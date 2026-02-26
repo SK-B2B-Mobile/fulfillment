@@ -1,0 +1,25 @@
+{
+  "name": "SK B2B Fulfillment",
+  "short_name": "SK Fulfillment",
+  "description": "StyleKorean B2B Fulfillment Manager",
+  "start_url": "/fulfillment/",
+  "scope": "/fulfillment/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0a0e1a",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StyleKorean B2B Fulfillment — v2.0</title>
+  <meta name="theme-color" content="#0a0e1a">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ══════════════════════════════════════════════════
+       ★ 완전 반응형: 모든 크기를 vw/vh 기반으로 설정
+       21인치(1600px), 23인치(1920px), 27인치(2560px) 모두 대응
+    ══════════════════════════════════════════════════ */
+    :root {
+      --bg-main:   #0a0e1a;
+      --bg-card:   #151b2d;
+      --bg-hover:  #1e2840;
+      --bg-input:  #0f1423;
+      --border:    #2a3550;
+      --text-primary:   #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted:     #64748b;
+      --accent-primary:   #6366f1;
+      --accent-secondary: #8b5cf6;
+      --accent-success:   #10b981;
+      --accent-danger:    #ef4444;
+      --shadow-glow: 0 0 20px rgba(99,102,241,0.3);
+      --transition:  250ms cubic-bezier(0.4,0,0.2,1);
+
+      /* ★ 핵심: vw 기반 동적 폰트 스케일
+         1920px 기준 → 1vw = 19.2px
+         1600px 기준 → 1vw = 16px
+         2560px 기준 → 1vw = 25.6px             */
+      --fs-xs:   clamp(10px, 0.68vw, 14px);   /* 약 13px @1920 */
+      --fs-sm:   clamp(11px, 0.75vw, 16px);   /* 약 14px @1920 */
+      --fs-md:   clamp(12px, 0.83vw, 18px);   /* 약 16px @1920 */
+      --fs-base: clamp(13px, 0.9vw,  20px);   /* 약 17px @1920 */
+      --fs-lg:   clamp(15px, 1.1vw,  24px);   /* 약 21px @1920 */
+      --fs-xl:   clamp(18px, 1.4vw,  30px);   /* 약 27px @1920 */
+      --fs-2xl:  clamp(24px, 1.9vw,  40px);   /* 약 36px @1920 */
+      --fs-mono: clamp(11px, 0.78vw, 17px);   /* 모노스페이스 */
+
+      /* ★ 간격 (vw 기반) */
+      --sp-xs: clamp(4px,  0.35vw, 8px);
+      --sp-sm: clamp(6px,  0.55vw, 12px);
+      --sp-md: clamp(10px, 0.85vw, 18px);
+      --sp-lg: clamp(14px, 1.1vw,  24px);
+      --sp-xl: clamp(18px, 1.5vw,  32px);
+
+      /* ★ 테두리 반경 */
+      --r-sm:   clamp(4px,  0.35vw, 8px);
+      --r-md:   clamp(8px,  0.65vw, 14px);
+      --r-lg:   clamp(10px, 0.85vw, 18px);
+      --r-full: 9999px;
+    }
+
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg-main);
+      color: var(--text-primary);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: var(--fs-base);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(99,102,241,0.1) 0%, transparent 50%),
+                  radial-gradient(circle at 80% 80%, rgba(139,92,246,0.08) 0%, transparent 50%);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ══════ LAYOUT ══════ */
+    .container {
+      position: relative; z-index: 1;
+      width: 100%;
+      /* ★ 좌우 패딩만, 최대 너비 제한 없음 → 화면을 꽉 채움 */
+      padding: clamp(10px, 1vw, 20px) clamp(12px, 1.2vw, 24px);
+    }
+
+    /* ══════ HEADER ══════ */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: clamp(10px, 1vh, 20px);
+      flex-wrap: wrap; gap: var(--sp-sm);
+      animation: slideDown 0.4s ease-out;
+    }
+    @keyframes slideDown { from { opacity:0; transform:translateY(-16px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes fadeUp    { from { opacity:0; transform:translateY(16px);  } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse     { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+    @keyframes spin      { to { transform:rotate(360deg); } }
+    @keyframes shimmer   { 0% { transform:translateX(-100%); } 100% { transform:translateX(100%); } }
+    @keyframes strongBlink {
+      0%,100% { background:var(--accent-danger); transform:scale(1); box-shadow:none; }
+      50%     { background:rgba(239,68,68,0.5); transform:scale(1.08); box-shadow:0 0 30px rgba(239,68,68,0.9); }
+    }
+
+    .header-left { display:flex; align-items:center; gap:var(--sp-md); }
+
+    .logo {
+      display: flex; align-items: center; gap: var(--sp-md);
+      font-size: var(--fs-xl); font-weight: 800;
+    }
+    .logo-icon {
+      width:  clamp(30px, 2.5vw, 48px);
+      height: clamp(30px, 2.5vw, 48px);
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      border-radius: var(--r-md);
+      display: flex; align-items: center; justify-content: center;
+      font-size: clamp(14px, 1.3vw, 24px); font-weight: 800; color: #fff;
+      box-shadow: var(--shadow-glow); flex-shrink: 0;
+    }
+    .logo-text {
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .logo-divider { width:1px; height:clamp(18px, 1.5vw, 28px); background:var(--border); margin:0 var(--sp-xs); }
+    .datetime-display {
+      display:flex; align-items:center; gap:var(--sp-xs);
+      font-family:'JetBrains Mono',monospace; font-size:var(--fs-sm);
+      color:var(--text-secondary); font-weight:600;
+    }
+    .header-right { display:flex; align-items:center; gap:var(--sp-xs); flex-wrap:wrap; }
+
+    .sync-indicator {
+      display:flex; align-items:center; gap:6px;
+      padding: clamp(4px, 0.4vw, 7px) clamp(8px, 0.7vw, 14px);
+      background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-full);
+      font-size:var(--fs-sm); font-weight:600;
+    }
+    .sync-dot {
+      width:clamp(6px, 0.5vw, 9px); height:clamp(6px, 0.5vw, 9px);
+      border-radius:50%; background:var(--accent-success); animation:pulse 2s infinite;
+    }
+    .sync-dot.syncing { background:#f59e0b; animation:spin 1s linear infinite; }
+
+    .tabs {
+      display:flex; gap:3px;
+      background:var(--bg-card); padding:3px;
+      border-radius:var(--r-full); border:1px solid var(--border);
+    }
+    .tab {
+      padding: clamp(5px, 0.45vw, 9px) clamp(10px, 1vw, 20px);
+      background:transparent; border:none; color:var(--text-secondary);
+      font-family:inherit; font-size:var(--fs-sm); font-weight:600;
+      cursor:pointer; border-radius:var(--r-full);
+      transition:all var(--transition); white-space:nowrap;
+    }
+    .tab:hover { color:var(--text-primary); background:rgba(99,102,241,0.1); }
+    .tab.active {
+      background:linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    /* ══════ KPI GRID ══════ */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: clamp(8px, 0.7vw, 14px);
+      margin-bottom: clamp(8px, 0.8vh, 16px);
+    }
+    .kpi-card {
+      background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-lg);
+      padding: clamp(10px, 0.9vw, 18px);
+      transition:all var(--transition); animation:fadeUp 0.5s ease-out backwards;
+    }
+    .kpi-card:nth-child(1) { animation-delay:.1s; }
+    .kpi-card:nth-child(2) { animation-delay:.2s; }
+    .kpi-card:nth-child(3) { animation-delay:.3s; }
+    .kpi-card:nth-child(4) { animation-delay:.4s; }
+    .kpi-card:hover { border-color:var(--accent-primary); box-shadow:var(--shadow-glow); transform:translateY(-2px); }
+    .kpi-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:clamp(4px, 0.4vh, 8px); }
+    .kpi-label { font-size:var(--fs-xs); color:var(--text-secondary); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+    .kpi-percentage { font-size:var(--fs-lg); font-weight:700; font-family:'JetBrains Mono',monospace; }
+    .kpi-value {
+      font-size: clamp(20px, 2.2vw, 42px);
+      font-weight:800; font-family:'JetBrains Mono',monospace;
+      line-height:1; margin-bottom:clamp(2px, 0.3vh, 6px);
+    }
+    .kpi-subtitle { font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:clamp(6px, 0.6vh, 12px); }
+    .progress-bar { height:clamp(6px, 0.5vh, 10px); background:rgba(255,255,255,0.05); border-radius:var(--r-full); overflow:hidden; }
+    .progress-fill {
+      height:100%; border-radius:var(--r-full);
+      transition:width .4s ease, background .4s ease; position:relative; overflow:hidden;
+    }
+    .progress-fill::after {
+      content:''; position:absolute; inset:0;
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation:shimmer 2s infinite;
+    }
+
+    /* ══════ BUTTONS ══════ */
+    .btn {
+      padding: clamp(5px, 0.5vw, 9px) clamp(8px, 0.85vw, 16px);
+      border:none; border-radius:var(--r-md);
+      font-family:inherit; font-size:var(--fs-sm); font-weight:600;
+      cursor:pointer; transition:all var(--transition);
+      display:inline-flex; align-items:center; justify-content:center; gap:4px;
+      white-space:nowrap;
+      min-width: clamp(60px, 5.5vw, 100px);
+    }
+    .btn-primary  { background:linear-gradient(135deg,var(--accent-primary),var(--accent-secondary)); color:#fff; }
+    .btn-primary:hover  { box-shadow:var(--shadow-glow); transform:translateY(-1px); }
+    .btn-secondary { background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border); }
+    .btn-secondary:hover { background:var(--bg-hover); border-color:var(--accent-primary); }
+    .btn-danger   { background:var(--accent-danger); color:#fff; }
+    .btn-danger.blink { animation:strongBlink .8s infinite; }
+    .btn-warning  { background:#f59e0b; color:#fff; }
+    .btn-success  { background:var(--accent-success); color:#fff; }
+    .btn-sm {
+      padding: clamp(4px, 0.4vw, 7px) clamp(6px, 0.65vw, 12px);
+      font-size:var(--fs-xs); min-width:clamp(48px, 4.5vw, 85px);
+    }
+    .btn:disabled { cursor:not-allowed; opacity:.9; }
+    .btn-success:disabled { opacity:1; }
+
+    /* ══════ CARD ══════ */
+    .card {
+      background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-lg);
+      padding:var(--sp-lg); margin-bottom:var(--sp-lg);
+    }
+    .card-header {
+      display:flex; justify-content:space-between; align-items:center;
+      margin-bottom:var(--sp-md); padding-bottom:var(--sp-md); border-bottom:1px solid var(--border);
+      flex-wrap:wrap; gap:var(--sp-sm);
+    }
+    /* ★ Records 카드 헤더: 제목 | 시계(중앙) | 버튼들 */
+    /* Records 헤더: 제목(좌) | 버튼+시계(우) */
+    #recordsPanel .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: var(--sp-sm);
+    }
+    /* 검색창 강조 */
+    #searchInput {
+      background: #1e2840 !important;
+      border: 2px solid var(--accent-primary) !important;
+      color: #fff !important;
+      font-size: var(--fs-sm) !important;
+      font-weight: 600 !important;
+    }
+    #searchInput:focus {
+      background: #1e2840 !important;
+      border-color: #a5b4fc !important;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.3) !important;
+    }
+    #searchInput::placeholder { color: #94a3b8 !important; font-weight:500 !important; }
+    .card-title { font-size:var(--fs-lg); font-weight:700; }
+    .card-actions { display:flex; gap:var(--sp-xs); flex-wrap:wrap; align-items:center; }
+
+    /* ══════ INPUTS ══════ */
+    input, select, textarea {
+      width:100%;
+      padding: clamp(5px, 0.5vw, 9px) clamp(8px, 0.8vw, 14px);
+      background:var(--bg-input); border:1px solid var(--border); border-radius:var(--r-full);
+      color:var(--text-primary); font-family:inherit; font-size:var(--fs-sm);
+      transition:all var(--transition);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline:none; border-color:var(--accent-primary);
+      box-shadow:0 0 0 3px rgba(99,102,241,0.15);
+    }
+    input:disabled, select:disabled { cursor:not-allowed; opacity:1; }
+    textarea { resize:vertical; min-height:clamp(60px, 6vh, 90px); border-radius:var(--r-md); }
+
+    .search-box { position:relative; min-width:clamp(220px, 22vw, 380px); }
+    .search-box input { padding-left:clamp(28px, 2.5vw, 40px); }
+    .search-box::before { content:'🔍'; position:absolute; left:clamp(8px,0.7vw,12px); top:50%; transform:translateY(-50%); font-size:var(--fs-sm); opacity:.5; pointer-events:none; }
+
+    /* ══════ TABLE ══════ */
+    .table-wrapper {
+      overflow-x:auto; overflow-y:auto;
+      /* ★ 화면 높이를 기준으로 테이블 높이 자동 계산 */
+      max-height: calc(100vh - clamp(220px, 22vh, 320px));
+      border-radius:var(--r-md);
+    }
+    table { width:100%; border-collapse:separate; border-spacing:0; font-size:var(--fs-sm); }
+    thead { position:sticky; top:0; z-index:10; background:var(--bg-card); }
+    thead th {
+      padding: clamp(8px, 0.75vw, 14px) clamp(6px, 0.65vw, 12px);
+      text-align:left; font-weight:600; color:var(--text-secondary);
+      text-transform:uppercase; font-size:var(--fs-xs); letter-spacing:.5px;
+      border-bottom:2px solid var(--border); white-space:nowrap;
+    }
+    tbody tr { transition:background 150ms; }
+    tbody tr:hover { background:var(--bg-hover); }
+    tbody td {
+      padding: clamp(8px, 0.75vw, 14px) clamp(6px, 0.6vw, 12px);
+      vertical-align:middle; border-bottom:1px solid rgba(42,53,80,0.5);
+      font-size:var(--fs-sm);
+    }
+
+    /* ══════ STATUS BADGES ══════ */
+    .status-badge {
+      display:inline-flex; align-items:center; gap:5px;
+      padding: clamp(3px, 0.3vw, 5px) clamp(8px, 0.7vw, 14px);
+      border-radius:var(--r-full); font-size:var(--fs-xs);
+      font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+      white-space:nowrap;
+    }
+    .status-badge::before { content:''; width:6px; height:6px; border-radius:50%; animation:pulse 2s infinite; flex-shrink:0; }
+    .status-idle      { background:rgba(100,116,139,0.15); color:var(--text-muted); border:1px solid rgba(100,116,139,0.3); }
+    .status-idle::before      { background:var(--text-muted); }
+    .status-ready     { background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); }
+    .status-ready::before     { background:#60a5fa; }
+    .status-started   { background:rgba(245,158,11,0.15); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); }
+    .status-started::before   { background:#fbbf24; }
+    .status-completed { background:rgba(16,185,129,0.15); color:#34d399; border:1px solid rgba(16,185,129,0.3); }
+    .status-completed::before { background:#34d399; }
+
+    .picker-tag {
+      display:inline-flex; align-items:center; gap:4px;
+      padding: clamp(4px, 0.4vw, 7px) clamp(8px, 0.75vw, 14px);
+      border-radius:var(--r-full); font-size:var(--fs-xs); font-weight:700;
+      border:none; color:#000; white-space:nowrap;
+    }
+    .time-tag {
+      display:inline-flex; align-items:center; gap:5px;
+      padding: clamp(3px, 0.3vw, 5px) clamp(6px, 0.6vw, 11px);
+      border-radius:var(--r-full); font-size:var(--fs-xs); font-weight:600;
+      font-family:'JetBrains Mono',monospace;
+      background:rgba(148,163,184,0.15); color:#e2e8f0;
+      border:1px solid rgba(148,163,184,0.25); white-space:nowrap;
+    }
+
+    /* ══════ MANAGER ONLY ══════ */
+    body:not(.manager-mode) .manager-only { display:none; }
+
+    /* ══════ FORM ══════ */
+    .form-group { margin-bottom:var(--sp-md); }
+    .form-label { display:block; margin-bottom:4px; font-size:var(--fs-xs); font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.3px; }
+    .form-row { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-md); }
+
+    /* ══════ PAGINATION ══════ */
+    .pagination-bar {
+      display:flex; justify-content:space-between; align-items:center;
+      padding: clamp(8px, 0.8vw, 14px) clamp(10px, 1vw, 18px);
+      border-top:1px solid var(--border);
+      flex-wrap:wrap; gap:var(--sp-sm);
+    }
+    .pagination-bar .info-text { font-size:var(--fs-xs); color:var(--text-secondary); }
+    .pagination-bar .pager { display:flex; gap:var(--sp-xs); align-items:center; }
+    .pager-info { font-size:var(--fs-xs); color:var(--text-secondary); white-space:nowrap; }
+    #gotoPage { width:clamp(44px, 4vw, 70px) !important; text-align:center; padding: clamp(4px,0.35vw,6px) clamp(6px,0.5vw,10px); }
+    #itemsPerPage { width:auto !important; padding: clamp(4px,0.35vw,6px) clamp(6px,0.5vw,10px); font-size:var(--fs-xs); }
+
+    /* ══════ MODAL ══════ */
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(4px); z-index:1000; align-items:center; justify-content:center; padding:var(--sp-lg); }
+    .modal.active { display:flex; animation:fadeUp .3s ease-out; }
+    .modal-content {
+      background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-lg);
+      padding:var(--sp-xl); max-width:clamp(300px, 28vw, 480px); width:90%;
+      box-shadow:0 8px 32px rgba(0,0,0,0.5);
+    }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--sp-lg); }
+    .modal-title { font-size:var(--fs-lg); font-weight:700; }
+    .modal-close {
+      background:none; border:none; color:var(--text-secondary); font-size:clamp(18px, 1.5vw, 26px);
+      cursor:pointer; width:clamp(28px,2.2vw,36px); height:clamp(28px,2.2vw,36px);
+      display:flex; align-items:center; justify-content:center; border-radius:var(--r-sm); transition:all var(--transition);
+    }
+    .modal-close:hover { background:var(--bg-hover); color:var(--text-primary); }
+
+    /* ══════ DATE PICKER ══════ */
+    .date-picker-wrapper { position:relative; display:inline-block; width:100%; }
+    .date-picker-input { cursor:pointer; user-select:none; }
+    .date-picker-calendar {
+      position:absolute; top:100%; left:0; margin-top:4px;
+      background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-md);
+      padding:var(--sp-md); box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:1000; min-width:clamp(260px,22vw,340px);
+    }
+    .calendar-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--sp-md); gap:var(--sp-sm); }
+    .calendar-nav {
+      background:var(--bg-input); border:1px solid var(--border); color:var(--text-primary);
+      width:clamp(26px,2.2vw,34px); height:clamp(26px,2.2vw,34px); border-radius:var(--r-sm);
+      display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:var(--fs-lg); font-weight:bold;
+    }
+    .calendar-nav:hover { background:var(--bg-hover); }
+    .calendar-title { flex:1; text-align:center; font-weight:600; font-size:var(--fs-sm); }
+    .calendar-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+    .calendar-day-header { text-align:center; font-size:var(--fs-xs); font-weight:700; color:var(--text-secondary); padding:var(--sp-xs) 2px; }
+    .calendar-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:var(--r-sm); cursor:pointer; font-size:var(--fs-sm); transition:all var(--transition); }
+    .calendar-day:hover { background:var(--bg-hover); }
+    .calendar-day.other-month { color:var(--text-muted); opacity:.4; }
+    .calendar-day.selected { background:var(--accent-primary); color:#fff; font-weight:700; }
+    .calendar-day.today { border:2px solid var(--accent-primary); font-weight:600; }
+    .calendar-footer { display:flex; justify-content:space-between; margin-top:var(--sp-md); padding-top:var(--sp-md); border-top:1px solid var(--border); }
+    .calendar-btn { padding:4px 10px; background:transparent; border:none; color:var(--accent-primary); font-size:var(--fs-sm); font-weight:600; cursor:pointer; border-radius:var(--r-sm); }
+    .calendar-btn:hover { background:rgba(99,102,241,0.1); }
+
+    /* ══════ TOAST ══════ */
+    #toastContainer { position:fixed; bottom:clamp(16px,2vh,28px); right:clamp(16px,1.5vw,28px); display:flex; flex-direction:column; gap:10px; z-index:99999; pointer-events:none; }
+    .toast-msg {
+      display:flex; align-items:center; gap:10px;
+      padding: clamp(10px, 0.9vw, 14px) clamp(14px, 1.2vw, 20px);
+      border-radius:var(--r-md); font-size:var(--fs-sm); font-weight:600; color:#fff;
+      box-shadow:0 8px 24px rgba(0,0,0,0.5); opacity:0; transform:translateY(16px);
+      transition:opacity .25s ease, transform .25s ease; pointer-events:auto;
+      min-width:clamp(180px,16vw,300px); max-width:clamp(260px,28vw,420px);
+    }
+    .toast-msg.show { opacity:1; transform:translateY(0); }
+    .toast-msg.toast-success { background:rgba(16,185,129,0.92); border:1px solid rgba(16,185,129,0.6); }
+    .toast-msg.toast-error   { background:rgba(239,68,68,0.92);  border:1px solid rgba(239,68,68,0.6); }
+    .toast-msg.toast-info    { background:rgba(99,102,241,0.92); border:1px solid rgba(99,102,241,0.6); }
+    .toast-msg.toast-warning { background:rgba(245,158,11,0.92); border:1px solid rgba(245,158,11,0.6); }
+    .toast-icon { font-size:var(--fs-md); flex-shrink:0; }
+
+    /* ══════ UTIL ══════ */
+    .hidden { display:none !important; }
+    .text-center { text-align:center; }
+    .text-left   { text-align:left !important; }
+    .flex { display:flex; }
+    .gap-sm { gap:var(--sp-xs); }
+    .mt-md  { margin-top:var(--sp-md); }
+    .empty-state { text-align:center; padding:var(--sp-xl); color:var(--text-muted); }
+    .empty-state-icon { font-size:clamp(32px, 3vw, 52px); margin-bottom:var(--sp-md); opacity:.5; }
+    input[type="checkbox"] { width:clamp(14px,1.2vw,20px); height:clamp(14px,1.2vw,20px); cursor:pointer; accent-color:var(--accent-primary); }
+
+    /* ══════ INLINE TABLE SELECTS (JS 렌더링) ══════ */
+    /* JS에서 인라인 style로 고정값 사용하므로 override */
+    tbody select {
+      font-size: var(--fs-xs) !important;
+      padding: clamp(4px,0.4vw,7px) clamp(6px,0.65vw,12px) !important;
+      max-width: clamp(90px, 9vw, 145px) !important;
+      min-width: clamp(80px, 7vw, 120px);
+    }
+
+    /* ══════ SCROLLBAR ══════ */
+    ::-webkit-scrollbar { width:6px; height:6px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+    ::-webkit-scrollbar-thumb:hover { background:var(--text-muted); }
+
+    /* ══════ MANAGER PANEL ══════ */
+    #managerPanel .form-group input,
+    #managerPanel .form-group select,
+    #managerPanel .form-group textarea { border-radius: var(--r-md); }
+  </style>
+</head>
+<body>
+<div id="toastContainer"></div>
+<div class="container">
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">📦</div>
+        <div class="logo-text">StyleKorean B2B Fulfillment</div>
+      </div>
+      <span style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);padding:3px 9px;border-radius:999px;font-size:var(--fs-xs);font-weight:700;">v2.0</span>
+    </div>
+    <div class="header-right">
+      <div class="sync-indicator">
+        <div class="sync-dot" id="syncDot"></div>
+        <span id="syncText">Syncing</span>
+      </div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="records">Records</button>
+        <button class="tab" data-tab="manager">Manager</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- KPI -->
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-header"><span class="kpi-label">SKU Progress</span><span class="kpi-percentage" id="skuPercent">0%</span></div>
+      <div class="kpi-value" id="skuValue">0 / 0</div>
+      <div class="kpi-subtitle">Completed SKU Items</div>
+      <div class="progress-bar"><div class="progress-fill" id="skuProgress" style="width:0%"></div></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-header"><span class="kpi-label">Qty Progress</span><span class="kpi-percentage" id="qtyPercent">0%</span></div>
+      <div class="kpi-value" id="qtyValue">0 / 0</div>
+      <div class="kpi-subtitle">Completed Total Quantity</div>
+      <div class="progress-bar"><div class="progress-fill" id="qtyProgress" style="width:0%"></div></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-header"><span class="kpi-label">Jobs Progress</span><span class="kpi-percentage" id="jobPercent">0%</span></div>
+      <div class="kpi-value" id="jobValue">0 / 0</div>
+      <div class="kpi-subtitle">Completed Jobs</div>
+      <div class="progress-bar"><div class="progress-fill" id="jobProgress" style="width:0%"></div></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-header"><span class="kpi-label">Active Workers</span><span class="kpi-percentage" id="workerCount">0</span></div>
+      <div class="kpi-value" id="workerNames" style="font-size:clamp(14px,1.3vw,22px);line-height:1.3;">-</div>
+      <div class="kpi-subtitle">Currently Working</div>
+    </div>
+  </div>
+
+  <!-- Records Panel -->
+  <div class="card" id="recordsPanel">
+    <div class="card-header">
+      <h2 class="card-title">📋 Records</h2>
+
+      <div class="card-actions">
+        <!-- ★ 시계: 검색창 왼쪽 인라인, 박스 없이 깔끔하게 -->
+        <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;margin-right:16px;">
+          <span id="currentTime" style="font-family:'JetBrains Mono',monospace;font-size:clamp(15px,1.3vw,22px);font-weight:700;color:#e2e8f0;letter-spacing:1.5px;">--:--:-- --</span>
+          <span id="currentDate" style="font-family:'JetBrains Mono',monospace;font-size:clamp(10px,0.75vw,13px);color:#94a3b8;font-weight:500;letter-spacing:0.5px;">----/--/--</span>
+        </div>
+        <div class="search-box"><input type="text" id="searchInput" placeholder="Search"></div>
+        <button class="btn btn-danger btn-sm manager-only" onclick="App.deleteSelected()" id="deleteBtn" style="display:none;">
+          🗑 Delete (<span id="deleteCount">0</span>)
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="App.refresh()">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="App.exportCSV()">⬇ Export CSV</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:clamp(30px,2.5vw,50px);" class="manager-only"><input type="checkbox" onchange="App.toggleSelectAll(this.checked)" id="selectAllCheckbox"></th>
+            <th style="width:clamp(30px,2.8vw,52px);">No.</th>
+            <th style="width:clamp(70px,7vw,130px);">Status</th>
+            <th>Invoice</th>
+            <th>Amount</th>
+            <th>Ship Date</th>
+            <th style="width:clamp(36px,3.5vw,65px);">SKU</th>
+            <th style="width:clamp(36px,3.5vw,65px);">Qty</th>
+            <th>Trucking</th>
+            <th>Remarks</th>
+            <th>Picker</th>
+            <th style="width:clamp(90px,9vw,150px);">Start</th>
+            <th style="width:clamp(90px,9vw,150px);">End</th>
+            <th style="width:clamp(200px,19vw,310px);">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="recordsBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination-bar">
+      <div class="info-text">
+        Showing <span id="paginationInfo">0-0 of 0</span>
+        &nbsp;&nbsp;Rows:
+        <select id="itemsPerPage" onchange="App.changeItemsPerPage(this.value)">
+          <option value="10">10</option>
+          <option value="15" selected>15</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+        </select>
+      </div>
+      <div class="pager">
+        <button class="btn btn-secondary btn-sm" onclick="App.prevPage()" id="prevBtn" disabled>Prev</button>
+        <span class="pager-info">Page <span id="currentPageNum">1</span> / <span id="totalPages">1</span></span>
+        <input type="number" id="gotoPage" placeholder="Go" min="1">
+        <button class="btn btn-secondary btn-sm" onclick="App.gotoPage()">Go</button>
+        <button class="btn btn-secondary btn-sm" onclick="App.nextPage()" id="nextBtn" disabled>Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manager Panel -->
+  <div class="card hidden" id="managerPanel">
+    <div class="card-header">
+      <h2 class="card-title">⚙️ Manager — Create/Update Job</h2>
+      <button class="btn btn-secondary btn-sm" onclick="App.activateWorkerMode()">Worker Mode</button>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="App.editColors()" style="margin-bottom:var(--sp-md);">Edit Colors</button>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Invoice No</label><input type="text" id="mgrInvoice" placeholder="Invoice Number"></div>
+      <div class="form-group"><label class="form-label">Amount</label><input type="text" id="mgrAmount" placeholder="1200.00" onblur="App.formatAmount(this)"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Ship Date</label>
+        <div class="date-picker-wrapper">
+          <input type="text" id="mgrShipDate" class="date-picker-input" readonly placeholder="MM/DD/YYYY" onclick="DatePicker.open(this)">
+          <div id="datePicker" class="date-picker-calendar hidden"></div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Trucking</label>
+        <select id="mgrTrucking">
+          <option value="">Select...</option>
+          <option value="UPS">UPS</option>
+          <option value="PU">PU</option>
+          <option value="TK">TK</option>
+          <option value="FedEx">FedEx</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">SKU Count</label><input type="number" id="mgrSkuCount" placeholder="0"></div>
+      <div class="form-group"><label class="form-label">Total Qty</label><input type="number" id="mgrTotalQty" placeholder="0"></div>
+    </div>
+    <div class="form-group" style="grid-column:1/-1;"><label class="form-label">Remarks</label><textarea id="mgrRemarks" rows="2" placeholder="Enter remarks..."></textarea></div>
+    <div class="flex gap-sm mt-md">
+      <button class="btn btn-primary" onclick="App.saveManagerJob()">💾 Save / Update Job</button>
+      <button class="btn btn-secondary" onclick="App.printJob()">🖨 Print</button>
+    </div>
+    <hr style="margin:clamp(18px,2vh,30px) 0;border:1px solid var(--border);">
+    <h3 style="margin-bottom:var(--sp-md);font-size:var(--fs-md);">Manager Settings</h3>
+    <div class="form-group"><label class="form-label">Google Apps Script Endpoint</label><input type="text" id="settingsScriptUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>
+    <div class="form-group"><label class="form-label">Manager PIN</label><input type="password" id="settingsPin" placeholder="4-digit PIN" maxlength="4"></div>
+    <div class="form-group"><label class="form-label">Pickers (comma-separated)</label><input type="text" id="settingsPickers" placeholder="Ryan, Jane, Henry, Nicole"></div>
+    <button class="btn btn-primary" onclick="App.saveSettings()">💾 Save Settings</button>
+    <div class="flex gap-sm mt-md">
+      <button class="btn btn-secondary" onclick="App.pullFromServer()">⬇ Pull From Server</button>
+      <button class="btn btn-secondary" onclick="App.pushToServer()">⬆ Push To Server</button>
+      <button class="btn btn-danger" onclick="App.clearLocal()">🗑 Clear Local</button>
+    </div>
+    <p style="margin-top:var(--sp-md);font-size:var(--fs-xs);color:var(--text-muted);">Records auto-refresh every 10s.</p>
+  </div>
+</div>
+
+<!-- PIN Modal -->
+<div class="modal" id="pinModal">
+  <div class="modal-content">
+    <div class="modal-header"><h3 class="modal-title">🔒 Manager PIN Required</h3><button class="modal-close" onclick="App.closePinModal()">×</button></div>
+    <div class="form-group"><label class="form-label">Enter 4-digit PIN</label><input type="password" id="pinInput" placeholder="****" maxlength="4" autocomplete="off"></div>
+    <div class="flex gap-sm mt-md">
+      <button class="btn btn-primary" style="flex:1;" onclick="App.validatePin()">Unlock</button>
+      <button class="btn btn-secondary" onclick="App.closePinModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal" id="editModal">
+  <div class="modal-content">
+    <div class="modal-header"><h3 class="modal-title">✏️ Edit</h3><button class="modal-close" onclick="App.closeEditModal()">×</button></div>
+    <input type="hidden" id="editInvoice">
+    <div class="form-group"><label class="form-label">Picker</label><select id="editPicker"><option value="">Select picker...</option></select></div>
+    <div class="form-group"><label class="form-label">Start Time</label><select id="editStartTime"><option value="">Select time...</option></select></div>
+    <div class="form-group"><label class="form-label">End Time</label><select id="editEndTime"><option value="">Select time...</option></select></div>
+    <div class="flex gap-sm mt-md">
+      <button class="btn btn-primary" style="flex:1;" onclick="App.saveEditTime()">💾 Save</button>
+      <button class="btn btn-secondary" onclick="App.closeEditModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Color Modal -->
+<div class="modal" id="colorModal">
+  <div class="modal-content" style="max-width:clamp(320px,32vw,560px);">
+    <div class="modal-header"><h3 class="modal-title">Picker Colors</h3><button class="modal-close" onclick="App.hideColorEditor()">×</button></div>
+    <div id="colorList"></div>
+    <div class="flex gap-sm mt-md">
+      <button class="btn btn-primary" onclick="App.savePickerColors()">💾 Save</button>
+      <button class="btn btn-secondary" onclick="App.hideColorEditor()">Close</button>
+    </div>
+  </div>
+</div>
+
+  <script>
+    const GAS_BASE_URL = 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec';
+    
+    // ===== TOAST NOTIFICATION =====
+    function showToast(msg, type = 'info', duration = 3000) {
+      const icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+      const container = document.getElementById('toastContainer');
+      const el = document.createElement('div');
+      el.className = `toast-msg toast-${type}`;
+      el.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ'}</span><span>${msg}</span>`;
+      container.appendChild(el);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => el.classList.add('show'));
+      });
+      setTimeout(() => {
+        el.classList.remove('show');
+        setTimeout(() => el.remove(), 300);
+      }, duration);
+    }
+
+    const CONFIG = {
+      STORAGE_KEY: 'b2b-fulfillment-v2',
+      REFRESH_INTERVAL: 10000,
+      DEFAULT_PICKERS: ['Ryan', 'Jane', 'Henry', 'Nicole'],
+      DEFAULT_PIN: '1004'
+    };
+
+    const State = {
+      jobs: [],
+      pickers: CONFIG.DEFAULT_PICKERS,
+      pickerColors: {},
+      currentVersion: null,
+      searchQuery: '',
+      refreshTimer: null,
+      scriptUrl: GAS_BASE_URL,
+      managerMode: false,
+      managerUnlocked: false,
+      managerPin: CONFIG.DEFAULT_PIN,
+      selectedJobs: new Set(),
+      currentPage: 1,
+      itemsPerPage: 15,
+      pendingSaves: 0
+    };
+
+    function updateDateTime() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      const rawH = now.getHours();
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const ampm = rawH >= 12 ? 'PM' : 'AM';
+      const h12 = rawH % 12 || 12;
+      const hours12 = String(h12).padStart(2, '0');
+      const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+      const dow = days[now.getDay()];
+      document.getElementById('currentDate').textContent = `${year}-${month}-${day} ${dow}`;
+      document.getElementById('currentTime').textContent = `${hours12}:${minutes}:${seconds} ${ampm}`;
+    }
+    setInterval(updateDateTime, 1000);
+    updateDateTime();
+
+    const ProgressColor = {
+      getColor(percentage) {
+        const colors = [
+          { percent: 0, color: '#ef4444' },{ percent: 30, color: '#f97316' },
+          { percent: 60, color: '#eab308' },{ percent: 80, color: '#84cc16' },
+          { percent: 100, color: '#10b981' }
+        ];
+        for (let i = 0; i < colors.length - 1; i++) {
+          if (percentage >= colors[i].percent && percentage <= colors[i + 1].percent) {
+            const range = colors[i + 1].percent - colors[i].percent;
+            const ratio = (percentage - colors[i].percent) / range;
+            return this.interpolateColor(colors[i].color, colors[i + 1].color, ratio);
+          }
+        }
+        return colors[colors.length - 1].color;
+      },
+      interpolateColor(color1, color2, ratio) {
+        const hex = (c) => parseInt(c.substring(1), 16);
+        const r1=(hex(color1)>>16)&255,g1=(hex(color1)>>8)&255,b1=hex(color1)&255;
+        const r2=(hex(color2)>>16)&255,g2=(hex(color2)>>8)&255,b2=hex(color2)&255;
+        const r=Math.round(r1+(r2-r1)*ratio),g=Math.round(g1+(g2-g1)*ratio),b=Math.round(b1+(b2-b1)*ratio);
+        return `#${((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1)}`;
+      }
+    };
+
+    const TimeOptions = {
+      generate() {
+        const times = [];
+        const now = new Date();
+        let startHour = now.getHours(), startMinute = now.getMinutes() - 30;
+        if (startMinute < 0) { startHour -= 1; startMinute += 60; }
+        startMinute = Math.floor(startMinute / 30) * 30;
+        if (startHour < 8 || (startHour === 8 && startMinute < 30)) { startHour = 8; startMinute = 30; }
+        const endHour = 17, endMinute = 30;
+        for (let h = startHour; h <= endHour; h++) {
+          const hours = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+          const ampm = h >= 12 ? 'PM' : 'AM';
+          const startMin = (h === startHour) ? startMinute : 0;
+          const stopMin  = (h === endHour)   ? endMinute  : 55;
+          for (let m = startMin; m <= stopMin; m += 5) {
+            const time24 = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+            const time12 = `${String(hours).padStart(2,'0')}:${String(m).padStart(2,'0')}${ampm}`;
+            times.push({ value: time24, label: time12 });
+          }
+        }
+        return times;
+      },
+      renderSelect(value = '', disabled = false, id = '') {
+        const times = this.generate();
+        const idAttr = id ? `id="${id}"` : '';
+        return `<select ${idAttr} ${disabled ? 'disabled' : ''}>
+          <option value="">Select time...</option>
+          ${times.map(t => `<option value="${t.value}" ${value === t.value ? 'selected' : ''}>${t.label}</option>`).join('')}
+        </select>`;
+      },
+      format12Hour(time24) {
+        if (!time24) return '';
+        const [h, m] = time24.split(':');
+        const hour = parseInt(h);
+        const hours = hour > 12 ? hour - 12 : hour;
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        return `${String(hours).padStart(2,'0')}:${m}${ampm}`;
+      }
+    };
+
+    const DatePicker = {
+      currentInput: null, currentDate: new Date(),
+      open(input) {
+        this.currentInput = input;
+        const picker = document.getElementById('datePicker');
+        if (input.value) {
+          const parts = input.value.split('/');
+          if (parts.length === 3) this.currentDate = new Date(parts[2], parts[0]-1, parts[1]);
+        } else { this.currentDate = new Date(); }
+        this.render();
+        picker.classList.remove('hidden');
+        setTimeout(() => { document.addEventListener('click', this.closeOnOutside); }, 0);
+      },
+      closeOnOutside(e) {
+        const picker = document.getElementById('datePicker');
+        const input = DatePicker.currentInput;
+        if (!picker.contains(e.target) && e.target !== input) DatePicker.close();
+      },
+      close() {
+        document.getElementById('datePicker').classList.add('hidden');
+        document.removeEventListener('click', this.closeOnOutside);
+      },
+      render() {
+        const picker = document.getElementById('datePicker');
+        const year = this.currentDate.getFullYear(), month = this.currentDate.getMonth();
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month+1, 0).getDate();
+        const daysInPrevMonth = new Date(year, month, 0).getDate();
+        const today = new Date();
+        const isToday = (d) => d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+        let html = `<div class="calendar-header"><button class="calendar-nav" onclick="DatePicker.prevMonth()">‹</button><div class="calendar-title">${monthNames[month]} ${year}</div><button class="calendar-nav" onclick="DatePicker.nextMonth()">›</button></div><div class="calendar-grid"><div class="calendar-day-header">Su</div><div class="calendar-day-header">Mo</div><div class="calendar-day-header">Tu</div><div class="calendar-day-header">We</div><div class="calendar-day-header">Th</div><div class="calendar-day-header">Fr</div><div class="calendar-day-header">Sa</div>`;
+        for (let i = firstDay-1; i >= 0; i--) html += `<div class="calendar-day other-month" onclick="DatePicker.selectDate(${year},${month-1},${daysInPrevMonth-i})">${daysInPrevMonth-i}</div>`;
+        for (let day = 1; day <= daysInMonth; day++) html += `<div class="calendar-day${isToday(day)?' today':''}" onclick="DatePicker.selectDate(${year},${month},${day})">${day}</div>`;
+        const rem = 42 - (firstDay + daysInMonth);
+        for (let day = 1; day <= rem; day++) html += `<div class="calendar-day other-month" onclick="DatePicker.selectDate(${year},${month+1},${day})">${day}</div>`;
+        html += `</div><div class="calendar-footer"><button class="calendar-btn" onclick="DatePicker.clear()">Clear</button><button class="calendar-btn" onclick="DatePicker.today()">Today</button></div>`;
+        picker.innerHTML = html;
+      },
+      selectDate(year, month, day) {
+        const date = new Date(year, month, day);
+        this.currentInput.value = `${String(date.getMonth()+1).padStart(2,'0')}/${String(date.getDate()).padStart(2,'0')}/${date.getFullYear()}`;
+        this.close();
+      },
+      prevMonth() { this.currentDate.setMonth(this.currentDate.getMonth()-1); this.render(); },
+      nextMonth() { this.currentDate.setMonth(this.currentDate.getMonth()+1); this.render(); },
+      today() { const t = new Date(); this.selectDate(t.getFullYear(), t.getMonth(), t.getDate()); },
+      clear() { this.currentInput.value = ''; this.close(); }
+    };
+
+    function toLocalISO(date) {
+      const pad = n => String(n).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    const App = {
+      init() {
+        this.loadSettings();
+        this.setupEventListeners();
+        this.fetchData();
+        this.startAutoRefresh();
+        this.populateEditTimeOptions();
+      },
+
+      setupEventListeners() {
+        document.querySelectorAll('.tab').forEach(tab => {
+          tab.addEventListener('click', () => {
+            if (tab.dataset.tab === 'manager' && !State.managerUnlocked) { this.showPinModal(); return; }
+            this.switchTab(tab.dataset.tab);
+          });
+        });
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+          State.searchQuery = e.target.value.toLowerCase().trim();
+          State.currentPage = 1; // ★ 검색 시 반드시 1페이지로 리셋
+          this.renderTable();
+        });
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) this.checkVersion(); });
+        document.getElementById('pinInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') this.validatePin(); });
+      },
+
+      switchTab(tabName) {
+        document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName));
+        if (tabName === 'manager') { State.managerMode = true; document.body.classList.add('manager-mode'); }
+        else { document.body.classList.remove('manager-mode'); }
+        document.getElementById('recordsPanel').classList.toggle('hidden', tabName !== 'records');
+        document.getElementById('managerPanel').classList.toggle('hidden', tabName !== 'manager');
+        if (tabName === 'records') this.renderTable();
+      },
+
+      showPinModal() {
+        document.getElementById('pinModal').classList.add('active');
+        document.getElementById('pinInput').value = '';
+        setTimeout(() => document.getElementById('pinInput').focus(), 100);
+      },
+      closePinModal() { document.getElementById('pinModal').classList.remove('active'); },
+      validatePin() {
+        const input = document.getElementById('pinInput').value;
+        if (input === State.managerPin) { State.managerUnlocked = true; this.closePinModal(); this.switchTab('manager'); }
+        else { alert('Incorrect PIN'); document.getElementById('pinInput').value = ''; document.getElementById('pinInput').focus(); }
+      },
+      activateWorkerMode() {
+        State.managerMode = false; State.managerUnlocked = false;
+        document.body.classList.remove('manager-mode');
+        this.switchTab('records'); this.renderTable();
+      },
+
+      async fetchData() {
+        if (State.pendingSaves > 0) return;
+        try {
+          this.updateSyncIndicator('syncing');
+          const response = await fetch(`${State.scriptUrl}?op=listJobs&t=${Date.now()}`);
+          const data = await response.json();
+          if (State.pendingSaves > 0) return;
+          if (data.ok) {
+            State.jobs = data.jobs || [];
+            State.pickers = data.pickers || CONFIG.DEFAULT_PICKERS;
+            State.currentVersion = data.ver;
+            this.renderTable(); this.updateKPIs();
+
+            // ★ 서버에서 받은 최신 pickers를 localStorage + 입력창에도 동기화
+            const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
+            saved.pickers = State.pickers;
+            localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(saved));
+            const pickerInput = document.getElementById('settingsPickers');
+            if (pickerInput) pickerInput.value = State.pickers.join(', ');
+          }
+          this.updateSyncIndicator('success');
+        } catch (error) {
+          console.error('Fetch failed:', error);
+          this.updateSyncIndicator('error');
+        }
+      },
+
+      renderTable() {
+        if (State.managerMode) document.body.classList.add('manager-mode');
+        else document.body.classList.remove('manager-mode');
+
+        const savedDropdowns = {};
+        document.querySelectorAll('select[id^="startTime-"], select[id^="endTime-"]').forEach(sel => { if (sel.value) savedDropdowns[sel.id] = sel.value; });
+
+        const tbody = document.getElementById('recordsBody');
+        const filteredJobs = State.jobs.filter(job => {
+          // archived 제외
+          const arch = String(job.archived || '').trim().toLowerCase();
+          if (arch === 'true' || arch === '1' || arch === 'y') return false;
+          // 검색 필터
+          if (!State.searchQuery) return true;
+          const q = State.searchQuery.trim().toLowerCase();
+          if (!q) return true;
+          return (job.invoice  || '').toLowerCase().includes(q) ||
+                 (job.status   || '').toLowerCase().includes(q) ||
+                 (job.trucking || '').toLowerCase().includes(q) ||
+                 (job.remarks  || '').toLowerCase().includes(q) ||
+                 (job.picker   || '').toLowerCase().includes(q);
+        });
+
+        if (filteredJobs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state"><div class="empty-state-icon">📭</div><div style="font-size:var(--fs-md);font-weight:600;margin-bottom:8px;">No Jobs Found</div><div style="font-size:var(--fs-sm);">Add a new job or check your search query</div></div></td></tr>`;
+          this.updatePaginationInfo(0, 0, 0); return;
+        }
+
+        const truckingOrder = { 'TK':1,'UPS':2,'PU':3,'FedEx':4,'Other':5 };
+        const sortedJobs = filteredJobs.sort((a, b) => {
+          const dateA = a.shipDate||'', dateB = b.shipDate||'';
+          if (dateA !== dateB) return dateA.localeCompare(dateB);
+          return (truckingOrder[a.trucking]||999) - (truckingOrder[b.trucking]||999);
+        });
+
+        const totalItems = sortedJobs.length;
+        const totalPages = Math.ceil(totalItems / State.itemsPerPage);
+        const startIndex = (State.currentPage - 1) * State.itemsPerPage;
+        const endIndex = Math.min(startIndex + State.itemsPerPage, totalItems);
+        const pageJobs = sortedJobs.slice(startIndex, endIndex);
+
+        const renderTimeTag = (time) => {
+          if (!time) return '-';
+          const time12 = TimeOptions.format12Hour(time);
+          const date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
+          return `<span class="time-tag">${time12} ${date}</span>`;
+        };
+
+        tbody.innerHTML = pageJobs.map((job, index) => {
+          const globalIndex = startIndex + index;
+          const status = (job.status || '').toLowerCase() || '';
+          const statusClass = status ? `status-${status}` : 'status-idle';
+          const statusText = { 'ready':'Ready','started':'Started','completed':'Completed' }[status] || 'Idle';
+          const pickerColor = State.pickerColors[job.picker] || '#6366f1';
+
+          let shipDate = '-';
+          if (job.shipDate && job.shipDate !== '-' && job.shipDate !== '') {
+            try {
+              let raw = String(job.shipDate);
+              if (raw.includes('T')) raw = raw.split('T')[0];
+              if (raw.includes(' ')) raw = raw.split(' ')[0];
+              const parts = raw.split('-');
+              if (parts.length === 3 && parts[0].length === 4) shipDate = `${parts[1]}-${parts[2]}-${parts[0]}`;
+              else { const d = new Date(job.shipDate); if (!isNaN(d)) { shipDate = `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}-${d.getFullYear()}`; } else { shipDate = raw; } }
+            } catch(e) { shipDate = String(job.shipDate); }
+          }
+
+          const hasStarted = status === 'started' || status === 'completed';
+          const isCompleted = status === 'completed';
+          const isSelected = State.selectedJobs.has(job.invoice);
+
+          return `<tr>
+            <td class="text-center manager-only"><input type="checkbox" ${isSelected?'checked':''} onchange="App.toggleSelectJob('${job.invoice}',this.checked)"></td>
+            <td class="text-left"><strong>${globalIndex+1}</strong></td>
+            <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+            <td><strong>${job.invoice||'-'}</strong></td>
+            <td>${job.amount ? parseFloat(job.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'}</td>
+            <td>${shipDate}</td>
+            <td class="text-left">${job.skuCount||0}</td>
+            <td class="text-left">${job.totalQty||0}</td>
+            <td>${job.trucking||'-'}</td>
+            <td style="max-width:clamp(100px,14vw,220px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${job.remarks||'-'}</td>
+            <td>
+              ${hasStarted && job.picker
+                ? `<span class="picker-tag" style="background-color:${pickerColor};">${job.picker}</span>`
+                : `<select onchange="App.updatePicker('${job.invoice}',this.value)">
+                    <option value="">Select picker...</option>
+                    ${State.pickers.map(p=>`<option value="${p}" ${job.picker===p?'selected':''}>${p}</option>`).join('')}
+                   </select>`}
+            </td>
+            <td>${hasStarted ? renderTimeTag(job.startTime) : `<div>${TimeOptions.renderSelect(job.startTime||'',false,`startTime-${job.invoice}`)}</div>`}</td>
+            <td>${isCompleted ? renderTimeTag(job.endTime) : `<div>${TimeOptions.renderSelect(job.endTime||'',false,`endTime-${job.invoice}`)}</div>`}</td>
+            <td>
+              <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
+                ${State.managerMode ? `
+                  ${isCompleted
+                    ? `<button class="btn btn-success btn-sm" disabled>Completed</button>`
+                    : `<button class="btn btn-success btn-sm" onclick="(function(){const el=document.getElementById('endTime-${job.invoice}');App.completeJobWithTime('${job.invoice}',el?el.value:'');})();">✓ Complete</button>`}
+                  <button class="btn btn-secondary btn-sm" onclick="App.editJobInline('${job.invoice}')">Mgr Edit</button>
+                ` : `
+                  ${isCompleted ? `
+                    <button class="btn btn-success btn-sm" disabled>Completed</button>
+                    <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
+                  ` : hasStarted ? `
+                    <button class="btn btn-warning btn-sm">Started</button>
+                    <button class="btn btn-success btn-sm" onclick="(function(){const el=document.getElementById('endTime-${job.invoice}');App.completeJobWithTime('${job.invoice}',el?el.value:'');})();">✓ Complete</button>
+                    <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
+                  ` : `
+                    <button class="btn btn-danger btn-sm ${!job.picker?'blink':''}" onclick="(function(){const el=document.getElementById('startTime-${job.invoice}');App.startJobWithTime('${job.invoice}',el?el.value:'');})();" ${!job.picker?'disabled':''}>▶ Start</button>
+                    <button class="btn btn-success btn-sm" onclick="(function(){const el=document.getElementById('endTime-${job.invoice}');App.completeJobWithTime('${job.invoice}',el?el.value:'');})();">✓ Complete</button>
+                    <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
+                  `}
+                `}
+              </div>
+            </td>
+          </tr>`;
+        }).join('');
+
+        this.updatePaginationInfo(startIndex+1, endIndex, totalItems);
+        this.updatePaginationButtons(totalPages);
+
+        Object.entries(savedDropdowns).forEach(([id, val]) => {
+          const el = document.getElementById(id);
+          if (el && el.value !== val) el.value = val;
+        });
+      },
+
+      updatePaginationInfo(start, end, total) {
+        document.getElementById('paginationInfo').textContent = `${start}-${end} of ${total}`;
+        document.getElementById('currentPageNum').textContent = State.currentPage;
+        document.getElementById('totalPages').textContent = Math.ceil(total/State.itemsPerPage)||1;
+      },
+      updatePaginationButtons(totalPages) {
+        document.getElementById('prevBtn').disabled = State.currentPage <= 1;
+        document.getElementById('nextBtn').disabled = State.currentPage >= totalPages;
+        document.getElementById('gotoPage').max = totalPages;
+      },
+
+      toggleSelectAll(checked) {
+        const filteredJobs = State.jobs.filter(job => { if(!State.searchQuery) return true; const q=State.searchQuery; return (job.invoice||'').toLowerCase().includes(q)||(job.status||'').toLowerCase().includes(q)||(job.trucking||'').toLowerCase().includes(q)||(job.remarks||'').toLowerCase().includes(q)||(job.picker||'').toLowerCase().includes(q); });
+        const truckingOrder = {'TK':1,'UPS':2,'PU':3,'FedEx':4,'Other':5};
+        const sortedJobs = [...filteredJobs].sort((a,b) => {
+          if ((a.shipDate||'') !== (b.shipDate||'')) return (a.shipDate||'').localeCompare(b.shipDate||'');
+          return (truckingOrder[a.trucking]||999)-(truckingOrder[b.trucking]||999);
+        });
+        const startIndex = (State.currentPage-1)*State.itemsPerPage;
+        const pageJobs = sortedJobs.slice(startIndex, Math.min(startIndex+State.itemsPerPage, sortedJobs.length));
+        if (checked) pageJobs.forEach(job => State.selectedJobs.add(job.invoice));
+        else pageJobs.forEach(job => State.selectedJobs.delete(job.invoice));
+        this.renderTable(); this.updateDeleteButton();
+      },
+      toggleSelectJob(invoice, checked) {
+        if (checked) State.selectedJobs.add(invoice); else State.selectedJobs.delete(invoice);
+        this.updateDeleteButton();
+      },
+      updateDeleteButton() {
+        const count = State.selectedJobs.size;
+        const deleteBtn = document.getElementById('deleteBtn');
+        if (count > 0) { deleteBtn.style.display='block'; document.getElementById('deleteCount').textContent=count; }
+        else { deleteBtn.style.display='none'; }
+        try {
+          const filteredJobs = State.jobs.filter(job => { if(!State.searchQuery) return true; const q=State.searchQuery; return (job.invoice||'').toLowerCase().includes(q)||(job.status||'').toLowerCase().includes(q)||(job.trucking||'').toLowerCase().includes(q)||(job.remarks||'').toLowerCase().includes(q)||(job.picker||'').toLowerCase().includes(q); });
+          const truckingOrder = {'TK':1,'UPS':2,'PU':3,'FedEx':4,'Other':5};
+          const sortedForCheck = [...filteredJobs].sort((a,b)=>{
+            if ((a.shipDate||')') !== (b.shipDate||'')) return (a.shipDate||'').localeCompare(b.shipDate||'');
+            return (truckingOrder[a.trucking]||999)-(truckingOrder[b.trucking]||999);
+          });
+          const startIndex = (State.currentPage-1)*State.itemsPerPage;
+          const pageJobs = sortedForCheck.slice(startIndex, Math.min(startIndex+State.itemsPerPage, sortedForCheck.length));
+          const pageSelected = pageJobs.filter(j=>State.selectedJobs.has(j.invoice)).length;
+          const cb = document.getElementById('selectAllCheckbox');
+          if (pageSelected === 0) { cb.checked=false; cb.indeterminate=false; }
+          else if (pageSelected === pageJobs.length) { cb.checked=true; cb.indeterminate=false; }
+          else { cb.checked=false; cb.indeterminate=true; }
+        } catch(e) {}
+      },
+
+      async deleteSelected() {
+        if (State.selectedJobs.size === 0) return;
+        const count = State.selectedJobs.size;
+        if (!confirm(`Delete ${count} selected job(s)?`)) return;
+        State.pendingSaves++;
+        const toDelete = [...State.selectedJobs];
+        State.jobs = State.jobs.filter(j => !State.selectedJobs.has(j.invoice));
+        State.selectedJobs.clear();
+        this.renderTable(); this.updateKPIs(); this.updateDeleteButton();
+        showToast(`✓ ${count} job(s) deleted`, 'success');
+        const deleteNext = (i) => {
+          if (i >= toDelete.length) { State.pendingSaves=Math.max(0,State.pendingSaves-1); if(State.pendingSaves===0)setTimeout(()=>this.fetchData(),1500); return; }
+          const url = State.scriptUrl+'?op=deleteJob&invoice='+encodeURIComponent(toDelete[i])+'&t='+Date.now();
+          fetch(url,{mode:'no-cors'}).then(()=>deleteNext(i+1)).catch(()=>deleteNext(i+1));
+        };
+        deleteNext(0);
+      },
+
+      changeItemsPerPage(value) { State.itemsPerPage=parseInt(value); State.currentPage=1; this.renderTable(); },
+      prevPage() { if(State.currentPage>1){State.currentPage--;this.renderTable();} },
+      nextPage() { const tp=Math.ceil(State.jobs.length/State.itemsPerPage); if(State.currentPage<tp){State.currentPage++;this.renderTable();} },
+      gotoPage() {
+        const input=document.getElementById('gotoPage');
+        const page=parseInt(input.value);
+        const totalPages=Math.ceil(State.jobs.length/State.itemsPerPage);
+        if(page>=1&&page<=totalPages){State.currentPage=page;this.renderTable();input.value='';}
+      },
+
+      updateKPIs() {
+        const totalJobs=State.jobs.length, completedJobs=State.jobs.filter(j=>j.status==='completed').length;
+        const totalSKU=State.jobs.reduce((s,j)=>s+(parseInt(j.skuCount)||0),0);
+        const completedSKU=State.jobs.filter(j=>j.status==='completed').reduce((s,j)=>s+(parseInt(j.skuCount)||0),0);
+        const totalQty=State.jobs.reduce((s,j)=>s+(parseInt(j.totalQty)||0),0);
+        const completedQty=State.jobs.filter(j=>j.status==='completed').reduce((s,j)=>s+(parseInt(j.totalQty)||0),0);
+        const activeWorkers=[...new Set(State.jobs.filter(j=>j.status==='started'&&j.picker).map(j=>j.picker))];
+
+        const sp=totalSKU>0?Math.round(completedSKU/totalSKU*100):0; const sc=ProgressColor.getColor(sp);
+        document.getElementById('skuPercent').textContent=`${sp}%`; document.getElementById('skuValue').textContent=`${completedSKU} / ${totalSKU}`; document.getElementById('skuProgress').style.cssText=`width:${sp}%;background:${sc}`;
+        const qp=totalQty>0?Math.round(completedQty/totalQty*100):0; const qc=ProgressColor.getColor(qp);
+        document.getElementById('qtyPercent').textContent=`${qp}%`; document.getElementById('qtyValue').textContent=`${completedQty} / ${totalQty}`; document.getElementById('qtyProgress').style.cssText=`width:${qp}%;background:${qc}`;
+        const jp=totalJobs>0?Math.round(completedJobs/totalJobs*100):0; const jc=ProgressColor.getColor(jp);
+        document.getElementById('jobPercent').textContent=`${jp}%`; document.getElementById('jobValue').textContent=`${completedJobs} / ${totalJobs}`; document.getElementById('jobProgress').style.cssText=`width:${jp}%;background:${jc}`;
+        document.getElementById('workerCount').textContent=activeWorkers.length;
+        document.getElementById('workerNames').textContent=activeWorkers.length>0?activeWorkers.join(', '):'-';
+      },
+
+      async updatePicker(invoice, picker) { await this.updateJob(invoice, { picker }); },
+      async startJobWithTime(invoice, selectedTime) {
+        const job = State.jobs.find(j=>j.invoice===invoice);
+        if (!job.picker) { showToast('Please select a picker first','warning'); return; }
+        if (selectedTime) {
+          const now=new Date(); const [h,m]=selectedTime.split(':');
+          const startDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+          await this.updateJob(invoice,{startTime:selectedTime,startAtISO:toLocalISO(startDate),status:'started'});
+        } else {
+          const now=new Date(); const startTime=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+          await this.updateJob(invoice,{startTime,startAtISO:toLocalISO(now),status:'started'});
+        }
+      },
+      async startJob(invoice) { await this.startJobWithTime(invoice,''); },
+      async completeJobWithTime(invoice, selectedTime) {
+        if (selectedTime) {
+          const now=new Date(); const [h,m]=selectedTime.split(':');
+          const endDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+          await this.updateJob(invoice,{endTime:selectedTime,endAtISO:toLocalISO(endDate),status:'completed'});
+        } else {
+          const now=new Date(); const endTime=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+          await this.updateJob(invoice,{endTime,endAtISO:toLocalISO(now),status:'completed'});
+        }
+      },
+      async completeJob(invoice) { await this.completeJobWithTime(invoice,''); },
+
+      async updateJob(invoice, updates) {
+        State.pendingSaves++;
+        const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
+        if (jobIndex >= 0) { State.jobs[jobIndex]={...State.jobs[jobIndex],...updates}; this.renderTable(); this.updateKPIs(); }
+        try {
+          await fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify({invoice,...updates})})});
+        } catch(error) { console.error('Update failed:',error); showToast('⚠ Sync error','error'); }
+        finally {
+          State.pendingSaves=Math.max(0,State.pendingSaves-1);
+          if(State.pendingSaves===0) this.startAutoRefresh();
+        }
+      },
+
+      formatAmount(input) {
+        let value=input.value.replace(/,/g,''); const num=parseFloat(value);
+        if(!isNaN(num)&&num>0) input.value=num.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        else if(value===''||value==='0') input.value='';
+      },
+
+      editTime(invoice) {
+        const job=State.jobs.find(j=>j.invoice===invoice); if(!job) return;
+        document.getElementById('editInvoice').value=invoice;
+        const pickerSelect=document.getElementById('editPicker');
+        pickerSelect.innerHTML='<option value="">Select picker...</option>'+State.pickers.map(p=>`<option value="${p}" ${job.picker===p?'selected':''}>${p}</option>`).join('');
+        document.getElementById('editStartTime').value=job.startTime||'';
+        document.getElementById('editEndTime').value=job.endTime||'';
+        document.getElementById('editModal').classList.add('active');
+      },
+      closeEditModal() { document.getElementById('editModal').classList.remove('active'); },
+      async saveEditTime() {
+        const invoice=document.getElementById('editInvoice').value;
+        const picker=document.getElementById('editPicker').value;
+        const startTime=document.getElementById('editStartTime').value;
+        const endTime=document.getElementById('editEndTime').value;
+        const updates={};
+        if(picker) updates.picker=picker;
+        if(startTime){const now=new Date();const[h,m]=startTime.split(':');const d=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);updates.startTime=startTime;updates.startAtISO=toLocalISO(d);}
+        if(endTime){const now=new Date();const[h,m]=endTime.split(':');const d=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);updates.endTime=endTime;updates.endAtISO=toLocalISO(d);}
+        this.closeEditModal();
+        await this.updateJob(invoice,updates);
+      },
+      populateEditTimeOptions() {
+        const times=TimeOptions.generate();
+        const options='<option value="">Select time...</option>'+times.map(t=>`<option value="${t.value}">${t.label}</option>`).join('');
+        document.getElementById('editStartTime').innerHTML=options;
+        document.getElementById('editEndTime').innerHTML=options;
+      },
+      editJobInline(invoice) { this.editJobInManager(invoice); },
+      editJobInManager(invoice) {
+        const job=State.jobs.find(j=>j.invoice===invoice); if(!job) return;
+        document.getElementById('mgrInvoice').dataset.originalInvoice=invoice;
+        document.getElementById('mgrInvoice').value=job.invoice;
+        if(job.amount){const amount=parseFloat(job.amount);document.getElementById('mgrAmount').value=amount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+        else document.getElementById('mgrAmount').value='';
+        if(job.shipDate){const date=new Date(job.shipDate);document.getElementById('mgrShipDate').value=`${String(date.getMonth()+1).padStart(2,'0')}/${String(date.getDate()).padStart(2,'0')}/${date.getFullYear()}`;}
+        document.getElementById('mgrSkuCount').value=job.skuCount||'';
+        document.getElementById('mgrTotalQty').value=job.totalQty||'';
+        document.getElementById('mgrTrucking').value=job.trucking||'';
+        document.getElementById('mgrRemarks').value=job.remarks||'';
+        if(!State.managerUnlocked) this.showPinModal(); else this.switchTab('manager');
+      },
+
+      async saveManagerJob() {
+        const invoiceInput=document.getElementById('mgrInvoice');
+        const invoice=invoiceInput.value;
+        const originalInvoice=invoiceInput.dataset.originalInvoice||'';
+        const amountStr=document.getElementById('mgrAmount').value;
+        const shipDateStr=document.getElementById('mgrShipDate').value;
+        const skuCount=document.getElementById('mgrSkuCount').value;
+        const totalQty=document.getElementById('mgrTotalQty').value;
+        const trucking=document.getElementById('mgrTrucking').value;
+        const remarks=document.getElementById('mgrRemarks').value;
+        if(!invoice){showToast('Please enter Invoice number','warning');return;}
+        const amount=amountStr?parseFloat(amountStr.replace(/,/g,'')):null;
+        let shipDate='';
+        if(shipDateStr){const[m,d,y]=shipDateStr.split('/');shipDate=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
+        const newJobData={invoice,amount,shipDate,skuCount,totalQty,trucking,remarks,status:'ready'};
+        if(originalInvoice&&originalInvoice!==invoice){
+          const oldJob=State.jobs.find(j=>j.invoice===originalInvoice)||{};
+          const merged={...oldJob,invoice,amount:amount!==null?amount:oldJob.amount,shipDate:shipDate||oldJob.shipDate,skuCount:skuCount||oldJob.skuCount,totalQty:totalQty||oldJob.totalQty,trucking:trucking||oldJob.trucking,remarks:remarks||oldJob.remarks};
+          State.jobs=State.jobs.filter(j=>j.invoice!==originalInvoice);
+          State.jobs.unshift(merged);
+          State.pendingSaves++;
+          Promise.all([
+            fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'deleteJob',invoice:originalInvoice})}),
+            fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify(merged)})})
+          ]).then(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);if(State.pendingSaves===0)this.startAutoRefresh();}).catch(e=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);showToast('⚠ Sync error','error');});
+        } else {
+          const existingIdx=State.jobs.findIndex(j=>j.invoice===invoice);
+          if(existingIdx>=0) State.jobs[existingIdx]={...State.jobs[existingIdx],...newJobData};
+          else State.jobs.unshift(newJobData);
+          State.pendingSaves++;
+          fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify(newJobData)})}).then(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);if(State.pendingSaves===0)this.startAutoRefresh();}).catch(e=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);showToast('⚠ Sync error','error');});
+        }
+        this.renderTable(); this.updateKPIs();
+        invoiceInput.dataset.originalInvoice='';
+        ['mgrInvoice','mgrAmount','mgrShipDate','mgrSkuCount','mgrTotalQty','mgrRemarks'].forEach(id=>document.getElementById(id).value='');
+        document.getElementById('mgrTrucking').value='';
+        showToast('✓ Job saved!','success');
+      },
+      printJob() { window.print(); },
+      editColors() {
+        document.getElementById('colorModal').classList.add('active');
+        const container=document.getElementById('colorList');
+        container.innerHTML=State.pickers.map(picker=>{
+          const color=State.pickerColors[picker]||'#6366f1';
+          return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><label style="flex:1;font-weight:600;">${picker}</label><input type="color" id="color-${picker}" value="${color}" style="width:clamp(44px,4vw,60px);height:clamp(32px,3vh,42px);cursor:pointer;border:1px solid var(--border);border-radius:8px;"></div>`;
+        }).join('');
+      },
+      hideColorEditor() { document.getElementById('colorModal').classList.remove('active'); },
+      savePickerColors() {
+        State.pickers.forEach(picker=>{ const input=document.getElementById(`color-${picker}`); if(input) State.pickerColors[picker]=input.value; });
+        const saved=JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)||'{}');
+        saved.pickerColors=State.pickerColors;
+        localStorage.setItem(CONFIG.STORAGE_KEY,JSON.stringify(saved));
+        fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'setSettings',data:JSON.stringify({pickers:State.pickers,pickerColors:State.pickerColors})})}).catch(e=>console.error('Color sync failed:',e));
+        this.renderTable(); this.hideColorEditor(); showToast('Colors saved','success');
+      },
+
+      updateSyncIndicator(status) {
+        const dot=document.getElementById('syncDot'), text=document.getElementById('syncText');
+        dot.className='sync-dot';
+        if(status==='syncing'){dot.classList.add('syncing');text.textContent='Syncing...';}
+        else if(status==='success') text.textContent='Synced';
+        else text.textContent='Error';
+      },
+      async checkVersion() {
+        try {
+          const response=await fetch(`${State.scriptUrl}?op=ver&t=${Date.now()}`);
+          const data=await response.json();
+          if(data.ver&&data.ver!==State.currentVersion) await this.fetchData();
+        } catch(error) {}
+      },
+      startAutoRefresh() {
+        if(State.refreshTimer) clearInterval(State.refreshTimer);
+        State.refreshTimer=setInterval(()=>{ if(!document.hidden) this.fetchData(); }, CONFIG.REFRESH_INTERVAL);
+      },
+      refresh() { this.fetchData(); },
+
+      exportCSV() {
+        const headers=['No','Status','Invoice','Amount','Ship Date','SKU','Qty','Trucking','Remarks','Picker','Start','End'];
+        const rows=State.jobs.map((job,index)=>[index+1,job.status||'',job.invoice||'',job.amount?parseFloat(job.amount).toFixed(2):'',(job.shipDate||'').split('T')[0],job.skuCount||'',job.totalQty||'',job.trucking||'',job.remarks||'',job.picker||'',job.startTime||'',job.endTime||'']);
+        const csv=[headers,...rows].map(row=>row.map(cell=>`"${cell}"`).join(',')).join('\n');
+        const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+        const link=document.createElement('a'); link.href=URL.createObjectURL(blob);
+        link.download=`fulfillment_${new Date().toISOString().split('T')[0]}.csv`; link.click();
+      },
+
+      loadSettings() {
+        const saved=localStorage.getItem(CONFIG.STORAGE_KEY);
+        if(saved){try{const settings=JSON.parse(saved);if(settings.scriptUrl)State.scriptUrl=settings.scriptUrl;if(settings.pickers)State.pickers=settings.pickers;if(settings.pickerColors)State.pickerColors=settings.pickerColors;if(settings.managerPin)State.managerPin=settings.managerPin;}catch(e){}}
+        document.getElementById('settingsScriptUrl').value=State.scriptUrl;
+        document.getElementById('settingsPin').value=State.managerPin;
+        document.getElementById('settingsPickers').value=State.pickers.join(', ');
+      },
+      saveSettings() {
+        const scriptUrl=document.getElementById('settingsScriptUrl').value;
+        const pin=document.getElementById('settingsPin').value;
+        const pickers=document.getElementById('settingsPickers').value.split(',').map(p=>p.trim()).filter(Boolean);
+        localStorage.setItem(CONFIG.STORAGE_KEY,JSON.stringify({scriptUrl,managerPin:pin,pickers,pickerColors:State.pickerColors}));
+        State.scriptUrl=scriptUrl; State.managerPin=pin; State.pickers=pickers;
+        fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'setSettings',data:JSON.stringify({pickers,pickerColors:State.pickerColors})})}).catch(e=>console.error('Settings sync failed:',e));
+        showToast('Settings saved','success');
+      },
+      pullFromServer() { this.fetchData(); showToast('Pulled from server','info'); },
+      pushToServer() { showToast('Push to server — coming soon','info'); },
+      clearLocal() { if(confirm('Clear all local data?')){localStorage.removeItem(CONFIG.STORAGE_KEY);alert('Local data cleared');location.reload();} }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => { App.init(); });
+  </script>
+</body>
+</html>
