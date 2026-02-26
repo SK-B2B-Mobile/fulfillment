@@ -917,11 +917,18 @@
             State.jobs = data.jobs || [];
             State.pickers = data.pickers || CONFIG.DEFAULT_PICKERS;
             State.currentVersion = data.ver;
+
+            // ★ 서버에서 pickerColors도 받아와서 동기화
+            if (data.pickerColors && Object.keys(data.pickerColors).length > 0) {
+              State.pickerColors = data.pickerColors;
+            }
+
             this.renderTable(); this.updateKPIs();
 
-            // ★ 서버에서 받은 최신 pickers를 localStorage + 입력창에도 동기화
+            // ★ 서버에서 받은 최신 pickers + pickerColors를 localStorage에도 동기화
             const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
             saved.pickers = State.pickers;
+            saved.pickerColors = State.pickerColors;
             localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(saved));
             const pickerInput = document.getElementById('settingsPickers');
             if (pickerInput) pickerInput.value = State.pickers.join(', ');
