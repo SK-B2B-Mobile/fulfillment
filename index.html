@@ -418,13 +418,31 @@
     /* ══════ UTIL ══════ */
     .hidden { display:none !important; }
     .text-center { text-align:center; }
+    /* ★ 체크박스 td 클릭 영역 넓게 */
+    td.text-center.manager-only {
+      text-align: center;
+      vertical-align: middle;
+      padding: 8px 4px;
+    }
     .text-left   { text-align:left !important; }
     .flex { display:flex; }
     .gap-sm { gap:var(--sp-xs); }
     .mt-md  { margin-top:var(--sp-md); }
     .empty-state { text-align:center; padding:var(--sp-xl); color:var(--text-muted); }
     .empty-state-icon { font-size:clamp(32px, 3vw, 52px); margin-bottom:var(--sp-md); opacity:.5; }
-    input[type="checkbox"] { width:clamp(14px,1.2vw,20px); height:clamp(14px,1.2vw,20px); cursor:pointer; accent-color:var(--accent-primary); }
+    input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+      accent-color: var(--accent-primary);
+      border: 2px solid #6366f1;
+      border-radius: 4px;
+      background: #1e2840;
+      -webkit-appearance: auto;
+      -moz-appearance: auto;
+      appearance: auto;
+      opacity: 1;
+    }
 
     /* ══════ INLINE TABLE SELECTS (JS 렌더링) ══════ */
     /* JS에서 인라인 style로 고정값 사용하므로 override */
@@ -520,7 +538,7 @@
       <table>
         <thead>
           <tr>
-            <th style="width:clamp(30px,2.5vw,50px);" class="manager-only"><input type="checkbox" onchange="App.toggleSelectAll(this.checked)" id="selectAllCheckbox"></th>
+            <th style="width:clamp(40px,3vw,60px); text-align:center;" class="manager-only"><input type="checkbox" onchange="App.toggleSelectAll(this.checked)" id="selectAllCheckbox"></th>
             <th style="width:clamp(30px,2.8vw,52px);">No.</th>
             <th style="width:clamp(70px,7vw,130px);">Status</th>
             <th>Invoice</th>
