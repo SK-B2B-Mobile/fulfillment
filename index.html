@@ -1265,7 +1265,26 @@
         const amount=amountStr?parseFloat(amountStr.replace(/,/g,'')):null;
         let shipDate='';
         if(shipDateStr){const[m,d,y]=shipDateStr.split('/');shipDate=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
-        const newJobData={invoice,amount,shipDate,skuCount,totalQty,trucking,remarks,status:'ready'};
+        // ★ 기존 job 데이터 가져오기 (status, picker, 시간 유지)
+        const existingJob = State.jobs.find(j=>j.invoice===invoice) || 
+                           State.jobs.find(j=>j.invoice===originalInvoice) || {};
+        const newJobData={
+          invoice,
+          amount,
+          shipDate,
+          skuCount,
+          totalQty,
+          trucking,
+          remarks,
+          // ★ 기존 status 유지 (completed면 completed 그대로!)
+          status: existingJob.status || 'ready',
+          // ★ 기존 picker, 시간 유지
+          picker: existingJob.picker || '',
+          startTime: existingJob.startTime || '',
+          endTime: existingJob.endTime || '',
+          startAtISO: existingJob.startAtISO || '',
+          endAtISO: existingJob.endAtISO || '',
+        };
         if(originalInvoice&&originalInvoice!==invoice){
           const oldJob=State.jobs.find(j=>j.invoice===originalInvoice)||{};
           const merged={...oldJob,invoice,amount:amount!==null?amount:oldJob.amount,shipDate:shipDate||oldJob.shipDate,skuCount:skuCount||oldJob.skuCount,totalQty:totalQty||oldJob.totalQty,trucking:trucking||oldJob.trucking,remarks:remarks||oldJob.remarks};
