@@ -1030,8 +1030,8 @@
                     ${State.pickers.map(p=>`<option value="${p}" ${job.picker===p?'selected':''}>${p}</option>`).join('')}
                    </select>`}
             </td>
-            <td>${hasStarted ? renderTimeTag(job.startTime) : `<div>${TimeOptions.renderSelect(job.startTime||'',false,`startTime-${job.invoice}`)}</div>`}</td>
-            <td>${isCompleted ? renderTimeTag(job.endTime) : hasStarted ? `<div>${TimeOptions.renderSelect(job.endTime||'',false,`endTime-${job.invoice}`)}</div>` : `<div><select id="endTime-${job.invoice}" disabled style="opacity:0.4;cursor:not-allowed;" title="스타트 시간을 먼저 입력하세요"><option value="">Start 후 입력가능</option></select></div>`}</td>
+            <td>${hasStarted ? renderTimeTag(job.startTime) : `<div>${TimeOptions.renderSelect(job.startTime||'',!job.picker,`startTime-${job.invoice}`)}</div>`}</td>
+            <td>${isCompleted ? renderTimeTag(job.endTime) : hasStarted ? `<div>${TimeOptions.renderSelect(job.endTime||'',false,`endTime-${job.invoice}`)}</div>` : `<div><select id="endTime-${job.invoice}" disabled style="opacity:0.4;cursor:not-allowed;" title="Available after Start"><option value="">Available after Start</option></select></div>`}</td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
                 ${State.managerMode ? `
