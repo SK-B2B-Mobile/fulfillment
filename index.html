@@ -1031,7 +1031,7 @@
                    </select>`}
             </td>
             <td>${hasStarted ? renderTimeTag(job.startTime) : `<div>${TimeOptions.renderSelect(job.startTime||'',false,`startTime-${job.invoice}`)}</div>`}</td>
-            <td>${isCompleted ? renderTimeTag(job.endTime) : `<div>${TimeOptions.renderSelect(job.endTime||'',false,`endTime-${job.invoice}`)}</div>`}</td>
+            <td>${isCompleted ? renderTimeTag(job.endTime) : hasStarted ? `<div>${TimeOptions.renderSelect(job.endTime||'',false,`endTime-${job.invoice}`)}</div>` : `<div><select id="endTime-${job.invoice}" disabled style="opacity:0.4;cursor:not-allowed;" title="스타트 시간을 먼저 입력하세요"><option value="">Start 후 입력가능</option></select></div>`}</td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
                 ${State.managerMode ? `
@@ -1166,26 +1166,21 @@
       async updatePicker(invoice, picker) { await this.updateJob(invoice, { picker }); },
       async startJobWithTime(invoice, selectedTime) {
         const job = State.jobs.find(j=>j.invoice===invoice);
-        if (!job.picker) { showToast('Please select a picker first','warning'); return; }
-        if (selectedTime) {
-          const now=new Date(); const [h,m]=selectedTime.split(':');
-          const startDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
-          await this.updateJob(invoice,{startTime:selectedTime,startAtISO:toLocalISO(startDate),status:'started'});
-        } else {
-          const now=new Date(); const startTime=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-          await this.updateJob(invoice,{startTime,startAtISO:toLocalISO(now),status:'started'});
-        }
+        if (!job.picker) { showToast('⚠ 먼저 작업자 이름을 선택해주세요!','warning'); return; }
+        if (!selectedTime) { showToast('⚠ 스타트 시간을 선택해주세요!','warning'); return; }
+        const now=new Date(); const [h,m]=selectedTime.split(':');
+        const startDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+        await this.updateJob(invoice,{startTime:selectedTime,startAtISO:toLocalISO(startDate),status:'started'});
       },
       async startJob(invoice) { await this.startJobWithTime(invoice,''); },
       async completeJobWithTime(invoice, selectedTime) {
-        if (selectedTime) {
-          const now=new Date(); const [h,m]=selectedTime.split(':');
-          const endDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
-          await this.updateJob(invoice,{endTime:selectedTime,endAtISO:toLocalISO(endDate),status:'completed'});
-        } else {
-          const now=new Date(); const endTime=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-          await this.updateJob(invoice,{endTime,endAtISO:toLocalISO(now),status:'completed'});
-        }
+        const job = State.jobs.find(j=>j.invoice===invoice);
+        if (!job.picker) { showToast('⚠ 먼저 작업자 이름을 선택해주세요!','warning'); return; }
+        if (!job.startTime) { showToast('⚠ 스타트 시간을 먼저 입력하고 Start 버튼을 눌러주세요!','warning'); return; }
+        if (!selectedTime) { showToast('⚠ 앤드 시간을 선택해주세요!','warning'); return; }
+        const now=new Date(); const [h,m]=selectedTime.split(':');
+        const endDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+        await this.updateJob(invoice,{endTime:selectedTime,endAtISO:toLocalISO(endDate),status:'completed'});
       },
       async completeJob(invoice) { await this.completeJobWithTime(invoice,''); },
 
