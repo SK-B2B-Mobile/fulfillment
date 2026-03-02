@@ -1180,7 +1180,10 @@
         if (!selectedTime) { showToast('⚠ 앤드 시간을 선택해주세요!','warning'); return; }
         const now=new Date(); const [h,m]=selectedTime.split(':');
         const endDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+        const completingPicker = job ? job.picker : null;
         await this.updateJob(invoice,{endTime:selectedTime,endAtISO:toLocalISO(endDate),status:'completed'});
+        // 🎉 셀러브레이션 체크
+        if (window.CelebrationSystem && completingPicker) window.CelebrationSystem.onComplete(completingPicker);
       },
       async completeJob(invoice) { await this.completeJobWithTime(invoice,''); },
 
@@ -1374,5 +1377,235 @@
 
     document.addEventListener('DOMContentLoaded', () => { App.init(); });
   </script>
+<script>
+/* ========================================================
+   🎉 DAILY ACHIEVEMENT CELEBRATION SYSTEM
+   7건 ⭐ Rising Star | 12건 💎 Diamond Pace | 17건 👑 Legend
+   ======================================================== */
+(function() {
+  var MILESTONES = [
+    { count:7,  tier:1, name:'Rising Star',       emoji:'⭐', color:'#FFD700', duration:3000 },
+    { count:12, tier:2, name:'Diamond Pace',       emoji:'💎', color:'#00BFFF', duration:3000 },
+    { count:17, tier:3, name:'Legend of the Day',  emoji:'👑', color:'#FFD700', duration:5000 }
+  ];
+
+  // 오늘 날짜 키
+  function todayStr() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
+  }
+
+  // 오늘 개인 완료 건수 가져오기
+  function getCount(picker) {
+    try { return parseInt(localStorage.getItem('cc_' + picker + '_' + todayStr()) || '0', 10); } catch(e) { return 0; }
+  }
+
+  // 완료 건수 +1 증가
+  function incCount(picker) {
+    try {
+      var n = getCount(picker) + 1;
+      localStorage.setItem('cc_' + picker + '_' + todayStr(), String(n));
+      return n;
+    } catch(e) { return 0; }
+  }
+
+  // 이미 발동된 마일스톤 확인
+  function getFired(picker) {
+    try { return JSON.parse(localStorage.getItem('cf_' + picker + '_' + todayStr()) || '[]'); } catch(e) { return []; }
+  }
+
+  // 마일스톤 발동 기록
+  function setFired(picker, tier) {
+    try {
+      var f = getFired(picker);
+      if (f.indexOf(tier) < 0) { f.push(tier); localStorage.setItem('cf_' + picker + '_' + todayStr(), JSON.stringify(f)); }
+    } catch(e) {}
+  }
+
+  // 파티클 애니메이션
+  function runParticles(canvas, tier, duration) {
+    var ctx = canvas.getContext('2d');
+    var W = canvas.width, H = canvas.height;
+    var particles = [];
+    var start = Date.now();
+
+    var configs = {
+      1: { colors:['#FFD700','#FFF8DC','#FFFACD','#FFF'], shapes:['star'], count:60 },
+      2: { colors:['#00BFFF','#1E90FF','#87CEEB','#B0E0E6','#FFFFFF'], shapes:['diamond'], count:80 },
+      3: { colors:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF','#FFD700'], shapes:['crown','star','circle'], count:140 }
+    };
+    var cfg = configs[tier];
+
+    function makeParticle() {
+      return {
+        x: Math.random() * W,
+        y: Math.random() * -H,
+        vx: (Math.random() - 0.5) * 5,
+        vy: Math.random() * 5 + 2,
+        size: Math.random() * 14 + 5,
+        color: cfg.colors[Math.floor(Math.random() * cfg.colors.length)],
+        shape: cfg.shapes[Math.floor(Math.random() * cfg.shapes.length)],
+        rot: Math.random() * 360,
+        rotV: (Math.random() - 0.5) * 8,
+        alpha: 1
+      };
+    }
+
+    for (var i = 0; i < cfg.count; i++) particles.push(makeParticle());
+
+    function drawStar(ctx, x, y, r) {
+      ctx.beginPath();
+      for (var k = 0; k < 5; k++) {
+        var a = (k * 4 * Math.PI / 5) - Math.PI/2;
+        var b = ((k * 4 + 2) * Math.PI / 5) - Math.PI/2;
+        if (k === 0) ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a));
+        else ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+        ctx.lineTo(x + (r*0.4) * Math.cos(b), y + (r*0.4) * Math.sin(b));
+      }
+      ctx.closePath(); ctx.fill();
+    }
+
+    function animate() {
+      var elapsed = Date.now() - start;
+      if (elapsed > duration + 500) return;
+      ctx.clearRect(0, 0, W, H);
+
+      // Tier 3: 황금 배경 글로우
+      if (tier === 3) {
+        var grd = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W/2);
+        grd.addColorStop(0, 'rgba(255,215,0,0.08)');
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        p.x += p.vx; p.y += p.vy; p.rot += p.rotV;
+        if (elapsed > duration * 0.6) p.alpha = Math.max(0, p.alpha - 0.01);
+
+        if (p.y > H + 20) {
+          particles[i] = makeParticle();
+          continue;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot * Math.PI / 180);
+        ctx.fillStyle = p.color;
+
+        if (p.shape === 'star') {
+          drawStar(ctx, 0, 0, p.size);
+        } else if (p.shape === 'diamond') {
+          ctx.beginPath();
+          ctx.moveTo(0, -p.size); ctx.lineTo(p.size*0.6, 0);
+          ctx.lineTo(0, p.size); ctx.lineTo(-p.size*0.6, 0);
+          ctx.closePath(); ctx.fill();
+        } else if (p.shape === 'crown') {
+          ctx.font = p.size * 2 + 'px serif';
+          ctx.fillText('👑', -p.size, p.size * 0.5);
+        } else {
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size/2, 0, Math.PI*2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      requestAnimationFrame(animate);
+    }
+    animate();
+  }
+
+  // 셀러브레이션 발동
+  function fire(milestone, picker) {
+    // 기존 오버레이 제거
+    var old = document.getElementById('_celebOverlay');
+    if (old) old.parentNode.removeChild(old);
+
+    var overlay = document.createElement('div');
+    overlay.id = '_celebOverlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;pointer-events:none;';
+
+    var canvas = document.createElement('canvas');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+    overlay.appendChild(canvas);
+
+    var tierColors = { 1:'#FFD700', 2:'#00BFFF', 3:'#FFD700' };
+    var tierBg     = { 1:'rgba(30,20,0,0.92)', 2:'rgba(0,10,30,0.92)', 3:'rgba(20,15,0,0.95)' };
+
+    var banner = document.createElement('div');
+    banner.style.cssText = [
+      'position:absolute;top:50%;left:50%;',
+      'transform:translate(-50%,-50%) scale(0.5);',
+      'background:' + tierBg[milestone.tier] + ';',
+      'border:3px solid ' + tierColors[milestone.tier] + ';',
+      'border-radius:24px;padding:32px 56px;text-align:center;',
+      'animation:_celebPop 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards;',
+      'box-shadow:0 0 60px ' + tierColors[milestone.tier] + '66;',
+      'min-width:320px;'
+    ].join('');
+
+    banner.innerHTML = [
+      '<div style="font-size:72px;line-height:1;margin-bottom:8px;">' + milestone.emoji + '</div>',
+      '<div style="font-size:32px;font-weight:900;color:#fff;letter-spacing:1px;">' + picker + '</div>',
+      '<div style="font-size:22px;font-weight:700;color:' + tierColors[milestone.tier] + ';margin:8px 0;">' + milestone.name + '!</div>',
+      '<div style="font-size:16px;color:#aaa;margin-top:4px;">🎉 ' + milestone.count + ' Orders Completed Today!</div>'
+    ].join('');
+
+    overlay.appendChild(banner);
+
+    // CSS 애니메이션
+    if (!document.getElementById('_celebStyle')) {
+      var style = document.createElement('style');
+      style.id = '_celebStyle';
+      style.textContent = [
+        '@keyframes _celebPop {',
+        '  0%   { transform:translate(-50%,-50%) scale(0.5); opacity:0; }',
+        '  70%  { transform:translate(-50%,-50%) scale(1.05); opacity:1; }',
+        '  100% { transform:translate(-50%,-50%) scale(1); opacity:1; }',
+        '}',
+        '@keyframes _celebFadeOut {',
+        '  0%   { opacity:1; }',
+        '  100% { opacity:0; }',
+        '}'
+      ].join('');
+      document.head.appendChild(style);
+    }
+
+    document.body.appendChild(overlay);
+    runParticles(canvas, milestone.tier, milestone.duration);
+
+    // 페이드 아웃 후 제거
+    setTimeout(function() {
+      banner.style.animation = '_celebFadeOut 0.5s ease forwards';
+    }, milestone.duration - 500);
+    setTimeout(function() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }, milestone.duration + 200);
+  }
+
+  // 외부 호출 함수
+  window.CelebrationSystem = {
+    onComplete: function(picker) {
+      if (!picker) return;
+      var count = incCount(picker);
+      var fired = getFired(picker);
+      for (var i = 0; i < MILESTONES.length; i++) {
+        var m = MILESTONES[i];
+        if (count >= m.count && fired.indexOf(m.tier) < 0) {
+          setFired(picker, m.tier);
+          (function(milestone, p) {
+            setTimeout(function() { fire(milestone, p); }, 300);
+          })(m, picker);
+          break; // 한 번에 하나만 발동
+        }
+      }
+    }
+  };
+})();
+</script>
 </body>
 </html>
