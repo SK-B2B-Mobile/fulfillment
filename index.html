@@ -1602,7 +1602,7 @@
       }
 
       for (var p in counts) {
-        var score = counts[p].orders * 1 + counts[p].skus * 0.5;
+        var score = counts[p].orders * 1.5 + counts[p].skus * 0.5;
         var existing = getScore(p);
         if (score > existing) setScore(p, score);
 
@@ -1631,7 +1631,7 @@
     // 완료 시 점수 추가 및 셀러브레이션 체크
     onComplete: function(picker, skuCount) {
       if (!picker) return;
-      var addScore = 1 + (parseInt(skuCount || 0, 10) * 0.5);
+      var addScore = 1.5 + (parseInt(skuCount || 0, 10) * 0.5);
       var newScore = getScore(picker) + addScore;
       setScore(picker, newScore);
 
