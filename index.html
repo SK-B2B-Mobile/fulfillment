@@ -1026,7 +1026,12 @@
             <td style="max-width:clamp(100px,14vw,220px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${job.remarks||'-'}</td>
             <td>
               ${hasStarted && job.picker
-                ? `<span class="picker-tag" style="background-color:${pickerColor};">${job.picker}</span>`
+                ? (function(){
+                    var _b = window.CelebrationSystem ? window.CelebrationSystem.getBadge(job.picker) : '';
+                    return '<span class="picker-tag" style="background-color:'+pickerColor+';display:inline-flex;flex-direction:column;align-items:center;gap:1px;">'
+                      + (_b ? '<span style="font-size:13px;line-height:1;">'+_b+'</span>' : '')
+                      + job.picker + '</span>';
+                  })()
                 : `<select onchange="App.updatePicker('${job.invoice}',this.value)">
                     <option value="">Select picker...</option>
                     ${State.pickers.map(p=>`<option value="${p}" ${job.picker===p?'selected':''}>${p}</option>`).join('')}
@@ -1162,7 +1167,16 @@
         const jp=totalJobs>0?Math.round(completedJobs/totalJobs*100):0; const jc=ProgressColor.getColor(jp);
         document.getElementById('jobPercent').textContent=`${jp}%`; document.getElementById('jobValue').textContent=`${completedJobs} / ${totalJobs}`; document.getElementById('jobProgress').style.cssText=`width:${jp}%;background:${jc}`;
         document.getElementById('workerCount').textContent=activeWorkers.length;
-        document.getElementById('workerNames').textContent=activeWorkers.length>0?activeWorkers.join(', '):'-';
+        // ★ Active Workers 이름 옆 뱃지 표시
+        if (activeWorkers.length > 0) {
+          var workerHtml = activeWorkers.map(function(w) {
+            var badge = window.CelebrationSystem ? window.CelebrationSystem.getBadge(w) : '';
+            return badge ? (w + ' ' + badge) : w;
+          }).join(', ');
+          document.getElementById('workerNames').textContent = workerHtml;
+        } else {
+          document.getElementById('workerNames').textContent = '-';
+        }
       },
 
       async updatePicker(invoice, picker) { await this.updateJob(invoice, { picker }); },
@@ -1554,7 +1568,22 @@
     setTimeout(function() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, milestone.duration + 300);
   }
 
+  // 피커 뱃지 반환 함수 (외부에서 호출 가능)
+  function getPickerBadge(picker) {
+    if (!picker) return '';
+    var score = getScore(picker);
+    var fired = getFired(picker);
+    // 가장 높은 달성 티어 뱃지 반환
+    for (var i = MILESTONES.length - 1; i >= 0; i--) {
+      if (fired.indexOf(MILESTONES[i].tier) >= 0) {
+        return MILESTONES[i].emoji;
+      }
+    }
+    return '';
+  }
+
   window.CelebrationSystem = {
+    getBadge: getPickerBadge,
 
     // 서버 데이터로 오늘 점수 동기화 (페이지 로드 시)
     syncFromJobs: function(jobs) {
