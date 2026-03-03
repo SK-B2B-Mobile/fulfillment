@@ -1393,9 +1393,9 @@
 (function() {
 
   var MILESTONES = [
-    { score:25, tier:1, name:'Rising Star',      emoji:'⭐', color:'#FFD700', particleColor:['#FFD700','#FFF8DC','#FFFACD','#ffffff'], shapes:['star'],                   duration:3000 },
-    { score:50, tier:2, name:'Super Star',        emoji:'🌟', color:'#FF8C00', particleColor:['#FF8C00','#FFD700','#FFA500','#ffffff','#FFE4B5'], shapes:['star','circle'], duration:3000 },
-    { score:80, tier:3, name:'Legend of the Day', emoji:'👑', color:'#FFD700', particleColor:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF'], shapes:['crown','star','circle'], duration:5000 }
+    { score:50, tier:1, name:'Rising Star',      emoji:'⭐', color:'#FFD700', particleColor:['#FFD700','#FFF8DC','#FFFACD','#ffffff'], shapes:['star'],                   duration:3000 },
+    { score:75, tier:2, name:'Super Star',        emoji:'🌟', color:'#FF8C00', particleColor:['#FF8C00','#FFD700','#FFA500','#ffffff','#FFE4B5'], shapes:['star','circle'], duration:3000 },
+    { score:100, tier:3, name:'Legend of the Day', emoji:'👑', color:'#FFD700', particleColor:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF'], shapes:['crown','star','circle'], duration:5000 }
   ];
 
   function todayStr() {
@@ -1575,7 +1575,21 @@
       for (var p in counts) {
         var score = counts[p].orders * 1 + counts[p].skus * 0.5;
         var existing = getScore(p);
-        if (score > existing) setScore(p, score);
+        if (score > existing) {
+          setScore(p, score);
+          // ★ 아직 발동 안 된 마일스톤 중 가장 높은 것 발동
+          var fired = getFired(p);
+          for (var k = MILESTONES.length - 1; k >= 0; k--) {
+            var m = MILESTONES[k];
+            if (score >= m.score && fired.indexOf(m.tier) < 0) {
+              setFired(p, m.tier);
+              (function(milestone, picker, s) {
+                setTimeout(function() { fire(milestone, picker, s); }, 800);
+              })(m, p, score);
+              break;
+            }
+          }
+        }
       }
     },
 
