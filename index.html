@@ -1029,7 +1029,7 @@
                 ? (function(){
                     var _b = window.CelebrationSystem ? window.CelebrationSystem.getBadge(job.picker) : '';
                     return '<span class="picker-tag" style="background-color:'+pickerColor+';display:inline-flex;flex-direction:column;align-items:center;gap:1px;">'
-                      + (_b ? '<span style="font-size:13px;line-height:1;">'+_b+'</span>' : '')
+                      + (_b ? '<span style="font-size:11px;line-height:1;">'+_b+'</span>' : '')
                       + job.picker + '</span>';
                   })()
                 : `<select onchange="App.updatePicker('${job.invoice}',this.value)">
@@ -1588,7 +1588,7 @@
     // 서버 데이터로 오늘 점수 동기화 (페이지 로드 시)
     syncFromJobs: function(jobs) {
       var today = todayStr();
-      var counts = {}; // { picker: { orders:0, skus:0 } }
+      var counts = {};
 
       for (var i = 0; i < jobs.length; i++) {
         var j = jobs[i];
@@ -1604,20 +1604,26 @@
       for (var p in counts) {
         var score = counts[p].orders * 1 + counts[p].skus * 0.5;
         var existing = getScore(p);
-        if (score > existing) {
-          setScore(p, score);
-          // ★ 아직 발동 안 된 마일스톤 중 가장 높은 것 발동
-          var fired = getFired(p);
-          for (var k = MILESTONES.length - 1; k >= 0; k--) {
-            var m = MILESTONES[k];
-            if (score >= m.score && fired.indexOf(m.tier) < 0) {
+        if (score > existing) setScore(p, score);
+
+        // ★ 핵심: 점수와 무관하게 항상 qualifying 티어 전부 fired에 저장
+        //    (getBadge가 항상 올바른 뱃지를 표시하도록)
+        var fired = getFired(p);
+        var highestNewTier = null;
+        for (var k = 0; k < MILESTONES.length; k++) {
+          var m = MILESTONES[k];
+          if (score >= m.score) {
+            if (fired.indexOf(m.tier) < 0) {
               setFired(p, m.tier);
-              (function(milestone, picker, s) {
-                setTimeout(function() { fire(milestone, picker, s); }, 800);
-              })(m, p, score);
-              break;
+              highestNewTier = m; // 새로 달성한 티어 중 가장 높은 것 기록
             }
           }
+        }
+        // 새로 달성한 티어가 있으면 가장 높은 것만 애니메이션
+        if (highestNewTier) {
+          (function(milestone, picker, s) {
+            setTimeout(function() { fire(milestone, picker, s); }, 800);
+          })(highestNewTier, p, score);
         }
       }
     },
