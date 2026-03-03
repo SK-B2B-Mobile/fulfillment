@@ -916,6 +916,8 @@
           if (data.ok) {
             State.jobs = data.jobs || [];
             State.pickers = data.pickers || CONFIG.DEFAULT_PICKERS;
+            // 🎉 오늘 완료 건수를 서버 데이터 기준으로 localStorage 동기화
+            if (window.CelebrationSystem) window.CelebrationSystem.syncFromJobs(State.jobs);
             State.currentVersion = data.ver;
 
             // ★ 서버에서 pickerColors도 받아와서 동기화
@@ -1181,9 +1183,10 @@
         const now=new Date(); const [h,m]=selectedTime.split(':');
         const endDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
         const completingPicker = job ? job.picker : null;
+        const completingSku = job ? (job.skuCount || 0) : 0;
         await this.updateJob(invoice,{endTime:selectedTime,endAtISO:toLocalISO(endDate),status:'completed'});
-        // 🎉 셀러브레이션 체크
-        if (window.CelebrationSystem && completingPicker) window.CelebrationSystem.onComplete(completingPicker);
+        // 🎉 셀러브레이션 체크 (건수 × 1점 + SKU × 0.5점)
+        if (window.CelebrationSystem && completingPicker) window.CelebrationSystem.onComplete(completingPicker, completingSku);
       },
       async completeJob(invoice) { await this.completeJobWithTime(invoice,''); },
 
@@ -1378,43 +1381,43 @@
     document.addEventListener('DOMContentLoaded', () => { App.init(); });
   </script>
 <script>
+
+</script>
+<script>
 /* ========================================================
-   🎉 DAILY ACHIEVEMENT CELEBRATION SYSTEM
-   7건 ⭐ Rising Star | 12건 💎 Diamond Pace | 17건 👑 Legend
+   🎉 DAILY ACHIEVEMENT CELEBRATION SYSTEM v2
+   점수 = 완료건수 × 1점 + 총SKU × 0.5점
+   ⭐ Rising Star 25pt | 🌟 Super Star 50pt | 👑 Legend 80pt
+   매일 자정 자동 리셋
    ======================================================== */
 (function() {
+
   var MILESTONES = [
-    { count:7,  tier:1, name:'Rising Star',       emoji:'⭐', color:'#FFD700', duration:3000 },
-    { count:12, tier:2, name:'Diamond Pace',       emoji:'💎', color:'#00BFFF', duration:3000 },
-    { count:17, tier:3, name:'Legend of the Day',  emoji:'👑', color:'#FFD700', duration:5000 }
+    { score:25, tier:1, name:'Rising Star',      emoji:'⭐', color:'#FFD700', particleColor:['#FFD700','#FFF8DC','#FFFACD','#ffffff'], shapes:['star'],                   duration:3000 },
+    { score:50, tier:2, name:'Super Star',        emoji:'🌟', color:'#FF8C00', particleColor:['#FF8C00','#FFD700','#FFA500','#ffffff','#FFE4B5'], shapes:['star','circle'], duration:3000 },
+    { score:80, tier:3, name:'Legend of the Day', emoji:'👑', color:'#FFD700', particleColor:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF'], shapes:['crown','star','circle'], duration:5000 }
   ];
 
-  // 오늘 날짜 키
   function todayStr() {
     var d = new Date();
     return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
   }
 
-  // 오늘 개인 완료 건수 가져오기
-  function getCount(picker) {
-    try { return parseInt(localStorage.getItem('cc_' + picker + '_' + todayStr()) || '0', 10); } catch(e) { return 0; }
+  // 오늘 점수 가져오기
+  function getScore(picker) {
+    try { return parseFloat(localStorage.getItem('cs_' + picker + '_' + todayStr()) || '0'); } catch(e) { return 0; }
   }
 
-  // 완료 건수 +1 증가
-  function incCount(picker) {
-    try {
-      var n = getCount(picker) + 1;
-      localStorage.setItem('cc_' + picker + '_' + todayStr(), String(n));
-      return n;
-    } catch(e) { return 0; }
+  // 점수 저장
+  function setScore(picker, score) {
+    try { localStorage.setItem('cs_' + picker + '_' + todayStr(), String(score)); } catch(e) {}
   }
 
-  // 이미 발동된 마일스톤 확인
+  // 이미 발동된 티어 목록
   function getFired(picker) {
     try { return JSON.parse(localStorage.getItem('cf_' + picker + '_' + todayStr()) || '[]'); } catch(e) { return []; }
   }
 
-  // 마일스톤 발동 기록
   function setFired(picker, tier) {
     try {
       var f = getFired(picker);
@@ -1423,35 +1426,32 @@
   }
 
   // 파티클 애니메이션
-  function runParticles(canvas, tier, duration) {
+  function runParticles(canvas, milestone) {
     var ctx = canvas.getContext('2d');
     var W = canvas.width, H = canvas.height;
     var particles = [];
     var start = Date.now();
-
-    var configs = {
-      1: { colors:['#FFD700','#FFF8DC','#FFFACD','#FFF'], shapes:['star'], count:60 },
-      2: { colors:['#00BFFF','#1E90FF','#87CEEB','#B0E0E6','#FFFFFF'], shapes:['diamond'], count:80 },
-      3: { colors:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF','#FFD700'], shapes:['crown','star','circle'], count:140 }
-    };
-    var cfg = configs[tier];
+    var tier = milestone.tier;
+    var count = tier === 3 ? 140 : tier === 2 ? 90 : 60;
+    var colors = milestone.particleColor;
+    var shapes = milestone.shapes;
 
     function makeParticle() {
       return {
         x: Math.random() * W,
-        y: Math.random() * -H,
-        vx: (Math.random() - 0.5) * 5,
+        y: Math.random() * -H * 0.5,
+        vx: (Math.random() - 0.5) * 6,
         vy: Math.random() * 5 + 2,
         size: Math.random() * 14 + 5,
-        color: cfg.colors[Math.floor(Math.random() * cfg.colors.length)],
-        shape: cfg.shapes[Math.floor(Math.random() * cfg.shapes.length)],
+        color: colors[Math.floor(Math.random() * colors.length)],
+        shape: shapes[Math.floor(Math.random() * shapes.length)],
         rot: Math.random() * 360,
         rotV: (Math.random() - 0.5) * 8,
         alpha: 1
       };
     }
 
-    for (var i = 0; i < cfg.count; i++) particles.push(makeParticle());
+    for (var i = 0; i < count; i++) particles.push(makeParticle());
 
     function drawStar(ctx, x, y, r) {
       ctx.beginPath();
@@ -1460,34 +1460,28 @@
         var b = ((k * 4 + 2) * Math.PI / 5) - Math.PI/2;
         if (k === 0) ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a));
         else ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
-        ctx.lineTo(x + (r*0.4) * Math.cos(b), y + (r*0.4) * Math.sin(b));
+        ctx.lineTo(x + r*0.4 * Math.cos(b), y + r*0.4 * Math.sin(b));
       }
       ctx.closePath(); ctx.fill();
     }
 
     function animate() {
       var elapsed = Date.now() - start;
-      if (elapsed > duration + 500) return;
+      if (elapsed > milestone.duration + 500) return;
       ctx.clearRect(0, 0, W, H);
 
-      // Tier 3: 황금 배경 글로우
       if (tier === 3) {
         var grd = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W/2);
         grd.addColorStop(0, 'rgba(255,215,0,0.08)');
         grd.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = grd;
-        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
       }
 
       for (var i = 0; i < particles.length; i++) {
         var p = particles[i];
         p.x += p.vx; p.y += p.vy; p.rot += p.rotV;
-        if (elapsed > duration * 0.6) p.alpha = Math.max(0, p.alpha - 0.01);
-
-        if (p.y > H + 20) {
-          particles[i] = makeParticle();
-          continue;
-        }
+        if (elapsed > milestone.duration * 0.6) p.alpha = Math.max(0, p.alpha - 0.015);
+        if (p.y > H + 20) { particles[i] = makeParticle(); continue; }
 
         ctx.save();
         ctx.globalAlpha = p.alpha;
@@ -1497,18 +1491,11 @@
 
         if (p.shape === 'star') {
           drawStar(ctx, 0, 0, p.size);
-        } else if (p.shape === 'diamond') {
-          ctx.beginPath();
-          ctx.moveTo(0, -p.size); ctx.lineTo(p.size*0.6, 0);
-          ctx.lineTo(0, p.size); ctx.lineTo(-p.size*0.6, 0);
-          ctx.closePath(); ctx.fill();
         } else if (p.shape === 'crown') {
-          ctx.font = p.size * 2 + 'px serif';
+          ctx.font = (p.size * 2) + 'px serif';
           ctx.fillText('👑', -p.size, p.size * 0.5);
         } else {
-          ctx.beginPath();
-          ctx.arc(0, 0, p.size/2, 0, Math.PI*2);
-          ctx.fill();
+          ctx.beginPath(); ctx.arc(0, 0, p.size/2, 0, Math.PI*2); ctx.fill();
         }
         ctx.restore();
       }
@@ -1517,9 +1504,7 @@
     animate();
   }
 
-  // 셀러브레이션 발동
-  function fire(milestone, picker) {
-    // 기존 오버레이 제거
+  function fire(milestone, picker, score) {
     var old = document.getElementById('_celebOverlay');
     if (old) old.parentNode.removeChild(old);
 
@@ -1533,74 +1518,84 @@
     canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
     overlay.appendChild(canvas);
 
-    var tierColors = { 1:'#FFD700', 2:'#00BFFF', 3:'#FFD700' };
-    var tierBg     = { 1:'rgba(30,20,0,0.92)', 2:'rgba(0,10,30,0.92)', 3:'rgba(20,15,0,0.95)' };
+    var tierBg = { 1:'rgba(25,20,0,0.93)', 2:'rgba(30,15,0,0.93)', 3:'rgba(20,15,0,0.95)' };
+
+    if (!document.getElementById('_celebStyle')) {
+      var style = document.createElement('style');
+      style.id = '_celebStyle';
+      style.textContent = '@keyframes _celebPop{0%{transform:translate(-50%,-50%) scale(0.4);opacity:0}70%{transform:translate(-50%,-50%) scale(1.06);opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}@keyframes _celebFadeOut{0%{opacity:1}100%{opacity:0}}';
+      document.head.appendChild(style);
+    }
 
     var banner = document.createElement('div');
     banner.style.cssText = [
       'position:absolute;top:50%;left:50%;',
-      'transform:translate(-50%,-50%) scale(0.5);',
+      'transform:translate(-50%,-50%) scale(0.4);',
       'background:' + tierBg[milestone.tier] + ';',
-      'border:3px solid ' + tierColors[milestone.tier] + ';',
+      'border:3px solid ' + milestone.color + ';',
       'border-radius:24px;padding:32px 56px;text-align:center;',
-      'animation:_celebPop 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards;',
-      'box-shadow:0 0 60px ' + tierColors[milestone.tier] + '66;',
-      'min-width:320px;'
+      'animation:_celebPop 0.55s cubic-bezier(0.175,0.885,0.32,1.275) forwards;',
+      'box-shadow:0 0 80px ' + milestone.color + '55;',
+      'min-width:300px;'
     ].join('');
 
     banner.innerHTML = [
-      '<div style="font-size:72px;line-height:1;margin-bottom:8px;">' + milestone.emoji + '</div>',
-      '<div style="font-size:32px;font-weight:900;color:#fff;letter-spacing:1px;">' + picker + '</div>',
-      '<div style="font-size:22px;font-weight:700;color:' + tierColors[milestone.tier] + ';margin:8px 0;">' + milestone.name + '!</div>',
-      '<div style="font-size:16px;color:#aaa;margin-top:4px;">🎉 ' + milestone.count + ' Orders Completed Today!</div>'
+      '<div style="font-size:68px;line-height:1;margin-bottom:6px;">' + milestone.emoji + '</div>',
+      '<div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:1px;">' + picker + '</div>',
+      '<div style="font-size:22px;font-weight:700;color:' + milestone.color + ';margin:8px 0;">' + milestone.name + '!</div>',
+      '<div style="font-size:14px;color:#bbb;margin-top:6px;">🏅 Score: <b style="color:#fff">' + score.toFixed(1) + ' pts</b></div>'
     ].join('');
 
     overlay.appendChild(banner);
-
-    // CSS 애니메이션
-    if (!document.getElementById('_celebStyle')) {
-      var style = document.createElement('style');
-      style.id = '_celebStyle';
-      style.textContent = [
-        '@keyframes _celebPop {',
-        '  0%   { transform:translate(-50%,-50%) scale(0.5); opacity:0; }',
-        '  70%  { transform:translate(-50%,-50%) scale(1.05); opacity:1; }',
-        '  100% { transform:translate(-50%,-50%) scale(1); opacity:1; }',
-        '}',
-        '@keyframes _celebFadeOut {',
-        '  0%   { opacity:1; }',
-        '  100% { opacity:0; }',
-        '}'
-      ].join('');
-      document.head.appendChild(style);
-    }
-
     document.body.appendChild(overlay);
-    runParticles(canvas, milestone.tier, milestone.duration);
+    runParticles(canvas, milestone);
 
-    // 페이드 아웃 후 제거
-    setTimeout(function() {
-      banner.style.animation = '_celebFadeOut 0.5s ease forwards';
-    }, milestone.duration - 500);
-    setTimeout(function() {
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    }, milestone.duration + 200);
+    setTimeout(function() { banner.style.animation = '_celebFadeOut 0.5s ease forwards'; }, milestone.duration - 500);
+    setTimeout(function() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, milestone.duration + 300);
   }
 
-  // 외부 호출 함수
   window.CelebrationSystem = {
-    onComplete: function(picker) {
+
+    // 서버 데이터로 오늘 점수 동기화 (페이지 로드 시)
+    syncFromJobs: function(jobs) {
+      var today = todayStr();
+      var counts = {}; // { picker: { orders:0, skus:0 } }
+
+      for (var i = 0; i < jobs.length; i++) {
+        var j = jobs[i];
+        if (String(j.status||'').toLowerCase() !== 'completed') continue;
+        var picker = j.picker; if (!picker) continue;
+        var iso = String(j.endAtISO || j.startAtISO || '');
+        if (!iso || iso.substring(0,10) !== today) continue;
+        if (!counts[picker]) counts[picker] = { orders:0, skus:0 };
+        counts[picker].orders += 1;
+        counts[picker].skus   += parseInt(j.skuCount || 0, 10);
+      }
+
+      for (var p in counts) {
+        var score = counts[p].orders * 1 + counts[p].skus * 0.5;
+        var existing = getScore(p);
+        if (score > existing) setScore(p, score);
+      }
+    },
+
+    // 완료 시 점수 추가 및 셀러브레이션 체크
+    onComplete: function(picker, skuCount) {
       if (!picker) return;
-      var count = incCount(picker);
+      var addScore = 1 + (parseInt(skuCount || 0, 10) * 0.5);
+      var newScore = getScore(picker) + addScore;
+      setScore(picker, newScore);
+
       var fired = getFired(picker);
-      for (var i = 0; i < MILESTONES.length; i++) {
+      // 높은 단계부터 체크 (가장 높은 미달성 티어 발동)
+      for (var i = MILESTONES.length - 1; i >= 0; i--) {
         var m = MILESTONES[i];
-        if (count >= m.count && fired.indexOf(m.tier) < 0) {
+        if (newScore >= m.score && fired.indexOf(m.tier) < 0) {
           setFired(picker, m.tier);
-          (function(milestone, p) {
-            setTimeout(function() { fire(milestone, p); }, 300);
-          })(m, picker);
-          break; // 한 번에 하나만 발동
+          (function(milestone, p, s) {
+            setTimeout(function() { fire(milestone, p, s); }, 300);
+          })(m, picker, newScore);
+          break;
         }
       }
     }
