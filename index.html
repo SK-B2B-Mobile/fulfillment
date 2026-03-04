@@ -1056,9 +1056,10 @@
               ${hasStarted && job.picker
                 ? (function(){
                     var _b = window.CelebrationSystem ? window.CelebrationSystem.getBadge(job.picker) : '';
-                    return '<span class="picker-tag" style="background-color:'+pickerColor+';display:inline-flex;flex-direction:column;align-items:center;gap:1px;">'
-                      + (_b ? '<span style="font-size:11px;line-height:1;">'+_b+'</span>' : '')
-                      + job.picker + '</span>';
+                    return '<span class="picker-tag" style="background-color:'+pickerColor+';display:inline-flex;flex-direction:row;align-items:center;gap:5px;">'
+                      + job.picker
+                      + (_b ? '&nbsp;<span style="font-size:12px;line-height:1;">'+_b+'</span>' : '')
+                      + '</span>';
                   })()
                 : `<select onchange="App.updatePicker('${job.invoice}',this.value)">
                     <option value="">Select picker...</option>
@@ -1082,7 +1083,7 @@
                     <button class="btn btn-success btn-sm" onclick="showAutoTimeModal('✓','Mark this job as complete?','Current time will be automatically recorded as the End Time.','#059669',()=>App.completeJobWithTime('${job.invoice}',''))">✓ Complete</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   ` : `
-                    <button class="btn btn-sm ${job.picker?'btn-start-pulse':'btn-secondary'}" onclick="${job.picker?`showAutoTimeModal('▶','Ready to start this job?','Current time will be automatically recorded as the Start Time.','#d97706',()=>App.startJobWithTime('${job.invoice}',''))`:'void(0)'}" ${!job.picker?'disabled':''}>▶ Start</button>
+                    <button class="btn btn-sm ${job.picker?'btn-start-pulse':'btn-secondary'}" onclick="${job.picker?`showAutoTimeModal('▶','Ready to start this job?','Current time will be automatically recorded as the Start Time.','#d97706',()=>App.startJobWithTime('${job.invoice}',''),()=>App.cancelStart('${job.invoice}'))`:'void(0)'}" ${!job.picker?'disabled':''}>▶ Start</button>
                     <button class="btn btn-success btn-sm" disabled style="opacity:0.35;cursor:not-allowed;">✓ Complete</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   `}
@@ -1204,6 +1205,10 @@
       },
 
       async updatePicker(invoice, picker) { await this.updateJob(invoice, { picker }); },
+      async cancelStart(invoice) {
+        // Start 모달 Cancel 시 → picker 초기화
+        await this.updateJob(invoice, { picker: '' });
+      },
       async startJobWithTime(invoice, selectedTime) {
         const job = State.jobs.find(j=>j.invoice===invoice);
         if (!job.picker) { showToast('⚠ Please select a picker first!','warning'); return; }
@@ -1695,16 +1700,21 @@
   </div>
 </div>
 <script>
-function showAutoTimeModal(icon,title,sub,color,cb){
+var _atmCancelCb = null;
+function showAutoTimeModal(icon,title,sub,color,cb,onCancel){
   document.getElementById('atmIcon').textContent=icon;
   document.getElementById('atmTitle').textContent=title;
   document.getElementById('atmSub').textContent=sub;
   document.getElementById('atmConfirm').style.background=color;
-  document.getElementById('atmConfirm').onclick=function(){ closeAutoTimeModal(); cb(); };
+  document.getElementById('atmConfirm').onclick=function(){ _atmCancelCb=null; closeAutoTimeModal(); cb(); };
+  _atmCancelCb = onCancel || null;
   var m=document.getElementById('autoTimeModal');
   m.style.display='flex';
 }
-function closeAutoTimeModal(){ document.getElementById('autoTimeModal').style.display='none'; }
+function closeAutoTimeModal(){
+  document.getElementById('autoTimeModal').style.display='none';
+  if(_atmCancelCb){ _atmCancelCb(); _atmCancelCb=null; }
+}
 </script>
 </body>
 </html>
