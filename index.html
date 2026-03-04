@@ -228,6 +228,9 @@
       100% { box-shadow:0 0 0 15px rgba(245,158,11,0); }
     }
     .btn-start-pulse:hover { background:linear-gradient(135deg,#fbbf24,#b45309) !important; }
+    /* 피커 미선택 시: pulse 유지하되 cursor로 비활성 표현 */
+    .btn-start-pulse.no-picker { cursor:default; opacity:0.75; }
+    .btn-start-pulse.no-picker:hover { background:linear-gradient(135deg,#f59e0b,#d97706) !important; }
     .btn-done-outline {
       background:transparent !important; color:#34d399 !important;
       border:1.5px solid rgba(16,185,129,0.5) !important;
@@ -1088,7 +1091,7 @@
                     <button class="btn btn-success btn-sm" onclick="showAutoTimeModal('✓','Mark this job as complete?','Current time will be automatically recorded as the End Time.','#059669',()=>App.completeJobWithTime('${job.invoice}',''))">✓ Complete</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   ` : `
-                    <button class="btn btn-sm ${job.picker?'btn-start-pulse':'btn-secondary'}" onclick="${job.picker?`showAutoTimeModal('▶','Ready to start this job?','Current time will be automatically recorded as the Start Time.','#d97706',()=>App.startJobWithTime('${job.invoice}',''),()=>App.cancelStart('${job.invoice}'))`:'void(0)'}" ${!job.picker?'disabled':''}>▶ Start</button>
+                    <button class="btn btn-sm btn-start-pulse" onclick="${job.picker?`showAutoTimeModal('▶','Ready to start this job?','Current time will be automatically recorded as the Start Time.','#d97706',()=>App.startJobWithTime('${job.invoice}',''),()=>App.cancelStart('${job.invoice}'))`:'App.nudgePicker(\"${job.invoice}\")'}">▶ Start</button>
                     <button class="btn btn-success btn-sm" disabled style="opacity:0.35;cursor:not-allowed;">✓ Complete</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   `}
@@ -1216,6 +1219,12 @@
           State.jobs[jobIndex].picker = picker;
           this.renderTable(); // UI만 업데이트
         }
+      },
+      nudgePicker(invoice) {
+        showToast('⚠ Please select a picker first!', 'warning');
+        // 해당 행의 picker select에 시각적 강조
+        const sel = document.querySelector(`select[onchange*="${invoice}"]`);
+        if (sel) { sel.style.outline='2px solid #f59e0b'; setTimeout(()=>{ sel.style.outline=''; },1500); }
       },
       cancelStart(invoice) {
         // Start 모달 Cancel → GAS 저장 없이 로컬만 초기화
