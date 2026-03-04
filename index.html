@@ -1496,15 +1496,15 @@
 /* ========================================================
    🎉 DAILY ACHIEVEMENT CELEBRATION SYSTEM v2
    점수 = 완료건수 × 1점 + 총SKU × 0.5점
-   ⭐ Rising Star 25pt | 🌟 Super Star 50pt | 👑 Legend 80pt
+   ⭐ Rising Star 50pt | 🌟 Super Star 80pt | 👑 Legend 110pt
    매일 자정 자동 리셋
    ======================================================== */
 (function() {
 
   var MILESTONES = [
     { score:50, tier:1, name:'Rising Star',      emoji:'⭐', color:'#FFD700', particleColor:['#FFD700','#FFF8DC','#FFFACD','#ffffff'], shapes:['star'],                   duration:3000 },
-    { score:75, tier:2, name:'Super Star',        emoji:'🌟', color:'#FF8C00', particleColor:['#FF8C00','#FFD700','#FFA500','#ffffff','#FFE4B5'], shapes:['star','circle'], duration:3000 },
-    { score:100, tier:3, name:'Legend of the Day', emoji:'👑', color:'#FFD700', particleColor:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF'], shapes:['crown','star','circle'], duration:5000 }
+    { score:80, tier:2, name:'Super Star',        emoji:'🌟', color:'#FF8C00', particleColor:['#FF8C00','#FFD700','#FFA500','#ffffff','#FFE4B5'], shapes:['star','circle'], duration:3000 },
+    { score:110, tier:3, name:'Legend of the Day', emoji:'👑', color:'#FFD700', particleColor:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF'], shapes:['crown','star','circle'], duration:5000 }
   ];
 
   function todayStr() {
