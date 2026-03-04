@@ -947,10 +947,21 @@
         try {
           this.updateSyncIndicator('syncing');
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 10000); // 10초 타임아웃
-          const response = await fetch(`${State.scriptUrl}?op=listJobs&t=${Date.now()}`, { signal: controller.signal });
-          clearTimeout(timer);
-          const data = await response.json();
+          const timer = setTimeout(() => controller.abort(), 30000); // 30초 타임아웃
+          let response, data;
+          try {
+            response = await fetch(`${State.scriptUrl}?op=listJobs&t=${Date.now()}`, { signal: controller.signal });
+            clearTimeout(timer);
+            data = await response.json();
+          } catch(fetchErr) {
+            clearTimeout(timer);
+            if (fetchErr.name === 'AbortError') {
+              console.warn('fetchData timed out, retrying next cycle');
+              this.updateSyncIndicator('error');
+              return; // 조용히 다음 사이클 대기
+            }
+            throw fetchErr;
+          }
           if (State.pendingSaves > 0) return;
           if (data.ok) {
             // ★ 로컬에서 선택된 picker 정보 보존 (GAS에 아직 저장 안된 것들)
@@ -1178,6 +1189,9 @@
         const toDelete = [...State.selectedJobs];
         State.jobs = State.jobs.filter(j => !State.selectedJobs.has(j.invoice));
         State.selectedJobs.clear();
+        // 삭제 후 현재 페이지가 범위 초과하면 1페이지로 리셋
+        const totalPagesAfter = Math.ceil(State.jobs.length / State.itemsPerPage) || 1;
+        if (State.currentPage > totalPagesAfter) State.currentPage = 1;
         this.renderTable(); this.updateKPIs(); this.updateDeleteButton();
         showToast(`✓ ${count} job(s) deleted`, 'success');
         const deleteNext = (i) => {
