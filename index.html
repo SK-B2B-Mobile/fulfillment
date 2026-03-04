@@ -937,7 +937,12 @@
           const data = await response.json();
           if (State.pendingSaves > 0) return;
           if (data.ok) {
+            // ★ 로컬에서 선택된 picker 정보 보존 (GAS에 아직 저장 안된 것들)
+            const pendingPickers = {};
+            State.jobs.forEach(j => { if (j.picker && (j.status||'').toLowerCase() === 'ready') pendingPickers[j.invoice] = j.picker; });
             State.jobs = data.jobs || [];
+            // 서버 데이터에 pending picker 복원
+            State.jobs.forEach(j => { if (!j.picker && pendingPickers[j.invoice]) j.picker = pendingPickers[j.invoice]; });
             State.pickers = data.pickers || CONFIG.DEFAULT_PICKERS;
             // 🎉 오늘 완료 건수를 서버 데이터 기준으로 localStorage 동기화
             if (window.CelebrationSystem) window.CelebrationSystem.syncFromJobs(State.jobs);
@@ -1204,10 +1209,21 @@
         }
       },
 
-      async updatePicker(invoice, picker) { await this.updateJob(invoice, { picker }); },
-      async cancelStart(invoice) {
-        // Start 모달 Cancel 시 → picker 초기화
-        await this.updateJob(invoice, { picker: '' });
+      async updatePicker(invoice, picker) {
+        // picker 선택 시 GAS에 즉시 저장하지 않음 → Start Confirm 시 함께 저장
+        const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
+        if (jobIndex >= 0) {
+          State.jobs[jobIndex].picker = picker;
+          this.renderTable(); // UI만 업데이트
+        }
+      },
+      cancelStart(invoice) {
+        // Start 모달 Cancel → GAS 저장 없이 로컬만 초기화
+        const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
+        if (jobIndex >= 0) {
+          State.jobs[jobIndex].picker = '';
+          this.renderTable();
+        }
       },
       async startJobWithTime(invoice, selectedTime) {
         const job = State.jobs.find(j=>j.invoice===invoice);
@@ -1218,7 +1234,8 @@
         const m = String(now.getMinutes()).padStart(2,'0');
         const autoTime = h + ':' + m;
         const startDate = new Date(now.getFullYear(),now.getMonth(),now.getDate(),now.getHours(),now.getMinutes());
-        await this.updateJob(invoice,{startTime:autoTime,startAtISO:toLocalISO(startDate),status:'started'});
+        // picker + startTime + status 한번에 GAS 저장 (picker는 여기서 처음 저장됨)
+        await this.updateJob(invoice,{picker:job.picker,startTime:autoTime,startAtISO:toLocalISO(startDate),status:'started'});
       },
       async startJob(invoice) { await this.startJobWithTime(invoice,''); },
       async completeJobWithTime(invoice, selectedTime) {
