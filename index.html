@@ -235,7 +235,7 @@
     .btn-done-outline:hover { border-color:#34d399 !important; }
     .time-plain     { font-size:12px; color:#94a3b8; white-space:nowrap; display:inline-block; padding:2px 0; }
     .time-plain.dim { color:#2d3f58; font-style:italic; font-size:11px; }
-    .time-plain.lit { color:#fbbf24; font-weight:600; }
+    .time-plain.lit { color:#e2e8f0; font-weight:600; }
     .btn-warning  { background:#f59e0b; color:#fff; }
     .btn-success  { background:var(--accent-success); color:#fff; }
     .btn-sm {
@@ -1095,10 +1095,7 @@
         this.updatePaginationInfo(startIndex+1, endIndex, totalItems);
         this.updatePaginationButtons(totalPages);
 
-        Object.entries(savedDropdowns).forEach(([id, val]) => {
-          const el = document.getElementById(id);
-          if (el && el.value !== val) el.value = val;
-        });
+        // (드롭다운 제거됨 - 자동시각 방식으로 변경, 복원 불필요)
       },
 
       updatePaginationInfo(start, end, total) {
