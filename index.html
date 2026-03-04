@@ -236,9 +236,9 @@
       border:1.5px solid rgba(16,185,129,0.5) !important;
     }
     .btn-done-outline:hover { border-color:#34d399 !important; }
-    .time-plain     { font-size:12px; color:#94a3b8; white-space:nowrap; display:inline-block; padding:2px 0; }
-    .time-plain.dim { color:#2d3f58; font-style:italic; font-size:11px; }
-    .time-plain.lit { color:#e2e8f0; font-weight:600; }
+    .time-plain     { font-size:var(--fs-sm); color:#94a3b8; white-space:nowrap; display:inline-block; padding:2px 0; }
+    .time-plain.dim { color:#2d3f58; font-style:italic; font-size:var(--fs-xs); }
+    .time-plain.lit { color:#e2e8f0; font-weight:600; font-size:var(--fs-sm); }
     .btn-warning  { background:#f59e0b; color:#fff; }
     .btn-success  { background:var(--accent-success); color:#fff; }
     .btn-sm {
@@ -946,7 +946,10 @@
         if (State.pendingSaves > 0) return;
         try {
           this.updateSyncIndicator('syncing');
-          const response = await fetch(`${State.scriptUrl}?op=listJobs&t=${Date.now()}`);
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 10000); // 10초 타임아웃
+          const response = await fetch(`${State.scriptUrl}?op=listJobs&t=${Date.now()}`, { signal: controller.signal });
+          clearTimeout(timer);
           const data = await response.json();
           if (State.pendingSaves > 0) return;
           if (data.ok) {
@@ -1076,7 +1079,7 @@
                     var _b = window.CelebrationSystem ? window.CelebrationSystem.getBadge(job.picker) : '';
                     return '<span class="picker-tag" style="background-color:'+pickerColor+';display:inline-flex;flex-direction:row;align-items:center;gap:5px;">'
                       + job.picker
-                      + (_b ? '&nbsp;<span style="font-size:12px;line-height:1;">'+_b+'</span>' : '')
+                      + (_b ? '&nbsp;<span style="font-size:16px;line-height:1;vertical-align:middle;">'+_b+'</span>' : '')
                       + '</span>';
                   })()
                 : `<select onchange="App.updatePicker('${job.invoice}',this.value)">
@@ -1277,15 +1280,25 @@
 
       async updateJob(invoice, updates) {
         State.pendingSaves++;
+        // 로컬 즉시 반영
         const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
         if (jobIndex >= 0) { State.jobs[jobIndex]={...State.jobs[jobIndex],...updates}; this.renderTable(); this.updateKPIs(); }
-        try {
-          await fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify({invoice,...updates})})});
-        } catch(error) { console.error('Update failed:',error); showToast('⚠ Sync error','error'); }
-        finally {
-          State.pendingSaves=Math.max(0,State.pendingSaves-1);
-          if(State.pendingSaves===0) this.startAutoRefresh();
+        const payload = new URLSearchParams({op:'upsertJob', data:JSON.stringify({invoice,...updates})});
+        const fetchOpts = { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:payload };
+        let success = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await fetch(State.scriptUrl, fetchOpts);
+            success = true;
+            break;
+          } catch(err) {
+            console.warn(`updateJob attempt ${attempt} failed:`, err);
+            if (attempt < 3) await new Promise(r => setTimeout(r, 800 * attempt));
+          }
         }
+        if (!success) showToast('⚠ Save failed — will retry on next refresh', 'error');
+        State.pendingSaves = Math.max(0, State.pendingSaves - 1);
+        if (State.pendingSaves === 0) this.startAutoRefresh();
       },
 
       formatAmount(input) {
