@@ -237,7 +237,7 @@
     }
     .btn-done-outline:hover { border-color:#34d399 !important; }
     .time-plain     { font-size:var(--fs-sm); color:#94a3b8; white-space:nowrap; display:inline-block; padding:2px 0; }
-    .time-plain.dim { color:#2d3f58; font-style:italic; font-size:var(--fs-xs); }
+    .time-plain.dim { color:#4a6080; font-style:italic; font-size:var(--fs-xs); }
     .time-plain.lit { color:#cbd5e1; font-weight:400; font-size:var(--fs-sm); }
     .btn-warning  { background:#f59e0b; color:#fff; }
     .btn-success  { background:var(--accent-success); color:#fff; }
@@ -378,6 +378,18 @@
     .pagination-bar .pager { display:flex; gap:var(--sp-xs); align-items:center; }
     .pager-info { font-size:var(--fs-xs); color:var(--text-secondary); white-space:nowrap; }
     #gotoPage { width:clamp(44px, 4vw, 70px) !important; text-align:center; padding: clamp(4px,0.35vw,6px) clamp(6px,0.5vw,10px); }
+    /* 페이지 번호 버튼 */
+    #pageNumbers { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
+    .page-num-btn {
+      min-width:clamp(28px,2.2vw,36px); height:clamp(28px,2.2vw,36px);
+      padding:0 6px; border-radius:7px; border:1px solid var(--border);
+      background:transparent; color:var(--text-secondary);
+      font-size:var(--fs-xs); font-weight:600; cursor:pointer;
+      transition:all 150ms;
+    }
+    .page-num-btn:hover { background:var(--bg-hover); color:var(--text-primary); border-color:var(--accent-primary); }
+    .page-num-btn.active { background:var(--accent-primary); color:#fff; border-color:var(--accent-primary); }
+    .page-num-btn.ellipsis { border:none; background:transparent; cursor:default; color:var(--text-secondary); }
     #itemsPerPage { width:auto !important; padding: clamp(4px,0.35vw,6px) clamp(6px,0.5vw,10px); font-size:var(--fs-xs); }
 
     /* ══════ MODAL ══════ */
@@ -594,12 +606,10 @@
           <option value="50">50</option>
         </select>
       </div>
-      <div class="pager">
-        <button class="btn btn-secondary btn-sm" onclick="App.prevPage()" id="prevBtn" disabled>Prev</button>
-        <span class="pager-info">Page <span id="currentPageNum">1</span> / <span id="totalPages">1</span></span>
-        <input type="number" id="gotoPage" placeholder="Go" min="1">
-        <button class="btn btn-secondary btn-sm" onclick="App.gotoPage()">Go</button>
-        <button class="btn btn-secondary btn-sm" onclick="App.nextPage()" id="nextBtn" disabled>Next</button>
+      <div class="pager" style="align-items:center;gap:6px;">
+        <button class="btn btn-secondary btn-sm" onclick="App.prevPage()" id="prevBtn" disabled>‹</button>
+        <div id="pageNumbers"></div>
+        <button class="btn btn-secondary btn-sm" onclick="App.nextPage()" id="nextBtn" disabled>›</button>
       </div>
     </div>
   </div>
@@ -1133,13 +1143,33 @@
 
       updatePaginationInfo(start, end, total) {
         document.getElementById('paginationInfo').textContent = `${start}-${end} of ${total}`;
-        document.getElementById('currentPageNum').textContent = State.currentPage;
-        document.getElementById('totalPages').textContent = Math.ceil(total/State.itemsPerPage)||1;
       },
       updatePaginationButtons(totalPages) {
-        document.getElementById('prevBtn').disabled = State.currentPage <= 1;
-        document.getElementById('nextBtn').disabled = State.currentPage >= totalPages;
-        document.getElementById('gotoPage').max = totalPages;
+        const cur = State.currentPage;
+        document.getElementById('prevBtn').disabled = cur <= 1;
+        document.getElementById('nextBtn').disabled = cur >= totalPages;
+        // 번호 버튼 생성 (최대 7개 표시, 나머지 ... 처리)
+        const container = document.getElementById('pageNumbers');
+        if (!container) return;
+        const pages = [];
+        if (totalPages <= 7) {
+          for (let i = 1; i <= totalPages; i++) pages.push(i);
+        } else {
+          pages.push(1);
+          if (cur > 3) pages.push('...');
+          for (let i = Math.max(2, cur-1); i <= Math.min(totalPages-1, cur+1); i++) pages.push(i);
+          if (cur < totalPages - 2) pages.push('...');
+          pages.push(totalPages);
+        }
+        container.innerHTML = pages.map(p =>
+          p === '...'
+            ? `<span class="page-num-btn ellipsis">…</span>`
+            : `<button class="page-num-btn${p===cur?' active':''}" onclick="App.jumpToPage(${p})">${p}</button>`
+        ).join('');
+      },
+      jumpToPage(page) {
+        const totalPages = Math.ceil(State.jobs.length / State.itemsPerPage) || 1;
+        if (page >= 1 && page <= totalPages) { State.currentPage = page; this.renderTable(); }
       },
 
       toggleSelectAll(checked) {
