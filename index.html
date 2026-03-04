@@ -213,6 +213,29 @@
     .btn-secondary:hover { background:var(--bg-hover); border-color:var(--accent-primary); }
     .btn-danger   { background:var(--accent-danger); color:#fff; }
     .btn-danger.blink { animation:strongBlink .8s infinite; }
+    /* ── Auto-time button styles ── */
+    .btn-start-pulse {
+      background:linear-gradient(135deg,#f59e0b,#d97706) !important;
+      color:#fff !important; border:none !important; position:relative;
+    }
+    .btn-start-pulse::after {
+      content:''; position:absolute; inset:-3px; border-radius:10px;
+      animation:start-ring 1.6s ease-out infinite; pointer-events:none;
+    }
+    @keyframes start-ring {
+      0%   { box-shadow:0 0 0 0   rgba(245,158,11,0.85); }
+      55%  { box-shadow:0 0 0 9px rgba(245,158,11,0.2); }
+      100% { box-shadow:0 0 0 15px rgba(245,158,11,0); }
+    }
+    .btn-start-pulse:hover { background:linear-gradient(135deg,#fbbf24,#b45309) !important; }
+    .btn-done-outline {
+      background:transparent !important; color:#34d399 !important;
+      border:1.5px solid rgba(16,185,129,0.5) !important;
+    }
+    .btn-done-outline:hover { border-color:#34d399 !important; }
+    .time-plain     { font-size:12px; color:#94a3b8; white-space:nowrap; display:inline-block; padding:2px 0; }
+    .time-plain.dim { color:#2d3f58; font-style:italic; font-size:11px; }
+    .time-plain.lit { color:#fbbf24; font-weight:600; }
     .btn-warning  { background:#f59e0b; color:#fff; }
     .btn-success  { background:var(--accent-success); color:#fff; }
     .btn-sm {
@@ -946,8 +969,7 @@
         if (State.managerMode) document.body.classList.add('manager-mode');
         else document.body.classList.remove('manager-mode');
 
-        const savedDropdowns = {};
-        document.querySelectorAll('select[id^="startTime-"], select[id^="endTime-"]').forEach(sel => { if (sel.value) savedDropdowns[sel.id] = sel.value; });
+        // (드롭다운 제거됨 - 자동시각 입력 방식으로 변경)
 
         const tbody = document.getElementById('recordsBody');
         const filteredJobs = State.jobs.filter(job => {
@@ -988,6 +1010,12 @@
           const time12 = TimeOptions.format12Hour(time);
           const date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
           return `<span class="time-tag">${time12} ${date}</span>`;
+        };
+        const renderTimeTag12 = (time) => {
+          if (!time) return '-';
+          const time12 = TimeOptions.format12Hour(time);
+          const date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
+          return time12 + ' ' + date;
         };
 
         tbody.innerHTML = pageJobs.map((job, index) => {
@@ -1037,26 +1065,25 @@
                     ${State.pickers.map(p=>`<option value="${p}" ${job.picker===p?'selected':''}>${p}</option>`).join('')}
                    </select>`}
             </td>
-            <td>${hasStarted ? renderTimeTag(job.startTime) : `<div>${TimeOptions.renderSelect(job.startTime||'',!job.picker,`startTime-${job.invoice}`)}</div>`}</td>
-            <td>${isCompleted ? renderTimeTag(job.endTime) : hasStarted ? `<div>${TimeOptions.renderSelect(job.endTime||'',false,`endTime-${job.invoice}`)}</div>` : `<div><select id="endTime-${job.invoice}" disabled style="opacity:0.4;cursor:not-allowed;" title="Available after Start"><option value="">Available after Start</option></select></div>`}</td>
+            <td>${hasStarted ? `<span class="time-plain lit">${renderTimeTag12(job.startTime)}</span>` : job.picker ? `<span class="time-plain dim">-- auto on Start --</span>` : `<span class="time-plain dim">Select picker first</span>`}</td>
+            <td>${isCompleted ? `<span class="time-plain lit">${renderTimeTag12(job.endTime)}</span>` : hasStarted ? `<span class="time-plain dim">Auto-fill on Complete</span>` : `<span class="time-plain dim">Available after Start</span>`}</td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
                 ${State.managerMode ? `
                   ${isCompleted
-                    ? `<button class="btn btn-success btn-sm" disabled>Completed</button>`
-                    : `<button class="btn btn-success btn-sm" onclick="(function(){const el=document.getElementById('endTime-${job.invoice}');App.completeJobWithTime('${job.invoice}',el?el.value:'');})();">✓ Complete</button>`}
+                    ? `<button class="btn btn-sm btn-done-outline" disabled>Done</button>`
+                    : `<button class="btn btn-success btn-sm" onclick="showAutoTimeModal('✓','Mark this job as complete?','Current time will be automatically recorded as the End Time.','#059669',()=>App.completeJobWithTime('${job.invoice}',''))">✓ Complete</button>`}
                   <button class="btn btn-secondary btn-sm" onclick="App.editJobInline('${job.invoice}')">Mgr Edit</button>
                 ` : `
                   ${isCompleted ? `
-                    <button class="btn btn-success btn-sm" disabled>Completed</button>
+                    <button class="btn btn-sm btn-done-outline" disabled>Done</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   ` : hasStarted ? `
-                    <button class="btn btn-warning btn-sm">Started</button>
-                    <button class="btn btn-success btn-sm" onclick="(function(){const el=document.getElementById('endTime-${job.invoice}');App.completeJobWithTime('${job.invoice}',el?el.value:'');})();">✓ Complete</button>
+                    <button class="btn btn-success btn-sm" onclick="showAutoTimeModal('✓','Mark this job as complete?','Current time will be automatically recorded as the End Time.','#059669',()=>App.completeJobWithTime('${job.invoice}',''))">✓ Complete</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   ` : `
-                    <button class="btn btn-danger btn-sm ${!job.picker?'blink':''}" onclick="(function(){const el=document.getElementById('startTime-${job.invoice}');App.startJobWithTime('${job.invoice}',el?el.value:'');})();" ${!job.picker?'disabled':''}>▶ Start</button>
-                    <button class="btn btn-success btn-sm" onclick="(function(){const el=document.getElementById('endTime-${job.invoice}');App.completeJobWithTime('${job.invoice}',el?el.value:'');})();">✓ Complete</button>
+                    <button class="btn btn-sm ${job.picker?'btn-start-pulse':'btn-secondary'}" onclick="${job.picker?`showAutoTimeModal('▶','Ready to start this job?','Current time will be automatically recorded as the Start Time.','#d97706',()=>App.startJobWithTime('${job.invoice}',''))`:'void(0)'}" ${!job.picker?'disabled':''}>▶ Start</button>
+                    <button class="btn btn-success btn-sm" disabled style="opacity:0.35;cursor:not-allowed;">✓ Complete</button>
                     <button class="btn btn-secondary btn-sm" onclick="App.editTime('${job.invoice}')">Edit</button>
                   `}
                 `}
@@ -1182,24 +1209,30 @@
       async updatePicker(invoice, picker) { await this.updateJob(invoice, { picker }); },
       async startJobWithTime(invoice, selectedTime) {
         const job = State.jobs.find(j=>j.invoice===invoice);
-        if (!job.picker) { showToast('⚠ 먼저 작업자 이름을 선택해주세요!','warning'); return; }
-        if (!selectedTime) { showToast('⚠ 스타트 시간을 선택해주세요!','warning'); return; }
-        const now=new Date(); const [h,m]=selectedTime.split(':');
-        const startDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
-        await this.updateJob(invoice,{startTime:selectedTime,startAtISO:toLocalISO(startDate),status:'started'});
+        if (!job.picker) { showToast('⚠ Please select a picker first!','warning'); return; }
+        // 현재시각 자동 사용
+        const now = new Date();
+        const h = String(now.getHours()).padStart(2,'0');
+        const m = String(now.getMinutes()).padStart(2,'0');
+        const autoTime = h + ':' + m;
+        const startDate = new Date(now.getFullYear(),now.getMonth(),now.getDate(),now.getHours(),now.getMinutes());
+        await this.updateJob(invoice,{startTime:autoTime,startAtISO:toLocalISO(startDate),status:'started'});
       },
       async startJob(invoice) { await this.startJobWithTime(invoice,''); },
       async completeJobWithTime(invoice, selectedTime) {
         const job = State.jobs.find(j=>j.invoice===invoice);
-        if (!job.picker) { showToast('⚠ 먼저 작업자 이름을 선택해주세요!','warning'); return; }
-        if (!job.startTime) { showToast('⚠ 스타트 시간을 먼저 입력하고 Start 버튼을 눌러주세요!','warning'); return; }
-        if (!selectedTime) { showToast('⚠ 앤드 시간을 선택해주세요!','warning'); return; }
-        const now=new Date(); const [h,m]=selectedTime.split(':');
-        const endDate=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m);
+        if (!job.picker) { showToast('⚠ Please select a picker first!','warning'); return; }
+        if (!job.startTime) { showToast('⚠ Please press Start first!','warning'); return; }
+        // 현재시각 자동 사용
+        const now = new Date();
+        const h = String(now.getHours()).padStart(2,'0');
+        const m = String(now.getMinutes()).padStart(2,'0');
+        const autoTime = h + ':' + m;
+        const endDate = new Date(now.getFullYear(),now.getMonth(),now.getDate(),now.getHours(),now.getMinutes());
         const completingPicker = job ? job.picker : null;
         const completingSku = job ? (job.skuCount || 0) : 0;
-        await this.updateJob(invoice,{endTime:selectedTime,endAtISO:toLocalISO(endDate),status:'completed'});
-        // 🎉 셀러브레이션 체크 (건수 × 1점 + SKU × 0.5점)
+        await this.updateJob(invoice,{endTime:autoTime,endAtISO:toLocalISO(endDate),status:'completed'});
+        // 🎉 셀러브레이션 체크
         if (window.CelebrationSystem && completingPicker) window.CelebrationSystem.onComplete(completingPicker, completingSku);
       },
       async completeJob(invoice) { await this.completeJobWithTime(invoice,''); },
@@ -1650,6 +1683,31 @@
     }
   };
 })();
+</script>
+
+<!-- ── Auto-time Confirm Modal ── -->
+<div id="autoTimeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#111d35;border:1px solid #1e3550;border-radius:16px;padding:32px 36px;text-align:center;min-width:300px;max-width:380px;">
+    <div id="atmIcon" style="font-size:44px;margin-bottom:14px;">▶</div>
+    <div id="atmTitle" style="font-size:17px;font-weight:700;color:#e2e8f0;margin-bottom:6px;">Ready to start this job?</div>
+    <div id="atmSub" style="font-size:13px;color:#64748b;margin-bottom:22px;line-height:1.6;">Current time will be automatically recorded as the Start Time.</div>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button onclick="closeAutoTimeModal()" style="padding:10px 28px;border-radius:8px;border:1px solid #1e3550;background:transparent;color:#94a3b8;cursor:pointer;font-weight:600;font-size:13px;">Cancel</button>
+      <button id="atmConfirm" style="padding:10px 28px;border-radius:8px;border:none;cursor:pointer;font-weight:700;font-size:13px;color:#fff;background:#d97706;">Confirm</button>
+    </div>
+  </div>
+</div>
+<script>
+function showAutoTimeModal(icon,title,sub,color,cb){
+  document.getElementById('atmIcon').textContent=icon;
+  document.getElementById('atmTitle').textContent=title;
+  document.getElementById('atmSub').textContent=sub;
+  document.getElementById('atmConfirm').style.background=color;
+  document.getElementById('atmConfirm').onclick=function(){ closeAutoTimeModal(); cb(); };
+  var m=document.getElementById('autoTimeModal');
+  m.style.display='flex';
+}
+function closeAutoTimeModal(){ document.getElementById('autoTimeModal').style.display='none'; }
 </script>
 </body>
 </html>
