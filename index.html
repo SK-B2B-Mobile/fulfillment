@@ -677,8 +677,18 @@
     <div class="modal-header"><h3 class="modal-title">✏️ Edit</h3><button class="modal-close" onclick="App.closeEditModal()">×</button></div>
     <input type="hidden" id="editInvoice">
     <div class="form-group"><label class="form-label">Picker</label><select id="editPicker"><option value="">Select picker...</option></select></div>
-    <div class="form-group"><label class="form-label">Start Time</label><select id="editStartTime"><option value="">Select time...</option></select></div>
-    <div class="form-group"><label class="form-label">End Time</label><select id="editEndTime"><option value="">Select time...</option></select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="form-group">
+        <label class="form-label">Start Time</label>
+        <input type="time" id="editStartTime"
+          style="width:100%;padding:10px 14px;background:#0d1629;border:1px solid #1e3550;border-radius:8px;color:#e2e8f0;font-size:15px;cursor:pointer;" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">End Time</label>
+        <input type="time" id="editEndTime"
+          style="width:100%;padding:10px 14px;background:#0d1629;border:1px solid #1e3550;border-radius:8px;color:#e2e8f0;font-size:15px;cursor:pointer;" />
+      </div>
+    </div>
     <div class="flex gap-sm mt-md">
       <button class="btn btn-primary" style="flex:1;" onclick="App.saveEditTime()">💾 Save</button>
       <button class="btn btn-secondary" onclick="App.closeEditModal()">Cancel</button>
@@ -1307,10 +1317,7 @@
         await this.updateJob(invoice,updates);
       },
       populateEditTimeOptions() {
-        const times=TimeOptions.generate();
-        const options='<option value="">Select time...</option>'+times.map(t=>`<option value="${t.value}">${t.label}</option>`).join('');
-        document.getElementById('editStartTime').innerHTML=options;
-        document.getElementById('editEndTime').innerHTML=options;
+        // text input 방식으로 변경 - 드롭다운 불필요
       },
       editJobInline(invoice) { this.editJobInManager(invoice); },
       editJobInManager(invoice) {
