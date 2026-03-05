@@ -1118,8 +1118,11 @@
             saved.pickers = State.pickers;
             saved.pickerColors = State.pickerColors;
             localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(saved));
+            // ★ 수정: 사용자가 현재 입력 중일 때는 덮어쓰지 않음
             const pickerInput = document.getElementById('settingsPickers');
-            if (pickerInput) pickerInput.value = State.pickers.join(', ');
+            if (pickerInput && document.activeElement !== pickerInput) {
+              pickerInput.value = State.pickers.join(', ');
+            }
           }
           this.updateSyncIndicator('success');
         } catch (error) {
