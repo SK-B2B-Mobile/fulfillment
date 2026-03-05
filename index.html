@@ -163,7 +163,8 @@
     /* ══════ KPI GRID ══════ */
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      /* Active Workers 1.4배, Inspection 1fr, 나머지 1fr */
+      grid-template-columns: 1fr 1fr 1fr 1.4fr 1fr;
       gap: clamp(8px, 0.7vw, 14px);
       margin-bottom: clamp(8px, 0.8vh, 16px);
     }
@@ -171,7 +172,7 @@
       background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-lg);
       padding: clamp(10px, 0.9vw, 18px);
       transition:all var(--transition); animation:fadeUp 0.5s ease-out backwards;
-      position: relative; overflow: hidden;
+      position:relative; overflow:hidden;
     }
     .kpi-card:nth-child(1) { animation-delay:.1s; }
     .kpi-card:nth-child(2) { animation-delay:.2s; }
@@ -183,21 +184,96 @@
     .kpi-label { font-size:var(--fs-xs); color:var(--text-secondary); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
     .kpi-percentage { font-size:var(--fs-lg); font-weight:700; font-family:'JetBrains Mono',monospace; }
     .kpi-value {
-      font-size: clamp(20px, 2.2vw, 42px);
+      /* ★ 숫자 크기 줄여서 한 줄 강제 */
+      font-size: clamp(15px, 1.55vw, 28px);
       font-weight:800; font-family:'JetBrains Mono',monospace;
       line-height:1; margin-bottom:clamp(2px, 0.3vh, 6px);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     }
     .kpi-subtitle { font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:clamp(6px, 0.6vh, 12px); }
-    .progress-bar { height:clamp(6px, 0.5vh, 10px); background:rgba(255,255,255,0.05); border-radius:var(--r-full); overflow:hidden; }
+
+    /* ★ 생동감 있는 progress bar */
+    .progress-bar {
+      height: clamp(7px, 0.55vh, 11px);
+      background: rgba(255,255,255,0.04);
+      border-radius: var(--r-full); overflow:hidden;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+    }
     .progress-fill {
       height:100%; border-radius:var(--r-full);
-      transition:width .4s ease, background .4s ease; position:relative; overflow:hidden;
+      transition: width 0.8s cubic-bezier(0.4,0,0.2,1), background 0.5s ease;
+      position:relative; overflow:hidden;
+    }
+    .progress-fill::before {
+      content:''; position:absolute; inset:0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(0,0,0,0.1) 100%);
     }
     .progress-fill::after {
       content:''; position:absolute; inset:0;
-      background:linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-      animation:shimmer 2s infinite;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%);
+      animation: shimmer 2.4s ease-in-out infinite;
     }
+    @keyframes bar-glow {
+      0%,100% { filter: brightness(1); }
+      50%      { filter: brightness(1.4) saturate(1.3); }
+    }
+    /* Workers 이름 — 여러 명 수용, 래핑 허용 */
+    #workerNames {
+      font-size: clamp(11px, 0.95vw, 15px) !important;
+      line-height: 1.55 !important;
+      word-break: break-word;
+      white-space: normal !important;
+    }
+    /* Inspection KPI sub */
+    .kpi-insp-sub { display:flex; gap:5px; margin-top:4px; flex-wrap:wrap; }
+    .kpi-insp-sub span { font-size:clamp(9px,0.58vw,11px); font-weight:700; }
+
+    /* ★ Inspection 컬럼 — 다른 td와 완전히 동일, 구분선 없음 */
+    th.th-insp { white-space:nowrap; }
+    td.td-insp { text-align:center; }
+    .insp-pass {
+      display:inline-flex; align-items:center; gap:5px;
+      padding:4px 10px; border-radius:var(--r-full);
+      font-size:var(--fs-xs); font-weight:700;
+      background:rgba(16,185,129,0.15); color:#10b981;
+      border:1px solid rgba(16,185,129,0.3); white-space:nowrap;
+    }
+    .insp-issues {
+      display:inline-flex; align-items:center; gap:5px;
+      padding:4px 10px; border-radius:var(--r-full);
+      font-size:var(--fs-xs); font-weight:700;
+      background:rgba(239,68,68,0.15); color:#ef4444;
+      border:1px solid rgba(239,68,68,0.3); white-space:nowrap;
+      cursor:pointer; position:relative;
+    }
+    .insp-pending {
+      display:inline-flex; align-items:center; gap:5px;
+      padding:4px 10px; border-radius:var(--r-full);
+      font-size:var(--fs-xs); font-weight:600;
+      background:rgba(100,116,139,0.1); color:var(--text-muted);
+      border:1px solid rgba(100,116,139,0.2); white-space:nowrap;
+    }
+    .insp-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+    .insp-pass .insp-dot    { background:#10b981; box-shadow:0 0 5px #10b981; }
+    .insp-issues .insp-dot  { background:#ef4444; box-shadow:0 0 5px #ef4444; animation:pulse 1.5s infinite; }
+    .insp-pending .insp-dot { background:var(--text-muted); }
+    .insp-tip {
+      display:none; position:absolute; top:calc(100% + 6px); left:50%; transform:translateX(-50%);
+      background:var(--bg-card); border:1px solid rgba(239,68,68,0.35);
+      border-radius:var(--r-md); padding:10px 14px; min-width:190px;
+      z-index:500; box-shadow:0 8px 28px rgba(0,0,0,0.6); text-align:left;
+    }
+    .insp-issues:hover .insp-tip { display:block; }
+    .insp-tip-title { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#ef4444; margin-bottom:8px; }
+    .insp-tip-row   { font-size:11px; color:var(--text-secondary); margin-bottom:4px; display:flex; gap:6px; align-items:center; }
+    .insp-tip-tag   { font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; flex-shrink:0; }
+    .insp-tip-exp   { background:rgba(239,68,68,0.2); color:#ef4444; }
+    .insp-tip-oos   { background:rgba(245,158,11,0.2); color:#f59e0b; }
+    .insp-tip-nf    { background:rgba(139,92,246,0.2); color:#8b5cf6; }
+    /* Inspection footer */
+    .insp-footer-summary { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:var(--fs-xs); }
+    .ifs-item { display:flex; align-items:center; gap:4px; color:var(--text-secondary); }
+    .ifs-num  { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; }
 
     /* ══════ BUTTONS ══════ */
     .btn {
@@ -368,71 +444,6 @@
     .form-group { margin-bottom:var(--sp-md); }
     .form-label { display:block; margin-bottom:4px; font-size:var(--fs-xs); font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.3px; }
     .form-row { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-md); }
-
-    /* ══════ INSPECTION COLUMN ══════ */
-    th.th-insp {
-      color: #818cf8 !important;
-      background: rgba(129,140,248,0.06) !important;
-      border-left: 1px solid rgba(129,140,248,0.2) !important;
-      white-space: nowrap;
-    }
-    td.td-insp {
-      background: rgba(129,140,248,0.02);
-      border-left: 1px solid rgba(129,140,248,0.08);
-      text-align: center;
-    }
-    tr:hover td.td-insp { background: rgba(129,140,248,0.06); }
-    .insp-pass {
-      display:inline-flex; align-items:center; gap:5px;
-      padding:4px 10px; border-radius:6px; font-size:var(--fs-xs); font-weight:700;
-      background:rgba(16,185,129,0.12); color:#10b981;
-      border:1px solid rgba(16,185,129,0.3); white-space:nowrap;
-    }
-    .insp-issues {
-      display:inline-flex; align-items:center; gap:5px;
-      padding:4px 10px; border-radius:6px; font-size:var(--fs-xs); font-weight:700;
-      background:rgba(239,68,68,0.12); color:#ef4444;
-      border:1px solid rgba(239,68,68,0.3); white-space:nowrap;
-      cursor:pointer; position:relative;
-    }
-    .insp-pending {
-      display:inline-flex; align-items:center; gap:5px;
-      padding:4px 10px; border-radius:6px; font-size:var(--fs-xs); font-weight:600;
-      background:rgba(100,116,139,0.1); color:var(--text-muted);
-      border:1px solid rgba(100,116,139,0.18); white-space:nowrap;
-    }
-    .insp-dot {
-      width:7px; height:7px; border-radius:50%; flex-shrink:0;
-    }
-    .insp-pass .insp-dot   { background:#10b981; box-shadow:0 0 5px #10b981; }
-    .insp-issues .insp-dot { background:#ef4444; box-shadow:0 0 5px #ef4444; animation:insp-pulse 1.5s infinite; }
-    .insp-pending .insp-dot{ background:var(--text-muted); }
-    @keyframes insp-pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
-    /* Tooltip */
-    .insp-tip {
-      display:none; position:absolute; top:calc(100% + 6px); left:50%; transform:translateX(-50%);
-      background:#0d1629; border:1px solid rgba(239,68,68,0.35);
-      border-radius:10px; padding:10px 14px; min-width:200px;
-      z-index:500; box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      text-align:left;
-    }
-    .insp-issues:hover .insp-tip { display:block; }
-    .insp-tip-title { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#ef4444; margin-bottom:8px; }
-    .insp-tip-row   { font-size:11px; color:var(--text-secondary); margin-bottom:4px; display:flex; gap:6px; align-items:center; }
-    .insp-tip-tag   { font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; flex-shrink:0; }
-    .insp-tip-exp   { background:rgba(239,68,68,0.2); color:#ef4444; }
-    .insp-tip-oos   { background:rgba(245,158,11,0.2); color:#f59e0b; }
-    .insp-tip-nf    { background:rgba(139,92,246,0.2); color:#8b5cf6; }
-    /* KPI sub-stats */
-    .kpi-insp-sub { display:flex; gap:6px; margin-top:4px; flex-wrap:wrap; }
-    .kpi-insp-sub span { font-size:var(--fs-xs); font-weight:700; }
-    /* Inspection summary in footer */
-    .insp-footer-summary {
-      display:flex; align-items:center; gap:12px; flex-wrap:wrap;
-      font-size:var(--fs-xs);
-    }
-    .ifs-item { display:flex; align-items:center; gap:5px; color:var(--text-secondary); }
-    .ifs-num  { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; }
 
     /* ══════ PAGINATION ══════ */
     .pagination-bar {
@@ -613,20 +624,21 @@
       <div class="kpi-subtitle">Completed Jobs</div>
       <div class="progress-bar"><div class="progress-fill" id="jobProgress" style="width:0%"></div></div>
     </div>
+    <!-- ★ Active Workers: 넓은 칸 → 7명+뱃지 수용 -->
     <div class="kpi-card">
       <div class="kpi-header"><span class="kpi-label">Active Workers</span><span class="kpi-percentage" id="workerCount">0</span></div>
-      <div class="kpi-value" id="workerNames" style="font-size:clamp(14px,1.3vw,22px);line-height:1.3;">-</div>
+      <div id="workerNames" style="font-size:clamp(11px,0.95vw,15px);line-height:1.55;word-break:break-word;font-weight:700;margin-bottom:clamp(2px,0.3vh,6px);">-</div>
       <div class="kpi-subtitle">Currently Working</div>
     </div>
-    <!-- ★ NEW: Inspection KPI Card -->
-    <div class="kpi-card" style="border-color:rgba(129,140,248,0.3);">
+    <!-- ★ Inspection KPI -->
+    <div class="kpi-card" style="border-color:rgba(129,140,248,0.4);">
       <div class="kpi-header">
         <span class="kpi-label" style="color:#818cf8;">🔬 Inspection</span>
         <span class="kpi-percentage" id="inspPercent" style="color:#818cf8;">0%</span>
       </div>
-      <div class="kpi-value" id="inspValue" style="color:#818cf8;font-size:clamp(18px,2vw,36px);">0 / 0</div>
+      <div class="kpi-value" id="inspValue" style="color:#818cf8;">0 / 0</div>
       <div class="kpi-insp-sub">
-        <span id="inspPassSub" style="color:#10b981;">✓ 0 Pass</span>
+        <span id="inspPassSub" style="color:#64748b;">✓ 0 Pass</span>
         <span id="inspIssSub"  style="color:#64748b;">⚠ 0 Issues</span>
         <span id="inspNotSub"  style="color:#f59e0b;">⏳ 0 Not Insp.</span>
       </div>
@@ -673,36 +685,36 @@
             <th style="width:clamp(90px,9vw,150px);">Start</th>
             <th style="width:clamp(90px,9vw,150px);">End</th>
             <th style="width:clamp(200px,19vw,310px);">Actions</th>
-            <th class="th-insp" style="width:clamp(110px,10vw,160px);">🔬 Inspection</th>
+            <th class="th-insp" style="width:clamp(120px,10vw,165px);">🔬 Inspection</th>
           </tr>
         </thead>
         <tbody id="recordsBody"></tbody>
       </table>
     </div>
     <div class="pagination-bar">
-      <!-- ★ Left: Inspection summary -->
+      <!-- ★ 왼쪽: Inspection 검수 요약 -->
       <div class="insp-footer-summary">
         <div class="ifs-item">
           <span style="color:var(--text-muted);">Completed:</span>
           <span class="ifs-num" style="color:#818cf8;" id="ifs-total">0</span>
         </div>
-        <span style="color:var(--text-muted);font-size:11px;">=</span>
+        <span style="color:var(--text-muted);">=</span>
         <div class="ifs-item">
           <span style="color:#10b981;">✓ Pass:</span>
           <span class="ifs-num" style="color:#10b981;" id="ifs-pass">0</span>
         </div>
-        <span style="color:var(--text-muted);font-size:11px;">+</span>
+        <span style="color:var(--text-muted);">+</span>
         <div class="ifs-item">
           <span style="color:#ef4444;">⚠ Issues:</span>
           <span class="ifs-num" style="color:#ef4444;" id="ifs-iss">0</span>
         </div>
-        <span style="color:var(--text-muted);font-size:11px;">+</span>
+        <span style="color:var(--text-muted);">+</span>
         <div class="ifs-item">
           <span style="color:#f59e0b;">⏳ Not Insp.:</span>
           <span class="ifs-num" style="color:#f59e0b;" id="ifs-not">0</span>
         </div>
       </div>
-      <!-- Right: Rows / Pagination -->
+      <!-- 오른쪽: 기존 페이지네이션 -->
       <div style="display:flex;align-items:center;gap:var(--sp-sm);flex-wrap:wrap;">
         <div class="info-text">
           Showing <span id="paginationInfo">0-0 of 0</span>
@@ -1198,7 +1210,7 @@
             <td><span class="status-badge ${statusClass}">${statusText}</span></td>
             <td><strong>${job.invoice||'-'}</strong></td>
             <td>${job.amount ? parseFloat(job.amount).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'}</td>
-            <td>${shipDate}</td>
+            <td style="white-space:nowrap;">${shipDate}</td>
             <td class="text-left">${job.skuCount||0}</td>
             <td class="text-left">${job.totalQty||0}</td>
             <td>${job.trucking||'-'}</td>
@@ -1248,15 +1260,13 @@
         this.updatePaginationInfo(startIndex+1, endIndex, totalItems);
         this.updatePaginationButtons(totalPages);
         this.updateInspFooter();
-
-        // (드롭다운 제거됨 - 자동시각 방식으로 변경, 복원 불필요)
       },
 
-      // ── Inspection cell builder ─────────────────────────────────
       buildInspCell(job) {
+        const status = (job.status || '').toLowerCase();
         const val = String(job.inspection || job.Inspection || '').trim();
         if (!val) {
-          if ((job.status || '').toLowerCase() !== 'completed') return '<span style="color:var(--text-muted);font-size:var(--fs-xs);">—</span>';
+          if (status !== 'completed') return '<span style="color:var(--text-muted);font-size:var(--fs-xs);">—</span>';
           return '<span class="insp-pending"><span class="insp-dot"></span>Pending...</span>';
         }
         if (val.indexOf('PASS') >= 0) {
@@ -1265,28 +1275,23 @@
         if (val.indexOf('ISSUES') >= 0) {
           const match = val.match(/ISSUES\((\d+)\)/);
           const cnt = match ? match[1] : '?';
-          // note 파싱
           const note = String(job.inspectionNote || job.InspectionNote || '');
           let tipRows = '';
           if (note) {
             note.split('\n').forEach(line => {
-              if (!line || line.indexOf('===') >= 0 || line.indexOf('Inspected:') >= 0 || line.indexOf('Note:') >= 0) return;
+              if (!line || line.indexOf('===') >= 0 || line.indexOf('Inspected:') >= 0) return;
               const typeMatch = line.match(/^(EXP|OOS|NF)/);
-              const cls = typeMatch ? ({ EXP:'insp-tip-exp', OOS:'insp-tip-oos', NF:'insp-tip-nf' }[typeMatch[1]] || 'insp-tip-exp') : 'insp-tip-exp';
+              const cls = typeMatch ? ({EXP:'insp-tip-exp',OOS:'insp-tip-oos',NF:'insp-tip-nf'}[typeMatch[1]]||'insp-tip-exp') : 'insp-tip-exp';
               const tag = typeMatch ? typeMatch[1] : '?';
               tipRows += `<div class="insp-tip-row"><span class="insp-tip-tag ${cls}">${tag}</span>${line.replace(/^(EXP|OOS|NF):\s*/,'')}</div>`;
             });
-          } else {
-            tipRows = '<div class="insp-tip-row" style="color:var(--text-muted);">See Google Sheet for details</div>';
           }
-          return `<span class="insp-issues"><span class="insp-dot"></span>⚠ ISSUES(${cnt})
-            <div class="insp-tip"><div class="insp-tip-title">Issues Recorded</div>${tipRows}</div>
-          </span>`;
+          if (!tipRows) tipRows = '<div class="insp-tip-row" style="color:var(--text-muted);">See Sheet for details</div>';
+          return `<span class="insp-issues"><span class="insp-dot"></span>⚠ ISSUES(${cnt})<div class="insp-tip"><div class="insp-tip-title">Issues Recorded</div>${tipRows}</div></span>`;
         }
         return `<span class="insp-pending"><span class="insp-dot"></span>${val}</span>`;
       },
 
-      // ── Inspection footer summary ────────────────────────────────
       updateInspFooter() {
         const completed = State.jobs.filter(j => (j.status||'').toLowerCase() === 'completed');
         let pass = 0, issues = 0;
@@ -1295,14 +1300,9 @@
           if (v.indexOf('PASS') >= 0) pass++;
           else if (v.indexOf('ISSUES') >= 0) issues++;
         });
-        const total     = completed.length;
-        const inspected = pass + issues;
-        const notInsp   = total - inspected;
-        const el = (id) => document.getElementById(id);
-        if (el('ifs-total')) el('ifs-total').textContent = total;
-        if (el('ifs-pass'))  el('ifs-pass').textContent  = pass;
-        if (el('ifs-iss'))   el('ifs-iss').textContent   = issues;
-        if (el('ifs-not'))   el('ifs-not').textContent   = notInsp;
+        const total = completed.length, inspected = pass + issues, notInsp = total - inspected;
+        const set = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+        set('ifs-total', total); set('ifs-pass', pass); set('ifs-iss', issues); set('ifs-not', notInsp);
       },
 
       updatePaginationInfo(start, end, total) {
@@ -1414,18 +1414,32 @@
         const completedQty=State.jobs.filter(j=>j.status==='completed').reduce((s,j)=>s+(parseInt(j.totalQty)||0),0);
         const activeWorkers=[...new Set(State.jobs.filter(j=>j.status==='started'&&j.picker).map(j=>j.picker))];
 
-        const sp=totalSKU>0?Math.round(completedSKU/totalSKU*100):0; const sc=ProgressColor.getColor(sp);
-        document.getElementById('skuPercent').textContent=`${sp}%`; document.getElementById('skuValue').textContent=`${completedSKU} / ${totalSKU}`; document.getElementById('skuProgress').style.cssText=`width:${sp}%;background:${sc}`;
-        const qp=totalQty>0?Math.round(completedQty/totalQty*100):0; const qc=ProgressColor.getColor(qp);
-        document.getElementById('qtyPercent').textContent=`${qp}%`; document.getElementById('qtyValue').textContent=`${completedQty} / ${totalQty}`; document.getElementById('qtyProgress').style.cssText=`width:${qp}%;background:${qc}`;
-        const jp=totalJobs>0?Math.round(completedJobs/totalJobs*100):0; const jc=ProgressColor.getColor(jp);
-        document.getElementById('jobPercent').textContent=`${jp}%`; document.getElementById('jobValue').textContent=`${completedJobs} / ${totalJobs}`; document.getElementById('jobProgress').style.cssText=`width:${jp}%;background:${jc}`;
-        document.getElementById('workerCount').textContent=activeWorkers.length;
+        // ★ 생동감 있는 bar 업데이트 (glow + gradient)
+        const setBar = (pctId, valId, barId, pct, val, color) => {
+          document.getElementById(pctId).textContent = `${pct}%`;
+          document.getElementById(valId).textContent = val;
+          const bar = document.getElementById(barId);
+          const glow = pct >= 100 ? `0 0 14px ${color}, 0 0 28px ${color}` : `0 0 8px ${color}80`;
+          bar.style.cssText = `width:${pct}%;background:linear-gradient(90deg,${color}cc,${color});box-shadow:${glow};`;
+          if (pct >= 100) bar.classList.add('done'); else bar.classList.remove('done');
+        };
+
+        const sp=totalSKU>0?Math.round(completedSKU/totalSKU*100):0;
+        setBar('skuPercent','skuValue','skuProgress', sp, `${completedSKU} / ${totalSKU}`, ProgressColor.getColor(sp));
+
+        const qp=totalQty>0?Math.round(completedQty/totalQty*100):0;
+        setBar('qtyPercent','qtyValue','qtyProgress', qp, `${completedQty} / ${totalQty}`, ProgressColor.getColor(qp));
+
+        const jp=totalJobs>0?Math.round(completedJobs/totalJobs*100):0;
+        setBar('jobPercent','jobValue','jobProgress', jp, `${completedJobs} / ${totalJobs}`, ProgressColor.getColor(jp));
+
+        document.getElementById('workerCount').textContent = activeWorkers.length;
         if (activeWorkers.length > 0) {
-          var workerHtml = activeWorkers.map(function(w) {
-            var badge = window.CelebrationSystem ? window.CelebrationSystem.getBadge(w) : '';
-            return badge ? (w + ' ' + badge) : w;
-          }).join(', ');
+          // 7명 모두 표시: 이름 + 뱃지, 줄바꿈 허용
+          const workerHtml = activeWorkers.map(w => {
+            const badge = window.CelebrationSystem ? window.CelebrationSystem.getBadge(w) : '';
+            return badge ? `${w} ${badge}` : w;
+          }).join(' · ');
           document.getElementById('workerNames').textContent = workerHtml;
         } else {
           document.getElementById('workerNames').textContent = '-';
@@ -1439,19 +1453,24 @@
           if (v.indexOf('PASS') >= 0) inspPass++;
           else if (v.indexOf('ISSUES') >= 0) inspIss++;
         });
-        const inspTotal     = completedAll.length;
-        const inspInspected = inspPass + inspIss;
-        const inspNot       = inspTotal - inspInspected;
-        const inspPct       = inspTotal > 0 ? Math.round(inspInspected / inspTotal * 100) : 0;
+        const inspTotal = completedAll.length;
+        const inspected = inspPass + inspIss;
+        const inspNot   = inspTotal - inspected;
+        const inspPct   = inspTotal > 0 ? Math.round(inspected / inspTotal * 100) : 0;
+
         document.getElementById('inspPercent').textContent = `${inspPct}%`;
-        document.getElementById('inspValue').textContent   = `${inspInspected} / ${inspTotal}`;
-        document.getElementById('inspProgress').style.cssText = `width:${inspPct}%;background:#818cf8;`;
+        document.getElementById('inspValue').textContent   = `${inspected} / ${inspTotal}`;
+        const inspBar = document.getElementById('inspProgress');
+        const inspGlow = inspPct >= 100 ? '0 0 14px #818cf8, 0 0 28px #818cf8' : '0 0 8px #818cf880';
+        inspBar.style.cssText = `width:${inspPct}%;background:linear-gradient(90deg,#6366f1,#818cf8);box-shadow:${inspGlow};`;
+
         const passSub = document.getElementById('inspPassSub');
         const issSub  = document.getElementById('inspIssSub');
         const notSub  = document.getElementById('inspNotSub');
-        if (passSub) { passSub.textContent = `✓ ${inspPass} Pass`; passSub.style.color = inspPass > 0 ? '#10b981' : '#64748b'; }
-        if (issSub)  { issSub.textContent  = `⚠ ${inspIss} Issues`; issSub.style.color = inspIss > 0 ? '#ef4444' : '#64748b'; }
-        if (notSub)  { notSub.textContent  = `⏳ ${inspNot} Not Insp.`; notSub.style.color = inspNot > 0 ? '#f59e0b' : '#64748b'; }
+        if (passSub) { passSub.textContent = `✓ ${inspPass} Pass`;      passSub.style.color = inspPass > 0 ? '#10b981' : '#64748b'; }
+        if (issSub)  { issSub.textContent  = `⚠ ${inspIss} Issues`;    issSub.style.color  = inspIss  > 0 ? '#ef4444' : '#64748b'; }
+        if (notSub)  { notSub.textContent  = `⏳ ${inspNot} Not Insp.`; notSub.style.color  = inspNot  > 0 ? '#f59e0b' : '#64748b'; }
+
         this.updateInspFooter();
       },
 
