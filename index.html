@@ -1177,10 +1177,21 @@
           const date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
           return `<span class="time-tag">${time12} ${date}</span>`;
         };
-        const renderTimeTag12 = (time) => {
+        const renderTimeTag12 = (time, isoStr) => {
           if (!time) return '-';
           const time12 = TimeOptions.format12Hour(time);
-          const date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
+          // ★ 수정: ISO 문자열에서 실제 날짜 추출 (없으면 오늘 날짜)
+          let date;
+          if (isoStr && String(isoStr).length >= 10) {
+            const raw = String(isoStr).substring(0, 10); // "2026-03-04"
+            const parts = raw.split('-');
+            if (parts.length === 3) {
+              date = parts[1] + '/' + parts[2]; // "03/04"
+            }
+          }
+          if (!date) {
+            date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
+          }
           return time12 + ' ' + date;
         };
 
@@ -1232,8 +1243,8 @@
                     ${State.pickers.map(p=>`<option value="${p}" ${job.picker===p?'selected':''}>${p}</option>`).join('')}
                    </select>`}
             </td>
-            <td>${hasStarted ? `<span class="time-plain lit">${renderTimeTag12(job.startTime)}</span>` : job.picker ? `<span class="time-plain dim">-- auto on Start --</span>` : `<span class="time-plain dim">Select picker first</span>`}</td>
-            <td>${isCompleted ? `<span class="time-plain lit">${renderTimeTag12(job.endTime)}</span>` : hasStarted ? `<span class="time-plain dim">Auto-fill on Complete</span>` : `<span class="time-plain dim">Available after Start</span>`}</td>
+            <td>${hasStarted ? `<span class="time-plain lit">${renderTimeTag12(job.startTime, job.startAtISO)}</span>` : job.picker ? `<span class="time-plain dim">-- auto on Start --</span>` : `<span class="time-plain dim">Select picker first</span>`}</td>
+            <td>${isCompleted ? `<span class="time-plain lit">${renderTimeTag12(job.endTime, job.endAtISO)}</span>` : hasStarted ? `<span class="time-plain dim">Auto-fill on Complete</span>` : `<span class="time-plain dim">Available after Start</span>`}</td>
             <td>
               <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;">
                 ${State.managerMode ? `
