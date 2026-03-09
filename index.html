@@ -1292,7 +1292,31 @@
           const cnt = match ? match[1] : '?';
           const note = String(job.inspectionNote || job.InspectionNote || '');
           const inspector = String(job.inspector || '').trim();
-          const inspEnd = String(job.inspEnd || job['Insp. End'] || '').trim();
+          // ★ inspEnd: UTC ISO 문자열이면 로컬 시간으로 변환
+          const _inspEndRaw = String(job.inspEnd || job['Insp. End'] || '').trim();
+          const inspEnd = (() => {
+            if (!_inspEndRaw) return '';
+            // ISO 형식(Z 또는 T 포함)이면 로컬 시간으로 변환
+            if (_inspEndRaw.includes('T') || _inspEndRaw.endsWith('Z')) {
+              try {
+                const d = new Date(_inspEndRaw);
+                if (!isNaN(d)) {
+                  const pad = n => String(n).padStart(2,'0');
+                  const yyyy = d.getFullYear();
+                  const mo   = pad(d.getMonth()+1);
+                  const dd   = pad(d.getDate());
+                  const hh   = pad(d.getHours());
+                  const mm   = pad(d.getMinutes());
+                  // AM/PM 표시
+                  const h12  = d.getHours() % 12 || 12;
+                  const ampm = d.getHours() < 12 ? 'AM' : 'PM';
+                  return `${mo}/${dd} ${pad(h12)}:${mm} ${ampm}`;
+                }
+              } catch(e) {}
+            }
+            // 이미 포맷된 문자열이면 그대로 반환
+            return _inspEndRaw;
+          })();
           let tipRows = '';
           if (note) {
             note.split('\n').forEach(line => {
