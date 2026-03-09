@@ -267,9 +267,10 @@
     .insp-tip-title { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#ef4444; margin-bottom:8px; }
     .insp-tip-row   { font-size:11px; color:var(--text-secondary); margin-bottom:4px; display:flex; gap:6px; align-items:center; }
     .insp-tip-tag   { font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px; flex-shrink:0; }
-    .insp-tip-exp   { background:rgba(239,68,68,0.2); color:#ef4444; }
-    .insp-tip-oos   { background:rgba(245,158,11,0.2); color:#f59e0b; }
-    .insp-tip-nf    { background:rgba(139,92,246,0.2); color:#8b5cf6; }
+    .insp-tip-exp    { background:rgba(239,68,68,0.2);   color:#ef4444; }
+    .insp-tip-oos    { background:rgba(245,158,11,0.2);  color:#f59e0b; }
+    .insp-tip-nf     { background:rgba(139,92,246,0.2);  color:#8b5cf6; }
+    .insp-tip-cancel { background:rgba(100,116,139,0.2); color:#94a3b8; }
     /* Inspection footer */
     .insp-footer-summary { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:var(--fs-xs); }
     .ifs-item { display:flex; align-items:center; gap:4px; color:var(--text-secondary); }
@@ -1290,18 +1291,36 @@
           const match = val.match(/ISSUES\((\d+)\)/);
           const cnt = match ? match[1] : '?';
           const note = String(job.inspectionNote || job.InspectionNote || '');
+          const inspector = String(job.inspector || '').trim();
+          const inspEnd = String(job.inspEnd || job['Insp. End'] || '').trim();
           let tipRows = '';
           if (note) {
             note.split('\n').forEach(line => {
-              if (!line || line.indexOf('===') >= 0 || line.indexOf('Inspected:') >= 0) return;
-              const typeMatch = line.match(/^(EXP|OOS|NF)/);
-              const cls = typeMatch ? ({EXP:'insp-tip-exp',OOS:'insp-tip-oos',NF:'insp-tip-nf'}[typeMatch[1]]||'insp-tip-exp') : 'insp-tip-exp';
-              const tag = typeMatch ? typeMatch[1] : '?';
-              tipRows += `<div class="insp-tip-row"><span class="insp-tip-tag ${cls}">${tag}</span>${line.replace(/^(EXP|OOS|NF):\s*/,'')}</div>`;
+              line = line.trim();
+              if (!line || line.indexOf('===') >= 0 || line.indexOf('Completed:') >= 0 || line.indexOf('Inspector:') >= 0 || line.indexOf('Inspected:') >= 0) return;
+              if (line.startsWith('Note:')) {
+                tipRows += `<div class="insp-tip-row" style="color:#94a3b8;font-style:italic;">📝 ${line.replace('Note:','').trim()}</div>`;
+                return;
+              }
+              const typeMatch = line.match(/^(EXP|OOS|NF|CANCEL)/i);
+              const typeKey = typeMatch ? typeMatch[1].toUpperCase() : null;
+              const clsMap = {EXP:'insp-tip-exp', OOS:'insp-tip-oos', NF:'insp-tip-nf', CANCEL:'insp-tip-cancel'};
+              const cls = typeKey ? (clsMap[typeKey] || 'insp-tip-exp') : 'insp-tip-exp';
+              const tag = typeKey || '?';
+              tipRows += `<div class="insp-tip-row"><span class="insp-tip-tag ${cls}">${tag}</span>${line.replace(/^(EXP|OOS|NF|CANCEL):\s*/i,'')}</div>`;
             });
           }
+          // Inspector + 시간 표시
+          let metaRow = '';
+          if (inspector || inspEnd) {
+            metaRow = `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:10px;color:var(--text-muted);">`
+              + (inspector ? `👤 ${inspector}` : '')
+              + (inspector && inspEnd ? ' &nbsp;·&nbsp; ' : '')
+              + (inspEnd ? `🕐 ${inspEnd}` : '')
+              + `</div>`;
+          }
           if (!tipRows) tipRows = '<div class="insp-tip-row" style="color:var(--text-muted);">See Sheet for details</div>';
-          return `<span class="insp-issues"><span class="insp-dot"></span>⚠ ISSUES(${cnt})<div class="insp-tip"><div class="insp-tip-title">Issues Recorded</div>${tipRows}</div></span>`;
+          return `<span class="insp-issues"><span class="insp-dot"></span>⚠ ISSUES(${cnt})<div class="insp-tip"><div class="insp-tip-title">Issues Recorded</div>${tipRows}${metaRow}</div></span>`;
         }
         return `<span class="insp-pending"><span class="insp-dot"></span>${val}</span>`;
       },
