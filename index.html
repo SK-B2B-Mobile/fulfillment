@@ -303,23 +303,59 @@
     .btn-danger   { background:var(--accent-danger); color:#fff; }
     .btn-danger.blink { animation:strongBlink .8s infinite; }
     /* ── Auto-time button styles ── */
+    /* ★ START 버튼 - 고급 펄스 애니메이션 */
+    @keyframes start-breathe {
+      0%   { box-shadow: 0 0 0 0 rgba(245,158,11,0.9), 0 4px 20px rgba(245,158,11,0.5); transform:scale(1); }
+      40%  { box-shadow: 0 0 0 8px rgba(245,158,11,0.25), 0 6px 28px rgba(245,158,11,0.6); transform:scale(1.04); }
+      100% { box-shadow: 0 0 0 18px rgba(245,158,11,0), 0 4px 20px rgba(245,158,11,0.3); transform:scale(1); }
+    }
+    @keyframes start-shimmer {
+      0%   { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
     .btn-start-pulse {
-      background:linear-gradient(135deg,#f59e0b,#d97706) !important;
-      color:#fff !important; border:none !important; position:relative;
+      background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+      color: #fff !important;
+      border: none !important;
+      position: relative;
+      font-weight: 800 !important;
+      letter-spacing: 0.3px;
+      animation: start-breathe 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      overflow: hidden;
     }
-    .btn-start-pulse::after {
-      content:''; position:absolute; inset:-3px; border-radius:10px;
-      animation:start-ring 1.6s ease-out infinite; pointer-events:none;
+    .btn-start-pulse::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(105deg,
+        transparent 30%,
+        rgba(255,255,255,0.22) 50%,
+        transparent 70%
+      );
+      background-size: 200% 100%;
+      animation: start-shimmer 2.2s linear infinite;
+      border-radius: inherit;
+      pointer-events: none;
     }
-    @keyframes start-ring {
-      0%   { box-shadow:0 0 0 0   rgba(245,158,11,0.85); }
-      55%  { box-shadow:0 0 0 9px rgba(245,158,11,0.2); }
-      100% { box-shadow:0 0 0 15px rgba(245,158,11,0); }
+    .btn-start-pulse:hover {
+      background: linear-gradient(135deg, #fbbf24, #b45309) !important;
+      animation-play-state: paused;
+      transform: scale(1.05);
+      box-shadow: 0 6px 28px rgba(245,158,11,0.7) !important;
     }
-    .btn-start-pulse:hover { background:linear-gradient(135deg,#fbbf24,#b45309) !important; }
-    /* 피커 미선택 시: pulse 유지하되 cursor로 비활성 표현 */
-    .btn-start-pulse.no-picker { cursor:default; opacity:0.75; }
-    .btn-start-pulse.no-picker:hover { background:linear-gradient(135deg,#f59e0b,#d97706) !important; }
+    /* 피커 미선택 시 */
+    .btn-start-pulse.no-picker {
+      cursor: default;
+      opacity: 0.65;
+      animation: none;
+      box-shadow: none;
+    }
+    .btn-start-pulse.no-picker::before { display: none; }
+    .btn-start-pulse.no-picker:hover {
+      background: linear-gradient(135deg,#f59e0b,#d97706) !important;
+      transform: none;
+      box-shadow: none !important;
+    }
     .btn-done-outline {
       background:transparent !important; color:#34d399 !important;
       border:1.5px solid rgba(16,185,129,0.5) !important;
