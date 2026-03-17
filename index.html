@@ -10,10 +10,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
   <style>
-    /* ══════════════════════════════════════════════════
-       ★ 완전 반응형: 모든 크기를 vw/vh 기반으로 설정
-       21인치(1600px), 23인치(1920px), 27인치(2560px) 모두 대응
-    ══════════════════════════════════════════════════ */
     :root {
       --bg-main:   #0a0e1a;
       --bg-card:   #151b2d;
@@ -29,28 +25,19 @@
       --accent-danger:    #ef4444;
       --shadow-glow: 0 0 20px rgba(99,102,241,0.3);
       --transition:  250ms cubic-bezier(0.4,0,0.2,1);
-
-      /* ★ 핵심: vw 기반 동적 폰트 스케일
-         1920px 기준 → 1vw = 19.2px
-         1600px 기준 → 1vw = 16px
-         2560px 기준 → 1vw = 25.6px             */
-      --fs-xs:   clamp(10px, 0.68vw, 14px);   /* 약 13px @1920 */
-      --fs-sm:   clamp(11px, 0.75vw, 16px);   /* 약 14px @1920 */
-      --fs-md:   clamp(12px, 0.83vw, 18px);   /* 약 16px @1920 */
-      --fs-base: clamp(13px, 0.9vw,  20px);   /* 약 17px @1920 */
-      --fs-lg:   clamp(15px, 1.1vw,  24px);   /* 약 21px @1920 */
-      --fs-xl:   clamp(18px, 1.4vw,  30px);   /* 약 27px @1920 */
-      --fs-2xl:  clamp(24px, 1.9vw,  40px);   /* 약 36px @1920 */
-      --fs-mono: clamp(11px, 0.78vw, 17px);   /* 모노스페이스 */
-
-      /* ★ 간격 (vw 기반) */
+      --fs-xs:   clamp(10px, 0.68vw, 14px);
+      --fs-sm:   clamp(11px, 0.75vw, 16px);
+      --fs-md:   clamp(12px, 0.83vw, 18px);
+      --fs-base: clamp(13px, 0.9vw,  20px);
+      --fs-lg:   clamp(15px, 1.1vw,  24px);
+      --fs-xl:   clamp(18px, 1.4vw,  30px);
+      --fs-2xl:  clamp(24px, 1.9vw,  40px);
+      --fs-mono: clamp(11px, 0.78vw, 17px);
       --sp-xs: clamp(4px,  0.35vw, 8px);
       --sp-sm: clamp(6px,  0.55vw, 12px);
       --sp-md: clamp(10px, 0.85vw, 18px);
       --sp-lg: clamp(14px, 1.1vw,  24px);
       --sp-xl: clamp(18px, 1.5vw,  32px);
-
-      /* ★ 테두리 반경 */
       --r-sm:   clamp(4px,  0.35vw, 8px);
       --r-md:   clamp(8px,  0.65vw, 14px);
       --r-lg:   clamp(10px, 0.85vw, 18px);
@@ -78,15 +65,12 @@
       pointer-events: none; z-index: 0;
     }
 
-    /* ══════ LAYOUT ══════ */
     .container {
       position: relative; z-index: 1;
       width: 100%;
-      /* ★ 좌우 패딩만, 최대 너비 제한 없음 → 화면을 꽉 채움 */
       padding: clamp(10px, 1vw, 20px) clamp(12px, 1.2vw, 24px);
     }
 
-    /* ══════ HEADER ══════ */
     .header {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: clamp(10px, 1vh, 20px);
@@ -160,10 +144,8 @@
       color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.3);
     }
 
-    /* ══════ KPI GRID ══════ */
     .kpi-grid {
       display: grid;
-      /* Active Workers 1.4배, Inspection 1fr, 나머지 1fr */
       grid-template-columns: 1fr 1fr 1fr 1.4fr 1fr;
       gap: clamp(8px, 0.7vw, 14px);
       margin-bottom: clamp(8px, 0.8vh, 16px);
@@ -184,7 +166,6 @@
     .kpi-label { font-size:var(--fs-xs); color:var(--text-secondary); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
     .kpi-percentage { font-size:var(--fs-lg); font-weight:700; font-family:'JetBrains Mono',monospace; }
     .kpi-value {
-      /* ★ 숫자 크기 줄여서 한 줄 강제 */
       font-size: clamp(15px, 1.55vw, 28px);
       font-weight:800; font-family:'JetBrains Mono',monospace;
       line-height:1; margin-bottom:clamp(2px, 0.3vh, 6px);
@@ -192,7 +173,6 @@
     }
     .kpi-subtitle { font-size:var(--fs-xs); color:var(--text-muted); margin-bottom:clamp(6px, 0.6vh, 12px); }
 
-    /* ★ 생동감 있는 progress bar */
     .progress-bar {
       height: clamp(7px, 0.55vh, 11px);
       background: rgba(255,255,255,0.04);
@@ -213,22 +193,15 @@
       background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%);
       animation: shimmer 2.4s ease-in-out infinite;
     }
-    @keyframes bar-glow {
-      0%,100% { filter: brightness(1); }
-      50%      { filter: brightness(1.4) saturate(1.3); }
-    }
-    /* Workers 이름 — 여러 명 수용, 래핑 허용 */
     #workerNames {
       font-size: clamp(11px, 0.95vw, 15px) !important;
       line-height: 1.55 !important;
       word-break: break-word;
       white-space: normal !important;
     }
-    /* Inspection KPI sub */
     .kpi-insp-sub { display:flex; gap:5px; margin-top:4px; flex-wrap:wrap; }
     .kpi-insp-sub span { font-size:clamp(9px,0.58vw,11px); font-weight:700; }
 
-    /* ★ Inspection 컬럼 — 다른 td와 완전히 동일, 구분선 없음 */
     th.th-insp { white-space:nowrap; }
     td.td-insp { text-align:center; }
     .insp-pass {
@@ -281,12 +254,10 @@
     .insp-tip-oos    { background:rgba(245,158,11,0.2);  color:#f59e0b; }
     .insp-tip-nf     { background:rgba(139,92,246,0.2);  color:#8b5cf6; }
     .insp-tip-cancel { background:rgba(100,116,139,0.2); color:#94a3b8; }
-    /* Inspection footer */
     .insp-footer-summary { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:var(--fs-xs); }
     .ifs-item { display:flex; align-items:center; gap:4px; color:var(--text-secondary); }
     .ifs-num  { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; }
 
-    /* ══════ BUTTONS ══════ */
     .btn {
       padding: clamp(5px, 0.5vw, 9px) clamp(8px, 0.85vw, 16px);
       border:none; border-radius:var(--r-md);
@@ -302,8 +273,6 @@
     .btn-secondary:hover { background:var(--bg-hover); border-color:var(--accent-primary); }
     .btn-danger   { background:var(--accent-danger); color:#fff; }
     .btn-danger.blink { animation:strongBlink .8s infinite; }
-    /* ── Auto-time button styles ── */
-    /* ★ START 버튼 - 고급 펄스 애니메이션 */
     @keyframes start-breathe {
       0%   { box-shadow: 0 0 0 0 rgba(245,158,11,0.9), 0 4px 20px rgba(245,158,11,0.5); transform:scale(1); }
       40%  { box-shadow: 0 0 0 8px rgba(245,158,11,0.25), 0 6px 28px rgba(245,158,11,0.6); transform:scale(1.04); }
@@ -343,7 +312,6 @@
       transform: scale(1.05);
       box-shadow: 0 6px 28px rgba(245,158,11,0.7) !important;
     }
-    /* 피커 미선택 시 */
     .btn-start-pulse.no-picker {
       cursor: default;
       opacity: 0.65;
@@ -373,7 +341,6 @@
     .btn:disabled { cursor:not-allowed; opacity:.9; }
     .btn-success:disabled { opacity:1; }
 
-    /* ══════ CARD ══════ */
     .card {
       background:var(--bg-card); border:1px solid var(--border); border-radius:var(--r-lg);
       padding:var(--sp-lg); margin-bottom:var(--sp-lg);
@@ -383,15 +350,12 @@
       margin-bottom:var(--sp-md); padding-bottom:var(--sp-md); border-bottom:1px solid var(--border);
       flex-wrap:wrap; gap:var(--sp-sm);
     }
-    /* ★ Records 카드 헤더: 제목 | 시계(중앙) | 버튼들 */
-    /* Records 헤더: 제목(좌) | 버튼+시계(우) */
     #recordsPanel .card-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: var(--sp-sm);
     }
-    /* 검색창 강조 */
     #searchInput {
       background: #1e2840 !important;
       border: 2px solid var(--accent-primary) !important;
@@ -408,7 +372,6 @@
     .card-title { font-size:var(--fs-lg); font-weight:700; }
     .card-actions { display:flex; gap:var(--sp-xs); flex-wrap:wrap; align-items:center; }
 
-    /* ══════ INPUTS ══════ */
     input, select, textarea {
       width:100%;
       padding: clamp(5px, 0.5vw, 9px) clamp(8px, 0.8vw, 14px);
@@ -428,10 +391,8 @@
     .search-box input { padding-left:clamp(28px, 2.5vw, 40px); }
     .search-box::before { content:'🔍'; position:absolute; left:clamp(8px,0.7vw,12px); top:50%; transform:translateY(-50%); font-size:var(--fs-sm); opacity:.5; pointer-events:none; }
 
-    /* ══════ TABLE ══════ */
     .table-wrapper {
       overflow-x:auto; overflow-y:auto;
-      /* ★ 화면 높이를 기준으로 테이블 높이 자동 계산 */
       max-height: calc(100vh - clamp(220px, 22vh, 320px));
       border-radius:var(--r-md);
     }
@@ -451,7 +412,6 @@
       font-size:var(--fs-sm);
     }
 
-    /* ══════ STATUS BADGES ══════ */
     .status-badge {
       display:inline-flex; align-items:center; gap:5px;
       padding: clamp(3px, 0.3vw, 5px) clamp(8px, 0.7vw, 14px);
@@ -484,15 +444,12 @@
       border:1px solid rgba(148,163,184,0.25); white-space:nowrap;
     }
 
-    /* ══════ MANAGER ONLY ══════ */
     body:not(.manager-mode) .manager-only { display:none; }
 
-    /* ══════ FORM ══════ */
     .form-group { margin-bottom:var(--sp-md); }
     .form-label { display:block; margin-bottom:4px; font-size:var(--fs-xs); font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.3px; }
     .form-row { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-md); }
 
-    /* ══════ PAGINATION ══════ */
     .pagination-bar {
       display:flex; justify-content:space-between; align-items:center;
       padding: clamp(8px, 0.8vw, 14px) clamp(10px, 1vw, 18px);
@@ -503,7 +460,6 @@
     .pagination-bar .pager { display:flex; gap:var(--sp-xs); align-items:center; }
     .pager-info { font-size:var(--fs-xs); color:var(--text-secondary); white-space:nowrap; }
     #gotoPage { width:clamp(44px, 4vw, 70px) !important; text-align:center; padding: clamp(4px,0.35vw,6px) clamp(6px,0.5vw,10px); }
-    /* 페이지 번호 버튼 */
     #pageNumbers { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
     .page-num-btn {
       min-width:clamp(28px,2.2vw,36px); height:clamp(28px,2.2vw,36px);
@@ -517,7 +473,6 @@
     .page-num-btn.ellipsis { border:none; background:transparent; cursor:default; color:var(--text-secondary); }
     #itemsPerPage { width:auto !important; padding: clamp(4px,0.35vw,6px) clamp(6px,0.5vw,10px); font-size:var(--fs-xs); }
 
-    /* ══════ MODAL ══════ */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(4px); z-index:1000; align-items:center; justify-content:center; padding:var(--sp-lg); }
     .modal.active { display:flex; animation:fadeUp .3s ease-out; }
     .modal-content {
@@ -534,7 +489,6 @@
     }
     .modal-close:hover { background:var(--bg-hover); color:var(--text-primary); }
 
-    /* ══════ DATE PICKER ══════ */
     .date-picker-wrapper { position:relative; display:inline-block; width:100%; }
     .date-picker-input { cursor:pointer; user-select:none; }
     .date-picker-calendar {
@@ -561,7 +515,6 @@
     .calendar-btn { padding:4px 10px; background:transparent; border:none; color:var(--accent-primary); font-size:var(--fs-sm); font-weight:600; cursor:pointer; border-radius:var(--r-sm); }
     .calendar-btn:hover { background:rgba(99,102,241,0.1); }
 
-    /* ══════ TOAST ══════ */
     #toastContainer { position:fixed; bottom:clamp(16px,2vh,28px); right:clamp(16px,1.5vw,28px); display:flex; flex-direction:column; gap:10px; z-index:99999; pointer-events:none; }
     .toast-msg {
       display:flex; align-items:center; gap:10px;
@@ -578,15 +531,9 @@
     .toast-msg.toast-warning { background:rgba(245,158,11,0.92); border:1px solid rgba(245,158,11,0.6); }
     .toast-icon { font-size:var(--fs-md); flex-shrink:0; }
 
-    /* ══════ UTIL ══════ */
     .hidden { display:none !important; }
     .text-center { text-align:center; }
-    /* ★ 체크박스 td 클릭 영역 넓게 */
-    td.text-center.manager-only {
-      text-align: center;
-      vertical-align: middle;
-      padding: 8px 4px;
-    }
+    td.text-center.manager-only { text-align: center; vertical-align: middle; padding: 8px 4px; }
     .text-left   { text-align:left !important; }
     .flex { display:flex; }
     .gap-sm { gap:var(--sp-xs); }
@@ -594,35 +541,23 @@
     .empty-state { text-align:center; padding:var(--sp-xl); color:var(--text-muted); }
     .empty-state-icon { font-size:clamp(32px, 3vw, 52px); margin-bottom:var(--sp-md); opacity:.5; }
     input[type="checkbox"] {
-      width: 14px;
-      height: 14px;
-      cursor: pointer;
+      width: 14px; height: 14px; cursor: pointer;
       accent-color: var(--accent-primary);
-      border: 2px solid #6366f1;
-      border-radius: 4px;
+      border: 2px solid #6366f1; border-radius: 4px;
       background: #1e2840;
-      -webkit-appearance: auto;
-      -moz-appearance: auto;
-      appearance: auto;
+      -webkit-appearance: auto; -moz-appearance: auto; appearance: auto;
       opacity: 1;
     }
-
-    /* ══════ INLINE TABLE SELECTS (JS 렌더링) ══════ */
-    /* JS에서 인라인 style로 고정값 사용하므로 override */
     tbody select {
       font-size: var(--fs-xs) !important;
       padding: clamp(4px,0.4vw,7px) clamp(6px,0.65vw,12px) !important;
       max-width: clamp(90px, 9vw, 145px) !important;
       min-width: clamp(80px, 7vw, 120px);
     }
-
-    /* ══════ SCROLLBAR ══════ */
     ::-webkit-scrollbar { width:6px; height:6px; }
     ::-webkit-scrollbar-track { background:transparent; }
     ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
     ::-webkit-scrollbar-thumb:hover { background:var(--text-muted); }
-
-    /* ══════ MANAGER PANEL ══════ */
     #managerPanel .form-group input,
     #managerPanel .form-group select,
     #managerPanel .form-group textarea { border-radius: var(--r-md); }
@@ -651,7 +586,6 @@
     </div>
   </header>
 
-  <!-- KPI -->
   <div class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-header"><span class="kpi-label">SKU Progress</span><span class="kpi-percentage" id="skuPercent">0%</span></div>
@@ -671,13 +605,11 @@
       <div class="kpi-subtitle">Completed Jobs</div>
       <div class="progress-bar"><div class="progress-fill" id="jobProgress" style="width:0%"></div></div>
     </div>
-    <!-- ★ Active Workers: 넓은 칸 → 7명+뱃지 수용 -->
     <div class="kpi-card">
       <div class="kpi-header"><span class="kpi-label">Active Workers</span><span class="kpi-percentage" id="workerCount">0</span></div>
       <div id="workerNames" style="font-size:clamp(11px,0.95vw,15px);line-height:1.55;word-break:break-word;font-weight:700;margin-bottom:clamp(2px,0.3vh,6px);">-</div>
       <div class="kpi-subtitle">Currently Working</div>
     </div>
-    <!-- ★ Inspection KPI -->
     <div class="kpi-card" style="border-color:rgba(129,140,248,0.4);">
       <div class="kpi-header">
         <span class="kpi-label" style="color:#818cf8;">🔬 Inspection</span>
@@ -695,13 +627,10 @@
     </div>
   </div>
 
-  <!-- Records Panel -->
   <div class="card" id="recordsPanel">
     <div class="card-header">
       <h2 class="card-title">📋 Records</h2>
-
       <div class="card-actions">
-        <!-- ★ 시계: 검색창 왼쪽 인라인, 박스 없이 깔끔하게 -->
         <div style="display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;margin-right:16px;">
           <span id="currentTime" style="font-family:'JetBrains Mono',monospace;font-size:clamp(15px,1.3vw,22px);font-weight:700;color:#e2e8f0;letter-spacing:1.5px;">--:--:-- --</span>
           <span id="currentDate" style="font-family:'JetBrains Mono',monospace;font-size:clamp(10px,0.75vw,13px);color:#94a3b8;font-weight:500;letter-spacing:0.5px;">----/--/--</span>
@@ -739,7 +668,6 @@
       </table>
     </div>
     <div class="pagination-bar">
-      <!-- ★ 왼쪽: Inspection 검수 요약 -->
       <div class="insp-footer-summary">
         <div class="ifs-item">
           <span style="color:var(--text-muted);">Completed:</span>
@@ -761,7 +689,6 @@
           <span class="ifs-num" style="color:#f59e0b;" id="ifs-not">0</span>
         </div>
       </div>
-      <!-- 오른쪽: 기존 페이지네이션 -->
       <div style="display:flex;align-items:center;gap:var(--sp-sm);flex-wrap:wrap;">
         <div class="info-text">
           Showing <span id="paginationInfo">0-0 of 0</span>
@@ -782,7 +709,6 @@
     </div>
   </div>
 
-  <!-- Manager Panel -->
   <div class="card hidden" id="managerPanel">
     <div class="card-header">
       <h2 class="card-title">⚙️ Manager — Create/Update Job</h2>
@@ -833,11 +759,10 @@
       <button class="btn btn-secondary" onclick="App.pushToServer()">⬆ Push To Server</button>
       <button class="btn btn-danger" onclick="App.clearLocal()">🗑 Clear Local</button>
     </div>
-    <p style="margin-top:var(--sp-md);font-size:var(--fs-xs);color:var(--text-muted);">Records auto-refresh every 10s.</p>
+    <p style="margin-top:var(--sp-md);font-size:var(--fs-xs);color:var(--text-muted);">Records auto-refresh every 30s.</p>
   </div>
 </div>
 
-<!-- PIN Modal -->
 <div class="modal" id="pinModal">
   <div class="modal-content">
     <div class="modal-header"><h3 class="modal-title">🔒 Manager PIN Required</h3><button class="modal-close" onclick="App.closePinModal()">×</button></div>
@@ -849,7 +774,6 @@
   </div>
 </div>
 
-<!-- Edit Modal -->
 <div class="modal" id="editModal">
   <div class="modal-content">
     <div class="modal-header"><h3 class="modal-title">✏️ Edit</h3><button class="modal-close" onclick="App.closeEditModal()">×</button></div>
@@ -874,7 +798,6 @@
   </div>
 </div>
 
-<!-- Color Modal -->
 <div class="modal" id="colorModal">
   <div class="modal-content" style="max-width:clamp(320px,32vw,560px);">
     <div class="modal-header"><h3 class="modal-title">Picker Colors</h3><button class="modal-close" onclick="App.hideColorEditor()">×</button></div>
@@ -888,8 +811,7 @@
 
   <script>
     const GAS_BASE_URL = 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec';
-    
-    // ===== TOAST NOTIFICATION =====
+
     function showToast(msg, type = 'info', duration = 3000) {
       const icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
       const container = document.getElementById('toastContainer');
@@ -897,18 +819,14 @@
       el.className = `toast-msg toast-${type}`;
       el.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ'}</span><span>${msg}</span>`;
       container.appendChild(el);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => el.classList.add('show'));
-      });
-      setTimeout(() => {
-        el.classList.remove('show');
-        setTimeout(() => el.remove(), 300);
-      }, duration);
+      requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
+      setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, duration);
     }
 
     const CONFIG = {
       STORAGE_KEY: 'b2b-fulfillment-v2',
-      REFRESH_INTERVAL: 10000,
+      REFRESH_INTERVAL: 30000,   // ★ FIX: 10초 → 30초로 변경 (GAS 저장 완료 여유 확보)
+      SAVE_GRACE_MS: 25000,      // ★ FIX: 저장 후 25초간 fetchData 덮어쓰기 방지
       DEFAULT_PICKERS: ['Ryan', 'Jane', 'Henry', 'Nicole'],
       DEFAULT_PIN: '1004'
     };
@@ -927,7 +845,8 @@
       selectedJobs: new Set(),
       currentPage: 1,
       itemsPerPage: 15,
-      pendingSaves: 0
+      pendingSaves: 0,
+      lastSaveTime: 0   // ★ FIX: 마지막 저장 시각 추적 (Grace Period 용)
     };
 
     function updateDateTime() {
@@ -995,14 +914,6 @@
           }
         }
         return times;
-      },
-      renderSelect(value = '', disabled = false, id = '') {
-        const times = this.generate();
-        const idAttr = id ? `id="${id}"` : '';
-        return `<select ${idAttr} ${disabled ? 'disabled' : ''}>
-          <option value="">Select time...</option>
-          ${times.map(t => `<option value="${t.value}" ${value === t.value ? 'selected' : ''}>${t.label}</option>`).join('')}
-        </select>`;
       },
       format12Hour(time24) {
         if (!time24) return '';
@@ -1087,7 +998,7 @@
         });
         document.getElementById('searchInput').addEventListener('input', (e) => {
           State.searchQuery = e.target.value.toLowerCase().trim();
-          State.currentPage = 1; // ★ 검색 시 반드시 1페이지로 리셋
+          State.currentPage = 1;
           this.renderTable();
         });
         document.addEventListener('visibilitychange', () => { if (!document.hidden) this.checkVersion(); });
@@ -1121,11 +1032,19 @@
       },
 
       async fetchData() {
+        // ★ FIX 1: pendingSaves 체크
         if (State.pendingSaves > 0) return;
+
+        // ★ FIX 2: Grace Period 체크 — 저장 후 25초 이내면 서버 데이터로 덮어쓰기 방지
+        if (Date.now() - State.lastSaveTime < CONFIG.SAVE_GRACE_MS) {
+          this.updateSyncIndicator('success');
+          return;
+        }
+
         try {
           this.updateSyncIndicator('syncing');
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 30000); // 30초 타임아웃
+          const timer = setTimeout(() => controller.abort(), 30000);
           let response, data;
           try {
             response = await fetch(`${State.scriptUrl}?op=listJobs&t=${Date.now()}`, { signal: controller.signal });
@@ -1136,36 +1055,34 @@
             if (fetchErr.name === 'AbortError') {
               console.warn('fetchData timed out, retrying next cycle');
               this.updateSyncIndicator('error');
-              return; // 조용히 다음 사이클 대기
+              return;
             }
             throw fetchErr;
           }
+
+          // ★ FIX 3: fetch 완료 직전 pendingSaves/Grace Period 재확인
           if (State.pendingSaves > 0) return;
+          if (Date.now() - State.lastSaveTime < CONFIG.SAVE_GRACE_MS) {
+            this.updateSyncIndicator('success');
+            return;
+          }
+
           if (data.ok) {
-            // ★ 로컬에서 선택된 picker 정보 보존 (GAS에 아직 저장 안된 것들)
             const pendingPickers = {};
             State.jobs.forEach(j => { if (j.picker && (j.status||'').toLowerCase() === 'ready') pendingPickers[j.invoice] = j.picker; });
             State.jobs = data.jobs || [];
-            // 서버 데이터에 pending picker 복원
             State.jobs.forEach(j => { if (!j.picker && pendingPickers[j.invoice]) j.picker = pendingPickers[j.invoice]; });
             State.pickers = data.pickers || CONFIG.DEFAULT_PICKERS;
-            // 🎉 오늘 완료 건수를 서버 데이터 기준으로 localStorage 동기화
             if (window.CelebrationSystem) window.CelebrationSystem.syncFromJobs(State.jobs);
             State.currentVersion = data.ver;
-
-            // ★ 서버에서 pickerColors도 받아와서 동기화
             if (data.pickerColors && Object.keys(data.pickerColors).length > 0) {
               State.pickerColors = data.pickerColors;
             }
-
             this.renderTable(); this.updateKPIs();
-
-            // ★ 서버에서 받은 최신 pickers + pickerColors를 localStorage에도 동기화
             const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
             saved.pickers = State.pickers;
             saved.pickerColors = State.pickerColors;
             localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(saved));
-            // ★ 수정: 사용자가 현재 입력 중일 때는 덮어쓰지 않음
             const pickerInput = document.getElementById('settingsPickers');
             if (pickerInput && document.activeElement !== pickerInput) {
               pickerInput.value = State.pickers.join(', ');
@@ -1182,14 +1099,10 @@
         if (State.managerMode) document.body.classList.add('manager-mode');
         else document.body.classList.remove('manager-mode');
 
-        // (드롭다운 제거됨 - 자동시각 입력 방식으로 변경)
-
         const tbody = document.getElementById('recordsBody');
         const filteredJobs = State.jobs.filter(job => {
-          // archived 제외
           const arch = String(job.archived || '').trim().toLowerCase();
           if (arch === 'true' || arch === '1' || arch === 'y') return false;
-          // 검색 필터
           if (!State.searchQuery) return true;
           const q = State.searchQuery.trim().toLowerCase();
           if (!q) return true;
@@ -1218,27 +1131,16 @@
         const endIndex = Math.min(startIndex + State.itemsPerPage, totalItems);
         const pageJobs = sortedJobs.slice(startIndex, endIndex);
 
-        const renderTimeTag = (time) => {
-          if (!time) return '-';
-          const time12 = TimeOptions.format12Hour(time);
-          const date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
-          return `<span class="time-tag">${time12} ${date}</span>`;
-        };
         const renderTimeTag12 = (time, isoStr) => {
           if (!time) return '-';
           const time12 = TimeOptions.format12Hour(time);
-          // ★ 수정: ISO 문자열에서 실제 날짜 추출 (없으면 오늘 날짜)
           let date;
           if (isoStr && String(isoStr).length >= 10) {
-            const raw = String(isoStr).substring(0, 10); // "2026-03-04"
+            const raw = String(isoStr).substring(0, 10);
             const parts = raw.split('-');
-            if (parts.length === 3) {
-              date = parts[1] + '/' + parts[2]; // "03/04"
-            }
+            if (parts.length === 3) { date = parts[1] + '/' + parts[2]; }
           }
-          if (!date) {
-            date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' });
-          }
+          if (!date) { date = new Date().toLocaleDateString('en-US', { month:'2-digit', day:'2-digit' }); }
           return time12 + ' ' + date;
         };
 
@@ -1363,29 +1265,20 @@
           const cnt = match ? match[1] : '?';
           const note = String(job.inspectionNote || job.InspectionNote || '');
           const inspector = String(job.inspector || '').trim();
-          // ★ inspEnd: UTC ISO 문자열이면 로컬 시간으로 변환
           const _inspEndRaw = String(job.inspEnd || job['Insp. End'] || '').trim();
           const inspEnd = (() => {
             if (!_inspEndRaw) return '';
-            // ISO 형식(Z 또는 T 포함)이면 로컬 시간으로 변환
             if (_inspEndRaw.includes('T') || _inspEndRaw.endsWith('Z')) {
               try {
                 const d = new Date(_inspEndRaw);
                 if (!isNaN(d)) {
                   const pad = n => String(n).padStart(2,'0');
-                  const yyyy = d.getFullYear();
-                  const mo   = pad(d.getMonth()+1);
-                  const dd   = pad(d.getDate());
-                  const hh   = pad(d.getHours());
-                  const mm   = pad(d.getMinutes());
-                  // AM/PM 표시
                   const h12  = d.getHours() % 12 || 12;
                   const ampm = d.getHours() < 12 ? 'AM' : 'PM';
-                  return `${mo}/${dd} ${pad(h12)}:${mm} ${ampm}`;
+                  return `${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(h12)}:${pad(d.getMinutes())} ${ampm}`;
                 }
               } catch(e) {}
             }
-            // 이미 포맷된 문자열이면 그대로 반환
             return _inspEndRaw;
           })();
           let tipRows = '';
@@ -1405,7 +1298,6 @@
               tipRows += `<div class="insp-tip-row"><span class="insp-tip-tag ${cls}">${tag}</span>${line.replace(/^(EXP|OOS|NF|CANCEL):\s*/i,'')}</div>`;
             });
           }
-          // Inspector + 시간 표시
           let metaRow = '';
           if (inspector || inspEnd) {
             metaRow = `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:10px;color:var(--text-muted);">`
@@ -1440,7 +1332,6 @@
         const cur = State.currentPage;
         document.getElementById('prevBtn').disabled = cur <= 1;
         document.getElementById('nextBtn').disabled = cur >= totalPages;
-        // 번호 버튼 생성 (최대 7개 표시, 나머지 ... 처리)
         const container = document.getElementById('pageNumbers');
         if (!container) return;
         const pages = [];
@@ -1508,16 +1399,20 @@
         const count = State.selectedJobs.size;
         if (!confirm(`Delete ${count} selected job(s)?`)) return;
         State.pendingSaves++;
+        State.lastSaveTime = Date.now(); // ★ FIX
         const toDelete = [...State.selectedJobs];
         State.jobs = State.jobs.filter(j => !State.selectedJobs.has(j.invoice));
         State.selectedJobs.clear();
-        // 삭제 후 현재 페이지가 범위 초과하면 1페이지로 리셋
         const totalPagesAfter = Math.ceil(State.jobs.length / State.itemsPerPage) || 1;
         if (State.currentPage > totalPagesAfter) State.currentPage = 1;
         this.renderTable(); this.updateKPIs(); this.updateDeleteButton();
         showToast(`✓ ${count} job(s) deleted`, 'success');
         const deleteNext = (i) => {
-          if (i >= toDelete.length) { State.pendingSaves=Math.max(0,State.pendingSaves-1); if(State.pendingSaves===0)setTimeout(()=>this.fetchData(),1500); return; }
+          if (i >= toDelete.length) {
+            State.pendingSaves=Math.max(0,State.pendingSaves-1);
+            if(State.pendingSaves===0) { this.startAutoRefresh(); }
+            return;
+          }
           const url = State.scriptUrl+'?op=deleteJob&invoice='+encodeURIComponent(toDelete[i])+'&t='+Date.now();
           fetch(url,{mode:'no-cors'}).then(()=>deleteNext(i+1)).catch(()=>deleteNext(i+1));
         };
@@ -1542,28 +1437,23 @@
         const completedQty=State.jobs.filter(j=>j.status==='completed').reduce((s,j)=>s+(parseInt(j.totalQty)||0),0);
         const activeWorkers=[...new Set(State.jobs.filter(j=>j.status==='started'&&j.picker).map(j=>j.picker))];
 
-        // ★ 생동감 있는 bar 업데이트 (glow + gradient)
         const setBar = (pctId, valId, barId, pct, val, color) => {
           document.getElementById(pctId).textContent = `${pct}%`;
           document.getElementById(valId).textContent = val;
           const bar = document.getElementById(barId);
           const glow = pct >= 100 ? `0 0 14px ${color}, 0 0 28px ${color}` : `0 0 8px ${color}80`;
           bar.style.cssText = `width:${pct}%;background:linear-gradient(90deg,${color}cc,${color});box-shadow:${glow};`;
-          if (pct >= 100) bar.classList.add('done'); else bar.classList.remove('done');
         };
 
         const sp=totalSKU>0?Math.round(completedSKU/totalSKU*100):0;
         setBar('skuPercent','skuValue','skuProgress', sp, `${completedSKU} / ${totalSKU}`, ProgressColor.getColor(sp));
-
         const qp=totalQty>0?Math.round(completedQty/totalQty*100):0;
         setBar('qtyPercent','qtyValue','qtyProgress', qp, `${completedQty} / ${totalQty}`, ProgressColor.getColor(qp));
-
         const jp=totalJobs>0?Math.round(completedJobs/totalJobs*100):0;
         setBar('jobPercent','jobValue','jobProgress', jp, `${completedJobs} / ${totalJobs}`, ProgressColor.getColor(jp));
 
         document.getElementById('workerCount').textContent = activeWorkers.length;
         if (activeWorkers.length > 0) {
-          // 7명 모두 표시: 이름 + 뱃지, 줄바꿈 허용
           const workerHtml = activeWorkers.map(w => {
             const badge = window.CelebrationSystem ? window.CelebrationSystem.getBadge(w) : '';
             return badge ? `${w} ${badge}` : w;
@@ -1573,7 +1463,6 @@
           document.getElementById('workerNames').textContent = '-';
         }
 
-        // ★ Inspection KPI
         const completedAll = State.jobs.filter(j => j.status === 'completed');
         let inspPass = 0, inspIss = 0;
         completedAll.forEach(j => {
@@ -1603,37 +1492,29 @@
       },
 
       async updatePicker(invoice, picker) {
-        // picker 선택 시 GAS에 즉시 저장하지 않음 → Start Confirm 시 함께 저장
         const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
         if (jobIndex >= 0) {
           State.jobs[jobIndex].picker = picker;
-          this.renderTable(); // UI만 업데이트
+          this.renderTable();
         }
       },
       nudgePicker(invoice) {
         showToast('⚠ Please select a picker first!', 'warning');
-        // 해당 행의 picker select에 시각적 강조
         const sel = document.querySelector(`select[onchange*="${invoice}"]`);
         if (sel) { sel.style.outline='2px solid #f59e0b'; setTimeout(()=>{ sel.style.outline=''; },1500); }
       },
       cancelStart(invoice) {
-        // Start 모달 Cancel → GAS 저장 없이 로컬만 초기화
         const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
-        if (jobIndex >= 0) {
-          State.jobs[jobIndex].picker = '';
-          this.renderTable();
-        }
+        if (jobIndex >= 0) { State.jobs[jobIndex].picker = ''; this.renderTable(); }
       },
       async startJobWithTime(invoice, selectedTime) {
         const job = State.jobs.find(j=>j.invoice===invoice);
         if (!job.picker) { showToast('⚠ Please select a picker first!','warning'); return; }
-        // 현재시각 자동 사용
         const now = new Date();
         const h = String(now.getHours()).padStart(2,'0');
         const m = String(now.getMinutes()).padStart(2,'0');
         const autoTime = h + ':' + m;
         const startDate = new Date(now.getFullYear(),now.getMonth(),now.getDate(),now.getHours(),now.getMinutes());
-        // picker + startTime + status 한번에 GAS 저장 (picker는 여기서 처음 저장됨)
         await this.updateJob(invoice,{picker:job.picker,startTime:autoTime,startAtISO:toLocalISO(startDate),status:'started'});
       },
       async startJob(invoice) { await this.startJobWithTime(invoice,''); },
@@ -1641,7 +1522,6 @@
         const job = State.jobs.find(j=>j.invoice===invoice);
         if (!job.picker) { showToast('⚠ Please select a picker first!','warning'); return; }
         if (!job.startTime) { showToast('⚠ Please press Start first!','warning'); return; }
-        // 현재시각 자동 사용
         const now = new Date();
         const h = String(now.getHours()).padStart(2,'0');
         const m = String(now.getMinutes()).padStart(2,'0');
@@ -1650,18 +1530,21 @@
         const completingPicker = job ? job.picker : null;
         const completingSku = job ? (job.skuCount || 0) : 0;
         await this.updateJob(invoice,{endTime:autoTime,endAtISO:toLocalISO(endDate),status:'completed'});
-        // 🎉 셀러브레이션 체크
         if (window.CelebrationSystem && completingPicker) window.CelebrationSystem.onComplete(completingPicker, completingSku);
       },
       async completeJob(invoice) { await this.completeJobWithTime(invoice,''); },
 
       async updateJob(invoice, updates) {
         State.pendingSaves++;
+        State.lastSaveTime = Date.now(); // ★ FIX: Grace Period 시작
+
         // 로컬 즉시 반영
         const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
         if (jobIndex >= 0) { State.jobs[jobIndex]={...State.jobs[jobIndex],...updates}; this.renderTable(); this.updateKPIs(); }
+
         const payload = new URLSearchParams({op:'upsertJob', data:JSON.stringify({invoice,...updates})});
         const fetchOpts = { method:'POST', mode:'no-cors', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:payload };
+
         let success = false;
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
@@ -1674,8 +1557,12 @@
           }
         }
         if (!success) showToast('⚠ Save failed — will retry on next refresh', 'error');
+
         State.pendingSaves = Math.max(0, State.pendingSaves - 1);
-        if (State.pendingSaves === 0) this.startAutoRefresh();
+        if (State.pendingSaves === 0) {
+          // ★ FIX: 저장 완료 후 타이머를 새로 시작 (이전 타이머 제거 후 재시작)
+          this.startAutoRefresh();
+        }
       },
 
       formatAmount(input) {
@@ -1706,9 +1593,7 @@
         this.closeEditModal();
         await this.updateJob(invoice,updates);
       },
-      populateEditTimeOptions() {
-        // text input 방식으로 변경 - 드롭다운 불필요
-      },
+      populateEditTimeOptions() {},
       editJobInline(invoice) { this.editJobInManager(invoice); },
       editJobInManager(invoice) {
         const job=State.jobs.find(j=>j.invoice===invoice); if(!job) return;
@@ -1738,26 +1623,18 @@
         const amount=amountStr?parseFloat(amountStr.replace(/,/g,'')):null;
         let shipDate='';
         if(shipDateStr){const[m,d,y]=shipDateStr.split('/');shipDate=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
-        // ★ 기존 job 데이터 가져오기 (status, picker, 시간 유지)
-        const existingJob = State.jobs.find(j=>j.invoice===invoice) || 
+        const existingJob = State.jobs.find(j=>j.invoice===invoice) ||
                            State.jobs.find(j=>j.invoice===originalInvoice) || {};
         const newJobData={
-          invoice,
-          amount,
-          shipDate,
-          skuCount,
-          totalQty,
-          trucking,
-          remarks,
-          // ★ 기존 status 유지 (completed면 completed 그대로!)
+          invoice, amount, shipDate, skuCount, totalQty, trucking, remarks,
           status: existingJob.status || 'ready',
-          // ★ 기존 picker, 시간 유지
           picker: existingJob.picker || '',
           startTime: existingJob.startTime || '',
           endTime: existingJob.endTime || '',
           startAtISO: existingJob.startAtISO || '',
           endAtISO: existingJob.endAtISO || '',
         };
+        State.lastSaveTime = Date.now(); // ★ FIX
         if(originalInvoice&&originalInvoice!==invoice){
           const oldJob=State.jobs.find(j=>j.invoice===originalInvoice)||{};
           const merged={...oldJob,invoice,amount:amount!==null?amount:oldJob.amount,shipDate:shipDate||oldJob.shipDate,skuCount:skuCount||oldJob.skuCount,totalQty:totalQty||oldJob.totalQty,trucking:trucking||oldJob.trucking,remarks:remarks||oldJob.remarks};
@@ -1767,13 +1644,13 @@
           Promise.all([
             fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'deleteJob',invoice:originalInvoice})}),
             fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify(merged)})})
-          ]).then(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);if(State.pendingSaves===0)this.startAutoRefresh();}).catch(e=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);showToast('⚠ Sync error','error');});
+          ]).then(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);if(State.pendingSaves===0)this.startAutoRefresh();}).catch(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);showToast('⚠ Sync error','error');});
         } else {
           const existingIdx=State.jobs.findIndex(j=>j.invoice===invoice);
           if(existingIdx>=0) State.jobs[existingIdx]={...State.jobs[existingIdx],...newJobData};
           else State.jobs.unshift(newJobData);
           State.pendingSaves++;
-          fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify(newJobData)})}).then(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);if(State.pendingSaves===0)this.startAutoRefresh();}).catch(e=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);showToast('⚠ Sync error','error');});
+          fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'upsertJob',data:JSON.stringify(newJobData)})}).then(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);if(State.pendingSaves===0)this.startAutoRefresh();}).catch(()=>{State.pendingSaves=Math.max(0,State.pendingSaves-1);showToast('⚠ Sync error','error');});
         }
         this.renderTable(); this.updateKPIs();
         invoiceInput.dataset.originalInvoice='';
@@ -1808,6 +1685,8 @@
         else text.textContent='Error';
       },
       async checkVersion() {
+        // ★ FIX: Grace Period 중에는 버전 체크도 스킵
+        if (Date.now() - State.lastSaveTime < CONFIG.SAVE_GRACE_MS) return;
         try {
           const response=await fetch(`${State.scriptUrl}?op=ver&t=${Date.now()}`);
           const data=await response.json();
@@ -1818,7 +1697,11 @@
         if(State.refreshTimer) clearInterval(State.refreshTimer);
         State.refreshTimer=setInterval(()=>{ if(!document.hidden) this.fetchData(); }, CONFIG.REFRESH_INTERVAL);
       },
-      refresh() { this.fetchData(); },
+      refresh() {
+        // ★ FIX: 수동 Refresh는 Grace Period 무시하고 강제 fetch
+        State.lastSaveTime = 0;
+        this.fetchData();
+      },
 
       exportCSV() {
         const headers=['No','Status','Invoice','Amount','Ship Date','SKU','Qty','Trucking','Remarks','Picker','Start','End'];
@@ -1845,263 +1728,111 @@
         fetch(State.scriptUrl,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({op:'setSettings',data:JSON.stringify({pickers,pickerColors:State.pickerColors})})}).catch(e=>console.error('Settings sync failed:',e));
         showToast('Settings saved','success');
       },
-      pullFromServer() { this.fetchData(); showToast('Pulled from server','info'); },
+      pullFromServer() {
+        State.lastSaveTime = 0; // ★ FIX: 강제 pull
+        this.fetchData();
+        showToast('Pulled from server','info');
+      },
       pushToServer() { showToast('Push to server — coming soon','info'); },
       clearLocal() { if(confirm('Clear all local data?')){localStorage.removeItem(CONFIG.STORAGE_KEY);alert('Local data cleared');location.reload();} }
     };
 
     document.addEventListener('DOMContentLoaded', () => { App.init(); });
   </script>
-<script>
 
-</script>
 <script>
 /* ========================================================
    🎉 DAILY ACHIEVEMENT CELEBRATION SYSTEM v2
-   점수 = 완료건수 × 1점 + 총SKU × 0.5점
-   ⭐ Rising Star 50pt | 🌟 Super Star 80pt | 👑 Legend 110pt
-   매일 자정 자동 리셋
    ======================================================== */
 (function() {
-
   var MILESTONES = [
     { score:50, tier:1, name:'Rising Star',      emoji:'⭐', color:'#FFD700', particleColor:['#FFD700','#FFF8DC','#FFFACD','#ffffff'], shapes:['star'],                   duration:3000 },
     { score:80, tier:2, name:'Super Star',        emoji:'🌟', color:'#FF8C00', particleColor:['#FF8C00','#FFD700','#FFA500','#ffffff','#FFE4B5'], shapes:['star','circle'], duration:3000 },
     { score:110, tier:3, name:'Legend of the Day', emoji:'👑', color:'#FFD700', particleColor:['#FFD700','#FF4500','#FF1493','#00FF7F','#1E90FF'], shapes:['crown','star','circle'], duration:5000 }
   ];
-
-  function todayStr() {
-    var d = new Date();
-    return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
-  }
-
-  // 오늘 점수 가져오기
-  function getScore(picker) {
-    try { return parseFloat(localStorage.getItem('cs_' + picker + '_' + todayStr()) || '0'); } catch(e) { return 0; }
-  }
-
-  // 점수 저장
-  function setScore(picker, score) {
-    try { localStorage.setItem('cs_' + picker + '_' + todayStr(), String(score)); } catch(e) {}
-  }
-
-  // 이미 발동된 티어 목록
-  function getFired(picker) {
-    try { return JSON.parse(localStorage.getItem('cf_' + picker + '_' + todayStr()) || '[]'); } catch(e) { return []; }
-  }
-
-  function setFired(picker, tier) {
-    try {
-      var f = getFired(picker);
-      if (f.indexOf(tier) < 0) { f.push(tier); localStorage.setItem('cf_' + picker + '_' + todayStr(), JSON.stringify(f)); }
-    } catch(e) {}
-  }
-
-  // 파티클 애니메이션
-  function runParticles(canvas, milestone) {
-    var ctx = canvas.getContext('2d');
-    var W = canvas.width, H = canvas.height;
-    var particles = [];
-    var start = Date.now();
-    var tier = milestone.tier;
-    var count = tier === 3 ? 140 : tier === 2 ? 90 : 60;
-    var colors = milestone.particleColor;
-    var shapes = milestone.shapes;
-
-    function makeParticle() {
-      return {
-        x: Math.random() * W,
-        y: Math.random() * -H * 0.5,
-        vx: (Math.random() - 0.5) * 6,
-        vy: Math.random() * 5 + 2,
-        size: Math.random() * 14 + 5,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        shape: shapes[Math.floor(Math.random() * shapes.length)],
-        rot: Math.random() * 360,
-        rotV: (Math.random() - 0.5) * 8,
-        alpha: 1
-      };
-    }
-
-    for (var i = 0; i < count; i++) particles.push(makeParticle());
-
-    function drawStar(ctx, x, y, r) {
-      ctx.beginPath();
-      for (var k = 0; k < 5; k++) {
-        var a = (k * 4 * Math.PI / 5) - Math.PI/2;
-        var b = ((k * 4 + 2) * Math.PI / 5) - Math.PI/2;
-        if (k === 0) ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a));
-        else ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
-        ctx.lineTo(x + r*0.4 * Math.cos(b), y + r*0.4 * Math.sin(b));
-      }
-      ctx.closePath(); ctx.fill();
-    }
-
-    function animate() {
-      var elapsed = Date.now() - start;
-      if (elapsed > milestone.duration + 500) return;
-      ctx.clearRect(0, 0, W, H);
-
-      if (tier === 3) {
-        var grd = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W/2);
-        grd.addColorStop(0, 'rgba(255,215,0,0.08)');
-        grd.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
-      }
-
-      for (var i = 0; i < particles.length; i++) {
-        var p = particles[i];
-        p.x += p.vx; p.y += p.vy; p.rot += p.rotV;
-        if (elapsed > milestone.duration * 0.6) p.alpha = Math.max(0, p.alpha - 0.015);
-        if (p.y > H + 20) { particles[i] = makeParticle(); continue; }
-
-        ctx.save();
-        ctx.globalAlpha = p.alpha;
-        ctx.translate(p.x, p.y);
-        ctx.rotate(p.rot * Math.PI / 180);
-        ctx.fillStyle = p.color;
-
-        if (p.shape === 'star') {
-          drawStar(ctx, 0, 0, p.size);
-        } else if (p.shape === 'crown') {
-          ctx.font = (p.size * 2) + 'px serif';
-          ctx.fillText('👑', -p.size, p.size * 0.5);
-        } else {
-          ctx.beginPath(); ctx.arc(0, 0, p.size/2, 0, Math.PI*2); ctx.fill();
-        }
+  function todayStr() { var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+  function getScore(picker) { try { return parseFloat(localStorage.getItem('cs_'+picker+'_'+todayStr())||'0'); } catch(e) { return 0; } }
+  function setScore(picker,score) { try { localStorage.setItem('cs_'+picker+'_'+todayStr(),String(score)); } catch(e) {} }
+  function getFired(picker) { try { return JSON.parse(localStorage.getItem('cf_'+picker+'_'+todayStr())||'[]'); } catch(e) { return []; } }
+  function setFired(picker,tier) { try { var f=getFired(picker); if(f.indexOf(tier)<0){f.push(tier);localStorage.setItem('cf_'+picker+'_'+todayStr(),JSON.stringify(f));} } catch(e) {} }
+  function runParticles(canvas,milestone) {
+    var ctx=canvas.getContext('2d'), W=canvas.width, H=canvas.height, particles=[], start=Date.now();
+    var tier=milestone.tier, count=tier===3?140:tier===2?90:60, colors=milestone.particleColor, shapes=milestone.shapes;
+    function makeParticle() { return {x:Math.random()*W,y:Math.random()*-H*0.5,vx:(Math.random()-0.5)*6,vy:Math.random()*5+2,size:Math.random()*14+5,color:colors[Math.floor(Math.random()*colors.length)],shape:shapes[Math.floor(Math.random()*shapes.length)],rot:Math.random()*360,rotV:(Math.random()-0.5)*8,alpha:1}; }
+    for(var i=0;i<count;i++) particles.push(makeParticle());
+    function drawStar(ctx,x,y,r){ctx.beginPath();for(var k=0;k<5;k++){var a=(k*4*Math.PI/5)-Math.PI/2,b=((k*4+2)*Math.PI/5)-Math.PI/2;if(k===0)ctx.moveTo(x+r*Math.cos(a),y+r*Math.sin(a));else ctx.lineTo(x+r*Math.cos(a),y+r*Math.sin(a));ctx.lineTo(x+r*0.4*Math.cos(b),y+r*0.4*Math.sin(b));}ctx.closePath();ctx.fill();}
+    function animate(){
+      var elapsed=Date.now()-start;
+      if(elapsed>milestone.duration+500) return;
+      ctx.clearRect(0,0,W,H);
+      for(var i=0;i<particles.length;i++){
+        var p=particles[i];p.x+=p.vx;p.y+=p.vy;p.rot+=p.rotV;
+        if(elapsed>milestone.duration*0.6) p.alpha=Math.max(0,p.alpha-0.015);
+        if(p.y>H+20){particles[i]=makeParticle();continue;}
+        ctx.save();ctx.globalAlpha=p.alpha;ctx.translate(p.x,p.y);ctx.rotate(p.rot*Math.PI/180);ctx.fillStyle=p.color;
+        if(p.shape==='star'){drawStar(ctx,0,0,p.size);}
+        else if(p.shape==='crown'){ctx.font=(p.size*2)+'px serif';ctx.fillText('👑',-p.size,p.size*0.5);}
+        else{ctx.beginPath();ctx.arc(0,0,p.size/2,0,Math.PI*2);ctx.fill();}
         ctx.restore();
       }
       requestAnimationFrame(animate);
     }
     animate();
   }
-
-  function fire(milestone, picker, score) {
-    var old = document.getElementById('_celebOverlay');
-    if (old) old.parentNode.removeChild(old);
-
-    var overlay = document.createElement('div');
-    overlay.id = '_celebOverlay';
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;pointer-events:none;';
-
-    var canvas = document.createElement('canvas');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
+  function fire(milestone,picker,score){
+    var old=document.getElementById('_celebOverlay'); if(old) old.parentNode.removeChild(old);
+    var overlay=document.createElement('div'); overlay.id='_celebOverlay';
+    overlay.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;pointer-events:none;';
+    var canvas=document.createElement('canvas'); canvas.width=window.innerWidth; canvas.height=window.innerHeight;
+    canvas.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;';
     overlay.appendChild(canvas);
-
-    var tierBg = { 1:'rgba(25,20,0,0.93)', 2:'rgba(30,15,0,0.93)', 3:'rgba(20,15,0,0.95)' };
-
-    if (!document.getElementById('_celebStyle')) {
-      var style = document.createElement('style');
-      style.id = '_celebStyle';
-      style.textContent = '@keyframes _celebPop{0%{transform:translate(-50%,-50%) scale(0.4);opacity:0}70%{transform:translate(-50%,-50%) scale(1.06);opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}@keyframes _celebFadeOut{0%{opacity:1}100%{opacity:0}}';
-      document.head.appendChild(style);
-    }
-
-    var banner = document.createElement('div');
-    banner.style.cssText = [
-      'position:absolute;top:50%;left:50%;',
-      'transform:translate(-50%,-50%) scale(0.4);',
-      'background:' + tierBg[milestone.tier] + ';',
-      'border:3px solid ' + milestone.color + ';',
-      'border-radius:24px;padding:32px 56px;text-align:center;',
-      'animation:_celebPop 0.55s cubic-bezier(0.175,0.885,0.32,1.275) forwards;',
-      'box-shadow:0 0 80px ' + milestone.color + '55;',
-      'min-width:300px;'
-    ].join('');
-
-    banner.innerHTML = [
-      '<div style="font-size:68px;line-height:1;margin-bottom:6px;">' + milestone.emoji + '</div>',
-      '<div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:1px;">' + picker + '</div>',
-      '<div style="font-size:22px;font-weight:700;color:' + milestone.color + ';margin:8px 0;">' + milestone.name + '!</div>',
-      '<div style="font-size:14px;color:#bbb;margin-top:6px;">🏅 Score: <b style="color:#fff">' + score.toFixed(1) + ' pts</b></div>'
-    ].join('');
-
-    overlay.appendChild(banner);
-    document.body.appendChild(overlay);
-    runParticles(canvas, milestone);
-
-    setTimeout(function() { banner.style.animation = '_celebFadeOut 0.5s ease forwards'; }, milestone.duration - 500);
-    setTimeout(function() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, milestone.duration + 300);
+    var tierBg={1:'rgba(25,20,0,0.93)',2:'rgba(30,15,0,0.93)',3:'rgba(20,15,0,0.95)'};
+    if(!document.getElementById('_celebStyle')){var style=document.createElement('style');style.id='_celebStyle';style.textContent='@keyframes _celebPop{0%{transform:translate(-50%,-50%) scale(0.4);opacity:0}70%{transform:translate(-50%,-50%) scale(1.06);opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}@keyframes _celebFadeOut{0%{opacity:1}100%{opacity:0}}';document.head.appendChild(style);}
+    var banner=document.createElement('div');
+    banner.style.cssText=['position:absolute;top:50%;left:50%;','transform:translate(-50%,-50%) scale(0.4);','background:'+tierBg[milestone.tier]+';','border:3px solid '+milestone.color+';','border-radius:24px;padding:32px 56px;text-align:center;','animation:_celebPop 0.55s cubic-bezier(0.175,0.885,0.32,1.275) forwards;','box-shadow:0 0 80px '+milestone.color+'55;','min-width:300px;'].join('');
+    banner.innerHTML='<div style="font-size:68px;line-height:1;margin-bottom:6px;">'+milestone.emoji+'</div><div style="font-size:28px;font-weight:900;color:#fff;letter-spacing:1px;">'+picker+'</div><div style="font-size:22px;font-weight:700;color:'+milestone.color+';margin:8px 0;">'+milestone.name+'!</div><div style="font-size:14px;color:#bbb;margin-top:6px;">🏅 Score: <b style="color:#fff">'+score.toFixed(1)+' pts</b></div>';
+    overlay.appendChild(banner); document.body.appendChild(overlay); runParticles(canvas,milestone);
+    setTimeout(function(){banner.style.animation='_celebFadeOut 0.5s ease forwards';},milestone.duration-500);
+    setTimeout(function(){if(overlay.parentNode) overlay.parentNode.removeChild(overlay);},milestone.duration+300);
   }
-
-  // 피커 뱃지 반환 함수 (외부에서 호출 가능)
-  function getPickerBadge(picker) {
-    if (!picker) return '';
-    var score = getScore(picker);
-    var fired = getFired(picker);
-    // 가장 높은 달성 티어 뱃지 반환
-    for (var i = MILESTONES.length - 1; i >= 0; i--) {
-      if (fired.indexOf(MILESTONES[i].tier) >= 0) {
-        return MILESTONES[i].emoji;
-      }
-    }
+  function getPickerBadge(picker){
+    if(!picker) return '';
+    var fired=getFired(picker);
+    for(var i=MILESTONES.length-1;i>=0;i--){ if(fired.indexOf(MILESTONES[i].tier)>=0) return MILESTONES[i].emoji; }
     return '';
   }
-
   window.CelebrationSystem = {
     getBadge: getPickerBadge,
-
-    // 서버 데이터로 오늘 점수 동기화 (페이지 로드 시)
-    syncFromJobs: function(jobs) {
-      var today = todayStr();
-      var counts = {};
-
-      for (var i = 0; i < jobs.length; i++) {
-        var j = jobs[i];
-        if (String(j.status||'').toLowerCase() !== 'completed') continue;
-        var picker = j.picker; if (!picker) continue;
-        var iso = String(j.endAtISO || j.startAtISO || '');
-        if (!iso || iso.substring(0,10) !== today) continue;
-        if (!counts[picker]) counts[picker] = { orders:0, skus:0 };
-        counts[picker].orders += 1;
-        counts[picker].skus   += parseInt(j.skuCount || 0, 10);
+    syncFromJobs: function(jobs){
+      var today=todayStr(), counts={};
+      for(var i=0;i<jobs.length;i++){
+        var j=jobs[i]; if(String(j.status||'').toLowerCase()!=='completed') continue;
+        var picker=j.picker; if(!picker) continue;
+        var iso=String(j.endAtISO||j.startAtISO||''); if(!iso||iso.substring(0,10)!==today) continue;
+        if(!counts[picker]) counts[picker]={orders:0,skus:0};
+        counts[picker].orders+=1; counts[picker].skus+=parseInt(j.skuCount||0,10);
       }
-
-      for (var p in counts) {
-        var score = counts[p].orders * 1.5 + counts[p].skus * 0.5;
-        var existing = getScore(p);
-        if (score > existing) setScore(p, score);
-
-        // ★ 핵심: 점수와 무관하게 항상 qualifying 티어 전부 fired에 저장
-        //    (getBadge가 항상 올바른 뱃지를 표시하도록)
-        var fired = getFired(p);
-        var highestNewTier = null;
-        for (var k = 0; k < MILESTONES.length; k++) {
-          var m = MILESTONES[k];
-          if (score >= m.score) {
-            if (fired.indexOf(m.tier) < 0) {
-              setFired(p, m.tier);
-              highestNewTier = m; // 새로 달성한 티어 중 가장 높은 것 기록
-            }
-          }
+      for(var p in counts){
+        var score=counts[p].orders*1.5+counts[p].skus*0.5;
+        var existing=getScore(p); if(score>existing) setScore(p,score);
+        var fired=getFired(p), highestNewTier=null;
+        for(var k=0;k<MILESTONES.length;k++){
+          var m=MILESTONES[k];
+          if(score>=m.score&&fired.indexOf(m.tier)<0){setFired(p,m.tier);highestNewTier=m;}
         }
-        // 새로 달성한 티어가 있으면 가장 높은 것만 애니메이션
-        if (highestNewTier) {
-          (function(milestone, picker, s) {
-            setTimeout(function() { fire(milestone, picker, s); }, 800);
-          })(highestNewTier, p, score);
-        }
+        if(highestNewTier){(function(milestone,picker,s){setTimeout(function(){fire(milestone,picker,s);},800);})(highestNewTier,p,score);}
       }
     },
-
-    // 완료 시 점수 추가 및 셀러브레이션 체크
-    onComplete: function(picker, skuCount) {
-      if (!picker) return;
-      var addScore = 1.5 + (parseInt(skuCount || 0, 10) * 0.5);
-      var newScore = getScore(picker) + addScore;
-      setScore(picker, newScore);
-
-      var fired = getFired(picker);
-      // 높은 단계부터 체크 (가장 높은 미달성 티어 발동)
-      for (var i = MILESTONES.length - 1; i >= 0; i--) {
-        var m = MILESTONES[i];
-        if (newScore >= m.score && fired.indexOf(m.tier) < 0) {
-          setFired(picker, m.tier);
-          (function(milestone, p, s) {
-            setTimeout(function() { fire(milestone, p, s); }, 300);
-          })(m, picker, newScore);
+    onComplete: function(picker,skuCount){
+      if(!picker) return;
+      var addScore=1.5+(parseInt(skuCount||0,10)*0.5);
+      var newScore=getScore(picker)+addScore; setScore(picker,newScore);
+      var fired=getFired(picker);
+      for(var i=MILESTONES.length-1;i>=0;i--){
+        var m=MILESTONES[i];
+        if(newScore>=m.score&&fired.indexOf(m.tier)<0){
+          setFired(picker,m.tier);
+          (function(milestone,p,s){setTimeout(function(){fire(milestone,p,s);},300);})(m,picker,newScore);
           break;
         }
       }
@@ -2110,7 +1841,6 @@
 })();
 </script>
 
-<!-- ── Auto-time Confirm Modal ── -->
 <div id="autoTimeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#111d35;border:1px solid #1e3550;border-radius:16px;padding:32px 36px;text-align:center;min-width:300px;max-width:380px;">
     <div id="atmIcon" style="font-size:44px;margin-bottom:14px;">▶</div>
@@ -2123,20 +1853,19 @@
   </div>
 </div>
 <script>
-var _atmCancelCb = null;
+var _atmCancelCb=null;
 function showAutoTimeModal(icon,title,sub,color,cb,onCancel){
   document.getElementById('atmIcon').textContent=icon;
   document.getElementById('atmTitle').textContent=title;
   document.getElementById('atmSub').textContent=sub;
   document.getElementById('atmConfirm').style.background=color;
-  document.getElementById('atmConfirm').onclick=function(){ _atmCancelCb=null; closeAutoTimeModal(); cb(); };
-  _atmCancelCb = onCancel || null;
-  var m=document.getElementById('autoTimeModal');
-  m.style.display='flex';
+  document.getElementById('atmConfirm').onclick=function(){_atmCancelCb=null;closeAutoTimeModal();cb();};
+  _atmCancelCb=onCancel||null;
+  var m=document.getElementById('autoTimeModal'); m.style.display='flex';
 }
 function closeAutoTimeModal(){
   document.getElementById('autoTimeModal').style.display='none';
-  if(_atmCancelCb){ _atmCancelCb(); _atmCancelCb=null; }
+  if(_atmCancelCb){_atmCancelCb();_atmCancelCb=null;}
 }
 </script>
 </body>
