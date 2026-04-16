@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StyleKorean B2B Fulfillment — v2.0</title>
+  <title>StyleKorean B2B Fulfillment — v2.1</title>
   <meta name="theme-color" content="#0a0e1a">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -85,6 +85,10 @@
     @keyframes strongBlink {
       0%,100% { background:var(--accent-danger); transform:scale(1); box-shadow:none; }
       50%     { background:rgba(239,68,68,0.5); transform:scale(1.08); box-shadow:0 0 30px rgba(239,68,68,0.9); }
+    }
+    @keyframes pullGlow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(139,92,246,0.6), 0 4px 14px rgba(139,92,246,0.4); }
+      50%      { box-shadow: 0 0 0 10px rgba(139,92,246,0.0), 0 4px 20px rgba(139,92,246,0.6); }
     }
 
     .header-left { display:flex; align-items:center; gap:var(--sp-md); }
@@ -273,6 +277,63 @@
     .btn-secondary:hover { background:var(--bg-hover); border-color:var(--accent-primary); }
     .btn-danger   { background:var(--accent-danger); color:#fff; }
     .btn-danger.blink { animation:strongBlink .8s infinite; }
+
+    /* 🆕 NEW — Pull from Sales 버튼 스타일 */
+    .btn-pull {
+      background: linear-gradient(135deg, #8b5cf6, #6366f1) !important;
+      color: #fff !important;
+      font-weight: 700 !important;
+      padding: clamp(10px, 1vw, 14px) clamp(16px, 1.4vw, 22px) !important;
+      font-size: var(--fs-md) !important;
+      border-radius: var(--r-md) !important;
+      animation: pullGlow 2.5s ease-in-out infinite;
+      min-width: clamp(220px, 22vw, 320px);
+    }
+    .btn-pull:hover {
+      transform: translateY(-2px) scale(1.02);
+      animation-play-state: paused;
+    }
+    .btn-pull .pull-badge {
+      background: rgba(255,255,255,0.25);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: var(--fs-xs);
+      font-weight: 800;
+      margin-left: 6px;
+    }
+
+    /* 🆕 NEW — Queue 모드 전용 SKU/Qty 하이라이트 */
+    @keyframes queuePulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.5); }
+      50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+    }
+    body.queue-mode #mgrSkuCount,
+    body.queue-mode #mgrTotalQty {
+      border: 2px solid #f59e0b !important;
+      background: rgba(245,158,11,0.08) !important;
+      animation: queuePulse 2s infinite;
+      font-weight: 700;
+    }
+    body.queue-mode #mgrSkuLabel,
+    body.queue-mode #mgrQtyLabel {
+      color: #f59e0b !important;
+    }
+    body.queue-mode #mgrSkuLabel::after,
+    body.queue-mode #mgrQtyLabel::after {
+      content: ' ← REQUIRED';
+      color: #ef4444;
+      font-weight: 800;
+      font-size: 10px;
+    }
+    body.queue-mode #mgrInvoice,
+    body.queue-mode #mgrAmount,
+    body.queue-mode #mgrShipDate,
+    body.queue-mode #mgrTrucking,
+    body.queue-mode #mgrRemarks {
+      background: rgba(99,102,241,0.08) !important;
+      border-color: rgba(99,102,241,0.3) !important;
+    }
+
     @keyframes start-breathe {
       0%   { box-shadow: 0 0 0 0 rgba(245,158,11,0.9), 0 4px 20px rgba(245,158,11,0.5); transform:scale(1); }
       40%  { box-shadow: 0 0 0 8px rgba(245,158,11,0.25), 0 6px 28px rgba(245,158,11,0.6); transform:scale(1.04); }
@@ -489,6 +550,124 @@
     }
     .modal-close:hover { background:var(--bg-hover); color:var(--text-primary); }
 
+    /* 🆕 NEW — Pull from Sales 모달 전용 스타일 */
+    .pull-modal-content {
+      max-width: clamp(600px, 60vw, 1000px) !important;
+      width: 95% !important;
+    }
+    .pull-info-bar {
+      display:flex; justify-content:space-between; align-items:center;
+      padding: 10px 14px; background: rgba(139,92,246,0.12);
+      border:1px solid rgba(139,92,246,0.3); border-radius: var(--r-md);
+      margin-bottom: var(--sp-md); font-size: var(--fs-sm);
+    }
+    .pull-list-wrapper {
+      max-height: 50vh; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: var(--r-md);
+      background: var(--bg-input);
+    }
+    .pull-table {
+      width: 100%; border-collapse: separate; border-spacing: 0;
+      font-size: var(--fs-sm);
+    }
+    .pull-table thead { position: sticky; top: 0; background: var(--bg-card); z-index: 5; }
+    .pull-table th {
+      padding: 10px 12px; text-align: left; font-weight: 700;
+      color: var(--text-secondary); text-transform: uppercase;
+      font-size: var(--fs-xs); letter-spacing: 0.5px;
+      border-bottom: 2px solid var(--border); white-space: nowrap;
+    }
+    .pull-table td {
+      padding: 9px 12px; border-bottom: 1px solid rgba(42,53,80,0.5);
+      vertical-align: middle;
+    }
+    .pull-table tbody tr { transition: background 150ms; }
+    .pull-table tbody tr:hover:not(.pull-row-disabled) { background: rgba(139,92,246,0.1); }
+    .pull-row-disabled {
+      opacity: 0.45; background: rgba(0,0,0,0.2);
+    }
+    .pull-row-disabled td { color: var(--text-muted) !important; }
+    .pull-status-tag {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: var(--r-full);
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .pull-status-new {
+      background: rgba(16,185,129,0.15); color: #10b981;
+      border: 1px solid rgba(16,185,129,0.3);
+    }
+    .pull-status-exists {
+      background: rgba(100,116,139,0.15); color: var(--text-muted);
+      border: 1px solid rgba(100,116,139,0.3);
+    }
+    .pull-empty {
+      text-align: center; padding: 50px 20px;
+      color: var(--text-muted);
+    }
+    .pull-empty-icon { font-size: 52px; opacity: 0.4; margin-bottom: 12px; }
+    .pull-loading {
+      text-align: center; padding: 60px 20px;
+      color: var(--accent-primary);
+    }
+    .pull-loading-spinner {
+      display: inline-block; width: 40px; height: 40px;
+      border: 4px solid rgba(139,92,246,0.2);
+      border-top-color: var(--accent-secondary);
+      border-radius: 50%; animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+    .pull-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: var(--sp-md); padding-top: var(--sp-md);
+      border-top: 1px solid var(--border); gap: var(--sp-sm); flex-wrap: wrap;
+    }
+
+    /* 🆕 NEW — 중복 Invoice 경고 스타일 */
+    .pull-duplicate-banner {
+      background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(239,68,68,0.1));
+      border: 2px solid rgba(245,158,11,0.5);
+      border-radius: var(--r-md);
+      padding: 12px 16px;
+      margin-bottom: var(--sp-md);
+      color: #fbbf24;
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .pull-duplicate-banner .dup-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .pull-row-duplicate {
+      background: rgba(245,158,11,0.08) !important;
+      border-left: 3px solid #f59e0b;
+    }
+    .pull-row-duplicate:hover {
+      background: rgba(245,158,11,0.15) !important;
+    }
+    .pull-dup-tag {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 6px; border-radius: var(--r-full);
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      background: rgba(245,158,11,0.2); color: #f59e0b;
+      border: 1px solid rgba(245,158,11,0.4);
+      white-space: nowrap; margin-left: 6px;
+    }
+    .pull-row-tag {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      background: rgba(100,116,139,0.15);
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      margin-left: 4px;
+    }
+
     .date-picker-wrapper { position:relative; display:inline-block; width:100%; }
     .date-picker-input { cursor:pointer; user-select:none; }
     .date-picker-calendar {
@@ -572,7 +751,7 @@
         <div class="logo-icon">📦</div>
         <div class="logo-text">StyleKorean B2B Fulfillment</div>
       </div>
-      <span style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);padding:3px 9px;border-radius:999px;font-size:var(--fs-xs);font-weight:700;">v2.0</span>
+      <span style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);padding:3px 9px;border-radius:999px;font-size:var(--fs-xs);font-weight:700;">v2.1</span>
     </div>
     <div class="header-right">
       <div class="sync-indicator">
@@ -714,7 +893,47 @@
       <h2 class="card-title">⚙️ Manager — Create/Update Job</h2>
       <button class="btn btn-secondary btn-sm" onclick="App.activateWorkerMode()">Worker Mode</button>
     </div>
+
+    <!-- 🆕 NEW — Pull from Sales Sheet 섹션 -->
+    <div style="padding:14px 16px;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(99,102,241,0.08));border:1px solid rgba(139,92,246,0.25);border-radius:var(--r-md);margin-bottom:var(--sp-lg);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:700;font-size:var(--fs-md);color:#c4b5fd;margin-bottom:4px;">
+            🔗 Auto-Import from Sales Sheet
+          </div>
+          <div style="font-size:var(--fs-xs);color:var(--text-secondary);">
+            Pull today's new invoices from the Sales team's spreadsheet — no more manual typing
+          </div>
+        </div>
+        <button class="btn btn-pull" onclick="PullSales.openModal()">
+          📥 Pull from Sales Sheet
+        </button>
+      </div>
+    </div>
+
     <button class="btn btn-secondary btn-sm" onclick="App.editColors()" style="margin-bottom:var(--sp-md);">Edit Colors</button>
+
+    <!-- 🆕 NEW — Queue 상태 바 (Pull 후 활성화) -->
+    <div id="queueBar" style="display:none;padding:14px 18px;background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(217,119,6,0.1));border:2px solid rgba(245,158,11,0.45);border-radius:var(--r-md);margin-bottom:var(--sp-md);box-shadow:0 0 20px rgba(245,158,11,0.2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;">
+        <div style="flex:1;min-width:240px;">
+          <div style="font-weight:800;font-size:var(--fs-md);color:#fbbf24;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">📋</span>
+            <span>Import Queue: <span id="queueProgress">0 / 0</span></span>
+          </div>
+          <div style="font-size:var(--fs-xs);color:#fde68a;">
+            Enter <b>SKU Count</b> and <b>Total Qty</b> below, then click <b>"Save & Next"</b> to process each invoice
+          </div>
+          <div style="margin-top:8px;height:6px;background:rgba(0,0,0,0.3);border-radius:3px;overflow:hidden;">
+            <div id="queueProgressBar" style="height:100%;width:0%;background:linear-gradient(90deg,#fbbf24,#f59e0b);transition:width 300ms;"></div>
+          </div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="PullSales.cancelQueue()" style="flex-shrink:0;">
+          ✕ Cancel Queue
+        </button>
+      </div>
+    </div>
+
     <div class="form-row">
       <div class="form-group"><label class="form-label">Invoice No</label><input type="text" id="mgrInvoice" placeholder="Invoice Number"></div>
       <div class="form-group"><label class="form-label">Amount</label><input type="text" id="mgrAmount" placeholder="1200.00" onblur="App.formatAmount(this)"></div>
@@ -740,12 +959,13 @@
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">SKU Count</label><input type="number" id="mgrSkuCount" placeholder="0"></div>
-      <div class="form-group"><label class="form-label">Total Qty</label><input type="number" id="mgrTotalQty" placeholder="0"></div>
+      <div class="form-group"><label class="form-label" id="mgrSkuLabel">SKU Count</label><input type="number" id="mgrSkuCount" placeholder="0"></div>
+      <div class="form-group"><label class="form-label" id="mgrQtyLabel">Total Qty</label><input type="number" id="mgrTotalQty" placeholder="0"></div>
     </div>
     <div class="form-group" style="grid-column:1/-1;"><label class="form-label">Remarks</label><textarea id="mgrRemarks" rows="2" placeholder="Enter remarks..."></textarea></div>
     <div class="flex gap-sm mt-md">
-      <button class="btn btn-primary" onclick="App.saveManagerJob()">💾 Save / Update Job</button>
+      <button class="btn btn-primary" id="mgrSaveBtn" onclick="App.saveManagerJob()">💾 Save / Update Job</button>
+      <button class="btn btn-secondary" id="mgrSkipBtn" onclick="PullSales.skipCurrent()" style="display:none;">⏭ Skip This One</button>
       <button class="btn btn-secondary" onclick="App.printJob()">🖨 Print</button>
     </div>
     <hr style="margin:clamp(18px,2vh,30px) 0;border:1px solid var(--border);">
@@ -809,6 +1029,37 @@
   </div>
 </div>
 
+<!-- 🆕 NEW — Pull from Sales Modal -->
+<div class="modal" id="pullModal">
+  <div class="modal-content pull-modal-content">
+    <div class="modal-header">
+      <h3 class="modal-title">📥 Pull from Sales Sheet</h3>
+      <button class="modal-close" onclick="PullSales.closeModal()">×</button>
+    </div>
+    <div class="pull-info-bar" id="pullInfoBar">
+      <div id="pullInfoText">Loading invoices from Sales Sheet...</div>
+      <div id="pullInfoDate" style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#c4b5fd;"></div>
+    </div>
+    <div class="pull-list-wrapper" id="pullListWrapper">
+      <div class="pull-loading">
+        <div class="pull-loading-spinner"></div>
+        <div>Fetching today's invoices from Sales team...</div>
+      </div>
+    </div>
+    <div class="pull-footer">
+      <div style="font-size:var(--fs-xs);color:var(--text-secondary);" id="pullSelectedText">
+        No invoices selected
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="PullSales.closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="pullImportBtn" onclick="PullSales.importSelected()" disabled>
+          ⬇ Import Selected (<span id="pullImportCount">0</span>)
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
   <script>
     const GAS_BASE_URL = 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec';
 
@@ -825,8 +1076,8 @@
 
     const CONFIG = {
       STORAGE_KEY: 'b2b-fulfillment-v2',
-      REFRESH_INTERVAL: 30000,   // ★ FIX: 10초 → 30초로 변경 (GAS 저장 완료 여유 확보)
-      SAVE_GRACE_MS: 25000,      // ★ FIX: 저장 후 25초간 fetchData 덮어쓰기 방지
+      REFRESH_INTERVAL: 30000,
+      SAVE_GRACE_MS: 25000,
       DEFAULT_PICKERS: ['Ryan', 'Jane', 'Henry', 'Nicole'],
       DEFAULT_PIN: '1004'
     };
@@ -846,7 +1097,7 @@
       currentPage: 1,
       itemsPerPage: 15,
       pendingSaves: 0,
-      lastSaveTime: 0   // ★ FIX: 마지막 저장 시각 추적 (Grace Period 용)
+      lastSaveTime: 0
     };
 
     function updateDateTime() {
@@ -980,6 +1231,538 @@
       return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 🆕 NEW — PullSales Module (영업팀 시트에서 Invoice 가져오기)
+    // ═══════════════════════════════════════════════════════════════
+    const PullSales = {
+      fetchedInvoices: [],
+      selectedInvoices: new Set(),
+
+      openModal() {
+        const modal = document.getElementById('pullModal');
+        modal.classList.add('active');
+        this.selectedInvoices.clear();
+        this.updateSelectedUI();
+        this.fetchFromSales();
+      },
+
+      closeModal() {
+        document.getElementById('pullModal').classList.remove('active');
+      },
+
+      async fetchFromSales() {
+        const wrapper = document.getElementById('pullListWrapper');
+        const infoText = document.getElementById('pullInfoText');
+        const infoDate = document.getElementById('pullInfoDate');
+
+        const todayDate = new Date();
+        const todayStr = `${String(todayDate.getMonth()+1).padStart(2,'0')}/${String(todayDate.getDate()).padStart(2,'0')}/${todayDate.getFullYear()}`;
+        infoDate.textContent = '📅 Today: ' + todayStr;
+
+        wrapper.innerHTML = `
+          <div class="pull-loading">
+            <div class="pull-loading-spinner"></div>
+            <div>Fetching today's invoices from Sales team...</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">This may take 5-15 seconds</div>
+          </div>`;
+        infoText.textContent = 'Loading invoices from Sales Sheet...';
+
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 30000);
+
+          const response = await fetch(
+            `${State.scriptUrl}?op=pullFromSales&t=${Date.now()}`,
+            { signal: controller.signal }
+          );
+          clearTimeout(timer);
+
+          const data = await response.json();
+
+          if (!data.ok) {
+            throw new Error(data.error || 'Failed to fetch from Sales Sheet');
+          }
+
+          this.fetchedInvoices = data.invoices || [];
+          this.renderList();
+
+        } catch (err) {
+          console.error('Pull failed:', err);
+          wrapper.innerHTML = `
+            <div class="pull-empty">
+              <div class="pull-empty-icon">⚠️</div>
+              <div style="font-size:var(--fs-md);font-weight:700;color:var(--accent-danger);margin-bottom:8px;">
+                Failed to fetch from Sales Sheet
+              </div>
+              <div style="font-size:var(--fs-sm);color:var(--text-secondary);max-width:440px;margin:0 auto;">
+                ${err.name === 'AbortError'
+                  ? 'The request timed out. Please check your internet and try again.'
+                  : 'Make sure your GAS script has the pullFromSales function added and redeployed.'}
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:12px;">
+                Error: ${String(err.message || err)}
+              </div>
+            </div>`;
+          infoText.textContent = 'Error loading invoices';
+        }
+      },
+
+      renderList() {
+        const wrapper = document.getElementById('pullListWrapper');
+        const infoText = document.getElementById('pullInfoText');
+
+        if (!this.fetchedInvoices || this.fetchedInvoices.length === 0) {
+          wrapper.innerHTML = `
+            <div class="pull-empty">
+              <div class="pull-empty-icon">📭</div>
+              <div style="font-size:var(--fs-md);font-weight:700;margin-bottom:8px;">
+                No invoices found for today
+              </div>
+              <div style="font-size:var(--fs-sm);color:var(--text-secondary);">
+                Sales team hasn't entered any invoices with today's date yet (column A).
+              </div>
+            </div>`;
+          infoText.textContent = 'No invoices found for today';
+          return;
+        }
+
+        // 이미 존재하는 invoice 체크
+        const existingInvoices = new Set(State.jobs.map(j => String(j.invoice || '').trim()));
+
+        // 🆕 중복 그룹 생성 (invoice 번호별로 몇 개의 행이 있는지)
+        const invoiceGroups = {};
+        this.fetchedInvoices.forEach(inv => {
+          if (!invoiceGroups[inv.invoice]) invoiceGroups[inv.invoice] = [];
+          invoiceGroups[inv.invoice].push(inv);
+        });
+
+        const duplicateGroups = Object.keys(invoiceGroups).filter(
+          k => invoiceGroups[k].length > 1
+        );
+        const hasDuplicates = duplicateGroups.length > 0;
+
+        // 🆕 고유 ID 생성 (invoice + row)로 selectedInvoices 관리
+        // toggleSelect/toggleSelectAll에서는 이 uniqueKey를 사용
+        const getUniqueKey = (inv) => `${inv.invoice}__row${inv.row || 0}`;
+
+        const newCount = this.fetchedInvoices.filter(
+          inv => !existingInvoices.has(inv.invoice)
+        ).length;
+        const existCount = this.fetchedInvoices.length - newCount;
+
+        let dupWarning = '';
+        if (hasDuplicates) {
+          const totalDupRows = duplicateGroups.reduce(
+            (sum, k) => sum + invoiceGroups[k].length, 0
+          );
+          dupWarning = `
+            <div class="pull-duplicate-banner">
+              <span class="dup-icon">⚠️</span>
+              <div>
+                <div style="margin-bottom:4px;">
+                  <b>Duplicate Invoice(s) Detected in Sales Sheet</b>
+                </div>
+                <div style="font-size:11px;font-weight:500;color:#fde68a;">
+                  ${duplicateGroups.length} invoice number(s) appear ${totalDupRows} times total.
+                  Only ONE version of each duplicate can be selected — choose carefully.
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        infoText.innerHTML = `
+          Found <b style="color:#c4b5fd;">${this.fetchedInvoices.length}</b> invoices.
+          <span style="color:#10b981;">✓ ${newCount} new</span> ·
+          <span style="color:var(--text-muted);">◯ ${existCount} already imported</span>
+          ${hasDuplicates ? `· <span style="color:#f59e0b;">⚠ ${duplicateGroups.length} duplicate group(s)</span>` : ''}
+        `;
+
+        // 기본 선택: 새 것만, 단 중복 그룹에서는 첫번째만 선택
+        const selectedGroupInvoices = new Set();
+        this.fetchedInvoices.forEach(inv => {
+          const key = getUniqueKey(inv);
+          if (existingInvoices.has(inv.invoice)) return;
+          if (inv.isDuplicate) {
+            // 중복 그룹에서는 첫번째 것만 기본 선택
+            if (!selectedGroupInvoices.has(inv.invoice)) {
+              this.selectedInvoices.add(key);
+              selectedGroupInvoices.add(inv.invoice);
+            }
+          } else {
+            this.selectedInvoices.add(key);
+          }
+        });
+
+        let html = dupWarning + `
+          <table class="pull-table">
+            <thead>
+              <tr>
+                <th style="width:42px;text-align:center;">
+                  <input type="checkbox" id="pullSelectAll"
+                    onchange="PullSales.toggleSelectAll(this.checked)"
+                    ${newCount > 0 ? 'checked' : ''}>
+                </th>
+                <th style="width:80px;">Status</th>
+                <th>Invoice #</th>
+                <th>Customer Name</th>
+                <th style="width:110px;">Ship Date</th>
+                <th style="width:80px;">Method</th>
+                <th style="text-align:right;width:120px;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        // 중복 그룹끼리 묶어서 표시 (중복되는 것끼리 인접하게)
+        const sortedInvoices = [...this.fetchedInvoices].sort((a, b) => {
+          // 중복 먼저, 그 다음 invoice 번호, 그 다음 row 번호
+          if (a.isDuplicate !== b.isDuplicate) return a.isDuplicate ? -1 : 1;
+          if (a.invoice !== b.invoice) return a.invoice.localeCompare(b.invoice);
+          return (a.row || 0) - (b.row || 0);
+        });
+
+        sortedInvoices.forEach(inv => {
+          const key = getUniqueKey(inv);
+          const exists = existingInvoices.has(inv.invoice);
+          const isSelected = this.selectedInvoices.has(key);
+          const isDup = inv.isDuplicate;
+
+          let rowClass = '';
+          if (exists) rowClass = 'pull-row-disabled';
+          else if (isDup) rowClass = 'pull-row-duplicate';
+
+          // Ship Date 표시용
+          let shipDateDisplay = '-';
+          if (inv.shipDate) {
+            const parts = inv.shipDate.split('-');
+            if (parts.length === 3) {
+              shipDateDisplay = `${parts[1]}/${parts[2]}/${parts[0]}`;
+            }
+          }
+
+          const amountDisplay = inv.amount
+            ? '$' + Number(inv.amount).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})
+            : '-';
+
+          // Status 태그
+          let statusTag = '';
+          if (exists) {
+            statusTag = '<span class="pull-status-tag pull-status-exists">◯ Exists</span>';
+          } else if (isDup) {
+            statusTag = '<span class="pull-status-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);">⚠ Duplicate</span>';
+          } else {
+            statusTag = '<span class="pull-status-tag pull-status-new">✓ New</span>';
+          }
+
+          // Row 태그 (중복일 때만 표시)
+          const rowTag = isDup ? `<span class="pull-row-tag">Row ${inv.row}</span>` : '';
+
+          html += `
+            <tr class="${rowClass}">
+              <td style="text-align:center;">
+                <input type="checkbox"
+                  ${isSelected && !exists ? 'checked' : ''}
+                  ${exists ? 'disabled' : ''}
+                  onchange="PullSales.toggleSelect('${key}', this.checked)"
+                  data-invoice="${inv.invoice}"
+                  data-isdup="${isDup ? '1' : '0'}">
+              </td>
+              <td>${statusTag}</td>
+              <td><strong>${inv.invoice}</strong>${rowTag}</td>
+              <td>${inv.remarks || '-'}</td>
+              <td>${shipDateDisplay}</td>
+              <td>${inv.trucking || '-'}</td>
+              <td style="text-align:right;font-family:'JetBrains Mono',monospace;">${amountDisplay}</td>
+            </tr>
+          `;
+        });
+
+        html += `</tbody></table>`;
+        wrapper.innerHTML = html;
+
+        this.updateSelectedUI();
+      },
+
+      toggleSelectAll(checked) {
+        const existingInvoices = new Set(State.jobs.map(j => String(j.invoice || '').trim()));
+        const getUniqueKey = (inv) => `${inv.invoice}__row${inv.row || 0}`;
+
+        // 🆕 중복 그룹 처리: 그룹당 하나씩만 선택
+        const selectedGroupInvoices = new Set();
+        this.selectedInvoices.clear();
+
+        if (checked) {
+          this.fetchedInvoices.forEach(inv => {
+            if (existingInvoices.has(inv.invoice)) return;
+            if (inv.isDuplicate) {
+              // 중복 그룹에서는 첫번째 것만 선택
+              if (!selectedGroupInvoices.has(inv.invoice)) {
+                this.selectedInvoices.add(getUniqueKey(inv));
+                selectedGroupInvoices.add(inv.invoice);
+              }
+            } else {
+              this.selectedInvoices.add(getUniqueKey(inv));
+            }
+          });
+        }
+
+        // 체크박스 UI 재렌더링
+        this.renderList();
+      },
+
+      // invoice + row 기반의 고유 키를 받음
+      toggleSelect(uniqueKey, checked) {
+        // uniqueKey format: "IN00431358__row5"
+        const match = uniqueKey.match(/^(.+)__row(\d+)$/);
+        if (!match) return;
+        const invoiceNum = match[1];
+
+        if (checked) {
+          // 🆕 중복 그룹이면 같은 invoice의 다른 row 선택 해제 (하나만 선택 가능)
+          const inv = this.fetchedInvoices.find(
+            x => `${x.invoice}__row${x.row || 0}` === uniqueKey
+          );
+          if (inv && inv.isDuplicate) {
+            // 같은 invoice의 모든 key 제거
+            const toRemove = [];
+            this.selectedInvoices.forEach(k => {
+              if (k.startsWith(invoiceNum + '__row')) toRemove.push(k);
+            });
+            toRemove.forEach(k => this.selectedInvoices.delete(k));
+          }
+          this.selectedInvoices.add(uniqueKey);
+        } else {
+          this.selectedInvoices.delete(uniqueKey);
+        }
+
+        // 중복 그룹 선택이 변경되면 UI 재렌더링 (같은 그룹 다른 체크박스 상태 반영)
+        const inv = this.fetchedInvoices.find(
+          x => `${x.invoice}__row${x.row || 0}` === uniqueKey
+        );
+        if (inv && inv.isDuplicate) {
+          this.renderList();
+        } else {
+          this.updateSelectedUI();
+        }
+      },
+
+      updateSelectedUI() {
+        const count = this.selectedInvoices.size;
+        const text = document.getElementById('pullSelectedText');
+        const btn = document.getElementById('pullImportBtn');
+        const cntSpan = document.getElementById('pullImportCount');
+        if (text) text.textContent = count === 0 ? 'No invoices selected' : `${count} invoice(s) selected`;
+        if (cntSpan) cntSpan.textContent = count;
+        if (btn) btn.disabled = count === 0;
+      },
+
+      async importSelected() {
+        if (this.selectedInvoices.size === 0) return;
+
+        // 🆕 uniqueKey 기반으로 필터링 (invoice + row 매칭)
+        const getUniqueKey = (inv) => `${inv.invoice}__row${inv.row || 0}`;
+        const toImport = this.fetchedInvoices.filter(
+          inv => this.selectedInvoices.has(getUniqueKey(inv))
+        );
+
+        if (toImport.length === 0) return;
+
+        // 🆕 최종 안전장치: 같은 invoice 번호가 2번 이상 있으면 첫번째만
+        const seenInvoices = new Set();
+        const dedupedImport = [];
+        toImport.forEach(inv => {
+          if (!seenInvoices.has(inv.invoice)) {
+            seenInvoices.add(inv.invoice);
+            dedupedImport.push(inv);
+          }
+        });
+
+        // Queue에 담기만 하고 저장하지 않음
+        this.queue = [...dedupedImport];
+        this.queueTotal = dedupedImport.length;
+        this.queueIndex = 0;
+
+        // 모달 닫기
+        this.closeModal();
+
+        // Manager 탭으로 전환 (이미 Manager 모드이지만 확실히)
+        if (!State.managerUnlocked) {
+          showToast('⚠ Please unlock Manager mode first', 'warning');
+          return;
+        }
+
+        // Queue 모드 활성화
+        document.body.classList.add('queue-mode');
+        document.getElementById('queueBar').style.display = 'block';
+        document.getElementById('mgrSkipBtn').style.display = 'inline-flex';
+
+        // Save 버튼 텍스트 변경
+        const saveBtn = document.getElementById('mgrSaveBtn');
+        saveBtn.innerHTML = '💾 Save &amp; Next →';
+        saveBtn.className = 'btn btn-warning';
+        saveBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+        saveBtn.style.color = '#fff';
+
+        // 첫번째 Invoice를 폼에 로드
+        this.loadCurrentToForm();
+
+        showToast(`📋 Queue started: ${this.queueTotal} invoice(s) to process`, 'info', 3000);
+      },
+
+      // 현재 Queue Invoice를 Manager 폼에 로드
+      loadCurrentToForm() {
+        if (this.queueIndex >= this.queue.length) {
+          this.finishQueue();
+          return;
+        }
+
+        const inv = this.queue[this.queueIndex];
+
+        // Invoice 번호
+        document.getElementById('mgrInvoice').value = inv.invoice;
+        document.getElementById('mgrInvoice').dataset.originalInvoice = '';
+
+        // Amount (포맷팅)
+        if (inv.amount) {
+          document.getElementById('mgrAmount').value = Number(inv.amount).toLocaleString('en-US', {
+            minimumFractionDigits: 2, maximumFractionDigits: 2
+          });
+        } else {
+          document.getElementById('mgrAmount').value = '';
+        }
+
+        // Ship Date (yyyy-mm-dd → mm/dd/yyyy)
+        if (inv.shipDate) {
+          const parts = inv.shipDate.split('-');
+          if (parts.length === 3) {
+            document.getElementById('mgrShipDate').value = `${parts[1]}/${parts[2]}/${parts[0]}`;
+          }
+        } else {
+          document.getElementById('mgrShipDate').value = '';
+        }
+
+        // Trucking
+        document.getElementById('mgrTrucking').value = inv.trucking || '';
+
+        // Remarks (Customer Name)
+        document.getElementById('mgrRemarks').value = inv.remarks || '';
+
+        // SKU와 Qty는 비워둠 — 매니저가 입력해야 함
+        document.getElementById('mgrSkuCount').value = '';
+        document.getElementById('mgrTotalQty').value = '';
+
+        // Queue 진행 상황 업데이트
+        this.updateQueueUI();
+
+        // SKU Count 필드에 포커스 (바로 입력 가능)
+        setTimeout(() => {
+          const skuField = document.getElementById('mgrSkuCount');
+          if (skuField) skuField.focus();
+        }, 100);
+
+        // 화면을 Manager 폼 위로 스크롤
+        document.getElementById('managerPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+
+      // Queue UI 업데이트 (진행 바, 카운터)
+      updateQueueUI() {
+        const current = this.queueIndex + 1;
+        const total = this.queueTotal;
+        const percent = total > 0 ? Math.round((this.queueIndex / total) * 100) : 0;
+
+        const progEl = document.getElementById('queueProgress');
+        const barEl = document.getElementById('queueProgressBar');
+        if (progEl) progEl.textContent = `${current} / ${total}`;
+        if (barEl) barEl.style.width = `${percent}%`;
+      },
+
+      // 현재 Invoice Save & Next로 이동 (App.saveManagerJob 에서 호출됨)
+      async onSaveSuccess() {
+        this.queueIndex++;
+
+        // 진행 바 업데이트
+        const total = this.queueTotal;
+        const percent = total > 0 ? Math.round((this.queueIndex / total) * 100) : 0;
+        const barEl = document.getElementById('queueProgressBar');
+        if (barEl) barEl.style.width = `${percent}%`;
+
+        // 모든 처리 끝났는지 체크
+        if (this.queueIndex >= this.queue.length) {
+          this.finishQueue();
+          return;
+        }
+
+        // 다음 Invoice 로드
+        this.loadCurrentToForm();
+      },
+
+      // 현재 Invoice 건너뛰기
+      skipCurrent() {
+        if (this.queue.length === 0) return;
+        if (!confirm('Skip this invoice? It will NOT be saved to the warehouse.')) return;
+
+        this.queueIndex++;
+        if (this.queueIndex >= this.queue.length) {
+          this.finishQueue();
+          return;
+        }
+        this.loadCurrentToForm();
+        showToast('⏭ Skipped', 'info', 2000);
+      },
+
+      // Queue 전체 취소
+      cancelQueue() {
+        if (this.queue.length === 0) return;
+        const remaining = this.queue.length - this.queueIndex;
+        if (!confirm(`Cancel queue? ${remaining} remaining invoice(s) will NOT be saved.`)) return;
+
+        this.resetQueue();
+        showToast('✕ Queue cancelled', 'warning', 2500);
+      },
+
+      // Queue 완료 처리
+      finishQueue() {
+        const total = this.queueTotal;
+        this.resetQueue();
+        showToast(`✓ All done! ${total} invoice(s) processed successfully.`, 'success', 5000);
+      },
+
+      // Queue 상태 초기화 (UI 원상복구)
+      resetQueue() {
+        this.queue = [];
+        this.queueIndex = 0;
+        this.queueTotal = 0;
+
+        document.body.classList.remove('queue-mode');
+        document.getElementById('queueBar').style.display = 'none';
+        document.getElementById('mgrSkipBtn').style.display = 'none';
+
+        // Save 버튼 원래대로
+        const saveBtn = document.getElementById('mgrSaveBtn');
+        saveBtn.innerHTML = '💾 Save / Update Job';
+        saveBtn.className = 'btn btn-primary';
+        saveBtn.style.background = '';
+        saveBtn.style.color = '';
+
+        // 폼 초기화
+        ['mgrInvoice','mgrAmount','mgrShipDate','mgrSkuCount','mgrTotalQty','mgrRemarks'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        document.getElementById('mgrTrucking').value = '';
+      },
+
+      // Queue 진행 중인지 체크
+      isInQueue() {
+        return this.queue && this.queue.length > 0 && this.queueIndex < this.queue.length;
+      }
+    };
+    // Queue 상태 저장용 프로퍼티 초기화
+    PullSales.queue = [];
+    PullSales.queueIndex = 0;
+    PullSales.queueTotal = 0;
+
     const App = {
       init() {
         this.loadSettings();
@@ -1032,10 +1815,7 @@
       },
 
       async fetchData() {
-        // ★ FIX 1: pendingSaves 체크
         if (State.pendingSaves > 0) return;
-
-        // ★ FIX 2: Grace Period 체크 — 저장 후 25초 이내면 서버 데이터로 덮어쓰기 방지
         if (Date.now() - State.lastSaveTime < CONFIG.SAVE_GRACE_MS) {
           this.updateSyncIndicator('success');
           return;
@@ -1060,7 +1840,6 @@
             throw fetchErr;
           }
 
-          // ★ FIX 3: fetch 완료 직전 pendingSaves/Grace Period 재확인
           if (State.pendingSaves > 0) return;
           if (Date.now() - State.lastSaveTime < CONFIG.SAVE_GRACE_MS) {
             this.updateSyncIndicator('success');
@@ -1381,7 +2160,7 @@
           const filteredJobs = State.jobs.filter(job => { if(!State.searchQuery) return true; const q=State.searchQuery; return (job.invoice||'').toLowerCase().includes(q)||(job.status||'').toLowerCase().includes(q)||(job.trucking||'').toLowerCase().includes(q)||(job.remarks||'').toLowerCase().includes(q)||(job.picker||'').toLowerCase().includes(q); });
           const truckingOrder = {'TK':1,'UPS':2,'PU':3,'FedEx':4,'Other':5};
           const sortedForCheck = [...filteredJobs].sort((a,b)=>{
-            if ((a.shipDate||')') !== (b.shipDate||'')) return (a.shipDate||'').localeCompare(b.shipDate||'');
+            if ((a.shipDate||'') !== (b.shipDate||'')) return (a.shipDate||'').localeCompare(b.shipDate||'');
             return (truckingOrder[a.trucking]||999)-(truckingOrder[b.trucking]||999);
           });
           const startIndex = (State.currentPage-1)*State.itemsPerPage;
@@ -1399,7 +2178,7 @@
         const count = State.selectedJobs.size;
         if (!confirm(`Delete ${count} selected job(s)?`)) return;
         State.pendingSaves++;
-        State.lastSaveTime = Date.now(); // ★ FIX
+        State.lastSaveTime = Date.now();
         const toDelete = [...State.selectedJobs];
         State.jobs = State.jobs.filter(j => !State.selectedJobs.has(j.invoice));
         State.selectedJobs.clear();
@@ -1536,9 +2315,8 @@
 
       async updateJob(invoice, updates) {
         State.pendingSaves++;
-        State.lastSaveTime = Date.now(); // ★ FIX: Grace Period 시작
+        State.lastSaveTime = Date.now();
 
-        // 로컬 즉시 반영
         const jobIndex = State.jobs.findIndex(j=>j.invoice===invoice);
         if (jobIndex >= 0) { State.jobs[jobIndex]={...State.jobs[jobIndex],...updates}; this.renderTable(); this.updateKPIs(); }
 
@@ -1560,7 +2338,6 @@
 
         State.pendingSaves = Math.max(0, State.pendingSaves - 1);
         if (State.pendingSaves === 0) {
-          // ★ FIX: 저장 완료 후 타이머를 새로 시작 (이전 타이머 제거 후 재시작)
           this.startAutoRefresh();
         }
       },
@@ -1620,6 +2397,22 @@
         const trucking=document.getElementById('mgrTrucking').value;
         const remarks=document.getElementById('mgrRemarks').value;
         if(!invoice){showToast('Please enter Invoice number','warning');return;}
+
+        // 🆕 Queue 모드에서는 SKU Count와 Total Qty 필수
+        const inQueue = PullSales.isInQueue();
+        if (inQueue) {
+          if (!skuCount || parseInt(skuCount) <= 0) {
+            showToast('⚠ SKU Count is required (must be > 0)', 'warning', 3000);
+            document.getElementById('mgrSkuCount').focus();
+            return;
+          }
+          if (!totalQty || parseInt(totalQty) <= 0) {
+            showToast('⚠ Total Qty is required (must be > 0)', 'warning', 3000);
+            document.getElementById('mgrTotalQty').focus();
+            return;
+          }
+        }
+
         const amount=amountStr?parseFloat(amountStr.replace(/,/g,'')):null;
         let shipDate='';
         if(shipDateStr){const[m,d,y]=shipDateStr.split('/');shipDate=`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;}
@@ -1634,7 +2427,7 @@
           startAtISO: existingJob.startAtISO || '',
           endAtISO: existingJob.endAtISO || '',
         };
-        State.lastSaveTime = Date.now(); // ★ FIX
+        State.lastSaveTime = Date.now();
         if(originalInvoice&&originalInvoice!==invoice){
           const oldJob=State.jobs.find(j=>j.invoice===originalInvoice)||{};
           const merged={...oldJob,invoice,amount:amount!==null?amount:oldJob.amount,shipDate:shipDate||oldJob.shipDate,skuCount:skuCount||oldJob.skuCount,totalQty:totalQty||oldJob.totalQty,trucking:trucking||oldJob.trucking,remarks:remarks||oldJob.remarks};
@@ -1654,9 +2447,16 @@
         }
         this.renderTable(); this.updateKPIs();
         invoiceInput.dataset.originalInvoice='';
-        ['mgrInvoice','mgrAmount','mgrShipDate','mgrSkuCount','mgrTotalQty','mgrRemarks'].forEach(id=>document.getElementById(id).value='');
-        document.getElementById('mgrTrucking').value='';
-        showToast('✓ Job saved!','success');
+
+        // 🆕 Queue 모드면 다음 Invoice로 이동, 아니면 폼 초기화
+        if (inQueue) {
+          showToast(`✓ Saved ${invoice}`, 'success', 1500);
+          PullSales.onSaveSuccess();
+        } else {
+          ['mgrInvoice','mgrAmount','mgrShipDate','mgrSkuCount','mgrTotalQty','mgrRemarks'].forEach(id=>document.getElementById(id).value='');
+          document.getElementById('mgrTrucking').value='';
+          showToast('✓ Job saved!','success');
+        }
       },
       printJob() { window.print(); },
       editColors() {
@@ -1685,7 +2485,6 @@
         else text.textContent='Error';
       },
       async checkVersion() {
-        // ★ FIX: Grace Period 중에는 버전 체크도 스킵
         if (Date.now() - State.lastSaveTime < CONFIG.SAVE_GRACE_MS) return;
         try {
           const response=await fetch(`${State.scriptUrl}?op=ver&t=${Date.now()}`);
@@ -1698,7 +2497,6 @@
         State.refreshTimer=setInterval(()=>{ if(!document.hidden) this.fetchData(); }, CONFIG.REFRESH_INTERVAL);
       },
       refresh() {
-        // ★ FIX: 수동 Refresh는 Grace Period 무시하고 강제 fetch
         State.lastSaveTime = 0;
         this.fetchData();
       },
@@ -1729,7 +2527,7 @@
         showToast('Settings saved','success');
       },
       pullFromServer() {
-        State.lastSaveTime = 0; // ★ FIX: 강제 pull
+        State.lastSaveTime = 0;
         this.fetchData();
         showToast('Pulled from server','info');
       },
