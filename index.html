@@ -966,7 +966,6 @@
     <div class="flex gap-sm mt-md">
       <button class="btn btn-primary" id="mgrSaveBtn" onclick="App.saveManagerJob()">💾 Save / Update Job</button>
       <button class="btn btn-secondary" id="mgrSkipBtn" onclick="PullSales.skipCurrent()" style="display:none;">⏭ Skip This One</button>
-      <button class="btn btn-secondary" onclick="App.printJob()">🖨 Print</button>
     </div>
     <hr style="margin:clamp(18px,2vh,30px) 0;border:1px solid var(--border);">
     <h3 style="margin-bottom:var(--sp-md);font-size:var(--fs-md);">Manager Settings</h3>
@@ -1379,20 +1378,36 @@
         `;
 
         // 기본 선택: 새 것만, 단 중복 그룹에서는 첫번째만 선택
-        const selectedGroupInvoices = new Set();
-        this.fetchedInvoices.forEach(inv => {
-          const key = getUniqueKey(inv);
-          if (existingInvoices.has(inv.invoice)) return;
-          if (inv.isDuplicate) {
-            // 중복 그룹에서는 첫번째 것만 기본 선택
-            if (!selectedGroupInvoices.has(inv.invoice)) {
+        // ★ skipDefaultSelection flag가 있으면 기본 선택 스킵 (toggleSelectAll에서 호출 시)
+        if (!this._skipDefaultSelection) {
+          this.selectedInvoices.clear();
+          const selectedGroupInvoices = new Set();
+          this.fetchedInvoices.forEach(inv => {
+            const key = getUniqueKey(inv);
+            if (existingInvoices.has(inv.invoice)) return;
+            if (inv.isDuplicate) {
+              // 중복 그룹에서는 첫번째 것만 기본 선택
+              if (!selectedGroupInvoices.has(inv.invoice)) {
+                this.selectedInvoices.add(key);
+                selectedGroupInvoices.add(inv.invoice);
+              }
+            } else {
               this.selectedInvoices.add(key);
-              selectedGroupInvoices.add(inv.invoice);
             }
-          } else {
-            this.selectedInvoices.add(key);
-          }
-        });
+          });
+        }
+        this._skipDefaultSelection = false;
+
+        // 헤더 체크박스 상태 계산: 선택 가능한 항목 중 몇 개가 선택되어 있는지
+        const selectableInvoices = this.fetchedInvoices.filter(
+          inv => !existingInvoices.has(inv.invoice)
+        );
+        // 중복 제외한 선택 가능 Invoice 개수 (각 그룹당 1개씩 셈)
+        const selectableUniqueInvoices = new Set();
+        selectableInvoices.forEach(inv => selectableUniqueInvoices.add(inv.invoice));
+        const totalSelectable = selectableUniqueInvoices.size;
+        const currentSelected = this.selectedInvoices.size;
+        const headerChecked = (currentSelected > 0 && currentSelected >= totalSelectable);
 
         let html = dupWarning + `
           <table class="pull-table">
@@ -1401,7 +1416,7 @@
                 <th style="width:42px;text-align:center;">
                   <input type="checkbox" id="pullSelectAll"
                     onchange="PullSales.toggleSelectAll(this.checked)"
-                    ${newCount > 0 ? 'checked' : ''}>
+                    ${headerChecked ? 'checked' : ''}>
                 </th>
                 <th style="width:80px;">Status</th>
                 <th>Invoice #</th>
@@ -1507,7 +1522,8 @@
           });
         }
 
-        // 체크박스 UI 재렌더링
+        // ★ renderList가 기본 선택을 다시 덮어쓰지 않도록 flag 설정
+        this._skipDefaultSelection = true;
         this.renderList();
       },
 
@@ -1541,6 +1557,7 @@
           x => `${x.invoice}__row${x.row || 0}` === uniqueKey
         );
         if (inv && inv.isDuplicate) {
+          this._skipDefaultSelection = true;
           this.renderList();
         } else {
           this.updateSelectedUI();
@@ -1679,6 +1696,24 @@
 
       // 현재 Invoice Save & Next로 이동 (App.saveManagerJob 에서 호출됨)
       async onSaveSuccess() {
+        // 🆕 현재 저장한 Invoice를 영업시트 K열 "Print?" = "Yes"로 마킹
+        const savedInvoice = this.queue[this.queueIndex];
+        if (savedInvoice && savedInvoice.invoice) {
+          // 백그라운드로 비동기 호출 (실패해도 Queue 진행 계속)
+          fetch(`${State.scriptUrl}?op=markSalesPrinted&invoice=${encodeURIComponent(savedInvoice.invoice)}&t=${Date.now()}`)
+            .then(r => r.json())
+            .then(data => {
+              if (!data.ok) {
+                console.warn('Failed to mark sales printed:', data.error);
+              } else {
+                console.log('✓ Sales Sheet marked Print?=Yes for', savedInvoice.invoice);
+              }
+            })
+            .catch(err => {
+              console.warn('markSalesPrinted network error:', err);
+            });
+        }
+
         this.queueIndex++;
 
         // 진행 바 업데이트
