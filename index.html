@@ -920,8 +920,9 @@
           <div style="font-weight:800;font-size:var(--fs-md);color:#fbbf24;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
             <span style="font-size:18px;">📋</span>
             <span>Import Queue: <span id="queueProgress">0 / 0</span></span>
+            <span id="queueCmsStatus" style="font-size:11px;margin-left:8px;"></span>
           </div>
-          <div style="font-size:var(--fs-xs);color:#fde68a;">
+          <div style="font-size:var(--fs-xs);color:#fde68a;" id="queueHelpText">
             Enter <b>SKU Count</b> and <b>Total Qty</b> below, then click <b>"Save & Next"</b> to process each invoice
           </div>
           <div style="margin-top:8px;height:6px;background:rgba(0,0,0,0.3);border-radius:3px;overflow:hidden;">
@@ -1283,6 +1284,7 @@
           }
 
           this.fetchedInvoices = data.invoices || [];
+          this.lastCmsTimestamp = data.cmsTimestamp || 0;  // 🆕 CMS 동기화 시간 저장
           this.renderList();
 
         } catch (err) {
@@ -1370,11 +1372,29 @@
           `;
         }
 
+        // 🆕 CMS 매칭 통계 계산
+        const cmsMatchedCount = this.fetchedInvoices.filter(
+          inv => inv.fromCms && inv.skuCount && inv.totalQty &&
+                 !existingInvoices.has(inv.invoice)
+        ).length;
+        const cmsMissingCount = newCount - cmsMatchedCount;
+
+        let cmsStatusHtml = '';
+        if (this.lastCmsTimestamp && this.lastCmsTimestamp > 0) {
+          const hoursAgo = Math.floor((Date.now() - this.lastCmsTimestamp) / 3600000);
+          const minAgo = Math.floor((Date.now() - this.lastCmsTimestamp) / 60000);
+          const ageStr = hoursAgo >= 1 ? (hoursAgo + 'h ago') : (minAgo + 'm ago');
+          cmsStatusHtml = `<br><span style="font-size:11px;color:var(--text-muted);">📦 CMS: ${cmsMatchedCount} matched, ${cmsMissingCount} missing (synced ${ageStr})</span>`;
+        } else {
+          cmsStatusHtml = `<br><span style="font-size:11px;color:#f59e0b;">⚠ No CMS data — SKU/Qty must be entered manually. Click "📦 Sync 창고" bookmark in CMS first.</span>`;
+        }
+
         infoText.innerHTML = `
           Found <b style="color:#c4b5fd;">${this.fetchedInvoices.length}</b> invoices.
           <span style="color:#10b981;">✓ ${newCount} new</span> ·
           <span style="color:var(--text-muted);">◯ ${existCount} already imported</span>
           ${hasDuplicates ? `· <span style="color:#f59e0b;">⚠ ${duplicateGroups.length} duplicate group(s)</span>` : ''}
+          ${cmsStatusHtml}
         `;
 
         // 기본 선택: 새 것만, 단 중복 그룹에서는 첫번째만 선택
@@ -1423,7 +1443,9 @@
                 <th>Customer Name</th>
                 <th style="width:110px;">Ship Date</th>
                 <th style="width:80px;">Method</th>
-                <th style="text-align:right;width:120px;">Amount</th>
+                <th style="text-align:right;width:110px;">Amount</th>
+                <th style="text-align:center;width:55px;">SKU</th>
+                <th style="text-align:center;width:55px;">Qty</th>
               </tr>
             </thead>
             <tbody>
@@ -1473,6 +1495,14 @@
           // Row 태그 (중복일 때만 표시)
           const rowTag = isDup ? `<span class="pull-row-tag">Row ${inv.row}</span>` : '';
 
+          // SKU / Qty 표시 (CMS 데이터 기반)
+          const skuDisplay = (inv.fromCms && inv.skuCount)
+            ? `<span style="color:#10b981;font-weight:700;" title="From CMS">${inv.skuCount}</span>`
+            : `<span style="color:#f59e0b;" title="Not in CMS">—</span>`;
+          const qtyDisplay = (inv.fromCms && inv.totalQty)
+            ? `<span style="color:#10b981;font-weight:700;" title="From CMS">${inv.totalQty}</span>`
+            : `<span style="color:#f59e0b;" title="Not in CMS">—</span>`;
+
           html += `
             <tr class="${rowClass}">
               <td style="text-align:center;">
@@ -1489,6 +1519,8 @@
               <td>${shipDateDisplay}</td>
               <td>${inv.trucking || '-'}</td>
               <td style="text-align:right;font-family:'JetBrains Mono',monospace;">${amountDisplay}</td>
+              <td style="text-align:center;font-family:'JetBrains Mono',monospace;">${skuDisplay}</td>
+              <td style="text-align:center;font-family:'JetBrains Mono',monospace;">${qtyDisplay}</td>
             </tr>
           `;
         });
@@ -1665,17 +1697,30 @@
         // Remarks (Customer Name)
         document.getElementById('mgrRemarks').value = inv.remarks || '';
 
-        // SKU와 Qty는 비워둠 — 매니저가 입력해야 함
-        document.getElementById('mgrSkuCount').value = '';
-        document.getElementById('mgrTotalQty').value = '';
+        // 🆕 SKU와 Qty: CMS 데이터가 있으면 자동 채우기
+        if (inv.fromCms && inv.skuCount && inv.totalQty) {
+          document.getElementById('mgrSkuCount').value = inv.skuCount;
+          document.getElementById('mgrTotalQty').value = inv.totalQty;
+        } else {
+          // CMS 데이터 없음 — 매니저가 입력해야 함
+          document.getElementById('mgrSkuCount').value = inv.skuCount || '';
+          document.getElementById('mgrTotalQty').value = inv.totalQty || '';
+        }
 
         // Queue 진행 상황 업데이트
         this.updateQueueUI();
 
-        // SKU Count 필드에 포커스 (바로 입력 가능)
+        // 🆕 포커스: CMS 데이터 있으면 Save 버튼, 없으면 SKU Count
         setTimeout(() => {
-          const skuField = document.getElementById('mgrSkuCount');
-          if (skuField) skuField.focus();
+          if (inv.fromCms && inv.skuCount && inv.totalQty) {
+            // CMS 있음 → Save 버튼 포커스 (엔터만 누르면 됨)
+            const saveBtn = document.getElementById('mgrSaveBtn');
+            if (saveBtn) saveBtn.focus();
+          } else {
+            // CMS 없음 → SKU Count 입력 필요
+            const skuField = document.getElementById('mgrSkuCount');
+            if (skuField) skuField.focus();
+          }
         }, 100);
 
         // 화면을 Manager 폼 위로 스크롤
@@ -1692,6 +1737,25 @@
         const barEl = document.getElementById('queueProgressBar');
         if (progEl) progEl.textContent = `${current} / ${total}`;
         if (barEl) barEl.style.width = `${percent}%`;
+
+        // 🆕 현재 Invoice의 CMS 매칭 상태 표시
+        const cmsStatusEl = document.getElementById('queueCmsStatus');
+        const helpTextEl = document.getElementById('queueHelpText');
+        const currentInv = this.queue[this.queueIndex];
+
+        if (currentInv && cmsStatusEl) {
+          if (currentInv.fromCms && currentInv.skuCount && currentInv.totalQty) {
+            cmsStatusEl.innerHTML = `<span style="background:rgba(16,185,129,0.25);color:#10b981;padding:2px 8px;border-radius:999px;font-weight:700;">✓ CMS 연동됨 (SKU=${currentInv.skuCount}, Qty=${currentInv.totalQty})</span>`;
+            if (helpTextEl) {
+              helpTextEl.innerHTML = `<b style="color:#10b981;">SKU/Qty가 CMS에서 자동으로 채워졌습니다.</b> 확인 후 <b>"Save & Next"</b>를 누르세요.`;
+            }
+          } else {
+            cmsStatusEl.innerHTML = `<span style="background:rgba(245,158,11,0.25);color:#f59e0b;padding:2px 8px;border-radius:999px;font-weight:700;">⚠ CMS 데이터 없음 — 수동 입력 필요</span>`;
+            if (helpTextEl) {
+              helpTextEl.innerHTML = `Enter <b>SKU Count</b> and <b>Total Qty</b> below, then click <b>"Save & Next"</b>`;
+            }
+          }
+        }
       },
 
       // 현재 Invoice Save & Next로 이동 (App.saveManagerJob 에서 호출됨)
