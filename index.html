@@ -1036,6 +1036,27 @@
       <h3 class="modal-title">📥 Pull from Sales Sheet</h3>
       <button class="modal-close" onclick="PullSales.closeModal()">×</button>
     </div>
+
+    <!-- 🆕 날짜 범위 선택 UI -->
+    <div id="pullDateRangeBar" style="padding:12px 16px;background:rgba(139,92,246,0.08);border-bottom:1px solid rgba(139,92,246,0.2);display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:13px;font-weight:700;color:#c4b5fd;white-space:nowrap;">📅 Date Range:</span>
+      <select id="pullDatePreset" onchange="PullSales.onDatePresetChange()" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-primary);border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;min-width:200px;">
+        <option value="today">📅 Today</option>
+        <option value="yesterday-today">📆 Yesterday + Today (2 days)</option>
+        <option value="last3">📆 Last 3 days</option>
+        <option value="last7">📆 Last 7 days</option>
+        <option value="custom">🗓 Custom range...</option>
+      </select>
+      <div id="pullCustomDateRange" style="display:none;align-items:center;gap:6px;">
+        <input type="date" id="pullDateFrom" style="padding:6px 8px;background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-primary);border-radius:6px;font-size:13px;">
+        <span style="color:var(--text-muted);">~</span>
+        <input type="date" id="pullDateTo" style="padding:6px 8px;background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-primary);border-radius:6px;font-size:13px;">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="PullSales.applyDateRange()" style="margin-left:auto;">
+        🔄 Apply
+      </button>
+    </div>
+
     <div class="pull-info-bar" id="pullInfoBar">
       <div id="pullInfoText">Loading invoices from Sales Sheet...</div>
       <div id="pullInfoDate" style="font-family:'JetBrains Mono',monospace;font-weight:700;color:#c4b5fd;"></div>
@@ -1237,12 +1258,106 @@
     const PullSales = {
       fetchedInvoices: [],
       selectedInvoices: new Set(),
+      currentDateFrom: '',  // 🆕 현재 조회 날짜 범위
+      currentDateTo: '',
+
+      // 🆕 날짜 유틸
+      _formatDate(d) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      },
+
+      _addDays(dateStr, days) {
+        const d = new Date(dateStr + 'T00:00:00');
+        d.setDate(d.getDate() + days);
+        return this._formatDate(d);
+      },
+
+      // 🆕 프리셋 → 날짜 범위 계산
+      _getDateRangeFromPreset(preset) {
+        const today = this._formatDate(new Date());
+        switch (preset) {
+          case 'today':
+            return { from: today, to: today };
+          case 'yesterday-today':
+            return { from: this._addDays(today, -1), to: today };
+          case 'last3':
+            return { from: this._addDays(today, -2), to: today };
+          case 'last7':
+            return { from: this._addDays(today, -6), to: today };
+          default:
+            return { from: today, to: today };
+        }
+      },
+
+      // 🆕 프리셋 드롭다운 변경 시
+      onDatePresetChange() {
+        const preset = document.getElementById('pullDatePreset').value;
+        const customBox = document.getElementById('pullCustomDateRange');
+
+        if (preset === 'custom') {
+          customBox.style.display = 'flex';
+          // Custom 기본값: 오늘~오늘
+          const today = this._formatDate(new Date());
+          document.getElementById('pullDateFrom').value = today;
+          document.getElementById('pullDateTo').value = today;
+        } else {
+          customBox.style.display = 'none';
+        }
+      },
+
+      // 🆕 Apply 버튼 클릭
+      applyDateRange() {
+        const preset = document.getElementById('pullDatePreset').value;
+        let from, to;
+
+        if (preset === 'custom') {
+          from = document.getElementById('pullDateFrom').value;
+          to = document.getElementById('pullDateTo').value;
+
+          if (!from || !to) {
+            showToast('Please select both From and To dates', 'warning');
+            return;
+          }
+          if (from > to) {
+            showToast('From date must be before To date', 'warning');
+            return;
+          }
+
+          // 14일 제한 체크
+          const fromD = new Date(from + 'T00:00:00');
+          const toD = new Date(to + 'T00:00:00');
+          const diffDays = Math.round((toD - fromD) / (1000 * 60 * 60 * 24));
+          if (diffDays > 14) {
+            showToast(`Date range too wide (max 14 days). Selected: ${diffDays + 1} days`, 'warning');
+            return;
+          }
+        } else {
+          const range = this._getDateRangeFromPreset(preset);
+          from = range.from;
+          to = range.to;
+        }
+
+        this.currentDateFrom = from;
+        this.currentDateTo = to;
+        this.fetchFromSales();
+      },
 
       openModal() {
         const modal = document.getElementById('pullModal');
         modal.classList.add('active');
         this.selectedInvoices.clear();
         this.updateSelectedUI();
+
+        // 🆕 날짜 UI 초기화: 오늘이 기본값
+        document.getElementById('pullDatePreset').value = 'today';
+        document.getElementById('pullCustomDateRange').style.display = 'none';
+        const today = this._formatDate(new Date());
+        this.currentDateFrom = today;
+        this.currentDateTo = today;
+
         this.fetchFromSales();
       },
 
@@ -1255,14 +1370,23 @@
         const infoText = document.getElementById('pullInfoText');
         const infoDate = document.getElementById('pullInfoDate');
 
-        const todayDate = new Date();
-        const todayStr = `${String(todayDate.getMonth()+1).padStart(2,'0')}/${String(todayDate.getDate()).padStart(2,'0')}/${todayDate.getFullYear()}`;
-        infoDate.textContent = '📅 Today: ' + todayStr;
+        // 🆕 날짜 범위 표시 텍스트
+        const formatDisplay = (dateStr) => {
+          const [y, m, d] = dateStr.split('-');
+          return `${m}/${d}/${y}`;
+        };
+
+        const fromDisplay = formatDisplay(this.currentDateFrom);
+        const toDisplay = formatDisplay(this.currentDateTo);
+        const dateRangeText = (this.currentDateFrom === this.currentDateTo)
+          ? `📅 ${fromDisplay}`
+          : `📅 ${fromDisplay} ~ ${toDisplay}`;
+        infoDate.textContent = dateRangeText;
 
         wrapper.innerHTML = `
           <div class="pull-loading">
             <div class="pull-loading-spinner"></div>
-            <div>Fetching today's invoices from Sales team...</div>
+            <div>Fetching invoices from Sales team...</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">This may take 5-15 seconds</div>
           </div>`;
         infoText.textContent = 'Loading invoices from Sales Sheet...';
@@ -1271,10 +1395,13 @@
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 30000);
 
-          const response = await fetch(
-            `${State.scriptUrl}?op=pullFromSales&t=${Date.now()}`,
-            { signal: controller.signal }
-          );
+          // 🆕 dateFrom, dateTo 파라미터 전달
+          const url = `${State.scriptUrl}?op=pullFromSales` +
+            `&dateFrom=${encodeURIComponent(this.currentDateFrom)}` +
+            `&dateTo=${encodeURIComponent(this.currentDateTo)}` +
+            `&t=${Date.now()}`;
+
+          const response = await fetch(url, { signal: controller.signal });
           clearTimeout(timer);
 
           const data = await response.json();
@@ -1285,6 +1412,7 @@
 
           this.fetchedInvoices = data.invoices || [];
           this.lastCmsTimestamp = data.cmsTimestamp || 0;  // 🆕 CMS 동기화 시간 저장
+          this._skipDefaultSelection = false;  // 기본 선택 활성화
           this.renderList();
 
         } catch (err) {
