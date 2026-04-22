@@ -91,6 +91,28 @@
       50%      { box-shadow: 0 0 0 10px rgba(139,92,246,0.0), 0 4px 20px rgba(139,92,246,0.6); }
     }
 
+    /* 🆕 CMS Sync Bar 상태별 스타일 */
+    .cms-sync-fresh {
+      background: linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.08)) !important;
+      border: 1px solid rgba(16,185,129,0.3) !important;
+      color: #10b981;
+    }
+    .cms-sync-stale {
+      background: linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.08)) !important;
+      border: 1px solid rgba(245,158,11,0.3) !important;
+      color: #f59e0b;
+    }
+    .cms-sync-urgent {
+      background: linear-gradient(135deg, rgba(239,68,68,0.15), rgba(220,38,38,0.1)) !important;
+      border: 2px solid rgba(239,68,68,0.5) !important;
+      color: #ef4444;
+      animation: cmsUrgentPulse 2s ease-in-out infinite;
+    }
+    @keyframes cmsUrgentPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.3); }
+      50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0.0); }
+    }
+
     .header-left { display:flex; align-items:center; gap:var(--sp-md); }
 
     .logo {
@@ -894,6 +916,27 @@
       <button class="btn btn-secondary btn-sm" onclick="App.activateWorkerMode()">Worker Mode</button>
     </div>
 
+    <!-- 🆕 CMS 동기화 상태 뱃지 (상시 표시) -->
+    <div id="cmsSyncBar" style="padding:12px 16px;border-radius:var(--r-md);margin-bottom:var(--sp-md);display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;transition:all 300ms;">
+      <div style="flex:1;min-width:240px;">
+        <div id="cmsSyncTitle" style="font-weight:700;font-size:var(--fs-md);margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+          <span id="cmsSyncIcon">📦</span>
+          <span id="cmsSyncStatus">CMS Sync Status: Loading...</span>
+        </div>
+        <div id="cmsSyncDetail" style="font-size:var(--fs-xs);opacity:0.85;">
+          Checking sync status...
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;">
+        <button class="btn btn-secondary btn-sm" onclick="CmsSync.openCmsPage()" title="Open CMS Picking List in new tab">
+          🔗 CMS 열기
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="CmsSync.refresh()" title="Check CMS sync status again">
+          🔄 새로고침
+        </button>
+      </div>
+    </div>
+
     <!-- 🆕 NEW — Pull from Sales Sheet 섹션 -->
     <div style="padding:14px 16px;background:linear-gradient(135deg,rgba(139,92,246,0.08),rgba(99,102,241,0.08));border:1px solid rgba(139,92,246,0.25);border-radius:var(--r-md);margin-bottom:var(--sp-lg);">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;">
@@ -1253,6 +1296,181 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // 🆕 CmsSync Module (CMS 동기화 상태 관리 및 표시)
+    // ═══════════════════════════════════════════════════════════════
+    const CmsSync = {
+      // CMS Picking List URL
+      CMS_URL: 'https://cms.siliconii.com/WHouse/PickingList?logi_yn=Y',
+
+      // 상태 기준 (분 단위)
+      FRESH_THRESHOLD_MIN: 10,       // 10분 이내 = 최신
+      URGENT_THRESHOLD_MIN: 120,      // 2시간 이상 = 긴급
+
+      // 자동 새로고침 타이머
+      _refreshTimer: null,
+
+      // 🆕 CMS 페이지 새 탭에서 열기
+      openCmsPage() {
+        window.open(this.CMS_URL, '_blank');
+        showToast('🔗 CMS 페이지를 새 탭에서 열었습니다. "📦 Sync 창고" 북마크를 클릭하세요.', 'info', 5000);
+      },
+
+      // 🆕 CMS 상태 수동 새로고침
+      refresh() {
+        this.checkStatus();
+        showToast('🔄 CMS 상태를 확인하는 중...', 'info', 2000);
+      },
+
+      // 🆕 CMS 동기화 상태 확인 및 UI 업데이트
+      async checkStatus() {
+        const bar = document.getElementById('cmsSyncBar');
+        const icon = document.getElementById('cmsSyncIcon');
+        const statusEl = document.getElementById('cmsSyncStatus');
+        const detailEl = document.getElementById('cmsSyncDetail');
+
+        if (!bar) return;
+
+        try {
+          const response = await fetch(
+            `${State.scriptUrl}?op=getCmsData&t=${Date.now()}`
+          );
+          const data = await response.json();
+
+          if (!data.ok) {
+            this._renderUrgent('오류', 'CMS 상태를 확인할 수 없습니다: ' + (data.error || 'Unknown error'));
+            return;
+          }
+
+          const cmsCount = data.count || 0;
+
+          // 타임스탬프 가져오기
+          const tsResponse = await fetch(
+            `${State.scriptUrl}?op=getCmsData&t=${Date.now() + 1}`
+          );
+          // timestamp는 Properties Service에 저장되므로 추가 API 필요
+          // 일단은 count만으로 판단
+
+          if (cmsCount === 0) {
+            this._renderNoData();
+            return;
+          }
+
+          // 타임스탬프 가져오기 (Pull 응답에서 저장된 것 사용)
+          const lastTimestamp = Number(localStorage.getItem('cms_last_timestamp') || 0);
+
+          if (lastTimestamp === 0) {
+            // 타임스탬프 없음 - CMS에는 있지만 모르는 상태
+            this._renderStale(cmsCount, null);
+            return;
+          }
+
+          const minutesAgo = Math.floor((Date.now() - lastTimestamp) / 60000);
+
+          if (minutesAgo <= this.FRESH_THRESHOLD_MIN) {
+            this._renderFresh(cmsCount, minutesAgo);
+          } else if (minutesAgo <= this.URGENT_THRESHOLD_MIN) {
+            this._renderStale(cmsCount, minutesAgo);
+          } else {
+            this._renderUrgentOld(cmsCount, minutesAgo);
+          }
+
+        } catch (err) {
+          console.error('CMS status check failed:', err);
+          this._renderUrgent('연결 오류', err.message || 'Network error');
+        }
+      },
+
+      // 🟢 최신 상태 렌더링
+      _renderFresh(count, minutesAgo) {
+        const bar = document.getElementById('cmsSyncBar');
+        const icon = document.getElementById('cmsSyncIcon');
+        const statusEl = document.getElementById('cmsSyncStatus');
+        const detailEl = document.getElementById('cmsSyncDetail');
+
+        bar.className = 'cms-sync-fresh';
+        bar.style.cssText = 'padding:12px 16px;border-radius:var(--r-md);margin-bottom:var(--sp-md);display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;transition:all 300ms;';
+        icon.textContent = '✓';
+        statusEl.innerHTML = `<span style="color:#10b981;">CMS Sync: 최신</span>`;
+        detailEl.innerHTML = `<span style="color:#10b981;">${count}개 Invoice · ${minutesAgo === 0 ? '방금 전' : minutesAgo + '분 전'} 동기화</span>`;
+      },
+
+      // 🟡 오래됨 상태
+      _renderStale(count, minutesAgo) {
+        const bar = document.getElementById('cmsSyncBar');
+        const icon = document.getElementById('cmsSyncIcon');
+        const statusEl = document.getElementById('cmsSyncStatus');
+        const detailEl = document.getElementById('cmsSyncDetail');
+
+        bar.className = 'cms-sync-stale';
+        bar.style.cssText = 'padding:12px 16px;border-radius:var(--r-md);margin-bottom:var(--sp-md);display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;transition:all 300ms;';
+        icon.textContent = '⚠';
+        const ageText = minutesAgo === null ? '동기화 시간 알 수 없음' :
+                        minutesAgo < 60 ? minutesAgo + '분 전' :
+                        Math.floor(minutesAgo / 60) + '시간 ' + (minutesAgo % 60) + '분 전';
+        statusEl.innerHTML = `<span style="color:#f59e0b;">CMS Sync: ${ageText}</span>`;
+        detailEl.innerHTML = `<span style="color:#f59e0b;">${count}개 Invoice · 다시 동기화를 권장합니다</span>`;
+      },
+
+      // 🔴 긴급 - 오래된 데이터
+      _renderUrgentOld(count, minutesAgo) {
+        const bar = document.getElementById('cmsSyncBar');
+        const icon = document.getElementById('cmsSyncIcon');
+        const statusEl = document.getElementById('cmsSyncStatus');
+        const detailEl = document.getElementById('cmsSyncDetail');
+
+        bar.className = 'cms-sync-urgent';
+        bar.style.cssText = 'padding:12px 16px;border-radius:var(--r-md);margin-bottom:var(--sp-md);display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;transition:all 300ms;';
+        icon.textContent = '🔴';
+        const hoursAgo = Math.floor(minutesAgo / 60);
+        statusEl.innerHTML = `<span style="color:#ef4444;">CMS Sync: 동기화 필요! (${hoursAgo}시간 전)</span>`;
+        detailEl.innerHTML = `<span style="color:#ef4444;">CMS 데이터가 오래되었습니다. CMS에서 "📦 Sync 창고" 북마크를 다시 실행하세요.</span>`;
+      },
+
+      // 🔴 데이터 전혀 없음
+      _renderNoData() {
+        const bar = document.getElementById('cmsSyncBar');
+        const icon = document.getElementById('cmsSyncIcon');
+        const statusEl = document.getElementById('cmsSyncStatus');
+        const detailEl = document.getElementById('cmsSyncDetail');
+
+        bar.className = 'cms-sync-urgent';
+        bar.style.cssText = 'padding:12px 16px;border-radius:var(--r-md);margin-bottom:var(--sp-md);display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;transition:all 300ms;';
+        icon.textContent = '🔴';
+        statusEl.innerHTML = `<span style="color:#ef4444;">CMS Sync: 동기화 이력 없음</span>`;
+        detailEl.innerHTML = `<span style="color:#ef4444;">CMS 페이지에서 "📦 Sync 창고" 북마크를 실행하세요. SKU/Qty 자동 입력을 위해 필수입니다.</span>`;
+      },
+
+      // 🔴 기타 오류
+      _renderUrgent(title, message) {
+        const bar = document.getElementById('cmsSyncBar');
+        const icon = document.getElementById('cmsSyncIcon');
+        const statusEl = document.getElementById('cmsSyncStatus');
+        const detailEl = document.getElementById('cmsSyncDetail');
+
+        bar.className = 'cms-sync-urgent';
+        bar.style.cssText = 'padding:12px 16px;border-radius:var(--r-md);margin-bottom:var(--sp-md);display:flex;justify-content:space-between;align-items:center;gap:var(--sp-md);flex-wrap:wrap;transition:all 300ms;';
+        icon.textContent = '🔴';
+        statusEl.innerHTML = `<span style="color:#ef4444;">CMS Sync: ${title}</span>`;
+        detailEl.innerHTML = `<span style="color:#ef4444;">${message}</span>`;
+      },
+
+      // 🆕 자동 새로고침 시작 (1분마다)
+      startAutoRefresh() {
+        if (this._refreshTimer) clearInterval(this._refreshTimer);
+        this._refreshTimer = setInterval(() => {
+          this.checkStatus();
+        }, 60000); // 1분마다
+      },
+
+      // 🆕 Pull 성공 시 타임스탬프 저장
+      saveTimestamp(timestamp) {
+        if (timestamp && timestamp > 0) {
+          localStorage.setItem('cms_last_timestamp', String(timestamp));
+        }
+      }
+    };
+
+    // ═══════════════════════════════════════════════════════════════
     // 🆕 NEW — PullSales Module (영업팀 시트에서 Invoice 가져오기)
     // ═══════════════════════════════════════════════════════════════
     const PullSales = {
@@ -1412,6 +1630,8 @@
 
           this.fetchedInvoices = data.invoices || [];
           this.lastCmsTimestamp = data.cmsTimestamp || 0;  // 🆕 CMS 동기화 시간 저장
+          CmsSync.saveTimestamp(data.cmsTimestamp);  // 🆕 CmsSync에도 저장
+          CmsSync.checkStatus();  // 🆕 상태 뱃지 갱신
           this._skipDefaultSelection = false;  // 기본 선택 활성화
           this.renderList();
 
@@ -2017,7 +2237,15 @@
 
       switchTab(tabName) {
         document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === tabName));
-        if (tabName === 'manager') { State.managerMode = true; document.body.classList.add('manager-mode'); }
+        if (tabName === 'manager') {
+          State.managerMode = true;
+          document.body.classList.add('manager-mode');
+          // 🆕 Manager 모드 진입 시 CMS 상태 체크 + 자동 갱신 시작
+          setTimeout(() => {
+            CmsSync.checkStatus();
+            CmsSync.startAutoRefresh();
+          }, 300);
+        }
         else { document.body.classList.remove('manager-mode'); }
         document.getElementById('recordsPanel').classList.toggle('hidden', tabName !== 'records');
         document.getElementById('managerPanel').classList.toggle('hidden', tabName !== 'manager');
