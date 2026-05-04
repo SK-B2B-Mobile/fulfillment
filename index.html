@@ -119,7 +119,7 @@
     .rev-cards { display:flex; gap:8px; align-items:center; }
     .rev-card {
       background:rgba(15,37,64,0.8); border:0.5px solid rgba(42,80,128,0.6);
-      border-radius:8px; padding:5px 12px; cursor:pointer; min-width:120px;
+      border-radius:8px; padding:5px 14px; cursor:pointer; min-width:150px;
       transition:border-color 0.2s, background 0.2s;
     }
     .rev-card:hover { border-color:#60a5fa; background:rgba(26,58,92,0.9); }
@@ -3230,8 +3230,9 @@
         return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
       },
 
-      // 카드 업데이트
+      // 카드 업데이트 (서버 데이터 있으면 우선, 없으면 로컬)
       updateCards() {
+        if (this._serverData) { this.updateCardsFromServer(); return; }
         var data = this.compute(State.jobs);
         var cur = this.curKey(), prev = this.prevKey();
         var dc = data[cur], dp = data[prev];
@@ -3247,9 +3248,9 @@
         this._data = data;
       },
 
-      // 팝업 열기
+      // 팝업 열기 (서버 데이터 우선, 없으면 로컬 데이터)
       openPopup(key) {
-        var data = this._data || this.compute(State.jobs);
+        var data = this._serverData || this._data || this.compute(State.jobs);
         var d = data[key];
         if (!d) return;
         document.getElementById('revPopupTitle').textContent = this.monthLabel(key) + ' — Revenue Detail';
@@ -3317,6 +3318,38 @@
         document.getElementById('revContentPicker').innerHTML = h || '<div style="color:#4a6a7a;font-size:13px;padding:8px 0;">No data</div>';
       },
 
+      // Apps Script에서 전체 데이터 기준 매출 집계 가져오기
+      fetchFromServer() {
+        var self = this;
+        var url = State.scriptUrl + '?op=getRevenueSummary&t=' + Date.now();
+        fetch(url)
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            if (data.ok && data.summary) {
+              self._serverData = data.summary;
+              self.updateCardsFromServer();
+            }
+          })
+          .catch(function(e){ console.warn('[Revenue] Server fetch failed:', e); });
+      },
+
+      // 서버 데이터로 카드 업데이트
+      updateCardsFromServer() {
+        var d = this._serverData;
+        if (!d) return;
+        var cur = this.curKey(), prev = this.prevKey();
+        var dc = d[cur]  || { amount:0, count:0 };
+        var dp = d[prev] || { amount:0, count:0 };
+
+        document.getElementById('revLabelCur').textContent  = this.monthLabel(cur);
+        document.getElementById('revAmtCur').textContent    = this.fmt(dc.amount);
+        document.getElementById('revSubCur').textContent    = dc.count + ' orders';
+
+        document.getElementById('revLabelPrev').textContent = this.monthLabel(prev);
+        document.getElementById('revAmtPrev').textContent   = this.fmt(dp.amount);
+        document.getElementById('revSubPrev').textContent   = dp.count + ' orders';
+      },
+
       // 이벤트 바인딩
       init() {
         var self = this;
@@ -3329,7 +3362,11 @@
         });
         document.getElementById('revTab1').addEventListener('click', function(){ self.switchTab('date'); });
         document.getElementById('revTab2').addEventListener('click', function(){ self.switchTab('picker'); });
+        // 서버에서 정확한 데이터 가져오기 (State.jobs 기반 임시 표시 후 교체)
         this.updateCards();
+        this.fetchFromServer();
+        // 30분마다 자동 갱신
+        setInterval(function(){ self.fetchFromServer(); }, 30 * 60 * 1000);
       }
     };
 
