@@ -115,6 +115,41 @@
 
     .header-left { display:flex; align-items:center; gap:var(--sp-md); }
 
+    /* Revenue Cards */
+    .rev-cards { display:flex; gap:8px; align-items:center; }
+    .rev-card {
+      background:rgba(15,37,64,0.8); border:0.5px solid rgba(42,80,128,0.6);
+      border-radius:8px; padding:5px 12px; cursor:pointer; min-width:120px;
+      transition:border-color 0.2s, background 0.2s;
+    }
+    .rev-card:hover { border-color:#60a5fa; background:rgba(26,58,92,0.9); }
+    .rev-card-label { font-size:9px; color:#4a8ab0; text-transform:uppercase; letter-spacing:0.7px; }
+    .rev-card-amount { font-size:13px; font-weight:600; margin-top:1px; }
+    .rev-card-sub { font-size:9px; color:#4a6a7a; margin-top:1px; }
+
+    /* Revenue Popup */
+    #revPopupOverlay {
+      display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+      background:rgba(0,0,0,0.6); z-index:9999;
+      align-items:center; justify-content:center;
+    }
+    #revPopupOverlay.open { display:flex; }
+    #revPopupBox {
+      background:#0d1b2e; border:0.5px solid #2a5080; border-radius:14px;
+      padding:22px 26px; width:480px; max-width:92vw; max-height:80vh; overflow-y:auto;
+    }
+    .rev-tab { 
+      padding:5px 16px; border-radius:6px; font-size:12px; cursor:pointer;
+      border:0.5px solid #2a5080; background:#0a1628; color:#60a5fa;
+      display:inline-block; user-select:none;
+    }
+    .rev-tab.on { background:#1e3a5f; color:#93c5fd; border-color:#4a80b0; }
+    .rev-row {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:8px 0; border-bottom:0.5px solid #1a2f4a; font-size:13px;
+    }
+    .rev-row:last-child { border-bottom:none; }
+
     .logo {
       display: flex; align-items: center; gap: var(--sp-md);
       font-size: var(--fs-xl); font-weight: 800;
@@ -774,6 +809,41 @@
         <div class="logo-text">StyleKorean B2B Fulfillment</div>
       </div>
       <span style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);padding:3px 9px;border-radius:999px;font-size:var(--fs-xs);font-weight:700;">v2.1</span>
+      <div class="rev-cards">
+        <div class="rev-card" id="revCardCur">
+          <div class="rev-card-label" id="revLabelCur">This Month</div>
+          <div class="rev-card-amount" id="revAmtCur" style="color:#4ade80;">$0</div>
+          <div class="rev-card-sub" id="revSubCur">0 orders</div>
+        </div>
+        <div class="rev-card" id="revCardPrev">
+          <div class="rev-card-label" id="revLabelPrev">Last Month</div>
+          <div class="rev-card-amount" id="revAmtPrev" style="color:#94a3b8;">$0</div>
+          <div class="rev-card-sub" id="revSubPrev">0 orders</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Revenue Detail Popup -->
+    <div id="revPopupOverlay">
+      <div id="revPopupBox">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+          <div>
+            <div style="font-size:14px;font-weight:600;color:#fff;" id="revPopupTitle"></div>
+            <div style="font-size:11px;color:#4a8ab0;margin-top:2px;">Completed orders · Ship date basis</div>
+          </div>
+          <button id="revPopupClose" style="background:#1e3a5f;border:0.5px solid #2a5080;color:#93c5fd;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:12px;">✕ Close</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:16px;">
+          <div class="rev-tab on" id="revTab1">By Date</div>
+          <div class="rev-tab" id="revTab2">By Picker</div>
+        </div>
+        <div id="revContentDate"></div>
+        <div id="revContentPicker" style="display:none;"></div>
+        <div style="display:flex;justify-content:space-between;padding-top:10px;margin-top:8px;border-top:0.5px solid #1e3a5f;">
+          <span style="font-size:12px;color:#4a8ab0;">Total Revenue</span>
+          <span style="font-size:15px;font-weight:600;color:#4ade80;" id="revPopupTotal"></span>
+        </div>
+      </div>
     </div>
     <div class="header-right">
       <div class="sync-indicator">
@@ -2308,6 +2378,7 @@
               State.pickerColors = data.pickerColors;
             }
             this.renderTable(); this.updateKPIs();
+            if (typeof RevenueTracker !== 'undefined') RevenueTracker.updateCards();
             const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
             saved.pickers = State.pickers;
             saved.pickerColors = State.pickerColors;
@@ -3091,10 +3162,182 @@
       }
     };
 
+    // ═══════════════════════════════════════════════════════════════
+    // 💰 REVENUE TRACKER - 월별 매출 집계 (Ship Date 기준, Completed만)
+    // ═══════════════════════════════════════════════════════════════
+    const RevenueTracker = {
+
+      // 월 키 반환 (YYYY-MM)
+      monthKey(dateStr) {
+        if (!dateStr || dateStr === '-') return null;
+        var s = String(dateStr).trim();
+        // YYYY-MM-DD 또는 MM/DD/YYYY 처리
+        if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+        if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) return s.slice(6,10) + '-' + s.slice(0,2);
+        return null;
+      },
+
+      // 이번 달 / 지난 달 키
+      curKey() {
+        var d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      },
+      prevKey() {
+        var d = new Date();
+        d.setMonth(d.getMonth()-1);
+        return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      },
+
+      // 월 레이블 (예: May 2026)
+      monthLabel(key) {
+        if (!key) return '-';
+        var parts = key.split('-');
+        var names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return names[parseInt(parts[1])-1] + ' ' + parts[0];
+      },
+
+      // 집계 실행
+      compute(jobs) {
+        var cur = this.curKey(), prev = this.prevKey();
+        var result = {};
+        result[cur]  = { amount:0, count:0, byDate:{}, byPicker:{} };
+        result[prev] = { amount:0, count:0, byDate:{}, byPicker:{} };
+
+        (jobs || []).forEach(function(j) {
+          if ((j.status || '').toLowerCase() !== 'completed') return;
+          var mk = RevenueTracker.monthKey(j.shipDate);
+          if (mk !== cur && mk !== prev) return;
+          var amt = parseFloat(j.amount) || 0;
+          var m = result[mk];
+          m.amount += amt;
+          m.count++;
+          // By Date
+          var dk = j.shipDate || '?';
+          if (!m.byDate[dk]) m.byDate[dk] = { amount:0, count:0 };
+          m.byDate[dk].amount += amt;
+          m.byDate[dk].count++;
+          // By Picker
+          var pk = j.picker || 'Unknown';
+          if (!m.byPicker[pk]) m.byPicker[pk] = { amount:0, count:0 };
+          m.byPicker[pk].amount += amt;
+          m.byPicker[pk].count++;
+        });
+        return result;
+      },
+
+      // 금액 포맷
+      fmt(n) {
+        return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      },
+
+      // 카드 업데이트
+      updateCards() {
+        var data = this.compute(State.jobs);
+        var cur = this.curKey(), prev = this.prevKey();
+        var dc = data[cur], dp = data[prev];
+
+        document.getElementById('revLabelCur').textContent  = this.monthLabel(cur);
+        document.getElementById('revAmtCur').textContent    = this.fmt(dc.amount);
+        document.getElementById('revSubCur').textContent    = dc.count + ' orders';
+
+        document.getElementById('revLabelPrev').textContent = this.monthLabel(prev);
+        document.getElementById('revAmtPrev').textContent   = this.fmt(dp.amount);
+        document.getElementById('revSubPrev').textContent   = dp.count + ' orders';
+
+        this._data = data;
+      },
+
+      // 팝업 열기
+      openPopup(key) {
+        var data = this._data || this.compute(State.jobs);
+        var d = data[key];
+        if (!d) return;
+        document.getElementById('revPopupTitle').textContent = this.monthLabel(key) + ' — Revenue Detail';
+        document.getElementById('revPopupTotal').textContent = this.fmt(d.amount);
+        this._popupKey = key;
+        this.renderDate(d);
+        this.renderPicker(d);
+        document.getElementById('revTab1').className = 'rev-tab on';
+        document.getElementById('revTab2').className = 'rev-tab';
+        document.getElementById('revContentDate').style.display = 'block';
+        document.getElementById('revContentPicker').style.display = 'none';
+        document.getElementById('revPopupOverlay').classList.add('open');
+      },
+
+      // 팝업 닫기
+      closePopup() {
+        document.getElementById('revPopupOverlay').classList.remove('open');
+      },
+
+      // 탭 전환
+      switchTab(tab) {
+        var isDate = tab === 'date';
+        document.getElementById('revTab1').className = 'rev-tab' + (isDate ? ' on' : '');
+        document.getElementById('revTab2').className = 'rev-tab' + (!isDate ? ' on' : '');
+        document.getElementById('revContentDate').style.display = isDate ? 'block' : 'none';
+        document.getElementById('revContentPicker').style.display = !isDate ? 'block' : 'none';
+      },
+
+      // By Date 렌더
+      renderDate(d) {
+        var keys = Object.keys(d.byDate).sort();
+        var h = '';
+        keys.forEach(function(k) {
+          var r = d.byDate[k];
+          h += '<div class="rev-row">'
+            + '<span style="color:#7a9ab8;width:110px;">' + k + '</span>'
+            + '<span style="color:#64748b;font-size:12px;">' + r.count + ' orders</span>'
+            + '<span style="color:#e2e8f0;font-weight:500;">' + RevenueTracker.fmt(r.amount) + '</span>'
+            + '</div>';
+        });
+        document.getElementById('revContentDate').innerHTML = h || '<div style="color:#4a6a7a;font-size:13px;padding:8px 0;">No data</div>';
+      },
+
+      // By Picker 렌더
+      renderPicker(d) {
+        var COLORS = ['#f59e0b','#4ade80','#60a5fa','#c084fc','#fb7185','#34d399','#fbbf24'];
+        var entries = Object.entries(d.byPicker).sort(function(a,b){ return b[1].amount - a[1].amount; });
+        var total = d.amount || 1;
+        var h = '';
+        entries.forEach(function(e, i) {
+          var name = e[0], r = e[1];
+          var pct = Math.round(r.amount / total * 100);
+          var color = COLORS[i % COLORS.length];
+          h += '<div class="rev-row">'
+            + '<span style="display:flex;align-items:center;gap:6px;width:140px;">'
+            + '<span style="width:8px;height:8px;border-radius:50%;background:'+color+';display:inline-block;flex-shrink:0;"></span>'
+            + '<span style="color:#e2e8f0;">'+name+'</span></span>'
+            + '<span style="color:#64748b;font-size:12px;">'+r.count+' orders</span>'
+            + '<div style="text-align:right;">'
+            + '<div style="color:#e2e8f0;font-weight:500;">'+RevenueTracker.fmt(r.amount)+'</div>'
+            + '<div style="width:70px;height:4px;background:#1a2f4a;border-radius:2px;margin-top:3px;">'
+            + '<div style="width:'+pct+'%;height:4px;background:'+color+';border-radius:2px;"></div></div>'
+            + '</div></div>';
+        });
+        document.getElementById('revContentPicker').innerHTML = h || '<div style="color:#4a6a7a;font-size:13px;padding:8px 0;">No data</div>';
+      },
+
+      // 이벤트 바인딩
+      init() {
+        var self = this;
+        var cur = this.curKey(), prev = this.prevKey();
+        document.getElementById('revCardCur').addEventListener('click', function(){ self.openPopup(cur); });
+        document.getElementById('revCardPrev').addEventListener('click', function(){ self.openPopup(prev); });
+        document.getElementById('revPopupClose').addEventListener('click', function(){ self.closePopup(); });
+        document.getElementById('revPopupOverlay').addEventListener('click', function(e){
+          if (e.target === document.getElementById('revPopupOverlay')) self.closePopup();
+        });
+        document.getElementById('revTab1').addEventListener('click', function(){ self.switchTab('date'); });
+        document.getElementById('revTab2').addEventListener('click', function(){ self.switchTab('picker'); });
+        this.updateCards();
+      }
+    };
+
     const _origAppInit = App.init.bind(App);
     App.init = function() {
       _origAppInit();
       AutoDelete.init();
+      RevenueTracker.init();
     };
   </script>
 
