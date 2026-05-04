@@ -2986,6 +2986,116 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => { App.init(); });
+
+    // ═══════════════════════════════════════════════════════════════
+    // AUTO DELETE - Inspection 완료 오더 다음날 새벽 자동 삭제
+    // 기준: inspStatus가 PASS 또는 ISSUES 인 오더
+    // 실행: 매일 새벽 4:00 AM (로컬 시간)
+    // ═══════════════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════════════════
+    // AUTO DELETE - 브라우저 열 때 전날 Inspection 완료 오더 자동 삭제
+    // 기준: PASS 또는 ISSUES 완료 + 오늘 날짜가 아닌 오더
+    // 실행: 브라우저 열 때마다 (하루 1회, 중복 방지)
+    // ═══════════════════════════════════════════════════════════════
+    const AutoDelete = {
+      STORAGE_KEY: 'autoDelete_lastRun',
+
+      // PASS 또는 ISSUES 완료 여부
+      isInspected(job) {
+        const v = (job.inspStatus || job.inspection || '').toString();
+        return v.indexOf('PASS') >= 0 || v.indexOf('ISSUES') >= 0;
+      },
+
+      // 오늘 이미 실행했는지 확인 (하루 1회만)
+      alreadyRanToday() {
+        const last = localStorage.getItem(this.STORAGE_KEY);
+        if (!last) return false;
+        return new Date(last).toDateString() === new Date().toDateString();
+      },
+
+      // 오늘 날짜 문자열 반환 (YYYY-MM-DD)
+      todayStr() {
+        const d = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+      },
+
+      // 오더의 날짜가 오늘인지 확인 (오늘 오더는 삭제 안 함)
+      isToday(job) {
+        const today = this.todayStr();
+        const shipDate = (job.shipDate || '').toString().replace(/\//g, '-');
+        const endDate  = (job.endAtISO || '').toString().slice(0, 10);
+        return shipDate === today || endDate === today;
+      },
+
+      run() {
+        if (this.alreadyRanToday()) {
+          console.log('[AutoDelete] Already ran today, skipping.');
+          return;
+        }
+
+        // 전날 이전 오더 중 Inspection 완료된 것만
+        const toDelete = (State.jobs || []).filter(j => this.isInspected(j) && !this.isToday(j));
+
+        if (toDelete.length === 0) {
+          localStorage.setItem(this.STORAGE_KEY, new Date().toISOString());
+          console.log('[AutoDelete] No inspected jobs to delete.');
+          return;
+        }
+
+        console.log('[AutoDelete] Auto-deleting ' + toDelete.length + ' inspected job(s)...');
+
+        // UI에서 먼저 제거
+        const invoiceSet = new Set(toDelete.map(j => j.invoice));
+        State.jobs = State.jobs.filter(j => !invoiceSet.has(j.invoice));
+        const totalPagesAfter = Math.ceil(State.jobs.length / (State.itemsPerPage || 15)) || 1;
+        if (State.currentPage > totalPagesAfter) State.currentPage = 1;
+        App.renderTable();
+        App.updateKPIs();
+        showToast('🗑️ Auto-deleted ' + toDelete.length + ' inspected job(s) from previous day', 'success');
+
+        // Apps Script 서버에서 삭제
+        const deleteNext = (i) => {
+          if (i >= toDelete.length) {
+            localStorage.setItem(AutoDelete.STORAGE_KEY, new Date().toISOString());
+            console.log('[AutoDelete] All done.');
+            return;
+          }
+          const url = State.scriptUrl + '?op=deleteJob&invoice=' + encodeURIComponent(toDelete[i].invoice) + '&t=' + Date.now();
+          fetch(url, { mode: 'no-cors' }).then(() => deleteNext(i + 1)).catch(() => deleteNext(i + 1));
+        };
+        deleteNext(0);
+      },
+
+      // 자정까지 남은 시간 계산 후 타이머 예약
+      scheduleTimer() {
+        const now = new Date();
+        const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 10, 0);
+        const msUntil = midnight - now;
+        const hUntil = Math.floor(msUntil / 3600000);
+        const mUntil = Math.floor((msUntil % 3600000) / 60000);
+        console.log('[AutoDelete] Timer scheduled: ' + hUntil + 'h ' + mUntil + 'm until midnight auto-delete');
+        setTimeout(() => {
+          // 자정에 실행 (날짜가 바뀌었으므로 alreadyRanToday 초기화됨)
+          this.run();
+          // 이후 매 24시간마다 반복
+          setInterval(() => this.run(), 24 * 60 * 60 * 1000);
+        }, msUntil);
+      },
+
+      init() {
+        // ① 브라우저 열 때: 데이터 로드 후 5초 뒤 즉시 실행
+        setTimeout(() => this.run(), 5000);
+        // ② 브라우저 켜둔 채로: 자정 타이머 예약
+        this.scheduleTimer();
+      }
+    };
+
+    const _origAppInit = App.init.bind(App);
+    App.init = function() {
+      _origAppInit();
+      AutoDelete.init();
+    };
   </script>
 
 <script>
