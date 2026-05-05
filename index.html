@@ -3077,11 +3077,16 @@
         return v.indexOf('PASS') >= 0 || v.indexOf('ISSUES') >= 0;
       },
 
-      // 오늘 이미 실행했는지 확인 (하루 1회만)
+      // 오늘 이미 실행했는지 확인 (하루 1회만) - 로컬 날짜 기준
       alreadyRanToday() {
         const last = localStorage.getItem(this.STORAGE_KEY);
         if (!last) return false;
-        return new Date(last).toDateString() === new Date().toDateString();
+        // UTC가 아닌 로컬 날짜 기준으로 비교
+        const lastDate = new Date(last);
+        const today = new Date();
+        return lastDate.getFullYear() === today.getFullYear() &&
+               lastDate.getMonth()    === today.getMonth() &&
+               lastDate.getDate()     === today.getDate();
       },
 
       // 오늘 날짜 문자열 반환 (YYYY-MM-DD)
@@ -3091,12 +3096,16 @@
         return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
       },
 
-      // 오더의 날짜가 오늘인지 확인 (오늘 오더는 삭제 안 함)
-      isToday(job) {
+      // Inspection이 오늘 완료됐는지 확인 (오늘 완료된 것은 삭제 안 함)
+      // 기준: inspEnd(Inspection 완료 날짜) → 없으면 endAtISO
+      isInspectedToday(job) {
         const today = this.todayStr();
-        const shipDate = (job.shipDate || '').toString().replace(/\//g, '-');
-        const endDate  = (job.endAtISO || '').toString().slice(0, 10);
-        return shipDate === today || endDate === today;
+        // inspEnd: "2026-05-04 HH:mm:ss" 형식
+        const inspEnd = (job.inspEnd || '').toString().slice(0, 10);
+        if (inspEnd && inspEnd !== '0001-01-01') return inspEnd === today;
+        // inspEnd 없으면 endAtISO 기준
+        const endDate = (job.endAtISO || '').toString().slice(0, 10);
+        return endDate === today;
       },
 
       run() {
@@ -3105,8 +3114,8 @@
           return;
         }
 
-        // 전날 이전 오더 중 Inspection 완료된 것만
-        const toDelete = (State.jobs || []).filter(j => this.isInspected(j) && !this.isToday(j));
+        // Inspection 완료 + 오늘 완료된 것은 제외 (어제 이전 완료만 삭제)
+        const toDelete = (State.jobs || []).filter(j => this.isInspected(j) && !this.isInspectedToday(j));
 
         if (toDelete.length === 0) {
           localStorage.setItem(this.STORAGE_KEY, new Date().toISOString());
