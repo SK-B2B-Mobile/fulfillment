@@ -3081,12 +3081,8 @@
       alreadyRanToday() {
         const last = localStorage.getItem(this.STORAGE_KEY);
         if (!last) return false;
-        // UTC가 아닌 로컬 날짜 기준으로 비교
-        const lastDate = new Date(last);
-        const today = new Date();
-        return lastDate.getFullYear() === today.getFullYear() &&
-               lastDate.getMonth()    === today.getMonth() &&
-               lastDate.getDate()     === today.getDate();
+        // 로컬 날짜 문자열(YYYY-MM-DD)로 직접 비교
+        return last === this.todayStr();
       },
 
       // 오늘 날짜 문자열 반환 (YYYY-MM-DD)
@@ -3118,7 +3114,7 @@
         const toDelete = (State.jobs || []).filter(j => this.isInspected(j) && !this.isInspectedToday(j));
 
         if (toDelete.length === 0) {
-          localStorage.setItem(this.STORAGE_KEY, new Date().toISOString());
+          localStorage.setItem(this.STORAGE_KEY, this.todayStr());
           console.log('[AutoDelete] No inspected jobs to delete.');
           return;
         }
@@ -3137,7 +3133,7 @@
         // Apps Script 서버에서 삭제
         const deleteNext = (i) => {
           if (i >= toDelete.length) {
-            localStorage.setItem(AutoDelete.STORAGE_KEY, new Date().toISOString());
+            localStorage.setItem(AutoDelete.STORAGE_KEY, AutoDelete.todayStr());
             console.log('[AutoDelete] All done.');
             return;
           }
