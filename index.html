@@ -2379,6 +2379,7 @@
             }
             this.renderTable(); this.updateKPIs();
             if (typeof RevenueTracker !== 'undefined') RevenueTracker.updateCards();
+            if (typeof AutoDelete !== 'undefined') AutoDelete.run();
             const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY) || '{}');
             saved.pickers = State.pickers;
             saved.pickerColors = State.pickerColors;
@@ -3160,9 +3161,8 @@
       },
 
       init() {
-        // ① 브라우저 열 때: 데이터 로드 후 5초 뒤 즉시 실행
-        setTimeout(() => this.run(), 5000);
-        // ② 브라우저 켜둔 채로: 자정 타이머 예약
+        // 브라우저 켜둔 채로: 자정 타이머 예약만
+        // ※ 실행은 fetchData 완료 후 호출됨 (데이터 로드 보장)
         this.scheduleTimer();
       }
     };
