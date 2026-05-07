@@ -3115,8 +3115,11 @@
         const toDelete = (State.jobs || []).filter(j => this.isInspected(j) && !this.isInspectedToday(j));
 
         if (toDelete.length === 0) {
-          localStorage.setItem(this.STORAGE_KEY, this.todayStr());
-          console.log('[AutoDelete] No inspected jobs to delete.');
+          // 데이터가 실제로 로드된 상태에서만 lastRun 저장 (빈 State.jobs면 저장 안 함)
+          if (State.jobs && State.jobs.length > 0) {
+            localStorage.setItem(this.STORAGE_KEY, this.todayStr());
+          }
+          console.log('[AutoDelete] No inspected jobs to delete. (jobs: ' + (State.jobs||[]).length + ')');
           return;
         }
 
