@@ -441,6 +441,7 @@
           🗑 Delete (<span id="deleteCount">0</span>)
         </button>
         <button class="btn btn-secondary btn-sm" onclick="App.refresh()">↻ Refresh</button>
+        <button class="btn btn-secondary btn-sm" onclick="WorkerKPI.open()" style="border-color:rgba(99,102,241,0.5);color:#a5b4fc;">📊 Today's Stats</button>
         <button class="btn btn-primary btn-sm" onclick="App.exportCSV()">⬇ Export CSV</button>
       </div>
     </div>
@@ -607,6 +608,27 @@
   </div>
 </div>
 
+<!-- ── 작업자 일일 KPI 팝업 ───────────────────────────── -->
+<div id="kpi-overlay" onclick="if(event.target===this)WorkerKPI.close()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(4px);z-index:2000;align-items:center;justify-content:center;padding:20px;">
+  <div id="kpi-box" style="background:var(--bg-card);border:1px solid #2a5080;border-radius:16px;padding:22px 24px;width:880px;max-width:96vw;max-height:86vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.6);">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:12px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#e2e8f0;">📊 Worker KPI — Daily Performance</div>
+        <div style="font-size:11px;color:#4a8ab0;margin-top:3px;">Completed jobs by worker · Pick time &amp; inspection quality</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button onclick="WorkerKPI.shiftDay(-1)" style="background:#1e3a5f;border:.5px solid #2a5080;color:#93c5fd;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px;font-weight:700;">‹</button>
+        <input type="date" id="kpi-date" onchange="WorkerKPI.onDateChange()" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;padding:5px 8px;font-size:13px;font-family:'JetBrains Mono',monospace;">
+        <button onclick="WorkerKPI.shiftDay(1)" style="background:#1e3a5f;border:.5px solid #2a5080;color:#93c5fd;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px;font-weight:700;">›</button>
+        <button onclick="WorkerKPI.today()" style="background:#1e3a5f;border:.5px solid #2a5080;color:#93c5fd;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;">Today</button>
+        <button onclick="WorkerKPI.close()" style="background:#1e3a5f;border:.5px solid #2a5080;color:#93c5fd;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;">✕ Close</button>
+      </div>
+    </div>
+    <div id="kpi-body"></div>
+    <div id="kpi-foot" style="margin-top:10px;text-align:center;font-size:10px;color:#2a4a6a;"></div>
+  </div>
+</div>
+
 <div class="modal" id="pinModal">
   <div class="modal-content">
     <div class="modal-header"><h3 class="modal-title">🔒 Manager PIN Required</h3><button class="modal-close" onclick="App.closePinModal()">×</button></div>
@@ -720,6 +742,93 @@
       showDetail(key){if(!this.data){showToast('Data loading. Please try again in a moment.','info',2500);return;}const b=this.data[key]||{count:0,amount:0,byTruck:{},byPicker:{}};const{today:td,d1:nd,d2:d2d}=this.dates||{};const tm={overdue:'🔥 Overdue (Unpicked)',today:`📅 Today Ship Out — ${this._displayDate(td)}`,d1:`📅 Tomorrow Ship Out — ${this._displayDate(nd)}`,d2:`📅 Day After Ship Out — ${this._displayDate(d2d)}`,inprogress:'🔄 In Progress — Now Picking'};document.getElementById('ss-popup-title').textContent=tm[key]||key;var subEl=document.getElementById('ss-popup-sub');if(subEl)subEl.textContent=(key==='inprogress')?'Filter: In Progress (Started, not Completed) · Warehouse Jobs Sheet':'Filter: Unpicked (no Start Time) · Warehouse Jobs Sheet';var totLbl=document.getElementById('ss-popup-total-label');if(totLbl)totLbl.textContent=(key==='inprogress')?'In Progress Total':'Unpicked Total';document.getElementById('ss-popup-total').textContent=`${b.count} jobs · ${this._fmtFull(b.amount)}`;if(this.asOf)document.getElementById('ss-popup-asof').textContent=`As of: ${this.asOf}`;const TO=['UPS','PU','TK','FedEx','Other'];const trucks=Object.entries(b.byTruck||{}).sort((a,z)=>{const ai=TO.indexOf(a[0]),zi=TO.indexOf(z[0]);return(ai<0?99:ai)-(zi<0?99:zi);});const mkRow=(name,count,amount)=>{const st=this._truckStyle(name);return `<div class="ss-popup-row"><span class="ss-popup-name"><span style="font-size:11px;font-weight:800;color:${st.fg};background:${st.bg};border:0.5px solid ${st.bd};border-radius:5px;padding:2px 9px;">${name}</span></span><span class="ss-popup-count">${count} jobs</span><span class="ss-popup-amount">${this._fmtFull(amount)}</span></div>`;};document.getElementById('ss-popup-trucks').innerHTML=trucks.length?trucks.map(([n,d])=>mkRow(n,d.count,d.amount)).join(''):'<div style="color:#3a5a7a;font-size:12px;padding:4px 0">None</div>';const isProg=(key==='inprogress');const pickers=Object.entries(b.byPicker||{}).sort((a,z)=>{if(a[0]==='미배정')return 1;if(z[0]==='미배정')return-1;return z[1].count-a[1].count;});const mkPickerRow=([n,d])=>{const nm=(n==='미배정')?'Unassigned':n;const bad=(n==='미배정');let el='';if(isProg&&d.oldestStart){const mins=this._elapsedMins(d.oldestStart);if(mins!=null){const c=mins>=60?'#ef4444':(mins>=30?'#f59e0b':'#64748b');el=`<span style="font-size:10px;color:${c};font-weight:700;margin-left:5px;white-space:nowrap;">⏱ ${this._elapsedText(mins)}</span>`;}}let cl='';if(!isProg&&!bad){cl=`<span style="font-size:9px;font-weight:700;color:#a78bfa;background:rgba(139,92,246,0.16);border:0.5px solid rgba(139,92,246,0.4);border-radius:4px;padding:1px 5px;margin-left:5px;white-space:nowrap;vertical-align:middle;">📋 Claimed</span>`;}let tk='';if(d.trucks&&!bad){const TKO=['UPS','PU','TK','FedEx','Other'];const tnames=Object.keys(d.trucks).sort((a,z)=>{const ai=TKO.indexOf(a),zi=TKO.indexOf(z);return(ai<0?99:ai)-(zi<0?99:zi);});tk=tnames.map(tn=>{const st=this._truckStyle(tn);return `<span style="font-size:9px;font-weight:700;color:${st.fg};background:${st.bg};border:0.5px solid ${st.bd};border-radius:4px;padding:1px 5px;margin-left:4px;white-space:nowrap;vertical-align:middle;">${tn}</span>`;}).join('');}let iv='';if(d.invoices&&d.invoices.length&&!bad){const arr=d.invoices;const _chip=(no)=>`<span style="font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;color:#cbd5e1;background:rgba(148,163,184,0.14);border:0.5px solid rgba(148,163,184,0.3);border-radius:4px;padding:1px 5px;margin-left:4px;white-space:nowrap;vertical-align:middle;">${no}</span>`;if(arr.length<=3){iv=`<span class="ss-inv-wrap">${arr.map(_chip).join('')}</span>`;}else{const shown=arr.slice(0,3).map(_chip).join('');iv=`<span class="ss-inv-wrap" data-all="${arr.join(' ')}">${shown}<span onclick="ShipSchedule.expandInv(this)" title="Click to show all (${arr.join(', ')})" style="cursor:pointer;font-size:9px;font-weight:700;color:#a78bfa;background:rgba(139,92,246,0.16);border:0.5px solid rgba(139,92,246,0.4);border-radius:4px;padding:1px 5px;margin-left:4px;white-space:nowrap;vertical-align:middle;">+${arr.length-3}</span></span>`;}}return `<div class="ss-popup-row"><span class="ss-popup-name${bad?' unassigned':''}">${nm}${cl}${tk}${iv}${el}</span><span class="ss-popup-count">${d.count} jobs</span><span class="ss-popup-amount">${this._fmtFull(d.amount)}</span></div>`;};document.getElementById('ss-popup-pickers').innerHTML=pickers.length?pickers.map(mkPickerRow).join(''):'<div style="color:#3a5a7a;font-size:12px;padding:4px 0">None</div>';document.getElementById('ss-overlay').classList.add('open');},
       closeDetail(){document.getElementById('ss-overlay').classList.remove('open');},expandInv(el){try{const wrap=el.closest('.ss-inv-wrap');if(!wrap)return;const all=(wrap.getAttribute('data-all')||'').trim().split(/\s+/).filter(Boolean);if(!all.length)return;const chip=(no)=>`<span style="font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;color:#cbd5e1;background:rgba(148,163,184,0.14);border:0.5px solid rgba(148,163,184,0.3);border-radius:4px;padding:1px 5px;margin-left:4px;white-space:nowrap;vertical-align:middle;">${no}</span>`;wrap.innerHTML=all.map(chip).join('');}catch(e){}},
       init(){this.fetch();if(this._timer)clearInterval(this._timer);this._timer=setInterval(()=>this.fetch(),5*60*1000);const now=new Date(),mid=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1,0,0,30);setTimeout(()=>{this.fetch();setInterval(()=>this.fetch(),86400000);},mid-now);}
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // 📊 WORKER KPI — 작업자별 일일 성과
+    // ═══════════════════════════════════════════════════════════════
+    const WorkerKPI = {
+      _date:'',
+      _todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');},
+      _fmtAmt(n){return'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});},
+      _fmtMin(m){if(!m)return'—';if(m<60)return m+'m';return Math.floor(m/60)+'h '+(m%60)+'m';},
+      _displayDate(s){if(!s)return'';const d=new Date(s+'T12:00:00');const dow=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];return `${d.getMonth()+1}/${d.getDate()} (${dow})`;},
+      open(){this._date=this._todayStr();document.getElementById('kpi-date').value=this._date;document.getElementById('kpi-overlay').style.display='flex';this.fetch();},
+      close(){document.getElementById('kpi-overlay').style.display='none';},
+      today(){this._date=this._todayStr();document.getElementById('kpi-date').value=this._date;this.fetch();},
+      onDateChange(){this._date=document.getElementById('kpi-date').value;this.fetch();},
+      shiftDay(delta){const d=new Date((this._date||this._todayStr())+'T12:00:00');d.setDate(d.getDate()+delta);this._date=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');document.getElementById('kpi-date').value=this._date;this.fetch();},
+      async fetch(){
+        const body=document.getElementById('kpi-body');
+        body.innerHTML='<div style="text-align:center;padding:40px;color:#4a8ab0;font-size:13px;">Loading…</div>';
+        try{
+          const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),25000);
+          const r=await fetch(`${State.scriptUrl}?op=getWorkerKPI&date=${encodeURIComponent(this._date)}&t=${Date.now()}`,{signal:ctrl.signal});
+          clearTimeout(tid);
+          const d=await r.json();
+          if(d.ok){this.render(d);}else{body.innerHTML='<div style="text-align:center;padding:40px;color:#ef4444;font-size:13px;">Error: '+(d.error||'unknown')+'</div>';}
+        }catch(e){body.innerHTML='<div style="text-align:center;padding:40px;color:#ef4444;font-size:13px;">Failed to load ('+e.message+')</div>';}
+      },
+      render(d){
+        const body=document.getElementById('kpi-body');
+        const foot=document.getElementById('kpi-foot');
+        const isToday=(d.date===this._todayStr());
+        if(!d.workers||!d.workers.length){
+          body.innerHTML='<div style="text-align:center;padding:44px 20px;color:#64748b;"><div style="font-size:40px;opacity:.4;margin-bottom:10px;">📭</div><div style="font-size:14px;font-weight:600;">No completed jobs on '+this._displayDate(d.date)+'</div>'+(!isToday?'<div style="font-size:11px;color:#3a5a7a;margin-top:8px;">※ Inspected jobs from past days may have been auto-removed</div>':'')+'</div>';
+          foot.textContent='';
+          return;
+        }
+        const t=d.totals;
+        const cell=(v,c)=>`<td style="padding:9px 10px;text-align:right;font-family:'JetBrains Mono',monospace;color:${c||'#e2e8f0'};white-space:nowrap;">${v}</td>`;
+        let rows=d.workers.map((w,i)=>{
+          const badge=(window.CelebrationSystem&&window.CelebrationSystem.getBadge)?window.CelebrationSystem.getBadge(w.picker):'';
+          const inspParts=[];
+          if(w.inspPass>0)inspParts.push(`<span style="color:#10b981;">${w.inspPass}✓</span>`);
+          if(w.inspIssues>0)inspParts.push(`<span style="color:#ef4444;">${w.inspIssues}⚠</span>`);
+          if(w.inspPending>0)inspParts.push(`<span style="color:#f59e0b;">${w.inspPending} Pending</span>`);
+          const inspStr=inspParts.length?inspParts.join(' '):'<span style="color:#3a5a7a;">—</span>';
+          return `<tr style="border-bottom:.5px solid #1a2f4a;">
+            <td style="padding:9px 10px;color:#64748b;font-family:'JetBrains Mono',monospace;">${i+1}</td>
+            <td style="padding:9px 10px;color:#e2e8f0;font-weight:700;white-space:nowrap;">${w.picker}${badge?' '+badge:''}</td>
+            ${cell(w.jobs,'#a5b4fc')}
+            ${cell(w.sku)}
+            ${cell(w.qty)}
+            ${cell(this._fmtAmt(w.amount),'#4ade80')}
+            ${cell(this._fmtMin(w.avgMinutes),'#93c5fd')}
+            <td style="padding:9px 10px;text-align:right;font-size:11px;white-space:nowrap;">${inspStr}</td>
+          </tr>`;
+        }).join('');
+        const totInsp=[];
+        if(t.inspPass>0)totInsp.push(`<span style="color:#10b981;">${t.inspPass}✓</span>`);
+        if(t.inspIssues>0)totInsp.push(`<span style="color:#ef4444;">${t.inspIssues}⚠</span>`);
+        if(t.inspPending>0)totInsp.push(`<span style="color:#f59e0b;">${t.inspPending} Pending</span>`);
+        body.innerHTML=`
+          <div style="font-size:12px;color:#93c5fd;font-weight:700;margin-bottom:10px;">${this._displayDate(d.date)} · ${d.workers.length} worker(s)</div>
+          <table style="width:100%;border-collapse:separate;border-spacing:0;font-size:12px;">
+            <thead><tr style="border-bottom:1.5px solid #2a5080;color:#4a8ab0;font-size:10px;text-transform:uppercase;letter-spacing:.5px;">
+              <th style="padding:8px 10px;text-align:left;">#</th>
+              <th style="padding:8px 10px;text-align:left;">Worker</th>
+              <th style="padding:8px 10px;text-align:right;">Jobs</th>
+              <th style="padding:8px 10px;text-align:right;">SKU</th>
+              <th style="padding:8px 10px;text-align:right;">Qty</th>
+              <th style="padding:8px 10px;text-align:right;">Amount</th>
+              <th style="padding:8px 10px;text-align:right;">Avg/Job</th>
+              <th style="padding:8px 10px;text-align:right;">Inspection</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+            <tfoot><tr style="border-top:1.5px solid #2a5080;font-weight:700;">
+              <td style="padding:10px;"></td>
+              <td style="padding:10px;color:#4a8ab0;text-transform:uppercase;font-size:10px;letter-spacing:.5px;">Total</td>
+              <td style="padding:10px;text-align:right;font-family:'JetBrains Mono',monospace;color:#a5b4fc;">${t.jobs}</td>
+              <td style="padding:10px;text-align:right;font-family:'JetBrains Mono',monospace;color:#e2e8f0;">${t.sku}</td>
+              <td style="padding:10px;text-align:right;font-family:'JetBrains Mono',monospace;color:#e2e8f0;">${t.qty}</td>
+              <td style="padding:10px;text-align:right;font-family:'JetBrains Mono',monospace;color:#4ade80;">${this._fmtAmt(t.amount)}</td>
+              <td style="padding:10px;"></td>
+              <td style="padding:10px;text-align:right;font-size:11px;">${totInsp.join(' ')||'—'}</td>
+            </tr></tfoot>
+          </table>`;
+        foot.innerHTML=(!isToday?'※ Inspected jobs from past days may have been auto-removed, so past totals can be partial &nbsp;·&nbsp; ':'')+'As of: '+(d.asOf||'');
+      }
     };
 
     // ═══════════════════════════════════════════════════════════════
