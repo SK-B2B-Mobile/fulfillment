@@ -434,7 +434,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
     <div class="view" id="v-slots">
       <div class="eyebrow">Step 02 · Slot layout</div>
       <h2 class="h-page">슬롯 배치도</h2>
-      <p class="sub">오더 수량 큰 순서대로 <b>슬롯 1~15는 대량 고객사</b>, <b>16~30은 소량 고객사</b>로 자동 배정됩니다. 매니저는 드래그로 재배치할 수 있습니다.</p>
+      <p class="sub">고객사별 <b>SKU 개수가 많은 순</b>(동률이면 QTY 많은 순)으로 <b>슬롯 1~16은 고정 대량 렉</b>, <b>17~30은 무빙카트(소량)</b>에 자동 배정됩니다. 매니저는 드래그로 재배치할 수 있습니다.</p>
 
       <div class="card" style="margin-bottom:16px; padding:14px 16px;">
         <div class="row" style="align-items:center; gap:10px;">
@@ -468,10 +468,10 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
           <div class="slot-section large" style="margin-bottom:16px;">
             <div class="slot-section-head">
               <div class="slot-section-title">
-                <h3>대량 오더 구역</h3>
-                <span class="range">SLOT 01–15</span>
+                <h3>대량 오더 구역 (고정 렉)</h3>
+                <span class="range">SLOT 01–16</span>
                 <span class="divider"></span>
-                <span class="count" id="largeCount">0 / 15</span>
+                <span class="count" id="largeCount">0 / 16</span>
               </div>
             </div>
             <div class="slot-grid" id="slotsLarge"></div>
@@ -480,10 +480,10 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
           <div class="slot-section small">
             <div class="slot-section-head">
               <div class="slot-section-title">
-                <h3>소량 오더 구역</h3>
-                <span class="range">SLOT 16–30</span>
+                <h3>소량 오더 구역 (무빙카트)</h3>
+                <span class="range">SLOT 17–30</span>
                 <span class="divider"></span>
-                <span class="count" id="smallCount">0 / 15</span>
+                <span class="count" id="smallCount">0 / 14</span>
               </div>
             </div>
             <div class="slot-grid" id="slotsSmall"></div>
@@ -765,7 +765,7 @@ const state = {
 function initSlots(){
   state.slots = [];
   for(let i=1; i<=30; i++){
-    state.slots.push({num:i, size: i<=15?'L':'S', assignedTo:null});
+    state.slots.push({num:i, size: i<=16?'L':'S', assignedTo:null});
   }
 }
 initSlots();
@@ -1368,9 +1368,13 @@ function autoAssignSlots(){
   // Clear existing assignments
   state.slots.forEach(s => s.assignedTo = null);
 
-  // Sort customers by qty descending
-  const sorted = [...state.custFiles].sort((a,b) => (b.totalQty||0) - (a.totalQty||0));
-  // Top 15 → big slots (1-15); rest → small slots (16-30)
+  // 정렬 기준: SKU 개수 많은 순 우선, 동률이면 QTY 많은 순
+  // → 1~16등: 슬롯 01~16 (고정 대량 렉), 17~30등: 슬롯 17~30 (무빙카트/소량)
+  const sorted = [...state.custFiles].sort((a,b) => {
+    const skuDiff = (b.totalSkus||0) - (a.totalSkus||0);
+    if(skuDiff !== 0) return skuDiff;
+    return (b.totalQty||0) - (a.totalQty||0);
+  });
   sorted.forEach((cf, i) => {
     const slotNum = i + 1; // 그냥 순서대로 1번부터
     if(slotNum <= 30){
@@ -1468,13 +1472,13 @@ function renderSlots(){
     </div>`;
   }
 
-  largeEl.innerHTML = state.slots.filter(s => s.num<=15).map(slotHtml).join('');
-  smallEl.innerHTML = state.slots.filter(s => s.num>15).map(slotHtml).join('');
+  largeEl.innerHTML = state.slots.filter(s => s.num<=16).map(slotHtml).join('');
+  smallEl.innerHTML = state.slots.filter(s => s.num>16).map(slotHtml).join('');
 
-  const lc = state.slots.filter(s => s.num<=15 && s.assignedTo).length;
-  const sc = state.slots.filter(s => s.num>15 && s.assignedTo).length;
-  document.getElementById('largeCount').textContent = lc + ' / 15';
-  document.getElementById('smallCount').textContent = sc + ' / 15';
+  const lc = state.slots.filter(s => s.num<=16 && s.assignedTo).length;
+  const sc = state.slots.filter(s => s.num>16 && s.assignedTo).length;
+  document.getElementById('largeCount').textContent = lc + ' / 16';
+  document.getElementById('smallCount').textContent = sc + ' / 14';
   document.getElementById('slotStat').textContent = (lc+sc) + '/' + state.custFiles.length + ' assigned';
 
   // DnD
