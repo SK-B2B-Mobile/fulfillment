@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SK Fulfillment · 총량피킹 현황판</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05070D; --surface:#0D1220; --surface2:#131B30;
+  --border:#212B45;
+  --text:#EDF1F9; --text-dim:#8A93AC;
+  --amber:#F59E0B; --amber-bg:rgba(245,158,11,0.12);
+  --green:#10D97E; --green-bg:rgba(16,217,126,0.12);
+  --gray:#3A4560; --gray-bg:rgba(58,69,96,0.25);
+  --sans:'Inter',-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; height:100%; overflow:hidden;}
+
+/* ═══════════════ 상단 헤더 ═══════════════ */
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:22px 40px; border-bottom:2px solid var(--border); background:var(--surface);}
+.tb-left{display:flex; align-items:center; gap:20px;}
+.tb-logo{width:52px; height:52px; border-radius:12px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:22px;}
+.tb-title{font-size:26px; font-weight:800; letter-spacing:-0.01em;}
+.tb-sub{font-family:var(--mono); font-size:14px; color:var(--text-dim); margin-top:2px;}
+.tb-right{display:flex; align-items:center; gap:36px;}
+.tb-stat{text-align:right;}
+.tb-stat-label{font-family:var(--mono); font-size:12px; color:var(--text-dim); letter-spacing:0.08em; text-transform:uppercase;}
+.tb-stat-value{font-family:var(--mono); font-size:34px; font-weight:800; line-height:1.1;}
+.tb-clock{font-family:var(--mono); font-size:30px; font-weight:700; color:var(--text-dim); min-width:200px; text-align:right;}
+.tb-progress-outer{width:280px;}
+.tb-progress-bar{height:10px; background:var(--surface2); border-radius:5px; overflow:hidden; margin-top:6px;}
+.tb-progress-bar > div{height:100%; background:linear-gradient(90deg,var(--amber),var(--green)); transition:width 0.6s;}
+
+.status-dot{width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:8px;}
+.status-dot.live{background:var(--green); box-shadow:0 0 12px var(--green);}
+.status-dot.off{background:var(--gray);}
+
+/* ═══════════════ 슬롯 그리드 ═══════════════ */
+.board{padding:26px 36px; height:calc(100vh - 108px); overflow-y:auto;}
+.zone-label{font-family:var(--mono); font-size:15px; color:var(--text-dim); letter-spacing:0.1em; margin:18px 0 12px; text-transform:uppercase;}
+.zone-label:first-child{margin-top:0;}
+.grid{display:grid; grid-template-columns:repeat(5, 1fr); gap:16px;}
+.grid.small{grid-template-columns:repeat(5, 1fr);}
+
+.card{background:var(--surface); border:2px solid var(--border); border-radius:16px; padding:18px 20px; min-height:150px; display:flex; flex-direction:column; transition:all 0.4s;}
+.card.waiting{opacity:0.55;}
+.card.active{border-color:var(--amber); background:var(--amber-bg); animation:pulse 1.5s ease-in-out infinite;}
+.card.done{border-color:var(--green); background:var(--green-bg);}
+.card.flash{animation:flashDone 1.8s ease-out 2;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4);} 50%{box-shadow:0 0 0 10px rgba(245,158,11,0);}}
+@keyframes flashDone{0%{background:var(--green); box-shadow:0 0 40px var(--green);} 100%{background:var(--green-bg); box-shadow:0 0 0 rgba(16,217,126,0);}}
+
+.card-top{display:flex; justify-content:space-between; align-items:flex-start;}
+.card-slot{font-family:var(--mono); font-size:30px; font-weight:800; color:var(--text-dim);}
+.card.active .card-slot{color:var(--amber);}
+.card.done .card-slot{color:var(--green);}
+.card-ship{font-family:var(--mono); font-size:12px; font-weight:800; padding:4px 9px; border-radius:6px; background:rgba(139,92,246,0.18); color:#B39CFF; letter-spacing:0.04em;}
+.card-cust{font-size:19px; font-weight:700; margin-top:10px; line-height:1.25; flex:1; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+.card-bottom{margin-top:12px;}
+.card-qty{font-family:var(--mono); font-size:16px; color:var(--text-dim); margin-bottom:6px;}
+.card.active .card-qty, .card.done .card-qty{color:var(--text);}
+.card-bar{height:7px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden;}
+.card-bar > div{height:100%; background:var(--amber); transition:width 0.5s;}
+.card.done .card-bar > div{background:var(--green);}
+.card-done-tag{font-family:var(--mono); font-size:14px; font-weight:800; color:var(--green); margin-top:8px; display:none; align-items:center; gap:6px;}
+.card.done .card-done-tag{display:flex;}
+.card-empty{display:flex; align-items:center; justify-content:center; height:100%; font-family:var(--mono); font-size:14px; color:var(--text-dim); opacity:0.4;}
+
+.empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
+.empty-state h2{font-size:28px; color:var(--text-dim);}
+.empty-state p{font-family:var(--mono); font-size:16px; color:var(--text-dim); opacity:0.6;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="tb-left">
+    <div class="tb-logo">SK</div>
+    <div>
+      <div class="tb-title">총량피킹 현황판</div>
+      <div class="tb-sub" id="batchLabel"><span class="status-dot off" id="liveDot"></span>연결 대기중...</div>
+    </div>
+  </div>
+  <div class="tb-right">
+    <div class="tb-stat">
+      <div class="tb-stat-label">완료 슬롯</div>
+      <div class="tb-stat-value" id="doneCount">-- / --</div>
+      <div class="tb-progress-outer"><div class="tb-progress-bar"><div id="doneBar" style="width:0%"></div></div></div>
+    </div>
+    <div class="tb-clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<div class="board" id="board">
+  <div class="empty-state">
+    <h2>오늘의 배치를 기다리는 중...</h2>
+    <p id="emptyMsg">CONFIG.GAS_URL 확인 중</p>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// ★★★ CONFIG — 반드시 채워야 작동합니다 (batch.html과 동일한 값) ★★★
+// ═══════════════════════════════════════════════════════════
+const CONFIG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec',
+};
+const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
+const POLL_MS = 8000; // 8초마다 새로고침
+
+async function gasQuery(op, params){
+  if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
+  try{
+    const qs = new URLSearchParams(Object.assign({op}, params||{})).toString();
+    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`);
+    return await res.json();
+  }catch(e){
+    console.error('gasQuery failed:', op, e);
+    return { ok:false, error:String(e) };
+  }
+}
+
+let currentBatchId = null;
+let prevStatus = {}; // slotNum -> 'waiting'|'active'|'done' (완료 순간 감지용 flash 처리)
+
+function fmtClock(){
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+}
+setInterval(fmtClock, 1000); fmtClock();
+
+function shipLabel(v){ return v || '-'; }
+
+function cardHtml(slot){
+  if(!slot){
+    return `<div class="card"><div class="card-empty">비어있음</div></div>`;
+  }
+  const pct = slot.totalQty > 0 ? Math.min(100, slot.scanned / slot.totalQty * 100) : 0;
+  const flashClass = (prevStatus[slot.slotNum] && prevStatus[slot.slotNum] !== 'done' && slot.status === 'done') ? ' flash' : '';
+  return `<div class="card ${slot.status}${flashClass}">
+    <div class="card-top">
+      <span class="card-slot">${String(slot.slotNum).padStart(2,'0')}</span>
+      <span class="card-ship">${shipLabel(slot.shipVia)}</span>
+    </div>
+    <div class="card-cust">${slot.customer || ''}</div>
+    <div class="card-bottom">
+      <div class="card-qty">${slot.scanned.toLocaleString()} / ${slot.totalQty.toLocaleString()}</div>
+      <div class="card-bar"><div style="width:${pct}%"></div></div>
+      <div class="card-done-tag">✓ 완료 · 패킹 이동</div>
+    </div>
+  </div>`;
+}
+
+function renderBoard(slots){
+  const board = document.getElementById('board');
+  if(!slots || slots.length === 0){
+    board.innerHTML = `<div class="empty-state"><h2>오늘의 배치를 기다리는 중...</h2><p>슬롯이 배정되면 여기 자동으로 표시됩니다</p></div>`;
+    return;
+  }
+  const large = slots.filter(s => s.slotNum <= 15).sort((a,b) => a.slotNum - b.slotNum);
+  const small = slots.filter(s => s.slotNum > 15).sort((a,b) => a.slotNum - b.slotNum);
+
+  let html = '';
+  if(large.length){
+    html += `<div class="zone-label">대량 오더 구역 · SLOT 01-15</div><div class="grid">`;
+    for(let n=1; n<=15; n++){
+      const s = large.find(x => x.slotNum === n);
+      html += cardHtml(s);
+    }
+    html += `</div>`;
+  }
+  if(small.length){
+    html += `<div class="zone-label">소량 오더 구역 · SLOT 16-30</div><div class="grid small">`;
+    for(let n=16; n<=30; n++){
+      const s = small.find(x => x.slotNum === n);
+      html += cardHtml(s);
+    }
+    html += `</div>`;
+  }
+  board.innerHTML = html;
+
+  // 완료 상태 기록 갱신 (다음 폴링에서 flash 판단용)
+  const next = {};
+  slots.forEach(s => { next[s.slotNum] = s.status; });
+  prevStatus = next;
+}
+
+async function pollOnce(){
+  if(!GAS_READY){
+    document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
+    return;
+  }
+  // 배치ID 아직 모르면 오늘자 배치부터 찾기
+  if(!currentBatchId){
+    const b = await gasQuery('getBatch', {});
+    if(!b.ok || !b.batch){
+      document.getElementById('liveDot').className = 'status-dot off';
+      document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>오늘 진행중인 배치 없음';
+      return;
+    }
+    currentBatchId = b.batch.batchId;
+    document.getElementById('batchLabel').innerHTML =
+      `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
+  }
+
+  const res = await gasQuery('getSlotProgress', { batchId: currentBatchId });
+  if(!res.ok){
+    document.getElementById('liveDot').className = 'status-dot off';
+    return;
+  }
+  document.getElementById('liveDot').className = 'status-dot live';
+  document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
+  document.getElementById('doneBar').style.width =
+    (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
+  renderBoard(res.slots);
+}
+
+pollOnce();
+setInterval(pollOnce, POLL_MS);
+</script>
+</body>
+</html>
