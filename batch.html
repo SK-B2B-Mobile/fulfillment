@@ -1195,8 +1195,13 @@ function updateBatchStats(){
   const recon = reconcile();
   renderReconcile(recon, sumTotalQty, custTotalQty);
 
-  // 총량 기준이 우선. 불일치해도 배치는 시작 가능하되 경고를 띄움.
-  btn.disabled = false;
+  // 2026-07-09 정책 변경: 불일치가 0이 아니면 배치 시작 자체를 막는다.
+  // (David 확정: "완전하지 않으면 작업 진행 의미가 없다" — 불완전한 상태로 스캔/슬롯
+  //  작업을 시작하면 재작업이 발생하므로, 정합성 100%가 될 때까지 시작 버튼을 비활성화)
+  btn.disabled = !recon.matched;
+  btn.textContent = recon.matched
+    ? '배치 시작 · Ship Date 순 슬롯 배정 →'
+    : '⚠ 데이터 불일치 해결 후 시작 가능';
 }
 
 // 총량 리스트 vs 고객사 합계 SKU 단위 대조
@@ -1290,6 +1295,9 @@ function renderReconcile(recon, sumTotalQty, custTotalQty){
         ${shortCount > 0 ? `<b style="color:var(--red)">${shortCount}개 SKU</b>가 고객사 합계보다 총량이 많습니다 (고객사 리스트 누락 가능성). ` : ''}
         ${overCount > 0 ? `<b style="color:var(--amber)">${overCount}개 SKU</b>가 고객사 합계가 총량보다 많습니다 (중복 업로드 가능성). ` : ''}
         아래 목록을 확인하고, 누락된 고객사 PDF를 추가하거나 중복을 제거하세요.
+      </div>
+      <div style="font-size:12px; color:var(--red); font-weight:700; margin-top:10px; padding-top:10px; border-top:1px solid var(--border2);">
+        🔒 차이가 0이 될 때까지 "배치 시작" 버튼이 비활성화됩니다. 불일치를 먼저 해결하세요.
       </div>
       <div class="reconcile-detail">
         <h4>불일치 SKU (차이 큰 순)</h4>
