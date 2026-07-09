@@ -771,15 +771,96 @@ function initSlots(){
 initSlots();
 populateWorkerSelect();
 
-document.getElementById('simDate').textContent = new Date().toISOString().slice(0,10) + ' · 09:00 KST';
+// ★ 2026-07-09 수정: 예전엔 페이지 열 때 "09:00 KST"라는 고정 텍스트를 한 번만
+//   찍어놓고 끝이라 시간이 절대 안 바뀌었음. 실제로 매초 갱신되는 시계로 교체.
+function updateClock(){
+  const el = document.getElementById('simDate');
+  if(!el) return;
+  const now = new Date();
+  const y = now.getFullYear(), mo = String(now.getMonth()+1).padStart(2,'0'), d = String(now.getDate()).padStart(2,'0');
+  const hh = String(now.getHours()).padStart(2,'0'), mm = String(now.getMinutes()).padStart(2,'0'), ss = String(now.getSeconds()).padStart(2,'0');
+  el.textContent = `${y}-${mo}-${d} · ${hh}:${mm}:${ss}`;
+}
+updateClock();
+setInterval(updateClock, 1000);
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-07-09 신규 — "배치 시작" 누르기 전 임시 저장 (새로고침 대비)
+// ─────────────────────────────────────────────────────────────
+// "배치 시작" 버튼을 누른 뒤에는 서버(구글시트)에 저장되어 새로고침해도
+// restoreBatchFromServer()가 복원해준다. 문제는 그 전 단계 — PDF 업로드해서
+// 파싱 결과/정합성을 확인하는 중에는 데이터가 브라우저 메모리에만 있어서
+// 새로고침하면 다 날아갔음. 그 구간만 브라우저 localStorage에 임시 저장해서
+// 새로고침해도 남아있게 한다. (같은 브라우저에서만 유지되며, 배치가 실제로
+// 시작되면 서버 저장으로 넘어가므로 이 임시 저장은 지운다.)
+// ═══════════════════════════════════════════════════════════
+const DRAFT_KEY = 'skBatchDraft_v1';
+
+function todayStr_(){ return new Date().toISOString().slice(0,10); }
+
+function saveDraftToLocalStorage(){
+  try{
+    if(!state.sumFile && state.custFiles.length === 0){
+      localStorage.removeItem(DRAFT_KEY);
+      return;
+    }
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      date: todayStr_(),
+      sumFile: state.sumFile,
+      custFiles: state.custFiles,
+    }));
+  }catch(e){
+    console.warn('임시저장 실패(용량 초과 등):', e);
+  }
+}
+
+function clearDraftFromLocalStorage(){
+  try{ localStorage.removeItem(DRAFT_KEY); }catch(e){}
+}
+
+// 드롭존 표시(제목/힌트)를 state 기준으로 다시 그려주는 공용 헬퍼
+function refreshDropZoneLabels_(){
+  if(state.sumFile){
+    const z = document.getElementById('dropSum');
+    z.className = 'drop filled';
+    z.querySelector('.drop-title').textContent = '✓ 총량 리스트 (복원됨)';
+    z.querySelector('.drop-hint').textContent = state.sumFile.items.length + ' SKU';
+  }
+  if(state.custFiles.length){
+    const z = document.getElementById('dropCust');
+    z.className = 'drop filled';
+    z.querySelector('.drop-title').textContent = '✓ ' + state.custFiles.length + '개 고객사 (복원됨)';
+  }
+}
+
+function tryRestoreDraftFromLocalStorage(){
+  try{
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if(!raw) return false;
+    const draft = JSON.parse(raw);
+    if(!draft || draft.date !== todayStr_()) { clearDraftFromLocalStorage(); return false; } // 날짜 지나면 폐기
+    if(!draft.sumFile && (!draft.custFiles || draft.custFiles.length === 0)) return false;
+
+    state.sumFile = draft.sumFile || null;
+    state.custFiles = draft.custFiles || [];
+    refreshDropZoneLabels_();
+    renderFileTags();
+    updateBatchStats();
+    toast('새로고침 전 업로드했던 내용을 복원했습니다', 'success');
+    return true;
+  }catch(e){
+    console.warn('임시저장 복원 실패:', e);
+    return false;
+  }
+}
+
 // 새로고침해도 이어서 작업 — 오늘자 진행중 배치 자동 복원
 // ═══════════════════════════════════════════════════════════
 async function restoreBatchFromServer(){
-  if(!GAS_READY) return; // 데모 모드에선 복원 안 함
+  if(!GAS_READY) { tryRestoreDraftFromLocalStorage(); return; } // 데모 모드: 임시저장만 시도
   const res = await gasQuery('getBatch', {});
-  if(!res.ok || !res.batch) return; // 오늘 진행중 배치 없음
+  if(!res.ok || !res.batch) { tryRestoreDraftFromLocalStorage(); return; } // 오늘 진행중 배치 없음 → 임시저장 확인
 
   state.batchId = res.batch.batchId;
   state.sumFile = { meta:{}, items: res.sumItems || [] };
@@ -1169,6 +1250,7 @@ function renderFileTags(){
 }
 
 function updateBatchStats(){
+  saveDraftToLocalStorage(); // ★ 2026-07-09: 새로고침 대비 임시저장 (업로드/삭제/초기화 시 항상 최신 상태 반영)
   const row = document.getElementById('statRow');
   const btn = document.getElementById('startBatchBtn');
   const panel = document.getElementById('reconcilePanel');
@@ -1331,6 +1413,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
       return;
     }
     state.batchId = created.batchId; // 서버가 발급한 정식 배치ID로 교체
+    clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
   }
 
   buildScanIndex();
