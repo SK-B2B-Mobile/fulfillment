@@ -807,6 +807,9 @@ async function restoreBatchFromServer(){
   document.getElementById('batchChip').classList.add('active');
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
   renderFileTags();
+  // ★ 2026-07-09: 다른 기기가 이미 스캔해둔 진행상황을 서버에서 가져와 반영 + 실시간 동기화 시작
+  await pollScanState();
+  startScanPolling();
   toast(`진행 중이던 배치 ${state.batchId} 복원 완료`, 'success');
   gotoView('v-slots');
 }
@@ -1333,6 +1336,8 @@ document.getElementById('startBatchBtn').onclick = async () => {
   buildScanIndex();
   autoAssignSlots();
   await syncSlotsToServer();
+  // ★ 2026-07-09: 새 배치 시작 시에도 실시간 동기화 폴링 시작 (여러 기기 스캔 동기화)
+  startScanPolling();
 
   state.batchStartTs = Date.now();
   document.getElementById('batchChip').textContent = state.batchId;
@@ -1401,8 +1406,60 @@ function autoAssignSlots(){
 }
 
 // ═══════════════════════════════════════════════════════════
-// Nav
+// ★ 2026-07-09 신규 — 여러 기기(PC/폰/태블릿) 실시간 스캔 동기화
+// ─────────────────────────────────────────────────────────────
+// 문제: 지금까지는 각 기기가 스캔한 내용을 자기 브라우저 메모리에만
+//   들고 있었음 (state.scans, sku.queue[].done). 서버(구글시트)에
+//   저장은 했지만, 다른 기기가 그걸 다시 읽어오는 기능이 없어서
+//   "폰에서 스캔해도 PC 화면엔 안 보이는" 문제가 발생했음.
+// 해결: 5초마다 서버(getScanState)에서 "이 배치의 진짜 스캔 현황"을
+//   통째로 다시 받아서, 각 기기의 진행률(done)과 최근 스캔 로그를
+//   서버 값으로 항상 덮어씀 (증분이 아니라 절대값 대입 → 어느 기기가
+//   스캔했든, 몇 대가 동시에 스캔하든 항상 정확하게 수렴함).
 // ═══════════════════════════════════════════════════════════
+function applyScanState(doneMap, scans){
+  // 1) 진행률(done)을 서버 진실값으로 갱신 — barcode|invoice 조합 기준
+  Object.entries(state.scanIndex).forEach(([barcode, sku]) => {
+    sku.queue.forEach(q => {
+      const key = q.invoice + '|' + barcode;
+      q.done = doneMap[key] || 0;
+    });
+  });
+  // 2) 최근 스캔/전체 로그를 서버 기준으로 교체 → 모든 기기가 동일하게 봄
+  //    (서버는 필드명이 result, 클라이언트 렌더 함수들은 status를 참조하므로 매핑)
+  state.scans = (scans || []).map(s => ({
+    ...s,
+    status: s.result,
+    time: new Date(String(s.time || '').replace(' ', 'T')),
+  }));
+}
+
+async function pollScanState(){
+  if(!GAS_READY || !state.batchId) return;
+  try{
+    const res = await gasQuery('getScanState', { batchId: state.batchId });
+    if(!res.ok) return;
+    applyScanState(res.doneMap || {}, res.scans || []);
+    updateScanStats();
+    if(document.getElementById('v-scan') && document.getElementById('v-scan').classList.contains('active')) renderRecentScans();
+    if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+    if(document.getElementById('v-log') && document.getElementById('v-log').classList.contains('active')) renderFullLog();
+    checkBatchComplete();
+  }catch(e){
+    console.error('pollScanState failed:', e);
+  }
+}
+
+let __scanPollTimer = null;
+function startScanPolling(){
+  if(__scanPollTimer) return; // 중복 시작 방지
+  __scanPollTimer = setInterval(pollScanState, 5000);
+}
+function stopScanPolling(){
+  if(__scanPollTimer){ clearInterval(__scanPollTimer); __scanPollTimer = null; }
+}
+
+
 document.querySelectorAll('nav button[data-view]').forEach(b => {
   b.onclick = () => { if(!b.disabled) gotoView(b.dataset.view); };
 });
@@ -1413,6 +1470,8 @@ function gotoView(vid){
   if(vid==='v-scan'){ renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
   if(vid==='v-log'){ renderFullLog(); renderKPI(); }
   if(vid==='v-workers') renderWorkers();
+  // ★ 탭을 옮길 때마다 최신 스캔 현황을 즉시 한 번 더 당겨옴 (5초 폴링 사이 텀 줄이기)
+  if(vid==='v-slots' || vid==='v-scan' || vid==='v-log') pollScanState();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1655,6 +1714,21 @@ function doScan(){
 
   const target = currentTarget(sku);
   if(!target){
+    // ★ 2026-07-09: "전량 완료"와 "애초에 이 SKU를 주문한 고객사가 하나도 없음"은
+    //   서로 다른 상황인데 예전엔 둘 다 같은 "Complete" 화면으로 표시돼서
+    //   데이터 문제(배치 생성 시 고객사 항목 누락 등)를 놓치기 쉬웠음. 구분해서 보여줌.
+    if(!sku.queue || sku.queue.length === 0){
+      el.innerHTML = `<div class="scan-result err">
+        <div class="product-name" style="color:var(--red)">${sku.name}</div>
+        <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span><span>· 총량 ${sku.total}pcs</span></div>
+        <div class="slot-cta err">
+          <div class="slot-cta-num"><span class="lbl">Action</span></div>
+          <div class="slot-cta-co">이 SKU는 어떤 고객사에도<br>배정되지 않았습니다<br><small>매니저 확인 필요 · 데이터 문제 가능성</small></div>
+        </div>
+      </div>`;
+      logScan({barcode:code, sku:sku.sku, customer:null, slot:null, status:'error'});
+      return;
+    }
     el.innerHTML = `<div class="scan-result complete">
       <div class="product-name">${sku.name}</div>
       <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span></div>
@@ -1737,7 +1811,12 @@ function logScan(entry){
       batchId: state.batchId, worker: entry.worker, barcode: entry.barcode,
       sku: entry.sku, slot: entry.slot, customer: entry.customer,
       invoice: entry.invoice, result: entry.status,
-    }).then(res => { if(res.ok) entry.scanId = res.scanId; });
+    }).then(res => {
+      if(res.ok) entry.scanId = res.scanId;
+      // ★ 2026-07-09: 저장 성공 직후 곧바로 한 번 더 동기화 (5초 폴링을 기다리지 않고
+      //   이 기기 + 다른 기기들이 최대한 빨리 같은 진행률을 보게 함)
+      pollScanState();
+    });
   }
 }
 
@@ -1852,7 +1931,7 @@ function renderFullLog(){
       }
       state.scans.splice(+b.dataset.undo, 1);
       renderFullLog(); renderSlots(); renderRecentScans(); updateScanStats();
-      if(GAS_READY && scan.scanId) gasCall('undoScan', { scanId: scan.scanId });
+      if(GAS_READY && scan.scanId) gasCall('undoScan', { scanId: scan.scanId }).then(() => pollScanState());
       toast('스캔 취소', 'success');
     };
   });
