@@ -514,6 +514,10 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             </div>
           </div>
 
+          <div class="row" style="margin-bottom:12px;">
+            <button class="btn btn-ghost btn-sm" id="btnSyncBatch" style="font-size:11px;">↺ 배치 데이터 동기화 (고객사·상품 다시 불러오기)</button>
+          </div>
+
           <div class="scan-input-wrap">
             <span class="scan-icon">▤</span>
             <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus>
@@ -891,6 +895,7 @@ async function restoreBatchFromServer(){
   // ★ 2026-07-09: 다른 기기가 이미 스캔해둔 진행상황을 서버에서 가져와 반영 + 실시간 동기화 시작
   await pollScanState();
   startScanPolling();
+  startStructurePolling();
   toast(`진행 중이던 배치 ${state.batchId} 복원 완료`, 'success');
   gotoView('v-slots');
 }
@@ -1443,6 +1448,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
   await syncSlotsToServer();
   // ★ 2026-07-09: 새 배치 시작 시에도 실시간 동기화 폴링 시작 (여러 기기 스캔 동기화)
   startScanPolling();
+  startStructurePolling();
 
   state.batchStartTs = Date.now();
   document.getElementById('batchChip').textContent = state.batchId;
@@ -1562,6 +1568,56 @@ function startScanPolling(){
 }
 function stopScanPolling(){
   if(__scanPollTimer){ clearInterval(__scanPollTimer); __scanPollTimer = null; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-07-09 신규 — "고객사·상품 배정 구조" 자체도 주기적으로 재동기화
+// ─────────────────────────────────────────────────────────────
+// pollScanState()는 "몇 개 스캔했는지(진행률)"만 5초마다 새로고침했음.
+// 그런데 "이 상품을 어느 고객사가 주문했는지" 같은 배치 구조 자체는
+// 페이지를 처음 열 때(getBatch) 딱 한 번만 불러오고 그 뒤로 절대
+// 다시 안 가져왔음 — 그래서 그 순간에 서버 데이터가 조금이라도
+// 늦게 반영돼 있었거나 하면, 그 기기는 영영 그 스냅샷에 갇혀서
+// "이 SKU는 어떤 고객사에도 배정 안 됨" 오류가 계속 나는 문제가 있었음.
+// 이제 30초마다, 그리고 스캐너가 수동으로도 구조 자체를 통째로 다시
+// 불러와서 sku.queue를 새로 짠다 (진행률은 그 직후 pollScanState로 복원).
+// ═══════════════════════════════════════════════════════════
+async function refreshBatchStructure(silent){
+  if(!GAS_READY || !state.batchId) return false;
+  try{
+    const res = await gasQuery('getBatch', { batchId: state.batchId });
+    if(!res.ok || !res.batch) return false;
+
+    state.sumFile = { meta:{}, items: res.sumItems || [] };
+    state.custFiles = (res.customers || []).map(c => ({
+      meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+      items: c.items || [],
+      totalQty: c.totalQty, totalSkus: c.totalSku,
+    }));
+    state.slots.forEach(s => { s.assignedTo = null; });
+    (res.customers || []).forEach(c => {
+      if(!c.slotNum) return;
+      const slot = state.slots.find(s => s.num === Number(c.slotNum));
+      if(slot) slot.assignedTo = c.invoice;
+    });
+
+    buildScanIndex();
+    updateSlotQueueNumbers();
+    await pollScanState(); // 구조를 새로 짰으니 진행률(done)도 즉시 다시 채워넣음
+
+    if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+    if(!silent) toast('배치 데이터 다시 불러옴 (고객사 · 상품 배정 최신화)', 'success');
+    return true;
+  }catch(e){
+    console.error('refreshBatchStructure failed:', e);
+    return false;
+  }
+}
+
+let __structPollTimer = null;
+function startStructurePolling(){
+  if(__structPollTimer) return;
+  __structPollTimer = setInterval(() => refreshBatchStructure(true), 30000); // 30초마다 조용히 재동기화
 }
 
 
@@ -2012,6 +2068,13 @@ async function renderKPI(){
   `;
 }
 document.getElementById('btnRefreshKPI').onclick = renderKPI;
+document.getElementById('btnSyncBatch').onclick = async () => {
+  const btn = document.getElementById('btnSyncBatch');
+  btn.disabled = true; btn.textContent = '동기화 중...';
+  const ok = await refreshBatchStructure(false);
+  if(!ok) toast('동기화 실패 — 인터넷 연결을 확인하세요', 'error');
+  btn.disabled = false; btn.textContent = '↺ 배치 데이터 동기화 (고객사·상품 다시 불러오기)';
+};
 
 function renderFullLog(){
   const el = document.getElementById('fullLogBody');
