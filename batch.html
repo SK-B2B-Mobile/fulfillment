@@ -419,7 +419,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-16:15</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-16:30</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -2242,7 +2242,7 @@ function renderRecentScans(){
   el.innerHTML = state.scans.slice(0,20).map(s => `
     <div class="log-row">
       <span class="log-time">${fmtClock(s.time)}</span>
-      <span class="log-msg">${s.customer || '<span style="color:var(--red)">Unknown</span>'} <small>${s.sku||''}</small></span>
+      <span class="log-msg">${s.customer || '<span style="color:var(--red)">Unknown</span>'} <small>${s.barcode||''}</small></span>
       <span class="log-slot">${s.slot ? String(s.slot).padStart(2,'0') : '-'}</span>
       <span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span>
     </div>`).join('');
