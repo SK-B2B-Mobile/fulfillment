@@ -774,6 +774,7 @@ const state = {
     {id:5, name:'Kevin Kim',  status:'off'},
   ],
   currentWorker: null,
+  lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
 };
 
 // Init slots (30개, 15+15)
@@ -1561,6 +1562,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
 };
 
 function buildScanIndex(){
+  state.lastStructureSync = Date.now(); // ★ 2026-07-10: 진단용 — 큐가 언제 마지막으로 다시 짜였는지
   const sumByBc = {};
   state.sumFile.items.forEach(it => { sumByBc[it.barcode] = it; });
   state.scanIndex = {};
@@ -1585,6 +1587,15 @@ function buildScanIndex(){
       sku: sumIt.sku, name: sumIt.name, rack: sumIt.rack,
       total: sumIt.req_qty, queue,
     };
+  }
+
+  // ★ 2026-07-10: 스캔해보기 전에 미리 발견 — 총량엔 있는데 어느 고객사에도
+  //   안 붙은 SKU가 있으면(=버그였든, 진짜 아무도 안 시켰든) 조용히 넘어가지 않고
+  //   즉시 매니저/작업자에게 경고. 이게 있었으면 지금까지의 시행착오를 많이 줄였을 것.
+  const emptyQueueSkus = Object.values(state.scanIndex).filter(s => s.total > 0 && s.queue.length === 0);
+  if(emptyQueueSkus.length > 0){
+    console.warn('큐가 비어있는 SKU:', emptyQueueSkus.map(s => s.sku));
+    toast(`⚠ ${emptyQueueSkus.length}개 SKU가 고객사 없이 로드됨 (예: ${emptyQueueSkus[0].sku}) — 동기화 버튼을 눌러보세요`, 'error');
   }
 }
 
@@ -1689,14 +1700,32 @@ async function refreshBatchStructure(silent){
     const res = await gasQuery('getBatch', { batchId: state.batchId });
     if(!res.ok || !res.batch) return false;
 
-    state.sumFile = { meta:{}, items: res.sumItems || [] };
-    state.custFiles = (res.customers || []).map(c => ({
+    const newSumItems = res.sumItems || [];
+    const newCustomers = res.customers || [];
+    const newCustItemCount = newCustomers.reduce((a,c) => a + (c.items||[]).length, 0);
+
+    // ★ 2026-07-10 신규 안전장치 — "한 번 제대로 불러온 좋은 데이터"가
+    //   나중에 불완전한 응답으로 덮어써지는 걸 막는다. 배치 안의 SKU/고객사
+    //   상품 줄 수는 시간이 지나도 절대 줄어들 수 없다(스캔해도 행이 지워지진
+    //   않으므로). 그런데 새로 받아온 게 지금 것보다 적으면 — 서버 응답이
+    //   잘렸거나 일부만 온 것으로 보고, 지금 있는(더 나은) 데이터를 그대로 유지한다.
+    const curSumCount = state.sumFile ? state.sumFile.items.length : 0;
+    const curCustItemCount = state.custFiles.reduce((a,c) => a + (c.items||[]).length, 0);
+    if(curSumCount > 0 && (newSumItems.length < curSumCount || newCustItemCount < curCustItemCount)){
+      console.warn(`refreshBatchStructure: 서버 응답이 기존보다 적음 (sum ${newSumItems.length}<${curSumCount} 또는 custItems ${newCustItemCount}<${curCustItemCount}) — 덮어쓰지 않고 유지`);
+      if(!silent) toast('⚠ 서버 응답이 불완전해 보여 기존 데이터를 유지했습니다 · 잠시 후 다시 시도하세요', 'error');
+      await pollScanState(); // 진행률(done)만 안전하게 갱신
+      return false;
+    }
+
+    state.sumFile = { meta:{}, items: newSumItems };
+    state.custFiles = newCustomers.map(c => ({
       meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
       items: c.items || [],
       totalQty: c.totalQty, totalSkus: c.totalSku,
     }));
     state.slots.forEach(s => { s.assignedTo = null; });
-    (res.customers || []).forEach(c => {
+    newCustomers.forEach(c => {
       if(!c.slotNum) return;
       const slot = state.slots.find(s => s.num === Number(c.slotNum));
       if(slot) slot.assignedTo = c.invoice;
@@ -1980,12 +2009,20 @@ function doScan(){
     //   서로 다른 상황인데 예전엔 둘 다 같은 "Complete" 화면으로 표시돼서
     //   데이터 문제(배치 생성 시 고객사 항목 누락 등)를 놓치기 쉬웠음. 구분해서 보여줌.
     if(!sku.queue || sku.queue.length === 0){
+      // ★ 2026-07-10: 스프레드시트를 매번 손으로 뒤지지 않아도 바로 원인 파악할 수 있도록
+      //   "지금 이 기기가 실제로 뭘 들고 있는지"를 화면에 그대로 보여줌
+      const diagCustCount = state.custFiles.length;
+      const diagSkuCount = Object.keys(state.scanIndex).length;
+      const diagLastSync = state.lastStructureSync ? new Date(state.lastStructureSync).toLocaleTimeString('ko-KR') : '-';
       el.innerHTML = `<div class="scan-result err">
         <div class="product-name" style="color:var(--red)">${sku.name}</div>
         <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span><span>· 총량 ${sku.total}pcs</span></div>
         <div class="slot-cta err">
           <div class="slot-cta-num"><span class="lbl">Action</span></div>
           <div class="slot-cta-co">이 SKU는 어떤 고객사에도<br>배정되지 않았습니다<br><small>매니저 확인 필요 · 데이터 문제 가능성</small></div>
+        </div>
+        <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border2); font-family:var(--mono); font-size:10px; color:var(--text-dim2); line-height:1.7;">
+          진단 · 배치 ${state.batchId||'-'} · 로드된 고객사 ${diagCustCount}개 · 로드된 SKU ${diagSkuCount}개 · 마지막 동기화 ${diagLastSync}
         </div>
       </div>`;
       logScan({barcode:code, sku:sku.sku, customer:null, slot:null, status:'error'});
