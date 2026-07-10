@@ -1402,6 +1402,28 @@ document.getElementById('startBatchBtn').onclick = async () => {
   const btn = document.getElementById('startBatchBtn');
   btn.disabled = true; btn.textContent = '배치 생성 중...';
 
+  // ★ 2026-07-09 신규: 오늘 이미 "진행중(active)" 배치가 있는데 또 새로 만들면
+  //   기기마다 서로 다른 배치를 보게 되는 사고(오늘 실제로 발생함)로 이어짐.
+  //   새 배치 생성 전에 반드시 확인하고, 있으면 매니저에게 명확히 경고 후 선택하게 함.
+  if(GAS_READY){
+    const existing = await gasQuery('getBatch', {});
+    if(existing.ok && existing.batch && existing.batch.status !== 'completed'){
+      const ok = confirm(
+        `⚠ 오늘 이미 진행중인 배치가 있습니다.\n\n` +
+        `배치ID: ${existing.batch.batchId}\n` +
+        `총 ${existing.batch.totalSku} SKU · ${Number(existing.batch.totalQty).toLocaleString()} pcs\n\n` +
+        `그런데도 새 배치를 또 만들면, 기기마다 서로 다른 배치를 보게 되어\n` +
+        `스캔이 반영 안 되는 문제가 생깁니다.\n\n` +
+        `계속 진행하시겠습니까? (취소를 누르면 새로고침해서 기존 배치를 이어서 작업하는 걸 권장합니다)`
+      );
+      if(!ok){
+        btn.disabled = false; btn.textContent = '배치 시작 · Ship Date 순 슬롯 배정 →';
+        toast('취소됨 — 새로고침하면 기존 배치로 복원됩니다', 'success');
+        return;
+      }
+    }
+  }
+
   if(GAS_READY){
     const created = await gasCall('createBatch', {
       sumItems: state.sumFile.items,
