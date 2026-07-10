@@ -1704,18 +1704,15 @@ async function refreshBatchStructure(silent){
     const newCustomers = res.customers || [];
     const newCustItemCount = newCustomers.reduce((a,c) => a + (c.items||[]).length, 0);
 
-    // ★ 2026-07-10 신규 안전장치 — "한 번 제대로 불러온 좋은 데이터"가
-    //   나중에 불완전한 응답으로 덮어써지는 걸 막는다. 배치 안의 SKU/고객사
-    //   상품 줄 수는 시간이 지나도 절대 줄어들 수 없다(스캔해도 행이 지워지진
-    //   않으므로). 그런데 새로 받아온 게 지금 것보다 적으면 — 서버 응답이
-    //   잘렸거나 일부만 온 것으로 보고, 지금 있는(더 나은) 데이터를 그대로 유지한다.
+    // ★ 2026-07-10: 어제 넣었던 "적으면 거부" 안전장치를 제거함.
+    //   그 로직이 한 번 잘못된 기준을 기억하면 그 뒤로 계속 정상 데이터까지
+    //   거부하는 구조적 결함이 있었던 것으로 보임 (실제로 서버는 항상 정상
+    //   데이터를 보내고 있었는데 화면이 계속 거부해서 스캔이 막혔던 것으로 확인됨).
+    //   이제 서버 응답은 항상 그대로 신뢰하고 적용한다. 이상해 보이면 경고만 남김.
     const curSumCount = state.sumFile ? state.sumFile.items.length : 0;
     const curCustItemCount = state.custFiles.reduce((a,c) => a + (c.items||[]).length, 0);
     if(curSumCount > 0 && (newSumItems.length < curSumCount || newCustItemCount < curCustItemCount)){
-      console.warn(`refreshBatchStructure: 서버 응답이 기존보다 적음 (sum ${newSumItems.length}<${curSumCount} 또는 custItems ${newCustItemCount}<${curCustItemCount}) — 덮어쓰지 않고 유지`);
-      if(!silent) toast('⚠ 서버 응답이 불완전해 보여 기존 데이터를 유지했습니다 · 잠시 후 다시 시도하세요', 'error');
-      await pollScanState(); // 진행률(done)만 안전하게 갱신
-      return false;
+      console.warn(`refreshBatchStructure: 서버 응답 개수가 기존과 다름 (sum ${newSumItems.length} vs ${curSumCount} / custItems ${newCustItemCount} vs ${curCustItemCount}) — 그래도 서버 데이터를 신뢰하고 적용함`);
     }
 
     state.sumFile = { meta:{}, items: newSumItems };
