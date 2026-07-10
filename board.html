@@ -64,6 +64,9 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-bottom{margin-top:12px;}
 .card-qty{font-family:var(--mono); font-size:16px; color:var(--text-dim); margin-bottom:6px;}
 .card.active .card-qty, .card.done .card-qty{color:var(--text);}
+.card-metarow{display:flex; justify-content:space-between; font-family:var(--mono); font-size:15px; color:var(--text-dim); margin-bottom:6px;}
+.card.active .card-metarow, .card.done .card-metarow{color:var(--text);}
+.card-sku{opacity:0.85;}
 .card-bar{height:7px; background:rgba(255,255,255,0.08); border-radius:4px; overflow:hidden;}
 .card-bar > div{height:100%; background:var(--amber); transition:width 0.5s;}
 .card.done .card-bar > div{background:var(--green);}
@@ -150,7 +153,10 @@ function cardHtml(slot){
     </div>
     <div class="card-cust">${slot.customer || ''}</div>
     <div class="card-bottom">
-      <div class="card-qty">${slot.scanned.toLocaleString()} / ${slot.totalQty.toLocaleString()}</div>
+      <div class="card-metarow">
+        <span class="card-sku">SKU ${slot.doneSku||0}/${slot.totalSku||0}</span>
+        <span>${slot.scanned.toLocaleString()} / ${slot.totalQty.toLocaleString()} pcs</span>
+      </div>
       <div class="card-bar"><div style="width:${pct}%"></div></div>
       <div class="card-done-tag">✓ 완료 · 패킹 이동</div>
     </div>
