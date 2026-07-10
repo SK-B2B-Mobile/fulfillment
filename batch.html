@@ -376,7 +376,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-12:00</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-15:30</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -489,7 +489,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             <div class="slot-grid" id="slotsLarge"></div>
           </div>
 
-          <div class="slot-section small">
+          <div class="slot-section small" style="margin-bottom:16px;">
             <div class="slot-section-head">
               <div class="slot-section-title">
                 <h3>소량 오더 구역 (무빙카트)</h3>
@@ -499,6 +499,20 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
               </div>
             </div>
             <div class="slot-grid" id="slotsSmall"></div>
+          </div>
+
+          <!-- ★ 2026-07-10 신규: 30개 슬롯 밖으로 밀린 고객사도 매니저가 임시 번호를 부여해서
+               작업자가 실제로 물건을 갖다 놓을 위치를 지정할 수 있게 함 -->
+          <div class="slot-section" id="manualSlotSection" style="display:none; border-color:var(--purple);">
+            <div class="slot-section-head">
+              <div class="slot-section-title">
+                <h3>임시 배정 구역 (매니저 수동 지정)</h3>
+                <span class="range">30개 슬롯 밖 · 미배정 고객사용</span>
+                <span class="divider"></span>
+                <span class="count" id="manualCount">0</span>
+              </div>
+            </div>
+            <div class="slot-grid" id="slotsManual"></div>
           </div>
         </div>
       </div>
@@ -1785,36 +1799,45 @@ document.querySelectorAll('#roleToggle button').forEach(b => {
 function renderSlots(){
   const largeEl = document.getElementById('slotsLarge');
   const smallEl = document.getElementById('slotsSmall');
+  const manualEl = document.getElementById('slotsManual');
 
   const progressByInvoice = {};
+  // ★ 2026-07-10 신규: 수량(pcs) 진행률 말고 "몇 개 상품(SKU)이 다 채워졌는지"도 같이 집계
+  const skuProgressByInvoice = {};
   Object.values(state.scanIndex).forEach(sku => sku.queue.forEach(q => {
     if(!progressByInvoice[q.invoice]) progressByInvoice[q.invoice] = {done:0, need:0};
     progressByInvoice[q.invoice].done += q.done;
     progressByInvoice[q.invoice].need += q.need;
+
+    if(!skuProgressByInvoice[q.invoice]) skuProgressByInvoice[q.invoice] = {doneSku:0, totalSku:0};
+    skuProgressByInvoice[q.invoice].totalSku += 1;
+    if(q.done >= q.need) skuProgressByInvoice[q.invoice].doneSku += 1;
   }));
 
   function slotHtml(slot){
     const cf = slot.assignedTo ? state.custFiles.find(c => c.meta.invoice_no === slot.assignedTo) : null;
     const p = cf ? progressByInvoice[cf.meta.invoice_no] || {done:0,need:0} : null;
+    const sp = cf ? skuProgressByInvoice[cf.meta.invoice_no] || {doneSku:0,totalSku:cf.totalSkus||0} : null;
     const status = !cf ? 'empty' : p.need>0 && p.done===p.need ? 'done' : p.done>0 ? 'active' : 'filled';
     const pct = p && p.need>0 ? (p.done/p.need*100) : 0;
+    const numLabel = /^\d+$/.test(String(slot.num)) ? String(slot.num).padStart(2,'0') : String(slot.num);
 
     if(!cf){
       return `<div class="slot empty" data-slot="${slot.num}">
-        <div class="slot-head"><span class="slot-num">${String(slot.num).padStart(2,'0')}</span></div>
+        <div class="slot-head"><span class="slot-num">${numLabel}</span></div>
         <div class="slot-empty-msg">비어있음</div>
       </div>`;
     }
     return `<div class="slot ${status}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
       <div class="slot-head">
-        <span class="slot-num">${String(slot.num).padStart(2,'0')}</span>
+        <span class="slot-num">${numLabel}</span>
         <div class="slot-badges">
           <span class="slot-badge ship-${cf.meta.ship_via}">${cf.meta.ship_via}</span>
         </div>
       </div>
       <div class="slot-co">${cf.meta.customer}</div>
       <div class="slot-meta">
-        <span>SKU ${cf.totalSkus}</span>
+        <span>SKU ${sp.doneSku}/${sp.totalSku}</span>
         <span>QTY ${cf.totalQty.toLocaleString()}</span>
       </div>
       <div class="slot-meta">
@@ -1823,7 +1846,7 @@ function renderSlots(){
       </div>
       <div class="slot-progress">
         <div class="slot-progress-bar"><div style="width:${pct}%"></div></div>
-        <span class="slot-progress-txt">${p.done}/${p.need}</span>
+        <span class="slot-progress-txt">${p.done}/${p.need} pcs</span>
       </div>
       <div class="slot-done-badge">✓ 완료 · 패킹 이동 가능</div>
       <div class="slot-actions">
@@ -1833,13 +1856,25 @@ function renderSlots(){
   }
 
   largeEl.innerHTML = state.slots.filter(s => s.num<=16).map(slotHtml).join('');
-  smallEl.innerHTML = state.slots.filter(s => s.num>16).map(slotHtml).join('');
+  smallEl.innerHTML = state.slots.filter(s => s.num>16 && s.num<=30).map(slotHtml).join('');
+
+  // ★ 임시 배정 구역 (30번 밖 수동 지정 슬롯)
+  const manualSlots = state.slots.filter(s => !(Number(s.num) >= 1 && Number(s.num) <= 30) && s.assignedTo);
+  const manualSection = document.getElementById('manualSlotSection');
+  if(manualSlots.length){
+    manualSection.style.display = 'block';
+    manualEl.innerHTML = manualSlots.map(slotHtml).join('');
+    document.getElementById('manualCount').textContent = manualSlots.length + '개';
+  } else {
+    manualSection.style.display = 'none';
+    manualEl.innerHTML = '';
+  }
 
   const lc = state.slots.filter(s => s.num<=16 && s.assignedTo).length;
-  const sc = state.slots.filter(s => s.num>16 && s.assignedTo).length;
+  const sc = state.slots.filter(s => s.num>16 && s.num<=30 && s.assignedTo).length;
   document.getElementById('largeCount').textContent = lc + ' / 16';
   document.getElementById('smallCount').textContent = sc + ' / 14';
-  document.getElementById('slotStat').textContent = (lc+sc) + '/' + state.custFiles.length + ' assigned';
+  document.getElementById('slotStat').textContent = (lc+sc+manualSlots.length) + '/' + state.custFiles.length + ' assigned';
 
   // DnD
   document.querySelectorAll('.slot').forEach(el => {
@@ -1886,7 +1921,11 @@ function renderQueue(){
         <span>QTY ${cf.totalQty.toLocaleString()}</span>
         <span>Ship ${cf.meta.ship_date.slice(5)}</span>
       </div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%; font-size:10.5px;" data-manual-assign="${cf.meta.invoice_no}">📍 임시 번호 부여</button>
     </div>`).join('');
+  el.querySelectorAll('[data-manual-assign]').forEach(btn => {
+    btn.onclick = (e) => { e.stopPropagation(); assignManualSlot(btn.dataset.manualAssign); };
+  });
   el.querySelectorAll('.cust-card').forEach(c => {
     c.addEventListener('dragstart', e => {
       c.classList.add('dragging');
@@ -1894,6 +1933,36 @@ function renderQueue(){
     });
     c.addEventListener('dragend', () => c.classList.remove('dragging'));
   });
+}
+
+// ★ 2026-07-10 신규: 30개 슬롯 밖으로 밀린 고객사에게 매니저가 임시 번호를 직접 부여
+// (숫자든 "임시A" 같은 라벨이든 자유롭게 입력 가능 — 현장에서 실제로 붙여둔 표지판과 맞추기 위함)
+function assignManualSlot(invoice){
+  const cf = state.custFiles.find(c => c.meta.invoice_no === invoice);
+  if(!cf) return;
+  const input = prompt(`"${cf.meta.customer}"에게 부여할 임시 슬롯 번호를 입력하세요.\n(예: 31, 32 ... 또는 "임시A" 같은 라벨도 가능)`, '');
+  if(input === null) return;
+  const label = input.trim();
+  if(!label){ toast('번호를 입력해주세요', 'error'); return; }
+
+  const numVal = /^\d+$/.test(label) ? Number(label) : label;
+  let slot = state.slots.find(s => String(s.num) === String(numVal));
+
+  if(slot && slot.assignedTo && slot.assignedTo !== invoice){
+    const other = state.custFiles.find(c => c.meta.invoice_no === slot.assignedTo);
+    if(!confirm(`슬롯 "${label}"은 이미 "${other ? other.meta.customer : slot.assignedTo}"가 쓰고 있습니다.\n교체하시겠습니까?`)) return;
+  }
+
+  if(!slot){
+    slot = { num: numVal, size: 'M', assignedTo: null }; // size 'M' = 매니저 수동 지정
+    state.slots.push(slot);
+  }
+  slot.assignedTo = invoice;
+
+  updateSlotQueueNumbers();
+  renderSlots();
+  syncSlotsToServer();
+  toast(`"${cf.meta.customer}" → 임시 슬롯 "${label}" 배정 완료`, 'success');
 }
 
 function moveToSlot(invoice, slotNum){
@@ -2050,6 +2119,14 @@ function doScan(){
 
 function renderTarget(sku, target, code){
   const el = document.getElementById('scanResult');
+
+  // ★ 2026-07-10: Confirm 버튼 없이 스캔되는 즉시 자동 확정 (창고 현장 효율성 개선)
+  //   기존엔 스캔 → 화면 확인 → 버튼 클릭의 2단계였는데, 실제 스캐너 사용 흐름에선
+  //   버튼을 누르는 손동작 자체가 비효율적이고, 반복 스캔 시 중복 확정 위험도 있었음.
+  target.done += 1;
+  logScan({barcode:code, sku:sku.sku, customer:target.customer, slot:target.slot, invoice:target.invoice, status:'pass'});
+  updateScanStats();
+
   el.innerHTML = `<div class="scan-result ok">
     <div class="product-name">${sku.name}</div>
     <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span><span>· 총 ${sku.total}pcs</span></div>
@@ -2065,7 +2142,7 @@ function renderTarget(sku, target, code){
     </div>
     <div class="scan-kv"><span class="k">Invoice</span><span class="v">${target.invoice}</span></div>
     <div class="scan-kv"><span class="k">이 고객사 요청</span><span class="v">${target.need} pcs</span></div>
-    <div class="scan-kv"><span class="k">스캔 후 남는 수량</span><span class="v">${target.need - target.done - 1} pcs</span></div>
+    <div class="scan-kv"><span class="k">확정 후 남는 수량</span><span class="v">${target.need - target.done} pcs</span></div>
     <div class="queue-list">${sku.queue.map(q => `
       <div class="queue-item ${q===target?'next':''}">
         <span class="qname">
@@ -2075,28 +2152,10 @@ function renderTarget(sku, target, code){
         </span>
         <span class="qty">${q.done}/${q.need}</span>
       </div>`).join('')}</div>
-    <button class="confirm-btn" id="confirmBtn">Confirm → 슬롯 ${String(target.slot).padStart(2,'0')}</button>
+    <div style="text-align:center; margin-top:14px; padding:10px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800; font-family:var(--mono); font-size:13px; letter-spacing:0.05em;">✓ 슬롯 ${String(target.slot).padStart(2,'0')}에 자동 확정됨</div>
   </div>`;
-  document.getElementById('confirmBtn').onclick = () => {
-    target.done += 1;
-    logScan({barcode:code, sku:sku.sku, customer:target.customer, slot:target.slot, invoice:target.invoice, status:'pass'});
-    updateScanStats();
-    const next = currentTarget(sku);
-    if(next){
-      renderTarget(sku, next, code);
-    } else {
-      el.innerHTML = `<div class="scan-result complete">
-        <div class="product-name">${sku.name}</div>
-        <div class="slot-cta" style="background:var(--green); color:#04140D">
-          <div class="slot-cta-num"><span class="lbl">SKU cleared</span></div>
-          <div class="slot-cta-co">전량 완료<br><small>${sku.total}/${sku.total}</small></div>
-        </div>
-        <div style="text-align:center; margin-top:12px; font-size:11.5px; color:var(--text-dim); font-family:var(--mono); letter-spacing:0.05em;">다음 상품 스캔 대기 중...</div>
-      </div>`;
-    }
-    scanInput.focus();
-    checkBatchComplete();
-  };
+  scanInput.focus();
+  checkBatchComplete();
 }
 
 function logScan(entry){
