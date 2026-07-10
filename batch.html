@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=yes, viewport-fit=cover">
 <title>SK B2B Fulfillment · Batch Operations</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,7 +32,7 @@
   --shadow-lg:0 12px 32px rgba(0,0,0,0.5);
 }
 *{box-sizing:border-box; margin:0; padding:0;}
-html,body{background:var(--bg); color:var(--text); font-family:var(--sans); font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;}
+html,body{background:var(--bg); color:var(--text); font-family:var(--sans); font-size:clamp(12.5px, 3.4vw, 14px); line-height:1.5; -webkit-font-smoothing:antialiased;}
 
 /* Sim indicator */
 .sim-bar{background:linear-gradient(90deg,rgba(139,92,246,0.15),rgba(59,130,246,0.15)); border-bottom:1px solid var(--border); padding:6px 20px; font-size:11px; color:#B4A5F0; display:flex; justify-content:space-between; align-items:center;}
@@ -356,6 +356,49 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
 .openb-date{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
 .openb-meta{font-family:var(--mono); font-size:11.5px; color:var(--text-dim); margin-top:6px;}
 .openb-actions{display:flex; gap:8px; margin-top:10px;}
+/* ═══════════════════════════════════════════════════════════
+   ★ 2026-07-10 신규 — 좁은 화면(스캔 디바이스·폰) 자동 맞춤
+   ─ NETUM류 핸드헬드 스캐너, 일반 폰(세로) 등 420px 이하 화면에서
+     수동으로 브라우저를 줌아웃하지 않아도 한 화면에 편하게 들어오도록
+     여백/글자크기/버튼 크기를 자동으로 줄여줌.
+═══════════════════════════════════════════════════════════ */
+@media (max-width:420px){
+  main{padding:14px;}
+  .sim-bar{padding:5px 10px; font-size:9.5px; flex-wrap:wrap; gap:2px;}
+  .topbar{padding:10px 14px; flex-wrap:wrap; gap:8px;}
+  .topbar-right{gap:8px; flex-wrap:wrap;}
+  .logo{width:28px; height:28px; font-size:11px;}
+  .brand-txt h1{font-size:12.5px;}
+  .brand-txt small{font-size:9px;}
+  nav{padding:0 10px;}
+  nav button{padding:11px 10px; font-size:11px;}
+  .h-page{font-size:18px;}
+  .sub{font-size:11.5px;}
+  .drop{padding:20px 12px;}
+  .card{padding:12px;}
+  .grid-4{grid-template-columns:repeat(2,1fr); gap:8px;}
+  .metric{padding:10px;}
+  .metric .val{font-size:18px;}
+  .scanner-panel{padding:12px; border-radius:10px;}
+  .scan-input-wrap{padding:10px 12px;}
+  .scan-input-wrap input{font-size:14px;}
+  .slot-cta{padding:12px; flex-wrap:wrap; gap:8px;}
+  .slot-cta-num .n{font-size:26px;}
+  .product-name{font-size:12.5px;}
+  .slot-grid{grid-template-columns:repeat(2,1fr); gap:6px;}
+  .slot{padding:9px 9px 7px; min-height:auto;}
+  .slot-num{font-size:15px;}
+  .slot-co{font-size:11px;}
+  .slot-meta{font-size:9px; flex-wrap:wrap;}
+  .queue-panel{padding:10px;}
+  .cust-card{padding:8px 9px;}
+  .complete-title{font-size:22px;}
+  .complete-stats{grid-template-columns:1fr; gap:8px;}
+  table{font-size:10.5px;}
+  th, td{padding:8px 6px;}
+  .modal{padding:16px; max-width:94vw;}
+  .toast{font-size:11px; padding:9px 14px; max-width:88vw;}
+}
 </style>
 </head>
 <body>
@@ -376,7 +419,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-15:30</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-16:15</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
