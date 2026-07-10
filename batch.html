@@ -376,7 +376,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-11:05</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-12:00</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -1564,14 +1564,18 @@ document.getElementById('startBatchBtn').onclick = async () => {
 
 function buildScanIndex(){
   state.lastStructureSync = Date.now(); // ★ 2026-07-10: 진단용 — 큐가 언제 마지막으로 다시 짜였는지
+  // ★ 2026-07-10 버그 수정: 구글시트가 순수 숫자로 된 바코드를 자동으로 "숫자" 타입으로
+  //   바꿔버려서, 총량 쪽(문자열)과 고객사 쪽(숫자)이 서로 안 맞는 문제가 있었음
+  //   (382개 중 문자 섞인 특수 바코드 7개만 매칭되고 나머지는 전부 실패했던 원인).
+  //   바코드는 항상 String()으로 통일해서 비교하도록 고침.
   const sumByBc = {};
-  state.sumFile.items.forEach(it => { sumByBc[it.barcode] = it; });
+  state.sumFile.items.forEach(it => { sumByBc[String(it.barcode)] = it; });
   state.scanIndex = {};
   for(const [bc, sumIt] of Object.entries(sumByBc)){
     const queue = [];
     state.custFiles.forEach(cf => {
       cf.items.forEach(it => {
-        if(it.barcode === bc){
+        if(String(it.barcode) === bc){
           queue.push({
             customer: cf.meta.customer,
             invoice: cf.meta.invoice_no,
