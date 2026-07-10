@@ -348,6 +348,14 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
 .mismatch-row .ms-diff.short{color:var(--red);}
 .mismatch-row .ms-diff.over{color:var(--amber);}
 .reconcile-more{font-size:11px; color:var(--text-dim2); margin-top:8px; font-family:var(--mono);}
+
+/* Open batches (미완료 배치) panel — 2026-07-10 신규 */
+.openb-card{background:var(--amber-bg); border:1px solid var(--amber); border-radius:10px; padding:14px 16px; margin-bottom:10px;}
+.openb-head{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;}
+.openb-id{font-family:var(--mono); font-size:13px; font-weight:700; color:var(--amber);}
+.openb-date{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
+.openb-meta{font-family:var(--mono); font-size:11.5px; color:var(--text-dim); margin-top:6px;}
+.openb-actions{display:flex; gap:8px; margin-top:10px;}
 </style>
 </head>
 <body>
@@ -393,6 +401,9 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       <div class="eyebrow">Step 01 · Batch setup</div>
       <h2 class="h-page">오늘의 배치 생성</h2>
       <p class="sub">CMS에서 <b>GROUP PICKING CHECK LIST</b> (1차, 필요시 2차 추가분까지 최대 2개)와 <b>고객사별 피킹 리스트</b> 전부를 업로드하세요. 시스템이 자동으로 총량을 파악하고 오더 크기에 맞춰 슬롯을 배정합니다.</p>
+
+      <!-- ★ 2026-07-10 신규: 매니저가 완료 처리 안 한 배치는 날짜가 바뀌어도 여기 계속 뜸 -->
+      <div id="openBatchesPanel" style="display:none; margin-bottom:18px;"></div>
 
       <div class="drop-row">
         <label class="drop" id="dropSum">
@@ -861,8 +872,98 @@ function tryRestoreDraftFromLocalStorage(){
 
 // 새로고침해도 이어서 작업 — 오늘자 진행중 배치 자동 복원
 // ═══════════════════════════════════════════════════════════
+async function checkOpenBatches(){
+  try{
+    const res = await gasQuery('getOpenBatches', {});
+    if(!res.ok) return;
+    renderOpenBatchesPanel(res.batches || []);
+  }catch(e){
+    console.error('checkOpenBatches failed:', e);
+  }
+}
+
+function renderOpenBatchesPanel(batches){
+  const panel = document.getElementById('openBatchesPanel');
+  if(!panel) return;
+  // 지금 이 화면이 이어서 작업 중인 배치는 목록에서 뺀다 (이미 위에서 정상 작업 중이므로 중복 경고 불필요)
+  const list = batches.filter(b => b.batchId !== state.batchId);
+  if(!list.length){ panel.style.display = 'none'; panel.innerHTML = ''; return; }
+
+  panel.style.display = 'block';
+  const today = new Date().toISOString().slice(0,10);
+  panel.innerHTML = `
+    <div style="font-size:12px; font-weight:700; color:var(--amber); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">
+      ⚠ 완료 처리 안 된 배치 ${list.length}건 — 확인이 필요합니다
+    </div>
+    ${list.map(b => {
+      const isOld = b.date !== today;
+      const pct = b.totalQty > 0 ? Math.round((b.scannedPass / b.totalQty) * 100) : 0;
+      return `<div class="openb-card">
+        <div class="openb-head">
+          <span class="openb-id">${b.batchId}</span>
+          <span class="openb-date">${b.date}${isOld ? ' · 이전 날짜' : ' · 오늘'}</span>
+        </div>
+        <div class="openb-meta">${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs 목표 · 지금까지 스캔 통과 ${Number(b.scannedPass).toLocaleString()}건 (약 ${pct}%)</div>
+        <div class="openb-actions">
+          <button class="btn btn-primary btn-sm" data-continue="${b.batchId}">이어서 작업하기</button>
+          <button class="btn btn-ghost btn-sm" data-complete="${b.batchId}">완료 처리</button>
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+  panel.querySelectorAll('[data-continue]').forEach(btn => {
+    btn.onclick = () => continueOpenBatch(btn.dataset.continue);
+  });
+  panel.querySelectorAll('[data-complete]').forEach(btn => {
+    btn.onclick = () => completeOpenBatch(btn.dataset.complete);
+  });
+}
+
+// "이어서 작업하기" — 그 배치를 통째로 불러와서 지금 화면에서 이어서 작업
+async function continueOpenBatch(batchId){
+  const res = await gasQuery('getBatch', { batchId });
+  if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
+
+  state.batchId = res.batch.batchId;
+  state.sumFile = { meta:{}, items: res.sumItems || [] };
+  state.custFiles = (res.customers || []).map(c => ({
+    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+    items: c.items || [],
+    totalQty: c.totalQty, totalSkus: c.totalSku,
+  }));
+  state.slots.forEach(s => { s.assignedTo = null; });
+  (res.customers || []).forEach(c => {
+    if(!c.slotNum) return;
+    const slot = state.slots.find(s => s.num === Number(c.slotNum));
+    if(slot) slot.assignedTo = c.invoice;
+  });
+
+  buildScanIndex();
+  updateSlotQueueNumbers();
+  document.getElementById('batchChip').textContent = state.batchId;
+  document.getElementById('batchChip').classList.add('active');
+  document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
+  renderFileTags();
+  await pollScanState();
+  startScanPolling();
+  startStructurePolling();
+  checkOpenBatches(); // 방금 고른 배치는 목록에서 빠지도록 다시 그림
+  toast(`배치 ${state.batchId} 이어서 작업 시작`, 'success');
+  gotoView('v-slots');
+}
+
+// "완료 처리" — 매니저가 명시적으로 이 배치를 끝난 것으로 확정
+async function completeOpenBatch(batchId){
+  if(!confirm(`배치 ${batchId}를 완료 처리하시겠습니까?\n\n(스캔 기록은 그대로 남고, 목록에서만 사라집니다. 되돌릴 수 없으니 정말 다 끝난 배치인지 확인해주세요.)`)) return;
+  const res = await gasCall('completeBatch', { batchId });
+  if(!res.ok){ toast('완료 처리 실패: ' + (res.error||''), 'error'); return; }
+  toast(`배치 ${batchId} 완료 처리됨`, 'success');
+  checkOpenBatches();
+}
+
 async function restoreBatchFromServer(){
   if(!GAS_READY) { tryRestoreDraftFromLocalStorage(); return; } // 데모 모드: 임시저장만 시도
+  checkOpenBatches(); // ★ 2026-07-10: 오늘 배치 여부와 무관하게, 완료 처리 안 된 배치는 항상 매니저에게 보여줌
   const res = await gasQuery('getBatch', {});
   if(!res.ok || !res.batch) { tryRestoreDraftFromLocalStorage(); return; } // 오늘 진행중 배치 없음 → 임시저장 확인
 
