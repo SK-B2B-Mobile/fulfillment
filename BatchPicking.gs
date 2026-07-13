@@ -42,7 +42,7 @@ function ensureBatchSheet_(name, headers) {
 function batchesSheet_()  { return ensureBatchSheet_(BATCHES_SHEET,  ['BatchId','Date','Status','TotalSku','TotalQty','CreatedAt','CompletedAt']); }
 function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize']); }
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
-function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status']); }
+function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty']); }
 function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
 
 function generateBatchId_() {
@@ -241,7 +241,12 @@ function logScan(data) {
     scanlogSheet_().appendRow([
       data.batchId, scanId, batchNow_(), data.worker || '', data.barcode || '',
       data.sku || '', data.slot || '', data.customer || '', data.invoice || '',
-      data.result || 'pass', 'active'
+      data.result || 'pass', 'active', Number(data.qty) || 1
+      // ★ 2026-07-13: '스캔 1번 = 낱개 1개'가 아니라 '스캔 1번 = 그 순간 배정된
+      //   고객사가 필요한 수량 전체를 분류 완료'로 워크플로우를 변경함에 따라
+      //   추가된 컬럼. 총량피킹에서 스캔의 목적은 개수 검수가 아니라 "이 상품을
+      //   어느 고객사로 보낼지 분류"하는 것이므로, 스캔 1번에 여러 개가 한번에
+      //   해당 고객사 몫으로 카운트되어야 함.
     ]);
     return { ok: true, scanId: scanId };
   } catch (e) {
@@ -414,14 +419,17 @@ function getSlotProgress(batchId) {
     const scannedByInvoice = {};
     const scannedByInvoiceBarcode = {};
     if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 11).getValues().forEach(r => {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[10] === 'undone') return;
         if (r[9] !== 'pass') return; // over/error는 완료 카운트에 안 넣음
+        // ★ 2026-07-13: 스캔 1건 = +1이 아니라, 그 스캔으로 분류된 실제 수량(Qty
+        //   컬럼)만큼 더함. 예전 데이터(Qty 컬럼 없음)는 1로 취급해 하위호환.
+        const qty = Number(r[11]) || 1;
         const inv = r[8];
-        scannedByInvoice[inv] = (scannedByInvoice[inv] || 0) + 1;
+        scannedByInvoice[inv] = (scannedByInvoice[inv] || 0) + qty;
         const key = inv + '|' + String(r[4]);
-        scannedByInvoiceBarcode[key] = (scannedByInvoiceBarcode[key] || 0) + 1;
+        scannedByInvoiceBarcode[key] = (scannedByInvoiceBarcode[key] || 0) + qty;
       });
     }
 
@@ -512,7 +520,7 @@ function getScanState(batchId) {
     const scans = [];
 
     if (last >= 2) {
-      const rows = sl.getRange(2, 1, last - 1, 11).getValues();
+      const rows = sl.getRange(2, 1, last - 1, 12).getValues();
       rows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[10] === 'undone') return; // 취소된 스캔은 진행률/로그에서 제외
@@ -521,15 +529,16 @@ function getScanState(batchId) {
         const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
           ? Utilities.formatDate(ts, batchTz_(), 'yyyy-MM-dd HH:mm:ss')
           : String(ts || '');
+        const qty = Number(r[11]) || 1; // ★ 2026-07-13: Qty 컬럼 없는 예전 데이터는 1로 하위호환
 
         scans.push({
           scanId: r[1], time: timeStr, worker: r[3], barcode: r[4],
-          sku: r[5], slot: r[6], customer: r[7], invoice: r[8], result: r[9]
+          sku: r[5], slot: r[6], customer: r[7], invoice: r[8], result: r[9], qty: qty
         });
 
         if (r[9] === 'pass' && r[8] && r[4]) {
           const key = r[8] + '|' + r[4]; // invoice|barcode
-          doneMap[key] = (doneMap[key] || 0) + 1;
+          doneMap[key] = (doneMap[key] || 0) + qty;
         }
       });
     }
@@ -567,16 +576,17 @@ function getOpenBatches() {
     });
     if (!open.length) return { ok: true, batches: [] };
 
-    // 배치별 대략적인 진행률(통과 스캔 수) 계산 — 얼마나 진행됐는지 매니저가 판단할 수 있게
+    // 배치별 대략적인 진행률(통과 스캔 수량 합계) 계산 — 얼마나 진행됐는지 매니저가 판단할 수 있게
     const sl = scanlogSheet_();
     const slLast = sl.getLastRow();
     const passByBatch = {};
     if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 11).getValues().forEach(r => {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
         if (r[10] === 'undone') return;
         if (r[9] !== 'pass') return;
         const bid = String(r[0]);
-        passByBatch[bid] = (passByBatch[bid] || 0) + 1;
+        const qty = Number(r[11]) || 1;
+        passByBatch[bid] = (passByBatch[bid] || 0) + qty;
       });
     }
     open.forEach(b => { b.scannedPass = passByBatch[String(b.batchId)] || 0; });
