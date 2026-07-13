@@ -419,7 +419,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-13:35</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-14:15</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -635,12 +635,13 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
               <th>SKU</th>
               <th>Customer</th>
               <th style="width:70px">Slot</th>
+              <th style="width:60px">Qty</th>
               <th style="width:80px">Status</th>
               <th style="width:90px"></th>
             </tr>
           </thead>
           <tbody id="fullLogBody">
-            <tr><td colspan="7" class="empty-log" style="border:none">기록 없음</td></tr>
+            <tr><td colspan="8" class="empty-log" style="border:none">기록 없음</td></tr>
           </tbody>
         </table>
       </div>
@@ -2201,10 +2202,31 @@ function renderTarget(sku, target, code){
   // ★ 2026-07-10: Confirm 버튼 없이 스캔되는 즉시 자동 확정 (창고 현장 효율성 개선)
   //   기존엔 스캔 → 화면 확인 → 버튼 클릭의 2단계였는데, 실제 스캐너 사용 흐름에선
   //   버튼을 누르는 손동작 자체가 비효율적이고, 반복 스캔 시 중복 확정 위험도 있었음.
-  target.done += 1;
-  logScan({barcode:code, sku:sku.sku, customer:target.customer, slot:target.slot, invoice:target.invoice, status:'pass'});
+  // ★ 2026-07-13 대폭 변경: 총량피킹에서 스캔의 목적은 "낱개 검수"가 아니라
+  //   "이미 다 피킹된 상품을 어느 고객사로 보낼지 분류"하는 것. 그래서 스캔
+  //   1번 = 그 순간 배정된 고객사가 필요한 수량 전체를 한번에 분류 완료 처리.
+  //   (예: KEAUTI LLC가 이 상품 20개 필요 → 스캔 1번으로 20개 다 분류 완료 →
+  //   다음 스캔은 자동으로 큐의 다음 고객사로 넘어감)
+  const qty = target.need - target.done; // 이번 스캔으로 채워지는 수량
+  target.done = target.need;
+  logScan({barcode:code, sku:sku.sku, customer:target.customer, slot:target.slot, invoice:target.invoice, status:'pass', qty:qty});
   scanFeedback('ok');
   updateScanStats();
+
+  // ★ 2026-07-13 신규: "다음엔 어느 슬롯에 몇 개를 넣어야 하는지" 스캔 직후 바로
+  //   안내 — 이걸 알아야 작업자가 다음 묶음을 미리 세어서 준비할 수 있음.
+  //   (한 SKU가 여러 업체로 찢어지는 게 정상 동작이며, 이 배너가 그 흐름을
+  //   눈으로 보여주는 부분)
+  const nextTarget = sku.queue.find(q => q.done < q.need);
+  const nextBannerHtml = nextTarget
+    ? `<div style="text-align:center; margin-top:10px; padding:12px; background:var(--amber-bg); border:1px solid var(--amber); border-radius:8px;">
+         <div style="font-family:var(--mono); font-size:10px; color:var(--amber); letter-spacing:0.08em; margin-bottom:4px;">▶ 다음 분류 대상</div>
+         <div style="font-weight:800; font-size:15px;">슬롯 ${String(nextTarget.slot).padStart(2,'0')} · ${nextTarget.customer}</div>
+         <div style="font-family:var(--mono); font-size:13px; color:var(--amber); font-weight:700; margin-top:2px;">${nextTarget.need - nextTarget.done}개 준비해서 스캔하세요</div>
+       </div>`
+    : `<div style="text-align:center; margin-top:10px; padding:12px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800;">
+         ✓ 이 상품(${sku.sku}) 전량 분류 완료 — 다음 상품으로 넘어가세요
+       </div>`;
 
   el.innerHTML = `<div class="scan-result ok">
     <div class="product-name">${sku.name}</div>
@@ -2220,8 +2242,9 @@ function renderTarget(sku, target, code){
       </div>
     </div>
     <div class="scan-kv"><span class="k">Invoice</span><span class="v">${target.invoice}</span></div>
-    <div class="scan-kv"><span class="k">이 고객사 요청</span><span class="v">${target.need} pcs</span></div>
-    <div class="scan-kv"><span class="k">확정 후 남는 수량</span><span class="v">${target.need - target.done} pcs</span></div>
+    <div class="scan-kv"><span class="k">이번 스캔으로 분류된 수량</span><span class="v" style="color:var(--green); font-weight:800;">${qty} pcs</span></div>
+    <div class="scan-kv"><span class="k">이 고객사 요청 전체</span><span class="v">${target.need} pcs · 전량 분류완료</span></div>
+    ${nextBannerHtml}
     <div class="queue-list">${sku.queue.map(q => `
       <div class="queue-item ${q===target?'next':''}">
         <span class="qname">
@@ -2231,7 +2254,7 @@ function renderTarget(sku, target, code){
         </span>
         <span class="qty">${q.done}/${q.need}</span>
       </div>`).join('')}</div>
-    <div style="text-align:center; margin-top:14px; padding:10px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800; font-family:var(--mono); font-size:13px; letter-spacing:0.05em;">✓ 슬롯 ${String(target.slot).padStart(2,'0')}에 자동 확정됨</div>
+    <div style="text-align:center; margin-top:14px; padding:10px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800; font-family:var(--mono); font-size:13px; letter-spacing:0.05em;">✓ 슬롯 ${String(target.slot).padStart(2,'0')}에 ${qty}개 전량 분류 완료됨</div>
   </div>`;
   scanInput.focus();
   checkBatchComplete();
@@ -2252,7 +2275,7 @@ function logScan(entry){
     gasCall('logScan', {
       batchId: state.batchId, worker: entry.worker, barcode: entry.barcode,
       sku: entry.sku, slot: entry.slot, customer: entry.customer,
-      invoice: entry.invoice, result: entry.status,
+      invoice: entry.invoice, result: entry.status, qty: entry.qty || 1,
     }).then(res => {
       if(res.ok) entry.scanId = res.scanId;
       // ★ 2026-07-09: 저장 성공 직후 곧바로 한 번 더 동기화 (5초 폴링을 기다리지 않고
@@ -2280,6 +2303,7 @@ function renderRecentScans(){
       <span class="log-time">${fmtClock(s.time)}</span>
       <span class="log-msg">${s.customer || '<span style="color:var(--red)">Unknown</span>'} <small>${s.barcode||''}</small></span>
       <span class="log-slot">${s.slot ? String(s.slot).padStart(2,'0') : '-'}</span>
+      ${s.status==='pass' ? `<span class="log-slot" style="color:var(--green)">+${s.qty||1}</span>` : ''}
       <span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span>
     </div>`).join('');
 }
@@ -2294,7 +2318,7 @@ function checkBatchComplete(){
 
 function showBatchComplete(){
   const filledSlots = state.slots.filter(s => s.assignedTo).length;
-  const totalQty = state.scans.filter(s => s.status==='pass').length;
+  const totalQty = state.scans.filter(s => s.status==='pass').reduce((a,s) => a + (s.qty||1), 0);
   const dur = state.batchStartTs ? Math.floor((Date.now() - state.batchStartTs)/60000) : 0;
   document.getElementById('cmpSlots').textContent = filledSlots;
   document.getElementById('cmpQty').textContent = totalQty.toLocaleString();
@@ -2359,7 +2383,7 @@ document.getElementById('btnSyncBatch').onclick = async () => {
 
 function renderFullLog(){
   const el = document.getElementById('fullLogBody');
-  if(state.scans.length === 0){ el.innerHTML = '<tr><td colspan="7" class="empty-log" style="border:none">기록 없음</td></tr>'; return; }
+  if(state.scans.length === 0){ el.innerHTML = '<tr><td colspan="8" class="empty-log" style="border:none">기록 없음</td></tr>'; return; }
   el.innerHTML = state.scans.map((s,i) => `
     <tr>
       <td><span class="log-time">${fmtClock(s.time)}</span></td>
@@ -2367,6 +2391,7 @@ function renderFullLog(){
       <td>${s.sku||'-'}</td>
       <td>${s.customer||'-'}</td>
       <td>${s.slot ? String(s.slot).padStart(2,'0') : '-'}</td>
+      <td style="font-family:var(--mono); color:var(--green); font-weight:700;">${s.status==='pass' ? '+'+(s.qty||1) : '-'}</td>
       <td><span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span></td>
       <td>${s.status==='pass' ? `<button class="mini-btn danger" data-undo="${i}">↶ undo</button>` : ''}</td>
     </tr>`).join('');
@@ -2376,7 +2401,7 @@ function renderFullLog(){
       // find the queue item and decrement
       for(const sku of Object.values(state.scanIndex)){
         const q = sku.queue.find(q => q.invoice === scan.invoice);
-        if(q && sku.sku === scan.sku){ q.done = Math.max(0, q.done - 1); break; }
+        if(q && sku.sku === scan.sku){ q.done = Math.max(0, q.done - (scan.qty || 1)); break; }
       }
       state.scans.splice(+b.dataset.undo, 1);
       renderFullLog(); renderSlots(); renderRecentScans(); updateScanStats();
