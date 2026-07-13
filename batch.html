@@ -145,32 +145,39 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot:hover{border-color:var(--border2); background:var(--surface3);}
 .slot.filled{background:var(--surface); border-color:var(--border2);}
 .slot.active{border-color:var(--amber); background:var(--amber-bg); animation:slotPulse 1.6s ease-in-out infinite;}
-.slot.done{border-color:var(--green); background:var(--green-bg);}
+/* ★ 2026-07-13 변경: 완료 슬롯을 테두리만 강조하던 것에서, 칸 전체를 초록색으로
+   채우도록 변경 (TV 현황판과 동일 톤 맞춤) — 텍스트는 초록 배경 위에서
+   잘 읽히는 진한 색으로 전부 맞춤. */
+.slot.done{border-color:var(--green); background:var(--green);}
 .slot.empty{border-style:dashed; background:var(--bg2);}
 .slot.dragover{border-color:var(--cyan) !important; background:var(--cyan-bg) !important;}
 @keyframes slotPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.35);} 50%{box-shadow:0 0 0 6px rgba(245,158,11,0);}}
 .slot-done-badge{display:none; align-items:center; gap:4px; font-family:var(--mono); font-size:10px; font-weight:800; color:var(--green); letter-spacing:0.05em; margin-top:4px;}
-.slot.done .slot-done-badge{display:flex;}
+.slot.done .slot-done-badge{display:flex; color:#04140D;}
 
 .slot-head{display:flex; justify-content:space-between; align-items:baseline;}
 .slot-num{font-family:var(--mono); font-size:20px; font-weight:700; color:var(--purple); line-height:1;}
 .slot.active .slot-num{color:var(--amber);}
-.slot.done .slot-num{color:var(--green);}
+.slot.done .slot-num{color:#04140D;}
 .slot-badges{display:flex; gap:4px;}
 .slot-badge{font-family:var(--mono); font-size:9px; padding:2px 5px; border-radius:3px; font-weight:700; letter-spacing:0.05em;}
 .slot-badge.ship-UPS{background:rgba(139,92,246,0.15); color:var(--purple);}
 .slot-badge.ship-PU{background:rgba(34,211,238,0.15); color:var(--cyan);}
 .slot-badge.ship-TK{background:rgba(245,158,11,0.15); color:var(--amber);}
+.slot.done .slot-badge{background:rgba(4,20,13,0.18); color:#04140D;}
 
 .slot-co{font-size:12.5px; font-weight:700; margin-top:8px; line-height:1.3; letter-spacing:-0.01em;}
+.slot.done .slot-co{color:#04140D;}
 .slot-meta{font-family:var(--mono); font-size:10px; color:var(--text-dim); margin-top:4px; display:flex; gap:8px;}
 .slot-meta span{white-space:nowrap;}
+.slot.done .slot-meta{color:#04140D; opacity:0.75;}
 .slot-progress{display:flex; align-items:center; gap:6px; margin-top:auto; padding-top:8px;}
 .slot-progress-bar{flex:1; height:3px; background:var(--surface3); border-radius:2px; overflow:hidden;}
 .slot-progress-bar > div{height:100%; background:var(--amber); transition:width 0.3s;}
-.slot.done .slot-progress-bar > div{background:var(--green);}
+.slot.done .slot-progress-bar{background:rgba(4,20,13,0.18);}
+.slot.done .slot-progress-bar > div{background:#04140D;}
 .slot-progress-txt{font-family:var(--mono); font-size:10px; color:var(--text-dim);}
-.slot.done .slot-progress-txt{color:var(--green);}
+.slot.done .slot-progress-txt{color:#04140D;}
 
 .slot-empty-msg{margin-top:16px; font-size:10.5px; color:var(--text-dim2); text-align:center; font-family:var(--mono); letter-spacing:0.05em;}
 
@@ -463,7 +470,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-16:05</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-16:20</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
