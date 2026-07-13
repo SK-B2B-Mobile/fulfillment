@@ -419,7 +419,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-10-16:30</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-13:10</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -1854,7 +1854,9 @@ function renderSlots(){
 
     if(!skuProgressByInvoice[q.invoice]) skuProgressByInvoice[q.invoice] = {doneSku:0, totalSku:0};
     skuProgressByInvoice[q.invoice].totalSku += 1;
-    if(q.done >= q.need) skuProgressByInvoice[q.invoice].doneSku += 1;
+    // ★ 2026-07-13 수정: '요청수량 100% 완료'가 아니라 '스캔이 1개라도 된 SKU'를 카운트
+    //   (TV 현황판 getSlotProgress와 동일한 기준으로 통일 — 안 그러면 화면마다 숫자가 다르게 보임)
+    if(q.done > 0) skuProgressByInvoice[q.invoice].doneSku += 1;
   }));
 
   function slotHtml(slot){
