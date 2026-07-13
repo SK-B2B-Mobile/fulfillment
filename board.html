@@ -59,7 +59,12 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-slot{font-family:var(--mono); font-size:30px; font-weight:800; color:var(--text-dim);}
 .card.active .card-slot{color:var(--amber);}
 .card.done .card-slot{color:var(--green);}
-.card-ship{font-family:var(--mono); font-size:12px; font-weight:800; padding:4px 9px; border-radius:6px; background:rgba(139,92,246,0.18); color:#B39CFF; letter-spacing:0.04em;}
+.card-ship{font-family:var(--mono); font-size:12px; font-weight:800; padding:4px 9px; border-radius:6px; letter-spacing:0.04em;}
+/* ★ 2026-07-13 신규: 배송타입(UPS/PU/TK)별 색상 구분 — batch.html과 동일한 배색 사용 */
+.card-ship.ship-UPS{background:rgba(139,92,246,0.18); color:#B39CFF;}
+.card-ship.ship-PU{background:rgba(34,211,238,0.18); color:#67E4F5;}
+.card-ship.ship-TK{background:rgba(245,158,11,0.18); color:#FBBF4E;}
+.card-ship.ship-other{background:rgba(58,69,96,0.35); color:var(--text-dim);}
 .card-cust{font-size:19px; font-weight:700; margin-top:10px; line-height:1.25; flex:1; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
 .card-bottom{margin-top:12px;}
 .card-qty{font-family:var(--mono); font-size:16px; color:var(--text-dim); margin-bottom:6px;}
@@ -139,6 +144,10 @@ function fmtClock(){
 setInterval(fmtClock, 1000); fmtClock();
 
 function shipLabel(v){ return v || '-'; }
+// ★ 2026-07-13: UPS/PU/TK가 아닌 값이 들어와도 스타일이 깨지지 않도록 안전하게 클래스 결정
+function shipClass(v){
+  return (v === 'UPS' || v === 'PU' || v === 'TK') ? 'ship-' + v : 'ship-other';
+}
 
 function cardHtml(slot){
   if(!slot){
@@ -146,10 +155,11 @@ function cardHtml(slot){
   }
   const pct = slot.totalQty > 0 ? Math.min(100, slot.scanned / slot.totalQty * 100) : 0;
   const flashClass = (prevStatus[slot.slotNum] && prevStatus[slot.slotNum] !== 'done' && slot.status === 'done') ? ' flash' : '';
+  const numLabel = /^\d+$/.test(String(slot.slotNum)) ? String(slot.slotNum).padStart(2,'0') : String(slot.slotNum);
   return `<div class="card ${slot.status}${flashClass}">
     <div class="card-top">
-      <span class="card-slot">${String(slot.slotNum).padStart(2,'0')}</span>
-      <span class="card-ship">${shipLabel(slot.shipVia)}</span>
+      <span class="card-slot">${numLabel}</span>
+      <span class="card-ship ${shipClass(slot.shipVia)}">${shipLabel(slot.shipVia)}</span>
     </div>
     <div class="card-cust">${slot.customer || ''}</div>
     <div class="card-bottom">
@@ -189,6 +199,19 @@ function renderBoard(slots){
     }
     html += `</div>`;
   }
+
+  // ★ 2026-07-13 신규: 30번을 초과하는 슬롯(31, 32... 또는 "임시A" 같은
+  //   매니저 수동 배정 라벨)은 기존엔 TV 화면에서 통째로 누락됐음.
+  //   고객사가 30개를 넘는 배치(예: 47개 고객사)에서 작업자가 31번째부터는
+  //   TV로 확인할 방법이 아예 없던 문제 — 여기 세번째 구역으로 추가.
+  const overflow = slots.filter(s => !(Number(s.slotNum) >= 1 && Number(s.slotNum) <= 30));
+  overflow.sort((a,b) => String(a.slotNum).localeCompare(String(b.slotNum), undefined, {numeric:true}));
+  if(overflow.length){
+    html += `<div class="zone-label">추가 배정 구역 · 31번 이상 / 수동 배정 (${overflow.length}개)</div><div class="grid small">`;
+    overflow.forEach(s => { html += cardHtml(s); });
+    html += `</div>`;
+  }
+
   board.innerHTML = html;
 
   // 완료 상태 기록 갱신 (다음 폴링에서 flash 판단용)
