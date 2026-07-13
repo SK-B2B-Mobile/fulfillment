@@ -228,6 +228,10 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .product-meta{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); display:flex; gap:12px;}
 .product-meta b{color:var(--text);}
 
+/* ★ 2026-07-13 신규: 제품명(텍스트)보다 바코드 숫자가 더 빠르고 확실하게
+   확인 가능하다는 현장 피드백 반영 — 스캔 결과 최상단에 크게 표시 */
+.barcode-tag{font-family:var(--mono); font-size:16px; font-weight:800; letter-spacing:0.04em; color:var(--cyan); background:var(--cyan-bg); border:1px solid var(--cyan); border-radius:6px; padding:5px 10px; display:inline-block; margin:4px 0 8px;}
+
 .slot-cta{margin-top:14px; background:var(--amber); color:#291800; border-radius:10px; padding:16px; display:flex; justify-content:space-between; align-items:center;}
 .slot-cta.err{background:var(--red); color:#fff;}
 .slot-cta-num{display:flex; align-items:baseline; gap:6px;}
@@ -459,7 +463,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-15:20</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-16:05</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -1687,7 +1691,7 @@ function buildScanIndex(){
       });
     });
     state.scanIndex[bc] = {
-      sku: sumIt.sku, name: sumIt.name, rack: sumIt.rack,
+      sku: sumIt.sku, name: sumIt.name, rack: sumIt.rack, barcode: bc,
       total: sumIt.req_qty, queue,
     };
   }
@@ -2211,6 +2215,7 @@ function doScan(){
       const diagLastSync = state.lastStructureSync ? new Date(state.lastStructureSync).toLocaleTimeString('ko-KR') : '-';
       el.innerHTML = `<div class="scan-result err">
         <div class="product-name" style="color:var(--red)">${sku.name}</div>
+        <div class="barcode-tag">${sku.barcode}</div>
         <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span><span>· 총량 ${sku.total}pcs</span></div>
         <div class="slot-cta err">
           <div class="slot-cta-num"><span class="lbl">Action</span></div>
@@ -2227,6 +2232,7 @@ function doScan(){
     }
     el.innerHTML = `<div class="scan-result complete">
       <div class="product-name">${sku.name}</div>
+      <div class="barcode-tag">${sku.barcode}</div>
       <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span></div>
       <div class="slot-cta" style="background:var(--green); color:#04140D">
         <div class="slot-cta-num"><span class="lbl">Complete</span></div>
@@ -2278,6 +2284,7 @@ function renderAllTargets(sku, pending, code){
 
   el.innerHTML = `<div class="scan-result ok">
     <div class="product-name">${sku.name}</div>
+    <div class="barcode-tag">${sku.barcode}</div>
     <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span><span>· 총 ${sku.total}pcs</span></div>
     <div style="text-align:center; margin:10px 0; padding:10px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800; font-family:var(--mono); font-size:13px; letter-spacing:0.03em;">
       ✓ ${n}개 고객사 · 총 ${totalQty}pcs 동시 분류완료
