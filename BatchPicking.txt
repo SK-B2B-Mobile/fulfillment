@@ -438,7 +438,13 @@ function getSlotProgress(batchId) {
         skuStatsByInvoice[inv].totalSku++;
         const reqQty = Number(r[5]) || 0;
         const scannedQty = scannedByInvoiceBarcode[inv + '|' + String(r[4])] || 0;
-        if (reqQty > 0 && scannedQty >= reqQty) skuStatsByInvoice[inv].doneSku++;
+        // ★ 2026-07-13 수정: "요청수량 100% 완료"가 아니라 "스캔이 1개라도 된 SKU"를
+        //   카운트하도록 변경. 예전엔 상품 하나에 필요한 수량을 다 못 채우면
+        //   그 상품에 스캔을 이미 3종류나 했어도 SKU 카운터가 계속 0으로 보여서
+        //   "SKU 3개 스캔했는데 왜 0이냐"는 혼란을 줬음. 지금은 몇 종류의 상품에
+        //   손을 댔는지(착수 기준)로 표시 — 총 SKU 수(예: 645개)에 맞춰
+        //   스캔할수록 자연스럽게 올라가는 방식.
+        if (scannedQty > 0) skuStatsByInvoice[inv].doneSku++;
       });
     }
 
