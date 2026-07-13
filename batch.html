@@ -419,7 +419,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-13:10</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-13:35</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -2099,6 +2099,36 @@ scanInput.addEventListener('keydown', e => { if(e.key==='Enter') doScan(); });
 
 function currentTarget(sku){ return sku.queue.find(q => q.done < q.need); }
 
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-07-13 신규 — 스캔 성공/실패 소리+진동 피드백
+// ─────────────────────────────────────────────────────────────
+// 목적: 낱개 스캔 방식(정확도 우선)은 그대로 유지하되, 매번 화면을
+//   눈으로 확인하지 않아도 손 감각(소리+진동)만으로 계속 스캔-담기를
+//   반복할 수 있게 해서 체감 속도를 높임. 대량 SKU(예: 110개)를
+//   빠르게 처리할 때 특히 효과적.
+// ═══════════════════════════════════════════════════════════
+function scanFeedback(kind){
+  try{
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(Ctx){
+      const ctx = window.__scanAudioCtx || (window.__scanAudioCtx = new Ctx());
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      if(kind === 'ok'){
+        o.frequency.value = 880; g.gain.value = 0.15;
+        o.start(); o.stop(ctx.currentTime + 0.09);
+      } else {
+        o.frequency.value = 220; g.gain.value = 0.2;
+        o.start(); o.stop(ctx.currentTime + 0.28);
+      }
+    }
+  }catch(e){ /* 오디오 미지원 기기는 조용히 무시 */ }
+  try{
+    if(navigator.vibrate) navigator.vibrate(kind === 'ok' ? 40 : [80,60,80]);
+  }catch(e){ /* 진동 미지원 기기는 조용히 무시 */ }
+}
+
 function doScan(){
   const code = scanInput.value.trim();
   scanInput.value = '';
@@ -2116,6 +2146,7 @@ function doScan(){
       </div>
     </div>`;
     logScan({barcode:code, sku:null, customer:null, slot:null, status:'unknown'});
+    scanFeedback('err');
     return;
   }
 
@@ -2145,6 +2176,7 @@ function doScan(){
         </div>
       </div>`;
       logScan({barcode:code, sku:sku.sku, customer:null, slot:null, status:'error'});
+      scanFeedback('err');
       return;
     }
     el.innerHTML = `<div class="scan-result complete">
@@ -2156,6 +2188,7 @@ function doScan(){
       </div>
     </div>`;
     logScan({barcode:code, sku:sku.sku, customer:null, slot:null, status:'over'});
+    scanFeedback('err');
     return;
   }
 
@@ -2170,6 +2203,7 @@ function renderTarget(sku, target, code){
   //   버튼을 누르는 손동작 자체가 비효율적이고, 반복 스캔 시 중복 확정 위험도 있었음.
   target.done += 1;
   logScan({barcode:code, sku:sku.sku, customer:target.customer, slot:target.slot, invoice:target.invoice, status:'pass'});
+  scanFeedback('ok');
   updateScanStats();
 
   el.innerHTML = `<div class="scan-result ok">
