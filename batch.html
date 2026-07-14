@@ -474,7 +474,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-13:45</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-13:55</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -1897,6 +1897,23 @@ function stopScanPolling(){
 // ═══════════════════════════════════════════════════════════
 async function refreshBatchStructure(silent){
   if(!GAS_READY || !state.batchId) return false;
+  // ★★★ 2026-07-14 긴급 수정 ★★★
+  // 문제: 이 함수는 "이어서 작업하기"로 열어둔 배치(예: 어제 것)를 30초마다
+  //   자동으로 서버와 재동기화하는데, state.sumFile/state.custFiles를 통째로
+  //   덮어쓴다. 그런데 "01 Batch" 화면(오늘 새 배치 만드는 중)도 정확히 같은
+  //   state.sumFile/state.custFiles를 임시로 쓰고 있어서 — 사용자가 오늘 파일을
+  //   드롭해서 정상으로 보여도, 30초 뒤 이 타이머가 조용히 어제 데이터로
+  //   되돌려버리는 심각한 "데이터 짬뽕" 사고가 있었음.
+  // 해결: 화이트리스트 방식 — 실제로 스캔 작업을 하는 화면(슬롯 배치도/스캔·분류/
+  //   스캔 로그)에 있을 때만 동기화하고, 그 외(특히 01 Batch — 오늘 새 배치를
+  //   준비 중인 화면)에서는 완전히 건너뜀. "01 Batch 탭만 피하면 된다"는 식보다
+  //   "이 화면들에서만 허용한다"가 더 안전함(새 화면이 추가돼도 실수로 동기화가
+  //   켜질 위험이 없음).
+  const syncAllowedViews = ['v-slots', 'v-scan', 'v-log', 'v-workers'];
+  const activeView = document.querySelector('.view.active');
+  if(!activeView || !syncAllowedViews.includes(activeView.id)){
+    return false;
+  }
   try{
     const res = await gasQuery('getBatch', { batchId: state.batchId });
     if(!res.ok || !res.batch) return false;
