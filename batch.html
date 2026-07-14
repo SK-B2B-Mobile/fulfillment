@@ -154,6 +154,10 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 @keyframes slotPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.35);} 50%{box-shadow:0 0 0 6px rgba(245,158,11,0);}}
 .slot-done-badge{display:none; align-items:center; gap:4px; font-family:var(--mono); font-size:10px; font-weight:800; color:var(--green); letter-spacing:0.05em; margin-top:4px;}
 .slot.done .slot-done-badge{display:flex; color:#04140D;}
+.slot-clear-btn{width:100%; margin-top:8px; padding:7px; border:1px solid #04140D; border-radius:6px; background:rgba(4,20,13,0.15); color:#04140D; font-weight:800; font-size:10.5px; cursor:pointer; font-family:var(--sans);}
+.slot-clear-btn:hover{background:rgba(4,20,13,0.28);}
+.slot-clear-btn:disabled{opacity:0.6; cursor:default;}
+.slot-cleared-tag{margin-top:8px; padding:6px 4px; text-align:center; font-family:var(--mono); font-size:9.5px; font-weight:700; color:#04140D; opacity:0.75;}
 
 .slot-head{display:flex; justify-content:space-between; align-items:baseline;}
 .slot-num{font-family:var(--mono); font-size:20px; font-weight:700; color:var(--purple); line-height:1;}
@@ -470,7 +474,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-13-16:20</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-09:30</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -884,6 +888,8 @@ const state = {
     {id:5, name:'Kevin Kim',  status:'off'},
   ],
   currentWorker: null,
+  clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
+  occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
 };
 
@@ -1043,10 +1049,12 @@ async function continueOpenBatch(batchId){
     totalQty: c.totalQty, totalSkus: c.totalSku,
   }));
   state.slots.forEach(s => { s.assignedTo = null; });
+  state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
     if(!c.slotNum) return;
     const slot = state.slots.find(s => s.num === Number(c.slotNum));
     if(slot) slot.assignedTo = c.invoice;
+    if(c.cleared) state.clearedInvoices.add(c.invoice);
   });
 
   buildScanIndex();
@@ -1086,10 +1094,12 @@ async function restoreBatchFromServer(){
     totalQty: c.totalQty, totalSkus: c.totalSku,
   }));
   state.slots.forEach(s => { s.assignedTo = null; });
+  state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
     if(!c.slotNum) return;
     const slot = state.slots.find(s => s.num === Number(c.slotNum));
     if(slot) slot.assignedTo = c.invoice;
+    if(c.cleared) state.clearedInvoices.add(c.invoice);
   });
 
   document.getElementById('dropSum').className = 'drop filled';
@@ -1655,6 +1665,12 @@ document.getElementById('startBatchBtn').onclick = async () => {
     clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
   }
 
+  // ★ 2026-07-14 신규: 자동배정 전에 다른 미완료 배치들이 점유 중인 슬롯부터 확인
+  await fetchOccupiedSlots();
+  if(state.occupiedSlots.size > 0){
+    toast(`이전 미완료 배치가 슬롯 ${state.occupiedSlots.size}개를 아직 쓰고 있어 자동으로 피해서 배정합니다`, 'success');
+  }
+
   buildScanIndex();
   autoAssignSlots();
   await syncSlotsToServer();
@@ -1718,6 +1734,11 @@ function autoAssignSlots(){
   // Clear existing assignments
   state.slots.forEach(s => s.assignedTo = null);
 
+  // ★ 2026-07-14 신규: 아직 완료 처리 안 된 다른 배치(어제 이월분 등)가 쓰고 있는
+  //   슬롯 번호는 실물이 아직 안 빠졌을 수 있으므로 오늘 자동배정에서 제외.
+  //   (fetchOccupiedSlots()로 미리 채워둔 state.occupiedSlots 사용)
+  const occupied = state.occupiedSlots || new Set();
+
   // 정렬 기준: SKU 개수 많은 순 우선, 동률이면 QTY 많은 순
   // → 1~16등: 슬롯 01~16 (고정 대량 렉), 17~30등: 슬롯 17~30 (무빙카트/소량)
   const sorted = [...state.custFiles].sort((a,b) => {
@@ -1725,12 +1746,17 @@ function autoAssignSlots(){
     if(skuDiff !== 0) return skuDiff;
     return (b.totalQty||0) - (a.totalQty||0);
   });
+  const availableSlotNums = [];
+  for(let n = 1; n <= 30; n++){ if(!occupied.has(n)) availableSlotNums.push(n); }
+
   sorted.forEach((cf, i) => {
-    const slotNum = i + 1; // 그냥 순서대로 1번부터
-    if(slotNum <= 30){
+    const slotNum = availableSlotNums[i]; // 점유된 번호를 건너뛴, 빈 자리만 순서대로
+    if(slotNum){
       const slot = state.slots.find(s => s.num === slotNum);
       slot.assignedTo = cf.meta.invoice_no;
     }
+    // 빈 자리보다 고객사가 많으면 여기서 배정 안 되고 "미배정 대기"로 남음
+    // → 기존 "📍 임시 번호 부여" 버튼으로 매니저가 31번 이후로 수동 확장
   });
 
   // Update scanIndex queue with slot numbers + resort by ship_date
@@ -1740,6 +1766,22 @@ function autoAssignSlots(){
     sku.queue.forEach(q => { q.slot = slotByInvoice[q.invoice]; });
     sku.queue.sort((a,b) => (a.ship_date||'9999').localeCompare(b.ship_date||'9999'));
   });
+}
+
+// ★ 2026-07-14 신규 — 새 배치 만들기 전, 아직 완료 처리 안 된 다른 배치들이
+//   점유 중인 슬롯 번호를 서버에서 조회해 state.occupiedSlots에 저장
+async function fetchOccupiedSlots(){
+  state.occupiedSlots = new Set();
+  if(!GAS_READY) return;
+  try{
+    const res = await gasQuery('getOccupiedSlots', {});
+    if(res.ok && Array.isArray(res.occupied)){
+      res.occupied.forEach(o => {
+        const n = Number(o.slotNum);
+        if(!isNaN(n)) state.occupiedSlots.add(n);
+      });
+    }
+  }catch(e){ console.warn('점유 슬롯 조회 실패:', e); }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1946,6 +1988,11 @@ function renderSlots(){
         <span class="slot-progress-txt">${p.done}/${p.need} pcs</span>
       </div>
       <div class="slot-done-badge">✓ 완료 · 패킹 이동 가능</div>
+      ${status==='done' ? (
+        (state.clearedInvoices && state.clearedInvoices.has(cf.meta.invoice_no))
+          ? `<div class="slot-cleared-tag">✓ 슬롯 비워짐 — 다음 배치에서 재사용 가능</div>`
+          : `<button class="slot-clear-btn" data-clear="${cf.meta.invoice_no}">📦 패킹완료 · 슬롯비우기</button>`
+      ) : ''}
       <div class="slot-actions">
         <button class="slot-action" data-remove="${slot.num}">비우기</button>
       </div>
@@ -1991,6 +2038,24 @@ function renderSlots(){
       s.assignedTo = null;
       updateSlotQueueNumbers();
       renderSlots(); renderQueue();
+    };
+    // ★ 2026-07-14 신규: "패킹완료·슬롯비우기" — 실제로 패킹팀이 물건을 가져간 뒤
+    //   눌러야 함. 서버(clearSlot)가 완료 여부를 다시 한번 검증하므로 안전함.
+    const clearBtn = el.querySelector('[data-clear]');
+    if(clearBtn) clearBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const invoice = clearBtn.dataset.clear;
+      clearBtn.disabled = true; clearBtn.textContent = '처리 중...';
+      const res = await gasCall('clearSlot', { batchId: state.batchId, invoice });
+      if(!res.ok){
+        toast('슬롯 비우기 실패: ' + (res.error||'서버 오류'), 'error');
+        clearBtn.disabled = false; clearBtn.textContent = '📦 패킹완료 · 슬롯비우기';
+        return;
+      }
+      if(!state.clearedInvoices) state.clearedInvoices = new Set();
+      state.clearedInvoices.add(invoice);
+      toast('슬롯이 비워졌습니다 — 다음 배치에서 이 번호를 재사용할 수 있습니다', 'success');
+      renderSlots();
     };
   });
 
