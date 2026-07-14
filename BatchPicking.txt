@@ -264,8 +264,55 @@ function clearSlot(data) {
     }
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
 
+    // ★ 2026-07-14 신규 — 슬롯이 비워지는 즉시, 다른 진행 중인 배치(보통 오늘
+    //   배치)의 미배정 대기 고객사 중 이 슬롯 크기에 맞는 곳을 자동으로 채움.
+    //   1~16번(대량 고정 렉)이 비면 대기 중 SKU/수량이 가장 큰 고객사를,
+    //   17~30번(무빙카트/소량)이 비면 가장 작은 고객사를 매칭해서 — 작은
+    //   오더가 대량 렉에 잘못 들어가는 걸 방지함. 매니저는 필요하면 언제든
+    //   드래그로 수동 재배치 가능(자동배정은 되돌릴 수 있는 기본값일 뿐).
+    const clearedSlotNum = rows.find((r,i) => String(r[0])===String(batchId) && String(r[1])===String(invoice))[7];
+    const numSlot = Number(clearedSlotNum);
+    const sizeClass = (!isNaN(numSlot) && numSlot >= 1 && numSlot <= 16) ? 'L'
+                     : (!isNaN(numSlot) && numSlot >= 17 && numSlot <= 30) ? 'S' : null;
+
+    let autoFilled = null;
+    if (sizeClass) {
+      const bSh = batchesSheet_();
+      const bLast = bSh.getLastRow();
+      const openBatches = []; // {batchId, createdAt}
+      if (bLast >= 2) {
+        bSh.getRange(2, 1, bLast - 1, 7).getValues().forEach(r => {
+          if (String(r[2] || '') !== 'completed') openBatches.push({ batchId: String(r[0]), createdAt: String(r[5]) });
+        });
+      }
+      openBatches.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // 최신 생성 배치 우선
+
+      const rows2 = bc.getRange(2, 1, bc.getLastRow() - 1, 10).getValues();
+      for (const ob of openBatches) {
+        // 이 배치의 "아직 슬롯 미배정" 대기 고객사만 후보로
+        const waiting = [];
+        for (let i = 0; i < rows2.length; i++) {
+          if (String(rows2[i][0]) !== ob.batchId) continue;
+          if (rows2[i][7] || rows2[i][7] === 0) continue; // 이미 슬롯 배정된 건 제외
+          waiting.push({ rowIdx: i, invoice: rows2[i][1], customer: rows2[i][2], totalQty: Number(rows2[i][5])||0, totalSku: Number(rows2[i][6])||0 });
+        }
+        if (!waiting.length) continue; // 이 배치엔 대기 고객사 없음 → 다음 배치 확인
+
+        // 사이즈에 맞는 후보 선택: L이면 SKU/수량 큰 순, S면 작은 순
+        waiting.sort((a, b) => sizeClass === 'L'
+          ? (b.totalSku - a.totalSku) || (b.totalQty - a.totalQty)
+          : (a.totalSku - b.totalSku) || (a.totalQty - b.totalQty));
+        const pick = waiting[0];
+
+        bc.getRange(pick.rowIdx + 2, 8).setValue(clearedSlotNum);
+        bc.getRange(pick.rowIdx + 2, 9).setValue(sizeClass);
+        autoFilled = { batchId: ob.batchId, invoice: pick.invoice, customer: pick.customer, slotNum: clearedSlotNum, sizeClass };
+        break;
+      }
+    }
+
     bumpVersion_();
-    return { ok: true };
+    return { ok: true, autoFilled: autoFilled };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
