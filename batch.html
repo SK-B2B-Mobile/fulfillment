@@ -474,8 +474,12 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-13:55</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-14:25</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
+      <div style="position:relative;">
+        <button class="btn btn-ghost btn-sm" id="btnSwitchBatch" title="다른 미완료 배치로 전환">⇄ 다른 배치</button>
+        <div id="switchBatchDropdown" style="display:none; position:absolute; top:calc(100% + 6px); right:0; z-index:50; background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:8px; min-width:280px; box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
+      </div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
         <button data-role="worker">Worker</button>
@@ -1024,6 +1028,44 @@ async function checkOpenBatches(){
     console.error('checkOpenBatches failed:', e);
   }
 }
+
+// ★ 2026-07-14 신규 — "01 Batch" 탭까지 안 가도 어느 화면에서나 다른 미완료
+//   배치로 바로 전환할 수 있게 하는 상단 드롭다운. (예: 오늘 배치 작업 중에
+//   어제 남은 배치로 잠깐 전환하고 싶을 때, 탭을 왔다갔다 안 해도 됨)
+document.getElementById('btnSwitchBatch').onclick = async (e) => {
+  e.stopPropagation();
+  const dd = document.getElementById('switchBatchDropdown');
+  if(dd.style.display === 'block'){ dd.style.display = 'none'; return; }
+
+  dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">불러오는 중...</div>`;
+  dd.style.display = 'block';
+
+  const res = await gasQuery('getOpenBatches', {});
+  if(!res.ok){ dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`; return; }
+  const list = (res.batches || []).filter(b => b.batchId !== state.batchId);
+  if(!list.length){
+    dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">전환할 다른 미완료 배치가 없습니다</div>`;
+    return;
+  }
+  const today = new Date().toISOString().slice(0,10);
+  dd.innerHTML = list.map(b => `
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
+      <div>
+        <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.date!==today?'var(--amber)':'var(--text)'}">${b.batchId}</div>
+        <div style="font-size:10px; color:var(--text-dim);">${b.date} · ${b.totalSku} SKU · 스캔 ${b.scannedPass||0}건</div>
+      </div>
+      <button class="btn btn-primary btn-sm" data-switch-to="${b.batchId}" style="white-space:nowrap;">전환</button>
+    </div>`).join('');
+  dd.querySelectorAll('[data-switch-to]').forEach(btn => {
+    btn.onclick = () => { dd.style.display = 'none'; continueOpenBatch(btn.dataset.switchTo); };
+  });
+};
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('switchBatchDropdown');
+  if(dd && dd.style.display === 'block' && !e.target.closest('#btnSwitchBatch') && !e.target.closest('#switchBatchDropdown')){
+    dd.style.display = 'none';
+  }
+});
 
 function renderOpenBatchesPanel(batches){
   const panel = document.getElementById('openBatchesPanel');
@@ -2116,7 +2158,16 @@ function renderSlots(){
       }
       if(!state.clearedInvoices) state.clearedInvoices = new Set();
       state.clearedInvoices.add(invoice);
-      toast('슬롯이 비워졌습니다 — 다음 배치에서 이 번호를 재사용할 수 있습니다', 'success');
+      // ★ 2026-07-14 신규: 서버가 이 자리에 다른 배치의 대기 고객사를 자동으로
+      //   채웠으면(사이즈 매칭) 그 결과를 바로 알려줌
+      if(res.autoFilled){
+        const af = res.autoFilled;
+        toast(`슬롯 ${af.slotNum}번 비워짐 → ${af.customer}(${af.batchId})가 자동 배정됨 (${af.sizeClass==='L'?'대량':'소량'} 매칭)`, 'success');
+        // 지금 보고 있는 배치가 방금 자동배정된 그 배치라면, 화면도 바로 최신화
+        if(af.batchId === state.batchId) await refreshBatchStructure(true);
+      } else {
+        toast('슬롯이 비워졌습니다 — 다음 배치에서 이 번호를 재사용할 수 있습니다', 'success');
+      }
       renderSlots();
     };
   });
@@ -2242,11 +2293,15 @@ document.getElementById('btnPickEnd').onclick = async () => {
   toast(`피킹 완료 · ${mins}분 소요`, 'success');
 };
 
-document.getElementById('btnRedoAuto').onclick = () => {
+document.getElementById('btnRedoAuto').onclick = async () => {
+  // ★ 2026-07-14 수정: 예전엔 "배치 시작" 시점의 점유 슬롯 스냅샷을 그대로 재사용해서,
+  //   그 사이 다른 배치의 슬롯이 비워져도(패킹완료·슬롯비우기) 반영이 안 됐음.
+  //   버튼 누를 때마다 최신 상태를 다시 조회하도록 수정.
+  await fetchOccupiedSlots();
   autoAssignSlots();
   renderSlots();
   syncSlotsToServer();
-  toast('자동 재배정 완료', 'success');
+  toast('자동 재배정 완료 (최신 점유 슬롯 반영)', 'success');
 };
 document.getElementById('btnClearSlots').onclick = () => {
   state.slots.forEach(s => s.assignedTo = null);
