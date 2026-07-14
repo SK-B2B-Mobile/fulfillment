@@ -40,7 +40,7 @@ function ensureBatchSheet_(name, headers) {
 }
 
 function batchesSheet_()  { return ensureBatchSheet_(BATCHES_SHEET,  ['BatchId','Date','Status','TotalSku','TotalQty','CreatedAt','CompletedAt']); }
-function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize']); }
+function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared']); }
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
 function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty']); }
 function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
@@ -97,12 +97,12 @@ function createBatch(data) {
       const meta = c.meta || {};
       const items = Array.isArray(c.items) ? c.items : [];
       const cQty = items.reduce((a, it) => a + (Number(it.req_qty)||0), 0);
-      custRows.push([batchId, meta.invoice_no||'', meta.customer||'', meta.ship_date||'', meta.ship_via||'', cQty, items.length, '', '']);
+      custRows.push([batchId, meta.invoice_no||'', meta.customer||'', meta.ship_date||'', meta.ship_via||'', cQty, items.length, '', '', '']);
       items.forEach(it => {
         itemRows.push([batchId, meta.invoice_no||'', it.sku||'', it.name||'', it.barcode||'', Number(it.req_qty)||0, it.rack||'']);
       });
     });
-    if (custRows.length) bc.getRange(bc.getLastRow()+1, 1, custRows.length, 9).setValues(custRows);
+    if (custRows.length) bc.getRange(bc.getLastRow()+1, 1, custRows.length, 10).setValues(custRows);
     if (itemRows.length) {
       const itemsSh = bitemsSheet_();
       const itemStartRow = itemsSh.getLastRow() + 1;
@@ -161,10 +161,10 @@ function getBatch(batchId) {
     const bcLast = bc.getLastRow();
     let customers = [];
     if (bcLast >= 2) {
-      const rows = bc.getRange(2, 1, bcLast - 1, 9).getValues();
+      const rows = bc.getRange(2, 1, bcLast - 1, 10).getValues();
       customers = rows.filter(r => String(r[0]) === String(resolvedId)).map(r => ({
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
-        totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8]
+        totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || ''
       }));
     }
 
@@ -206,7 +206,7 @@ function assignSlots(data) {
     const last = bc.getLastRow();
     if (last < 2) return { ok: false, error: 'no customers for this batch' };
 
-    const rows = bc.getRange(2, 1, last - 1, 9).getValues();
+    const rows = bc.getRange(2, 1, last - 1, 10).getValues();
     const map = {};
     assignments.forEach(a => { map[a.invoice] = a; });
 
@@ -223,6 +223,148 @@ function assignSlots(data) {
     return { ok: true, updated: updated };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ===================== ③b clearSlot (★ 2026-07-14 신규) =====================
+ * "패킹완료·슬롯비우기" 버튼 — 그 고객사분이 실제로 패킹팀에 넘어가서 물리적으로
+ * 자리가 빈 시점에 눌러야 함. 시스템이 "완료(done)"라고 판정한 것과 실물이
+ * 진짜 빠진 것은 다를 수 있어서, 완료 안 된 슬롯은 절대 못 비우게 안전장치를 둠.
+ * 입력: { batchId, invoice }
+ * ============================================================ */
+function clearSlot(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const batchId = data.batchId, invoice = data.invoice;
+    if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
+
+    // 안전장치: 정말로 완료(수량 100%)됐는지 재확인 없이 그냥 비우면, 아직
+    // 스캔 안 끝난 자리를 실수로 다음 배치에 내줄 위험이 있음
+    const sp = getSlotProgress(batchId);
+    if (!sp.ok) return { ok: false, error: '슬롯 상태 확인 실패: ' + sp.error };
+    const slot = sp.slots.find(s => String(s.invoice) === String(invoice));
+    if (!slot) return { ok: false, error: '해당 슬롯을 찾을 수 없습니다' };
+    if (slot.status !== 'done') {
+      return { ok: false, error: '아직 완료되지 않은 슬롯은 비울 수 없습니다 (' + slot.scanned + '/' + slot.totalQty + ')' };
+    }
+
+    const bc = bcustSheet_();
+    const last = bc.getLastRow();
+    const rows = bc.getRange(2, 1, last - 1, 10).getValues();
+    let found = false;
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(batchId)) continue;
+      if (String(rows[i][1]) !== String(invoice)) continue;
+      bc.getRange(i + 2, 10).setValue(batchNow_());
+      found = true;
+      break;
+    }
+    if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
+
+    bumpVersion_();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ===================== ③c getOccupiedSlots (★ 2026-07-14 신규) =====================
+ * 완료 처리 안 된(활성 상태) 모든 배치를 통틀어, 아직 "비워지지" 않은
+ * 슬롯 번호 전체를 반환. 새 배치를 만들 때 이 목록을 피해서 자동배정하기 위함
+ * (어제 배치가 아직 안 끝났는데 오늘 배치가 같은 슬롯 번호를 또 쓰는 사고 방지).
+ * 입력: 없음 (오늘/이전 날짜 상관없이 완료 처리 안 된 배치 전부 대상)
+ * ============================================================ */
+function getOccupiedSlots() {
+  try {
+    const bSh = batchesSheet_();
+    const bLast = bSh.getLastRow();
+    const openBatchIds = {};
+    if (bLast >= 2) {
+      bSh.getRange(2, 1, bLast - 1, 7).getValues().forEach(r => {
+        if (String(r[2] || '') !== 'completed') openBatchIds[String(r[0])] = String(r[1]);
+      });
+    }
+    if (!Object.keys(openBatchIds).length) return { ok: true, occupied: [] };
+
+    const bc = bcustSheet_();
+    const bcLast = bc.getLastRow();
+    const occupied = [];
+    if (bcLast >= 2) {
+      bc.getRange(2, 1, bcLast - 1, 10).getValues().forEach(r => {
+        const batchId = String(r[0]);
+        if (!(batchId in openBatchIds)) return;
+        if (!r[7] && r[7] !== 0) return; // 슬롯 미배정
+        if (r[9]) return; // 이미 비워짐(Cleared 값 있음) → 재사용 가능하니 목록에서 제외
+        occupied.push({
+          slotNum: r[7], batchId: batchId, batchDate: openBatchIds[batchId],
+          customer: r[2], invoice: r[1],
+        });
+      });
+    }
+    return { ok: true, occupied: occupied };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ===================== ③d autoClearStaleDoneSlots (★ 2026-07-14 신규) =====================
+ * "패킹완료·슬롯비우기" 버튼을 깜빡했을 때 대비한 안전망. 매일 새벽 자정에
+ * Apps Script 트리거로 자동 실행되도록 설정 (아래 안내 참고).
+ * 규칙: 완료(done)됐고 + 그 배치 날짜가 "오늘"이 아닌(=밤새 지난) 슬롯만 자동으로 비움.
+ *   같은 날 안에서는 절대 자동으로 안 비움 (패킹팀이 아직 못 치웠을 수 있어서) —
+ *   반드시 하룻밤 지난 것만 안전하게 자동 처리.
+ *
+ * ★ Apps Script 트리거 등록 방법 (직접 한번만 설정하면 매일 자동 실행됨):
+ *   1) Apps Script 에디터 왼쪽 시계 아이콘(트리거) 클릭
+ *   2) 우측 하단 "트리거 추가" 클릭
+ *   3) 실행할 함수: autoClearStaleDoneSlots 선택
+ *   4) 이벤트 소스: "시간 기반" 선택
+ *   5) 시간 기반 트리거 유형: "일 타이머" 선택
+ *   6) 시간대: "오전 12시~오전 1시" 선택 (자정 직후)
+ *   7) 저장
+ * ============================================================ */
+function autoClearStaleDoneSlots() {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
+    const bSh = batchesSheet_();
+    const bLast = bSh.getLastRow();
+    const openBatchDates = {}; // batchId -> date, 완료처리 안 된 배치만
+    if (bLast >= 2) {
+      bSh.getRange(2, 1, bLast - 1, 7).getValues().forEach(r => {
+        if (String(r[2] || '') !== 'completed') openBatchDates[String(r[0])] = String(r[1]);
+      });
+    }
+
+    const bc = bcustSheet_();
+    const bcLast = bc.getLastRow();
+    if (bcLast < 2) return;
+    const rows = bc.getRange(2, 1, bcLast - 1, 10).getValues();
+
+    let clearedCount = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const batchId = String(rows[i][0]);
+      if (!(batchId in openBatchDates)) continue;
+      if (openBatchDates[batchId] === today) continue; // 오늘 생성된 배치는 자동 비움 대상 아님 (하룻밤 지난 것만)
+      if (!rows[i][7] && rows[i][7] !== 0) continue; // 슬롯 미배정
+      if (rows[i][9]) continue; // 이미 비워짐
+
+      const sp = getSlotProgress(batchId);
+      if (!sp.ok) continue;
+      const slot = sp.slots.find(s => String(s.invoice) === String(rows[i][1]));
+      if (!slot || slot.status !== 'done') continue; // 완료된 것만 자동 비움 대상
+
+      bc.getRange(i + 2, 10).setValue('auto:' + batchNow_());
+      clearedCount++;
+    }
+    if (clearedCount) bumpVersion_();
+    Logger.log('autoClearStaleDoneSlots: ' + clearedCount + '개 슬롯 자동 비움');
   } finally {
     lock.releaseLock();
   }
@@ -461,7 +603,7 @@ function getSlotProgress(batchId) {
     const bcLast = bc.getLastRow();
     const slots = [];
     if (bcLast >= 2) {
-      bc.getRange(2, 1, bcLast - 1, 9).getValues().forEach(r => {
+      bc.getRange(2, 1, bcLast - 1, 10).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (!r[7] && r[7] !== 0) return; // 슬롯 미배정이면 현황판에 안 띄움
         const invoice = r[1];
@@ -480,7 +622,8 @@ function getSlotProgress(batchId) {
           slotSize: r[8], invoice: invoice,
           customer: r[2], shipVia: r[4], totalQty: totalQty,
           scanned: scanned, status: status,
-          totalSku: skuStat.totalSku, doneSku: skuStat.doneSku
+          totalSku: skuStat.totalSku, doneSku: skuStat.doneSku,
+          cleared: r[9] || '', // ★ 2026-07-14 신규: 비어있으면 "패킹완료·슬롯비우기" 버튼 표시 대상
         });
       });
     }
