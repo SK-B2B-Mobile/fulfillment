@@ -167,6 +167,11 @@ function doGet(e) {
   if (op === 'getOpenBatches') {
     return json_(getOpenBatches());
   }
+  // ★ 2026-07-14 신규 — 아직 안 비워진(패킹 대기중이거나 진행중인) 슬롯 전체 조회.
+  //   새 배치 만들 때 이 슬롯 번호들을 피해서 자동배정하기 위함.
+  if (op === 'getOccupiedSlots') {
+    return json_(getOccupiedSlots());
+  }
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -278,6 +283,8 @@ function doPost(e) {
   if (op === 'undoScan')       return json_(undoScan(data));
   if (op === 'completeBatch')  return json_(completeBatch(data));
   if (op === 'logPickTiming')  return json_(logPickTiming(data));
+  // ★ 2026-07-14 신규 — "패킹완료·슬롯비우기" 버튼
+  if (op === 'clearSlot')      return json_(clearSlot(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
