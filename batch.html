@@ -474,7 +474,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-09:30</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-13:30</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -888,6 +888,8 @@ const state = {
     {id:5, name:'Kevin Kim',  status:'off'},
   ],
   currentWorker: null,
+  userHasUploaded: false, // ★ 2026-07-14 신규: 실제 파일 드롭 여부 — 임시저장 복원 경합 방지용
+  previewBatchId: null, // ★ 2026-07-14 신규: STEP01 화면 표시 전용 — 절대 폴링에 쓰면 안 됨(state.batchId와 분리)
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
@@ -968,11 +970,20 @@ function refreshDropZoneLabels_(){
 
 function tryRestoreDraftFromLocalStorage(){
   try{
+    // ★ 2026-07-14 신규 — 경합(레이스 컨디션) 방지: 서버에 "오늘 배치 있냐"
+    //   물어본 응답이 늦게 도착하는 사이, 사용자가 이미 오늘 파일을 직접
+    //   드롭해서 작업을 시작했을 수 있음. 그 경우 뒤늦게 도착한 이 복원 로직이
+    //   방금 올린 정상 데이터를 예전 임시저장으로 조용히 덮어쓰는 사고가
+    //   있었음 (총량 371 SKU로 정상 표시됐다가, 뒤늦게 도착한 복원 때문에
+    //   통계 카드만 예전 645로 바뀌어버리는 버그). 실제 사용자 행동이 있었다면
+    //   그게 항상 우선.
+    if(state.userHasUploaded) return false;
     const raw = localStorage.getItem(DRAFT_KEY);
     if(!raw) return false;
     const draft = JSON.parse(raw);
     if(!draft || draft.date !== todayStr_()) { clearDraftFromLocalStorage(); return false; } // 날짜 지나면 폐기
     if(!draft.sumFile && (!draft.custFiles || draft.custFiles.length === 0)) return false;
+    if(state.userHasUploaded) return false; // 위와 동일한 체크, JSON.parse 등으로 지연된 사이 또 바뀌었을 수 있어 한번 더 확인
 
     state.sumFile = draft.sumFile || null;
     state.custFiles = draft.custFiles || [];
@@ -1256,6 +1267,7 @@ let __parsingLock = false; // 총량/고객사 드롭존 동시 파싱 방지 (R
 
 setupDropZone('dropSum', 'sumFile', true, async files => {
   if(!files.length) return;
+  state.userHasUploaded = true; // ★ 2026-07-14: 실제로 드롭이 시작된 순간부터 임시저장 복원 차단
   if(!serverAvailable()){
     toast('run_app.py 로 실행해야 파일 업로드가 됩니다 · 지금은 데모 데이터 사용', 'error');
     return;
@@ -1318,6 +1330,7 @@ setupDropZone('dropSum', 'sumFile', true, async files => {
 
 setupDropZone('dropCust', 'custFile', true, async files => {
   if(!files.length) return;
+  state.userHasUploaded = true; // ★ 2026-07-14: 실제로 드롭이 시작된 순간부터 임시저장 복원 차단
   if(!serverAvailable()){
     toast('run_app.py 로 실행해야 파일 업로드가 됩니다 · 지금은 데모 데이터 사용', 'error');
     return;
@@ -1421,11 +1434,18 @@ function askDuplicate(newCf, existingCf){
 function renderFileTags(){
   const el = document.getElementById('fileTags');
   const tags = [];
-  if(state.sumFile) tags.push(`<span class="tag">📋 총량 리스트 <button data-clear="sum" title="총량 리스트 삭제">×</button></span>`);
+  // ★ 2026-07-14 신규: 총량 리스트 태그에도 SKU/수량 표시 — 드롭존 힌트와
+  //   여기 숫자가 어긋나면(오늘처럼) 바로 눈치챌 수 있도록
+  if(state.sumFile){
+    const sumQty = state.sumFile.items.reduce((a,it) => a + (it.req_qty||0), 0);
+    tags.push(`<span class="tag">📋 총량 리스트 <span style="color:var(--text-dim2); font-size:10px">· SKU ${state.sumFile.items.length} · ${sumQty.toLocaleString()}pcs</span> <button data-clear="sum" title="총량 리스트 삭제">×</button></span>`);
+  }
   state.custFiles.forEach((cf,i) => {
     const label = cf.meta.customer || cf.meta.invoice_no || cf.filename;
     const inv = cf.meta.invoice_no ? ` · ${cf.meta.invoice_no}` : '';
-    tags.push(`<span class="tag">📄 ${label}<span style="color:var(--text-dim2); font-size:10px">${inv}</span> <button data-clear="cust" data-i="${i}" title="삭제">×</button></span>`);
+    // ★ 2026-07-14 신규: 고객사 태그에도 SKU 개수 · 수량 표시 — 총량과 눈으로 바로 대조 가능
+    const skuQty = ` · SKU ${cf.totalSkus||cf.items.length} · ${(cf.totalQty||0).toLocaleString()}pcs`;
+    tags.push(`<span class="tag">📄 ${label}<span style="color:var(--text-dim2); font-size:10px">${inv}${skuQty}</span> <button data-clear="cust" data-i="${i}" title="삭제">×</button></span>`);
   });
   // 전체 초기화 버튼 (파일이 하나라도 있을 때)
   if(state.sumFile || state.custFiles.length > 0){
@@ -1489,8 +1509,18 @@ function updateBatchStats(){
   }
   row.style.display = 'grid';
   const today = new Date();
+  // ★ 2026-07-14 긴급 수정: 이 bid는 STEP 01 화면의 "미리보기용" 표시일 뿐인데,
+  //   예전 코드는 이걸 그대로 전역 state.batchId에 덮어쓰고 있었음. state.batchId는
+  //   백그라운드 폴링(진행률 동기화)이 "지금 어느 배치를 봐야 하는지" 판단하는 데
+  //   쓰이는 핵심 변수라서, "이어서 작업하기"로 어제(진짜) 배치를 열어둔 채 오늘 새
+  //   리스트를 드롭하기만 해도 — 아직 생성되지도 않은 오늘 배치 ID로 폴링이 바뀌어
+  //   버려서, 서버가 "그런 배치 없음"으로 응답 → 어제 배치의 스캔 진행률이 전부 0으로
+  //   덮어써지는 심각한 사고로 이어졌음 (실제 스캔 기록 자체는 서버에 안전하게 남아있고,
+  //   화면이 엉뚱한 배치ID를 조회해서 안 보여준 것뿐이었음).
+  //   → 미리보기 ID는 별도 변수(previewBatchId)에만 저장하고, 실제 생성 성공 시에만
+  //   (배치 시작 버튼 핸들러에서) state.batchId를 갱신하도록 분리.
   const bid = 'B' + String(today.getMonth()+1).padStart(2,'0') + String(today.getDate()).padStart(2,'0') + '-AM';
-  state.batchId = bid;
+  state.previewBatchId = bid;
   document.getElementById('stBatchId').textContent = bid;
   document.getElementById('stBatchDate').textContent = today.toISOString().slice(0,10);
   document.getElementById('stCust').textContent = state.custFiles.length;
