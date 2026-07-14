@@ -474,7 +474,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-13:30</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-13:45</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div class="role-toggle" id="roleToggle">
         <button class="on" data-role="manager">Manager</button>
@@ -954,6 +954,20 @@ function clearDraftFromLocalStorage(){
 }
 
 // 드롭존 표시(제목/힌트)를 state 기준으로 다시 그려주는 공용 헬퍼
+// ★ 2026-07-14 신규: 고객사 드롭존의 "고유 SKU · 총 수량" 요약을 갱신하는 공용 헬퍼
+//   (신규 파싱 / 복원 / 중복 해결 뒤 등 여러 곳에서 재사용)
+function updateCustDropZoneSummary(){
+  const z = document.getElementById('dropCust');
+  if(!z || !state.custFiles.length) return;
+  const allBarcodes = new Set();
+  let allQty = 0, allLines = 0;
+  state.custFiles.forEach(cf => cf.items.forEach(it => {
+    allBarcodes.add(it.barcode); allQty += (it.req_qty||0); allLines++;
+  }));
+  z.querySelector('.drop-title').textContent = '✓ ' + state.custFiles.length + '개 고객사';
+  z.querySelector('.drop-hint').textContent = `${allBarcodes.size} SKU (고유) · ${allQty.toLocaleString()}pcs · 라인 ${allLines}`;
+}
+
 function refreshDropZoneLabels_(){
   if(state.sumFile){
     const z = document.getElementById('dropSum');
@@ -964,7 +978,8 @@ function refreshDropZoneLabels_(){
   if(state.custFiles.length){
     const z = document.getElementById('dropCust');
     z.className = 'drop filled';
-    z.querySelector('.drop-title').textContent = '✓ ' + state.custFiles.length + '개 고객사 (복원됨)';
+    updateCustDropZoneSummary();
+    z.querySelector('.drop-title').textContent += ' (복원됨)'; // 요약 갱신 뒤 "복원됨" 표시만 덧붙임
   }
 }
 
@@ -1375,8 +1390,7 @@ setupDropZone('dropCust', 'custFile', true, async files => {
   }
   __parsingLock = false;
   zone.className = 'drop filled';
-  titleEl.textContent = '✓ ' + state.custFiles.length + '개 고객사';
-  hintEl.textContent = failures.length ? (successCount + '건 성공 · ' + failures.length + '건 실패') : (successCount + '건 파싱 완료');
+  updateCustDropZoneSummary(); // ★ 2026-07-14: 고유 SKU · 총 수량 요약 표시
   renderFileTags(); updateBatchStats();
   if(failures.length){
     toast(successCount + '건 성공, ' + failures.length + '건 실패 (콘솔 확인)', 'error');
@@ -1402,6 +1416,7 @@ async function handleDuplicates(duplicates){
       state.custFiles.push(dup.newCf);
       toast(dup.newCf.meta.invoice_no + ' 둘 다 유지 (중복 인보이스)', 'success');
     } // cancel이면 무시
+    updateCustDropZoneSummary(); // ★ 2026-07-14: 중복 처리 후에도 요약 갱신
     renderFileTags(); updateBatchStats();
   }
 }
@@ -1468,7 +1483,7 @@ function renderFileTags(){
           z.querySelector('.drop-title').textContent = '고객사별 피킹 리스트';
           z.querySelector('.drop-hint').textContent = '여러 개 동시 선택 가능';
         } else {
-          document.querySelector('#dropCust .drop-title').textContent = '✓ ' + state.custFiles.length + '개 고객사';
+          updateCustDropZoneSummary(); // ★ 2026-07-14: 삭제 후 남은 고객사 기준으로 요약 다시 계산
         }
       }
       renderFileTags();
