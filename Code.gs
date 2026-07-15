@@ -294,6 +294,18 @@ function doPost(e) {
     return json_(saveInspectionBulk_(list));
   }
 
+  // ★ 2026-07-14 신규 — 여러 작업자가 정확히 같은 순간 완료 버튼을 눌러서 "다음
+  //   오더"가 우연히 같은 걸로 겹치면, 그 오더를 동시에 여러 명이 열어버릴 수
+  //   있었음(아직 아무도 검수 안 한 오더라 서버가 막을 근거가 없었음). 오더를
+  //   열 때 "지금 내가 이거 검수 중" 도장을 찍어두고, 다른 사람이 같은 오더를
+  //   열려고 하면 막아주는 선점(claim) 기능.
+  if (op === 'claimInspection') {
+    return json_(claimInspection_(data));
+  }
+  if (op === 'releaseInspectionClaim') {
+    return json_(releaseInspectionClaim_(data));
+  }
+
   if (op === 'clearInspection') {
     return clearInspection(JSON.parse(e.parameter.data || '{}'));
   }
@@ -1339,6 +1351,48 @@ function saveInspectionBulk_(dataList) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+  }
+}
+
+// ★ 2026-07-14 신규 — 오더 선점(claim) 기능. CacheService를 씀(3분 후 자동 만료라
+//   작업자가 앱을 닫고 안 돌아와도 그 오더가 영원히 잠기지 않음).
+function claimInspection_(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const invoice = String(data.invoice || '').trim();
+    const worker = String(data.worker || '').trim();
+    if (!invoice || !worker) return { ok: false, error: 'invoice, worker required' };
+
+    const cache = CacheService.getScriptCache();
+    const key = 'insp_claim_' + invoice;
+    const existingRaw = cache.get(key);
+    if (existingRaw) {
+      let existing;
+      try { existing = JSON.parse(existingRaw); } catch (e) { existing = null; }
+      if (existing && existing.worker && existing.worker !== worker) {
+        // 이미 다른 사람이 선점 중 — 거부
+        return { ok: false, claimedBy: existing.worker, claimedAt: existing.at };
+      }
+    }
+    // 선점 성공 (또는 본인이 이미 선점한 걸 갱신) — 3분(180초) 후 자동 만료
+    cache.put(key, JSON.stringify({ worker: worker, at: new Date().toISOString() }), 180);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function releaseInspectionClaim_(data) {
+  try {
+    const invoice = String(data.invoice || '').trim();
+    if (!invoice) return { ok: false };
+    CacheService.getScriptCache().remove('insp_claim_' + invoice);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
 
