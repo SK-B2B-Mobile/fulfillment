@@ -474,7 +474,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
       </div>
     </div>
     <div class="topbar-right">
-      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-14:25</span>
+      <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-17:55</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
       <div style="position:relative;">
         <button class="btn btn-ghost btn-sm" id="btnSwitchBatch" title="다른 미완료 배치로 전환">⇄ 다른 배치</button>
@@ -1919,7 +1919,11 @@ async function pollScanState(){
 let __scanPollTimer = null;
 function startScanPolling(){
   if(__scanPollTimer) return; // 중복 시작 방지
-  __scanPollTimer = setInterval(pollScanState, 5000);
+  // ★ 2026-07-14 신규: 여러 스캔 기기가 정확히 같은 5초 주기로 돌면 서버 요청이
+  //   몰리는 문제가 있어서, 기기마다 소폭(0~1.5초) 다르게 어긋나도록 지터 추가.
+  //   실시간성은 거의 그대로 유지.
+  const jitter = Math.floor(Math.random()*1500);
+  __scanPollTimer = setInterval(pollScanState, 5000+jitter);
 }
 function stopScanPolling(){
   if(__scanPollTimer){ clearInterval(__scanPollTimer); __scanPollTimer = null; }
@@ -2004,7 +2008,8 @@ async function refreshBatchStructure(silent){
 let __structPollTimer = null;
 function startStructurePolling(){
   if(__structPollTimer) return;
-  __structPollTimer = setInterval(() => refreshBatchStructure(true), 30000); // 30초마다 조용히 재동기화
+  const jitter = Math.floor(Math.random()*6000); // ★ 2026-07-14 신규: 기기간 폴링 충돌 방지
+  __structPollTimer = setInterval(() => refreshBatchStructure(true), 30000+jitter); // 30초 내외로 조용히 재동기화
 }
 
 
