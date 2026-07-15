@@ -284,6 +284,16 @@ function doPost(e) {
     return saveInspection(JSON.parse(e.parameter.data || '{}'));
   }
 
+  // ★ 2026-07-14 신규 — 여러 건을 체크박스로 선택해서 한번에 PASS 처리할 때,
+  //   건별로 따로따로 서버를 호출하면 19건에 19번 네트워크 왕복 + 19번 스크립트
+  //   실행이 발생해서 느림(체감 30초 이상). 이 op은 배열로 한번에 받아서
+  //   시트를 한 번만 열고 순서대로 기록 → 왕복 1번으로 끝남.
+  if (op === 'saveInspectionBulk') {
+    let list = [];
+    try { list = JSON.parse(e.parameter.data || '[]'); } catch (err) { list = []; }
+    return json_(saveInspectionBulk_(list));
+  }
+
   if (op === 'clearInspection') {
     return clearInspection(JSON.parse(e.parameter.data || '{}'));
   }
@@ -1246,6 +1256,89 @@ function saveInspection(data) {
     return ContentService.createTextOutput(
       JSON.stringify({ ok: false, error: e.message })
     ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ★ 2026-07-14 신규 — 체크박스로 선택한 여러 건을 한번에 처리하는 벌크 버전.
+//   saveInspection()과 저장 로직은 동일하되, 시트를 한 번만 열고 인보이스
+//   위치도 한 번만 스캔해서, 건별로 따로 호출할 때보다 훨씬 빠름.
+function saveInspectionBulk_(dataList) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    if (!Array.isArray(dataList) || !dataList.length) return { ok: false, error: 'empty list' };
+
+    var ss      = SpreadsheetApp.openById(SS_ID);
+    var sheet   = ss.getSheetByName(JOBS_SHEET);
+    var lastRow = sheet.getLastRow();
+    var tz      = Session.getScriptTimeZone();
+
+    function fmtTime(isoStr) {
+      if (!isoStr) return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+      try { return Utilities.formatDate(new Date(isoStr), tz, 'yyyy-MM-dd HH:mm:ss'); }
+      catch (e) { return String(isoStr); }
+    }
+
+    // 인보이스 → 행번호 매핑을 딱 한 번만 만들어서 재사용
+    var invoiceCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var rowMap = {};
+    for (var i = 0; i < invoiceCol.length; i++) {
+      rowMap[String(invoiceCol[i][0]).trim()] = i + 2;
+    }
+
+    var results = [];
+    dataList.forEach(function(data) {
+      var targetRow = rowMap[String(data.invoice || '').trim()];
+      if (!targetRow) { results.push({ invoice: data.invoice, ok: false, error: 'not found' }); return; }
+
+      var inspEndAt = fmtTime(data.inspEndAt || data.inspectedAt);
+      var inspector = String(data.inspector || '').trim();
+      var cell = sheet.getRange(targetRow, 19);
+
+      if (data.pass && (!data.issues || data.issues.length === 0)) {
+        cell.setValue('✓ PASS');
+        cell.setBackground('#0d2e1a');
+        cell.setFontColor('#10b981');
+        cell.setFontWeight('bold');
+        cell.setNote('✓ PASS\nCompleted: ' + inspEndAt + (inspector ? '\nInspector: ' + inspector : ''));
+      } else {
+        var issueCount = data.issues ? data.issues.length : 0;
+        cell.setValue('⚠ ISSUES(' + issueCount + ')');
+        cell.setBackground('#2e0d0d');
+        cell.setFontColor('#ef4444');
+        cell.setFontWeight('bold');
+        var noteLines = ['=== Inspection Issues ==='];
+        if (data.issues && data.issues.length > 0) {
+          data.issues.forEach(function(issue) {
+            noteLines.push(issue.type + ': Barcode ' + issue.barcode + ' x ' + issue.qty + ' pcs');
+          });
+        }
+        if (data.memo && data.memo.trim() !== '') { noteLines.push(''); noteLines.push('Note: ' + data.memo); }
+        noteLines.push(''); noteLines.push('Completed: ' + inspEndAt);
+        if (inspector) noteLines.push('Inspector: ' + inspector);
+        cell.setNote(noteLines.join('\n'));
+      }
+
+      if (inspector) {
+        sheet.getRange(targetRow, 20).setValue(inspector);
+      } else {
+        var existing = sheet.getRange(targetRow, 20).getValue();
+        if (!existing) sheet.getRange(targetRow, 20).setValue('(Unknown)');
+      }
+      sheet.getRange(targetRow, 21).setValue(inspEndAt);
+      results.push({ invoice: data.invoice, ok: true, row: targetRow });
+    });
+
+    var sH = sheet.getRange(1, 19); if (!sH.getValue()) { sH.setValue('Inspection'); sH.setFontWeight('bold'); }
+    var tH = sheet.getRange(1, 20); if (!tH.getValue()) { tH.setValue('Inspector'); tH.setFontWeight('bold'); }
+    var uH = sheet.getRange(1, 21); if (!uH.getValue()) { uH.setValue('Insp. End'); uH.setFontWeight('bold'); }
+
+    bumpVersion_();
+    return { ok: true, results: results };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
   }
 }
 
