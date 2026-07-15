@@ -35,6 +35,9 @@ function getVersion_() {
 
 function bumpVersion_() {
   PROP.setProperty('jobsVersion', _nowVer_());
+  // ★ 2026-07-14 신규: 데이터가 실제로 바뀌면 listJobs 캐시를 즉시 지워서,
+  //   다음 조회부터는(캐시 만료 8초를 기다리지 않고) 곧바로 최신 데이터를 읽음
+  try { CacheService.getScriptCache().remove('listJobs_cache_v1'); } catch (e) {}
 }
 
 // === Header map cache ===
@@ -71,10 +74,28 @@ function doGet(e) {
   }
 
   if (op === 'listJobs') {
-    const out = listJobs_textSafe_();
-    out.pickers = getPickers_();
-    out.pickerColors = getPickerColors_();
-    out.ver = getVersion_();
+    // ★ 2026-07-14 신규 — 총량피킹/기존 웹/모바일 앱 세 시스템이 같은 스프레드시트를
+    //   공유하다보니, 여러 기기가 거의 동시에 새로고침할 때 매번 시트를 처음부터
+    //   다시 읽어서 요청이 몰리면 응답이 느려지고(때로 1분 이상) 타임아웃까지
+    //   발생했음. 8초짜리 짧은 캐시를 둬서, 그 사이 들어온 요청들은 시트를 다시
+    //   안 읽고 캐시된 값을 즉시 돌려줌. 실제로 데이터가 바뀌면(upsertJob/delete/
+    //   saveInspection 등) bumpVersion_()이 이 캐시를 바로 지우므로, 최대 8초의
+    //   "약간 오래된 데이터"만 감수하면 되고 그 안에서도 본인이 직접 바꾼 내용은
+    //   즉시 반영됨(자기 자신의 쓰기 → 캐시 삭제 → 자신의 다음 조회는 새 데이터).
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'listJobs_cache_v1';
+    let out;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try { out = JSON.parse(cached); } catch (e) { out = null; }
+    }
+    if (!out) {
+      out = listJobs_textSafe_();
+      out.pickers = getPickers_();
+      out.pickerColors = getPickerColors_();
+      out.ver = getVersion_();
+      try { cache.put(cacheKey, JSON.stringify(out), 8); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    }
     return json_(out);
   }
 
