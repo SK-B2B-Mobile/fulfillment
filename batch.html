@@ -333,6 +333,12 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 
 @media (max-width:480px){
   .tgrid-2{grid-template-columns:1fr;} /* 폰/스캐너 좁은 화면에선 2단도 1단으로 */
+  /* ★ 2026-07-17 신규 — 5.5~6인치 핸드터미널 등 좁은 화면 기기에서는
+     100% 배율이어도 화면 대비 UI가 큰 편이라, 줌을 막는(user-scalable=no)
+     대신 애초에 이 화면 폭에서는 전체를 비례 축소해서 딱 맞도록 함.
+     (개별 요소 폰트/여백을 하나씩 줄이는 대신 zoom으로 통째로 축소 —
+     크롬/안드로이드 웹뷰에서 잘 지원되는 방식) */
+  body{zoom:0.82;}
 }
 
 /* Recent scans panel */
