@@ -304,6 +304,33 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .tsz-sm .target-meta{display:none;} /* 배송정보는 좁은 줄에서 생략, 필요시 전체 로그에서 확인 */
 .tsz-sm .target-qty{font-size:14px;}
 
+/* ★ 2026-07-16 신규 — 스캔 결과 카드별 이슈(EXP/NF/Damaged/OOS) 등록 UI */
+.target-item{margin-bottom:2px;}
+.target-issue-bar{display:flex; justify-content:flex-end; padding:3px 4px 0;}
+.target-issue-btn{background:none; border:none; color:var(--text-dim); font-size:10.5px; font-family:var(--mono); cursor:pointer; padding:3px 6px; border-radius:6px; opacity:0.75;}
+.target-issue-btn:hover{opacity:1; background:rgba(255,255,255,0.06);}
+.target-item.issued .target-issue-btn{color:var(--red); opacity:1; font-weight:700;}
+.target-item.issued .target-card{border-color:var(--red);}
+.issue-form{margin:4px 4px 8px; padding:10px; background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:8px; display:flex; flex-direction:column; gap:6px;}
+.issue-form select, .issue-form input[type=text]{width:100%; padding:8px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:12.5px; font-family:var(--sans);}
+.issue-form-row{display:flex; align-items:center; gap:8px;}
+.issue-form-row input[type=number]{width:80px; padding:8px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-family:var(--mono); font-size:13px;}
+.issue-form-hint{font-size:10.5px; color:var(--text-dim); font-family:var(--mono);}
+.issue-form-actions{display:flex; gap:8px; margin-top:2px;}
+.issue-btn-cancel, .issue-btn-save{flex:1; padding:9px; border-radius:6px; border:none; font-weight:700; font-size:12px; cursor:pointer;}
+.issue-btn-cancel{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
+.issue-btn-save{background:var(--red); color:#fff;}
+.issue-tag{margin:4px 4px 8px; padding:8px 10px; background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.35); border-radius:8px; font-size:11.5px; color:var(--red); font-family:var(--mono); display:flex; justify-content:space-between; align-items:center;}
+.issue-tag button{background:none; border:none; color:var(--text-dim); font-size:10px; text-decoration:underline; cursor:pointer;}
+
+/* ★ 2026-07-16 신규 — SKU(스캔) 단위 전체 이슈 등록(자동분배) */
+.sku-issue-bar{display:flex; justify-content:center; margin:2px 0 6px;}
+.sku-issue-btn{background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.4); color:var(--red); font-size:12px; font-weight:700; padding:9px 14px; border-radius:8px; cursor:pointer; width:100%;}
+.sku-issue-btn:hover{background:rgba(255,77,109,0.18);}
+.sku-issue-form{margin:0 0 10px; padding:12px; background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:10px; display:flex; flex-direction:column; gap:8px;}
+.sku-issue-hint{font-size:11px; color:var(--text-dim); line-height:1.5;}
+.sku-issue-form select, .sku-issue-form input[type=text]{width:100%; padding:9px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:13px; font-family:var(--sans);}
+
 @media (max-width:480px){
   .tgrid-2{grid-template-columns:1fr;} /* 폰/스캐너 좁은 화면에선 2단도 1단으로 */
 }
@@ -884,6 +911,7 @@ const state = {
   slots: [],               // 30 slots
   scanIndex: {},           // barcode -> {sku, name, rack, total, queue}
   scans: [],               // [{time, barcode, sku, customer, slot, status, ...canonical}]
+  issues: [],               // ★ 2026-07-16 신규: [{invoice, barcode, sku, name, reason, qty, worker, time, note}, ...]
   workers: [
     {id:1, name:'Hyeong Kim', status:'active'},
     {id:2, name:'Ryan Park',  status:'active'},
@@ -1794,7 +1822,8 @@ function buildScanIndex(){
             ship_date: cf.meta.ship_date,
             ship_via: cf.meta.ship_via,
             slot: null,   // 슬롯 배정 후 채움
-            need: it.req_qty,
+            origNeed: it.req_qty, // ★ 2026-07-16 신규: 이슈 반영 전 원래 필요수량(불변)
+            need: it.req_qty,     // 이슈 등록되면 origNeed - 이슈수량으로 재계산됨
             done: 0,
           });
         }
@@ -1883,12 +1912,18 @@ async function fetchOccupiedSlots(){
 //   서버 값으로 항상 덮어씀 (증분이 아니라 절대값 대입 → 어느 기기가
 //   스캔했든, 몇 대가 동시에 스캔하든 항상 정확하게 수렴함).
 // ═══════════════════════════════════════════════════════════
-function applyScanState(doneMap, scans){
+function applyScanState(doneMap, scans, issueMap, issues){
   // 1) 진행률(done)을 서버 진실값으로 갱신 — barcode|invoice 조합 기준
   Object.entries(state.scanIndex).forEach(([barcode, sku]) => {
     sku.queue.forEach(q => {
       const key = q.invoice + '|' + barcode;
       q.done = doneMap[key] || 0;
+      // ★ 2026-07-16 신규: 이 고객사(invoice)+이 SKU(barcode)에 등록된 이슈
+      //   수량만큼 "원래 필요수량(origNeed)"에서 빼서 need를 항상 재계산.
+      //   → 다른 기기에서 이슈를 등록해도 이 기기가 폴링하는 순간 반영됨.
+      const issueQty = (issueMap && issueMap[key]) || 0;
+      q.need = Math.max(0, (q.origNeed != null ? q.origNeed : q.need) - issueQty);
+      if(q.done > q.need) q.done = q.need;
     });
   });
   // 2) 최근 스캔/전체 로그를 서버 기준으로 교체 → 모든 기기가 동일하게 봄
@@ -1898,6 +1933,11 @@ function applyScanState(doneMap, scans){
     status: s.result,
     time: new Date(String(s.time || '').replace(' ', 'T')),
   }));
+  // ★ 2026-07-16 신규: 이슈 목록도 서버 기준으로 교체 (슬롯 카드에 상세 표시용)
+  state.issues = (issues || []).map(i => ({
+    ...i,
+    time: new Date(String(i.time || '').replace(' ', 'T')),
+  }));
 }
 
 async function pollScanState(){
@@ -1905,7 +1945,7 @@ async function pollScanState(){
   try{
     const res = await gasQuery('getScanState', { batchId: state.batchId });
     if(!res.ok) return;
-    applyScanState(res.doneMap || {}, res.scans || []);
+    applyScanState(res.doneMap || {}, res.scans || [], res.issueMap || {}, res.issues || []);
     updateScanStats();
     if(document.getElementById('v-scan') && document.getElementById('v-scan').classList.contains('active')) renderRecentScans();
     if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
@@ -2449,6 +2489,14 @@ function doScan(){
 //   3~6곳: 2단 그리드, 중간 크기 카드
 //   7곳 이상: 컴팩트 리스트(줄 단위) — 화면 넘침 방지
 // ═══════════════════════════════════════════════════════════
+const ISSUE_REASONS = [
+  {v:'EXP', label:'EXP · 유통기한 지남'},
+  {v:'NF', label:'NF · 재고 못 찾음'},
+  {v:'DAMAGED', label:'DAMAGED · 파손'},
+  {v:'OOS', label:'OOS · 품절'},
+];
+let _lastScanCtx = null; // ★ 2026-07-16: 이슈 등록 버튼이 참조할 현재 스캔 결과 컨텍스트
+
 function renderAllTargets(sku, pending, code){
   const el = document.getElementById('scanResult');
 
@@ -2461,19 +2509,41 @@ function renderAllTargets(sku, pending, code){
   scanFeedback('ok');
   updateScanStats();
 
+  // ★ 2026-07-16: 이슈 등록 버튼이 나중에(폼 제출 시) 참조할 수 있도록 컨텍스트 저장
+  _lastScanCtx = { sku, barcode: code, results };
+
   const n = results.length;
   const totalQty = results.reduce((a,r) => a + r.qty, 0);
   const sizeClass = n <= 2 ? 'tsz-lg' : n <= 6 ? 'tsz-md' : 'tsz-sm';
   const gridClass = n <= 2 ? 'tgrid-1' : n <= 6 ? 'tgrid-2' : 'tgrid-1';
 
-  const cardsHtml = results.map(r => `
-    <div class="target-card ${sizeClass}">
-      <div class="target-slot">${String(r.slot).padStart(2,'0')}</div>
-      <div class="target-info">
-        <div class="target-co">${r.customer}</div>
-        <div class="target-meta">${r.ship_via} · Ship ${(r.ship_date||'').slice(5)} · ${r.invoice}</div>
+  const cardsHtml = results.map((r, idx) => `
+    <div class="target-item" id="targetItem-${idx}">
+      <div class="target-card ${sizeClass}">
+        <div class="target-slot">${String(r.slot).padStart(2,'0')}</div>
+        <div class="target-info">
+          <div class="target-co">${r.customer}</div>
+          <div class="target-meta">${r.ship_via} · Ship ${(r.ship_date||'').slice(5)} · ${r.invoice}</div>
+        </div>
+        <div class="target-qty" id="targetQty-${idx}">${r.qty}<small>pcs</small></div>
       </div>
-      <div class="target-qty">${r.qty}<small>pcs</small></div>
+      <div class="target-issue-bar">
+        <button class="target-issue-btn" id="targetIssueBtn-${idx}" onclick="toggleIssueForm(${idx})">⚠ 이슈로 정정</button>
+      </div>
+      <div class="issue-form" id="issueForm-${idx}" style="display:none">
+        <select id="issueReason-${idx}">
+          ${ISSUE_REASONS.map(r2 => `<option value="${r2.v}">${r2.label}</option>`).join('')}
+        </select>
+        <div class="issue-form-row">
+          <input type="number" id="issueQty-${idx}" min="1" max="${r.qty}" value="${r.qty}" placeholder="수량">
+          <span class="issue-form-hint">/ 최대 ${r.qty}pcs</span>
+        </div>
+        <input type="text" id="issueNote-${idx}" placeholder="메모(선택) — 예: 박스 3개 파손 확인">
+        <div class="issue-form-actions">
+          <button class="issue-btn-cancel" onclick="toggleIssueForm(${idx})">취소</button>
+          <button class="issue-btn-save" onclick="submitIssue(${idx})">이슈 저장</button>
+        </div>
+      </div>
     </div>`).join('');
 
   el.innerHTML = `<div class="scan-result ok">
@@ -2483,10 +2553,178 @@ function renderAllTargets(sku, pending, code){
     <div style="text-align:center; margin:10px 0; padding:10px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800; font-family:var(--mono); font-size:13px; letter-spacing:0.03em;">
       ✓ ${n}개 고객사 · 총 ${totalQty}pcs 동시 분류완료
     </div>
+    <div class="sku-issue-bar">
+      <button class="sku-issue-btn" onclick="toggleSkuIssueForm()">⚠ 이 스캔에 이슈 있음 (부족분 자동분배)</button>
+    </div>
+    <div class="sku-issue-form" id="skuIssueForm" style="display:none">
+      <div class="sku-issue-hint">이슈 수량만 입력하면, 슬롯 번호 순서대로 앞 고객사부터 채우고 부족한 만큼 뒤 고객사에 자동으로 이슈 등록됩니다.</div>
+      <select id="skuIssueReason">
+        ${ISSUE_REASONS.map(r2 => `<option value="${r2.v}">${r2.label}</option>`).join('')}
+      </select>
+      <div class="issue-form-row">
+        <input type="number" id="skuIssueQty" min="1" max="${sku.total}" placeholder="이슈 수량">
+        <span class="issue-form-hint">/ 총 ${sku.total}pcs 중</span>
+      </div>
+      <input type="text" id="skuIssueNote" placeholder="메모(선택)">
+      <div class="issue-form-actions">
+        <button class="issue-btn-cancel" onclick="toggleSkuIssueForm()">취소</button>
+        <button class="issue-btn-save" onclick="submitSkuIssue()">자동 분배 등록</button>
+      </div>
+    </div>
     <div class="target-grid ${gridClass}">${cardsHtml}</div>
   </div>`;
   scanInput.focus();
   checkBatchComplete();
+}
+
+// ★ 2026-07-16 신규 — SKU 전체 이슈 폼 열기/닫기
+function toggleSkuIssueForm(){
+  const form = document.getElementById('skuIssueForm');
+  if(!form) return;
+  const opening = form.style.display === 'none';
+  form.style.display = opening ? 'flex' : 'none';
+  if(opening){
+    const qtyInput = document.getElementById('skuIssueQty');
+    if(qtyInput) qtyInput.focus();
+  }
+}
+
+// ★ 2026-07-16 신규 — SKU 전체 이슈 자동분배: 슬롯 번호 오름차순으로 앞 고객사부터
+//   필요수량을 채우고, 남은 재고가 그 고객사 필요수량보다 적으면 부족한 만큼만
+//   채운 뒤 나머지는 자동으로 이슈 등록. 그 다음 고객사부터는 재고가 0이므로
+//   전량이 자동으로 이슈 등록됨. → 작업자는 "이슈 수량이 총 몇 개인지"만 입력.
+function submitSkuIssue(){
+  if(!_lastScanCtx) return;
+  const { sku, barcode, results } = _lastScanCtx;
+
+  const reason = document.getElementById('skuIssueReason').value;
+  const qtyInput = document.getElementById('skuIssueQty');
+  const issueQtyTotal = parseInt(qtyInput.value, 10);
+  const note = document.getElementById('skuIssueNote').value.trim();
+
+  if(!issueQtyTotal || issueQtyTotal < 1){ toast('⚠️ 이슈 수량을 입력하세요', 'error'); return; }
+  if(issueQtyTotal > sku.total){ toast(`⚠️ 이 SKU 총 수량(${sku.total}pcs)을 초과할 수 없습니다`, 'error'); return; }
+  if(!state.currentWorker){ toast('⚠️ 작업자를 먼저 선택하세요', 'error'); return; }
+
+  // 1) 슬롯 번호 오름차순으로 정렬해서 순서대로 재고를 소진시키며 배분 계산
+  const order = results.map((r, idx) => ({...r, idx}))
+    .sort((a, b) => (Number(a.slot)||9999) - (Number(b.slot)||9999));
+
+  let available = sku.total - issueQtyTotal; // 실제 쓸 수 있는 물량
+  const shortages = []; // {idx, r, shortQty}
+  order.forEach(r => {
+    const give = Math.max(0, Math.min(r.qty, available));
+    const shortQty = r.qty - give;
+    available -= give;
+    if(shortQty > 0) shortages.push({ idx: r.idx, r, shortQty });
+  });
+
+  if(shortages.length === 0){
+    toast('⚠️ 입력한 이슈 수량으로는 부족분이 발생하지 않습니다 (모든 고객사 충족 가능)', 'error');
+    return;
+  }
+
+  // 2) 부족분이 생긴 고객사들에 대해 각각 이슈 등록 (개별 카드 등록과 동일한 로직 재사용)
+  let doneN = 0;
+  shortages.forEach(({ idx, r, shortQty }) => {
+    const q = state.scanIndex[barcode] && state.scanIndex[barcode].queue.find(x => x.invoice === r.invoice);
+    if(q){
+      q.need = Math.max(0, q.need - shortQty);
+      if(q.done > q.need) q.done = q.need;
+    }
+    gasCall('logIssue', {
+      batchId: state.batchId, worker: state.currentWorker,
+      barcode: barcode, sku: sku.sku, name: sku.name,
+      invoice: r.invoice, customer: r.customer,
+      reason: reason, qty: shortQty, note: note,
+    }).then(res => {
+      if(!res.ok) toast('⚠️ 이슈 저장 실패(' + r.customer + '): ' + (res.error||''), 'error');
+      doneN++;
+      if(doneN === shortages.length) pollScanState();
+    });
+
+    // 화면의 해당 카드를 "이슈 등록됨" 상태로 갱신
+    const item = document.getElementById(`targetItem-${idx}`);
+    const btn = document.getElementById(`targetIssueBtn-${idx}`);
+    const form = document.getElementById(`issueForm-${idx}`);
+    const qtyEl = document.getElementById(`targetQty-${idx}`);
+    const reasonLabel = (ISSUE_REASONS.find(x => x.v === reason) || {}).label || reason;
+    if(item) item.classList.add('issued');
+    if(form) form.outerHTML = `<div class="issue-tag">⚠ ${reasonLabel} · ${shortQty}pcs 자동 이슈 등록됨${note ? ' · '+note : ''}</div>`;
+    if(btn) btn.style.display = 'none';
+    if(qtyEl) qtyEl.innerHTML = `${r.qty - shortQty}<small>pcs</small>`;
+  });
+
+  toggleSkuIssueForm();
+  updateScanStats();
+  if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+  checkBatchComplete();
+  toast(`⚠ 자동분배 완료 · ${shortages.length}개 고객사에 이슈 등록됨`, 'success');
+}
+
+// ★ 2026-07-16 신규 — 카드별 "⚠ 이슈로 정정" 폼 열기/닫기
+function toggleIssueForm(idx){
+  const form = document.getElementById(`issueForm-${idx}`);
+  if(!form) return;
+  const opening = form.style.display === 'none';
+  form.style.display = opening ? 'flex' : 'none';
+  if(opening){
+    const qtyInput = document.getElementById(`issueQty-${idx}`);
+    if(qtyInput) qtyInput.focus();
+  }
+}
+
+// ★ 2026-07-16 신규 — 이슈 저장: 해당 카드(고객사 1건)만 필요수량에서 차감하고
+//   서버에 기록. 스캔 흐름을 막지 않도록 바코드 입력창 포커스는 건드리지 않음.
+function submitIssue(idx){
+  if(!_lastScanCtx || !_lastScanCtx.results[idx]) return;
+  const r = _lastScanCtx.results[idx];
+  const sku = _lastScanCtx.sku;
+  const barcode = _lastScanCtx.barcode;
+
+  const reason = document.getElementById(`issueReason-${idx}`).value;
+  const qtyInput = document.getElementById(`issueQty-${idx}`);
+  const qty = parseInt(qtyInput.value, 10);
+  const note = document.getElementById(`issueNote-${idx}`).value.trim();
+
+  if(!qty || qty < 1){ toast('⚠️ 수량을 입력하세요', 'error'); return; }
+  if(qty > r.qty){ toast(`⚠️ 이 고객사에 배정된 수량(${r.qty}pcs)을 초과할 수 없습니다`, 'error'); return; }
+  if(!state.currentWorker){ toast('⚠️ 작업자를 먼저 선택하세요', 'error'); return; }
+
+  // 1) 로컬 상태 즉시 반영 — 해당 고객사(invoice)의 이 SKU 필요수량/완료수량을
+  //    함께 줄여서 "애초에 그만큼은 필요 없었던 것"처럼 처리
+  const q = state.scanIndex[barcode] && state.scanIndex[barcode].queue.find(x => x.invoice === r.invoice);
+  if(q){
+    q.need = Math.max(0, q.need - qty);
+    if(q.done > q.need) q.done = q.need;
+  }
+
+  // 2) 서버 저장 (다른 기기/현황판이 폴링으로 곧 동일하게 반영됨)
+  gasCall('logIssue', {
+    batchId: state.batchId, worker: state.currentWorker,
+    barcode: barcode, sku: sku.sku, name: sku.name,
+    invoice: r.invoice, customer: r.customer,
+    reason: reason, qty: qty, note: note,
+  }).then(res => {
+    if(!res.ok) toast('⚠️ 이슈 저장 실패 — 다시 시도해주세요: ' + (res.error||''), 'error');
+    pollScanState();
+  });
+
+  // 3) 화면 업데이트: 카드에 "이슈 등록됨" 표시로 전환
+  const item = document.getElementById(`targetItem-${idx}`);
+  const btn = document.getElementById(`targetIssueBtn-${idx}`);
+  const form = document.getElementById(`issueForm-${idx}`);
+  const qtyEl = document.getElementById(`targetQty-${idx}`);
+  const reasonLabel = (ISSUE_REASONS.find(x => x.v === reason) || {}).label || reason;
+  if(item) item.classList.add('issued');
+  if(form) form.outerHTML = `<div class="issue-tag">⚠ ${reasonLabel} · ${qty}pcs 제외됨${note ? ' · '+note : ''}</div>`;
+  if(btn) btn.style.display = 'none';
+  if(qtyEl) qtyEl.innerHTML = `${r.qty - qty}<small>pcs</small>`;
+
+  updateScanStats();
+  if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+  checkBatchComplete();
+  toast(`⚠ 이슈 등록됨 · ${r.customer} · ${qty}pcs`, 'success');
 }
 
 function logScan(entry){
