@@ -193,6 +193,10 @@ function doGet(e) {
   if (op === 'getOccupiedSlots') {
     return json_(getOccupiedSlots());
   }
+  // ★ 2026-07-16 신규 — 총량피킹 작업자 명단 서버 조회
+  if (op === 'getBatchWorkers') {
+    return json_(getBatchWorkers());
+  }
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -331,6 +335,8 @@ function doPost(e) {
   // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
   if (op === 'logIssue')       return json_(logIssue(data));
   if (op === 'undoIssue')      return json_(undoIssue(data));
+  // ★ 2026-07-16 신규 — 총량피킹 작업자 명단 서버 저장
+  if (op === 'setBatchWorkers') return json_(setBatchWorkers(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
