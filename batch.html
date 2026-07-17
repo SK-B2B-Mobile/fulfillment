@@ -2382,6 +2382,23 @@ document.getElementById('btnPickEnd').onclick = async () => {
   document.getElementById('pickTimerStat').textContent = `${worker} 완료 · ${mins}분`;
   if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'end' });
   toast(`피킹 완료 · ${mins}분 소요`, 'success');
+
+  // ★ 2026-07-17 신규: "피킹 시작 누른 사람만 Active" 원칙에 맞춰, 종료하면
+  //   자동으로 다시 Off로 되돌림. 예전 테스트로 눌러본 사람이 실제로 일 안 하는데
+  //   계속 Active로 남아 다른 화면(스캔 로그인 목록 등)에 잘못 노출되는 문제 방지.
+  //   다음에 다시 피킹 시작하면 그때 또 자동으로 Active가 되므로 수동 조작 불필요.
+  const w = state.workers.find(x => x.name === worker);
+  if(w && w.status !== 'off'){
+    w.status = 'off';
+    saveBatchWorkersToServer();
+    if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
+  }
+  const dot = document.getElementById('pickWorkerDot');
+  if(dot) dot.style.background = 'var(--text-dim2)';
+  const pickSel = document.getElementById('pickWorkerSelect');
+  const selectedOpt = pickSel && pickSel.options[pickSel.selectedIndex];
+  if(selectedOpt) selectedOpt.textContent = worker + ' (Off)';
+
   // ★ 2026-07-16 신규: 지금 Scan Log 탭에 가 있지 않아도, 다음에 그 탭을 열면
   //   바로 최신 KPI가 보이도록 갱신. 이미 그 탭이 열려있으면 즉시 반영됨.
   renderKPI();
