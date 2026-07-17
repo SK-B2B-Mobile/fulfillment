@@ -227,7 +227,7 @@ function cardHtml(slot){
 function openIssueModal(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot || !slot.issues || slot.issues.length === 0) return;
-  const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DAMAGED:'DAMAGED · 파손', OOS:'OOS · 품절'};
+  const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절'};
   const rowsHtml = slot.issues.map(i => `
     <div class="issue-modal-row">
       <div class="issue-modal-row-top">
