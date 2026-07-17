@@ -164,8 +164,11 @@ const POLL_MS = 8000; // 8초마다 새로고침
 async function gasQuery(op, params){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
   try{
-    const qs = new URLSearchParams(Object.assign({op}, params||{})).toString();
-    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`);
+    // ★ 2026-07-17 수정: TV처럼 오래 켜두는 화면에서 브라우저가 예전 응답을
+    //   캐싱해서 재사용하는 바람에 데이터가 안 바뀌는 것처럼 보이던 문제 수정.
+    //   매번 다른 타임스탬프를 붙이고, fetch 자체도 캐시를 쓰지 말라고 명시.
+    const qs = new URLSearchParams(Object.assign({op, _ts: Date.now()}, params||{})).toString();
+    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`, { cache: 'no-store' });
     return await res.json();
   }catch(e){
     console.error('gasQuery failed:', op, e);
@@ -302,33 +305,39 @@ function renderBoard(slots){
 }
 
 async function pollOnce(){
-  if(!GAS_READY){
-    document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
-    return;
-  }
-  // 배치ID 아직 모르면 오늘자 배치부터 찾기
-  if(!currentBatchId){
-    const b = await gasQuery('getBatch', {});
-    if(!b.ok || !b.batch){
-      document.getElementById('liveDot').className = 'status-dot off';
-      document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>오늘 진행중인 배치 없음';
+  try{
+    if(!GAS_READY){
+      document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
       return;
     }
-    currentBatchId = b.batch.batchId;
-    document.getElementById('batchLabel').innerHTML =
-      `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
-  }
+    // 배치ID 아직 모르면 오늘자 배치부터 찾기
+    if(!currentBatchId){
+      const b = await gasQuery('getBatch', {});
+      if(!b.ok || !b.batch){
+        document.getElementById('liveDot').className = 'status-dot off';
+        document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>오늘 진행중인 배치 없음';
+        return;
+      }
+      currentBatchId = b.batch.batchId;
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
+    }
 
-  const res = await gasQuery('getSlotProgress', { batchId: currentBatchId });
-  if(!res.ok){
-    document.getElementById('liveDot').className = 'status-dot off';
-    return;
+    const res = await gasQuery('getSlotProgress', { batchId: currentBatchId });
+    if(!res.ok){
+      document.getElementById('liveDot').className = 'status-dot off';
+      return;
+    }
+    document.getElementById('liveDot').className = 'status-dot live';
+    document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
+    document.getElementById('doneBar').style.width =
+      (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
+    renderBoard(res.slots);
+  }catch(e){
+    // ★ 2026-07-17 신규: 폴링 중 예상 못한 오류가 나도 콘솔에만 남기고
+    //   다음 8초 뒤 폴링은 그대로 이어지게 함(화면이 아예 멈추지 않도록)
+    console.error('pollOnce failed:', e);
   }
-  document.getElementById('liveDot').className = 'status-dot live';
-  document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
-  document.getElementById('doneBar').style.width =
-    (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
-  renderBoard(res.slots);
 }
 
 pollOnce();
