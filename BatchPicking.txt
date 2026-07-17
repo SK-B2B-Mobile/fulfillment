@@ -21,6 +21,7 @@ const BCUST_SHEET    = 'BatchCustomers';
 const BITEMS_SHEET   = 'BatchItems';
 const SCANLOG_SHEET  = 'ScanLog';
 const PICKTIME_SHEET = 'PickTiming';
+const ISSUELOG_SHEET = 'IssueLog'; // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
 
 function batchTz_() { return Session.getScriptTimeZone(); }
 function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
@@ -44,6 +45,8 @@ function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId',
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
 function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty']); }
 function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
+// ★ 2026-07-16 신규: 고객사(Invoice) 하나에 대해 등록된 이슈 한 건 = 한 행
+function issuelogSheet_() { return ensureBatchSheet_(ISSUELOG_SHEET, ['BatchId','IssueId','Timestamp','Worker','Barcode','SKU','Name','Invoice','Customer','Reason','Qty','Note','Status']); }
 
 function generateBatchId_() {
   const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
@@ -445,6 +448,69 @@ function logScan(data) {
   }
 }
 
+/* ===================== ④-2 logIssue (★ 2026-07-16 신규) =====================
+ * 목적: EXP(유통기한)/NF(재고없음)/DAMAGED(파손)/OOS(품절) 등의 사유로
+ *       "특정 고객사 주문 한 건"에 대해 필요수량 일부(또는 전량)를
+ *       채워줄 수 없을 때 등록. 등록된 수량만큼 그 고객사의 완료 판정
+ *       기준(totalQty)에서 빠지므로, 나머지가 다 채워지면 정상적으로
+ *       "완료"로 표시된다. (배치 전체 공용이 아니라 invoice 단위로 귀속됨 —
+ *       같은 SKU를 여러 고객사가 나눠 가질 때 손상분을 어느 고객사 순서로
+ *       배분했는지는 작업자가 직접 판단해서 각 카드별로 등록.)
+ * 입력: { batchId, worker, barcode, sku, name, invoice, customer, reason, qty, note }
+ * ============================================================ */
+function logIssue(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    if (!data.batchId) return { ok: false, error: 'batchId required' };
+    if (!data.invoice) return { ok: false, error: 'invoice required' };
+    const qty = Number(data.qty) || 0;
+    if (qty <= 0) return { ok: false, error: 'qty must be > 0' };
+    const issueId = Utilities.getUuid();
+    issuelogSheet_().appendRow([
+      data.batchId, issueId, batchNow_(), data.worker || '',
+      data.barcode || '', data.sku || '', data.name || '',
+      data.invoice, data.customer || '', data.reason || 'ETC',
+      qty, data.note || '', 'active'
+    ]);
+    bumpVersion_();
+    return { ok: true, issueId: issueId };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ===================== ④-3 undoIssue (★ 2026-07-16 신규) =====================
+ * 잘못 등록한 이슈를 취소 (삭제 대신 Status를 'undone'으로 변경)
+ * 입력: { issueId }
+ * ============================================================ */
+function undoIssue(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const issueId = data.issueId;
+    if (!issueId) return { ok: false, error: 'issueId required' };
+    const sh = issuelogSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: false, error: 'no issues' };
+    const ids = sh.getRange(2, 2, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(issueId)) {
+        sh.getRange(i + 2, 13).setValue('undone');
+        bumpVersion_();
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'issue not found' };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ===================== ⑤ undoScan =====================
  * 입력: { scanId }
  * → 실제 삭제 대신 Status를 'undone' 으로 변경 (동시 스캔 중 안전)
@@ -622,6 +688,31 @@ function getSlotProgress(batchId) {
       });
     }
 
+    // ★ 2026-07-16 신규: EXP/NF/Damaged/OOS 등으로 등록된 이슈 수량 집계.
+    //   이 수량만큼은 애초에 "필요하지 않았던 것"처럼 그 고객사(Invoice)의
+    //   완료 판정 기준(totalQty)에서 빼준다 — 100% 못 채워도 완료로 표시되도록.
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const issueQtyByInvoice = {};
+    const issueQtyByInvoiceBarcode = {};
+    const issuesByInvoice = {};
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[12] === 'undone') return;
+        const inv = r[7];
+        const qty = Number(r[10]) || 0;
+        issueQtyByInvoice[inv] = (issueQtyByInvoice[inv] || 0) + qty;
+        const key = inv + '|' + String(r[4]);
+        issueQtyByInvoiceBarcode[key] = (issueQtyByInvoiceBarcode[key] || 0) + qty;
+        if (!issuesByInvoice[inv]) issuesByInvoice[inv] = [];
+        issuesByInvoice[inv].push({
+          issueId: r[1], time: r[2], worker: r[3], barcode: r[4],
+          sku: r[5], name: r[6], reason: r[9], qty: qty, note: r[11] || '',
+        });
+      });
+    }
+
     // 고객사별 "필요한 SKU 목록"을 읽어서 SKU 단위 완료 개수(doneSku/totalSku) 계산
     const bi = bitemsSheet_();
     const biLast = bi.getLastRow();
@@ -634,14 +725,14 @@ function getSlotProgress(batchId) {
         if (!skuStatsByInvoice[inv]) skuStatsByInvoice[inv] = { totalSku: 0, doneSku: 0 };
         skuStatsByInvoice[inv].totalSku++;
         const reqQty = Number(r[5]) || 0;
-        const scannedQty = scannedByInvoiceBarcode[inv + '|' + String(r[4])] || 0;
+        const bcKey = inv + '|' + String(r[4]);
+        const scannedQty = scannedByInvoiceBarcode[bcKey] || 0;
+        const issueQty = issueQtyByInvoiceBarcode[bcKey] || 0;
         // ★ 2026-07-13 수정: "요청수량 100% 완료"가 아니라 "스캔이 1개라도 된 SKU"를
-        //   카운트하도록 변경. 예전엔 상품 하나에 필요한 수량을 다 못 채우면
-        //   그 상품에 스캔을 이미 3종류나 했어도 SKU 카운터가 계속 0으로 보여서
-        //   "SKU 3개 스캔했는데 왜 0이냐"는 혼란을 줬음. 지금은 몇 종류의 상품에
-        //   손을 댔는지(착수 기준)로 표시 — 총 SKU 수(예: 645개)에 맞춰
-        //   스캔할수록 자연스럽게 올라가는 방식.
-        if (scannedQty > 0) skuStatsByInvoice[inv].doneSku++;
+        //   카운트하도록 변경. ★ 2026-07-16 추가: 이슈로 등록된 SKU도 "손을 댄"
+        //   것이므로(결론이 났으므로) 함께 카운트 — 안 그러면 이슈 처리해도
+        //   SKU 진행률이 영원히 안 올라가는 것처럼 보임.
+        if (scannedQty > 0 || issueQty > 0) skuStatsByInvoice[inv].doneSku++;
       });
     }
 
@@ -656,10 +747,14 @@ function getSlotProgress(batchId) {
         const invoice = r[1];
         const totalQty = Number(r[5]) || 0;
         const scanned = scannedByInvoice[invoice] || 0;
+        const issueQty = issueQtyByInvoice[invoice] || 0;
+        // ★ 2026-07-16: 완료 판정 기준 수량 = 원래 필요수량 - 이슈로 빠진 수량.
+        //   예) 20개 필요 중 3개가 EXP로 등록되면 → 17개만 채우면 완료.
+        const effectiveTotal = Math.max(0, totalQty - issueQty);
         const skuStat = skuStatsByInvoice[invoice] || { totalSku: Number(r[6]) || 0, doneSku: 0 };
         let status = 'waiting';
-        if (scanned > 0 && scanned < totalQty) status = 'active';
-        if (scanned >= totalQty && totalQty > 0) status = 'done';
+        if (scanned > 0 && scanned < effectiveTotal) status = 'active';
+        if (effectiveTotal >= 0 && totalQty > 0 && scanned >= effectiveTotal) status = 'done';
         // ★ 매니저가 "임시A" 같은 문자 라벨로 수동 배정한 슬롯도 있을 수 있어
         //   숫자로 안 바뀌면 원래 값을 그대로 씀 (화면 정렬은 숫자만 우선순위로)
         const rawSlot = r[7];
@@ -671,6 +766,8 @@ function getSlotProgress(batchId) {
           scanned: scanned, status: status,
           totalSku: skuStat.totalSku, doneSku: skuStat.doneSku,
           cleared: r[9] || '', // ★ 2026-07-14 신규: 비어있으면 "패킹완료·슬롯비우기" 버튼 표시 대상
+          issueQty: issueQty, // ★ 2026-07-16 신규: 현황판 "⚠ N" 뱃지용
+          issues: issuesByInvoice[invoice] || [], // ★ 2026-07-16 신규: 뱃지 클릭 시 상세 목록
         });
       });
     }
@@ -697,6 +794,10 @@ function getSlotProgress(batchId) {
  *   doneMap: { "인보이스|바코드": 통과(pass) 스캔 누적 개수, ... }
  *            → 클라이언트가 sku.queue[].done 을 이 값으로 "항상 대입"하면
  *              어느 기기에서 스캔했든 모든 기기가 같은 진행률을 보게 됨.
+ *   issueMap: { "인보이스|바코드": 이슈로 등록된 누적 수량, ... } (★ 2026-07-16 신규)
+ *            → 클라이언트가 sku.queue[].need 를 "원래수량 - 이 값"으로 항상
+ *              재계산하면, 어느 기기에서 이슈를 등록했든 모든 기기가 같은
+ *              필요수량/완료 여부를 보게 됨.
  *   scans:   이 배치의 전체 스캔 이벤트 목록(undone 제외, 최신순),
  *            "최근 스캔"/"전체 로그" 화면을 모든 기기가 동일하게 보여주는 데 사용.
  * ================================================================== */
@@ -735,7 +836,33 @@ function getScanState(batchId) {
 
     scans.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0)); // 최신순
 
-    return { ok: true, doneMap: doneMap, scans: scans };
+    // ★ 2026-07-16 신규: 이슈 맵도 함께 반환 — invoice|barcode 키로 누적 수량 집계
+    const issueMap = {};
+    const issues = [];
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[12] === 'undone') return;
+        const inv = r[7], bc = String(r[4]);
+        const qty = Number(r[10]) || 0;
+        const key = inv + '|' + bc;
+        issueMap[key] = (issueMap[key] || 0) + qty;
+        const ts = r[2];
+        const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
+          ? Utilities.formatDate(ts, batchTz_(), 'yyyy-MM-dd HH:mm:ss')
+          : String(ts || '');
+        issues.push({
+          issueId: r[1], time: timeStr, worker: r[3], barcode: bc,
+          sku: r[5], name: r[6], invoice: inv, customer: r[8],
+          reason: r[9], qty: qty, note: r[11] || '',
+        });
+      });
+    }
+    issues.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+
+    return { ok: true, doneMap: doneMap, scans: scans, issueMap: issueMap, issues: issues };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
