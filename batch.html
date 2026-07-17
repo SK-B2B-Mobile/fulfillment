@@ -2345,6 +2345,15 @@ document.getElementById('btnPickStart').onclick = async () => {
   document.getElementById('pickTimerStat').textContent = worker + ' 피킹 중...';
   if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange });
   else toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
+
+  // ★ 2026-07-16 신규: 피킹 시작하면 그 작업자 Status를 자동으로 Active로 전환.
+  //   Off 상태로 남아있으면 다음번 드롭다운/작업자 관리 화면에서 헷갈리기 때문.
+  const w = state.workers.find(x => x.name === worker);
+  if(w && w.status !== 'active'){
+    w.status = 'active';
+    saveBatchWorkersToServer();
+    if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
+  }
 };
 document.getElementById('btnPickEnd').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
@@ -2916,16 +2925,19 @@ function renderFullLog(){
 // Workers CRUD
 // ═══════════════════════════════════════════════════════════
 function populateWorkerSelect(){
-  const active = state.workers.filter(w => w.status === 'active');
-  const optsHtml = active.length
-    ? active.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
+  // ★ 2026-07-16 수정: Active인 사람만 보여주다가, 아무도 Active로 안 돼있으면
+  //   드롭다운이 통째로 비어서 "피킹 시작"조차 못 누르는 막다른 상황이 생겼음.
+  //   Active/Off와 무관하게 전체 작업자를 보여주되, Active인 사람을 위로 정렬.
+  const all = [...state.workers].sort((a,b) => (b.status==='active')-(a.status==='active'));
+  const optsHtml = all.length
+    ? all.map(w => `<option value="${w.name}">${w.name}${w.status!=='active' ? ' (Off)' : ''}</option>`).join('')
     : '<option value="">작업자 없음</option>';
 
   const sel = document.getElementById('workerSelect');
   if(sel){
     const prev = state.currentWorker;
     sel.innerHTML = optsHtml;
-    sel.value = active.some(w => w.name === prev) ? prev : (active[0]?.name || '');
+    sel.value = all.some(w => w.name === prev) ? prev : (all[0]?.name || '');
     state.currentWorker = sel.value;
     document.getElementById('workerInitial').textContent = state.currentWorker
       ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
@@ -2940,7 +2952,7 @@ function populateWorkerSelect(){
   if(pickSel && !state.pickTimerRunning){
     const prevPick = pickSel.value;
     pickSel.innerHTML = optsHtml;
-    pickSel.value = active.some(w => w.name === prevPick) ? prevPick : (active[0]?.name || '');
+    pickSel.value = all.some(w => w.name === prevPick) ? prevPick : (all[0]?.name || '');
   }
 }
 
