@@ -936,6 +936,27 @@ function initSlots(){
 }
 initSlots();
 populateWorkerSelect();
+loadBatchWorkersFromServer(); // ★ 2026-07-16 신규: 하드코딩 대신 서버(구글시트) 명단으로 교체
+
+// ★ 2026-07-16 신규 — 작업자 명단을 서버에서 불러오기. 시트가 비어있으면(최초 1회)
+//   지금 코드에 있는 기본값을 그대로 서버에 저장해서 다음부터는 서버가 기준이 되게 함.
+async function loadBatchWorkersFromServer(){
+  if(!GAS_READY) return; // 데모모드면 하드코딩 기본값 그대로 사용
+  try{
+    const res = await gasQuery('getBatchWorkers', {});
+    if(!res.ok) return;
+    if(res.workers && res.workers.length > 0){
+      state.workers = res.workers;
+    } else {
+      // 서버에 아직 아무것도 없음 → 지금 갖고 있는 기본 명단을 최초 1회 저장
+      await gasCall('setBatchWorkers', { workers: state.workers });
+    }
+    renderWorkers();
+    populateWorkerSelect();
+  }catch(e){
+    console.error('loadBatchWorkersFromServer failed:', e);
+  }
+}
 
 // ★ 2026-07-09 수정: 예전엔 페이지 열 때 "09:00 KST"라는 고정 텍스트를 한 번만
 //   찍어놓고 끝이라 시간이 절대 안 바뀌었음. 실제로 매초 갱신되는 시계로 교체.
@@ -2062,7 +2083,7 @@ function gotoView(vid){
   if(vid==='v-slots') renderSlots();
   if(vid==='v-scan'){ renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
   if(vid==='v-log'){ renderFullLog(); renderKPI(); }
-  if(vid==='v-workers') renderWorkers();
+  if(vid==='v-workers') loadBatchWorkersFromServer(); // ★ 2026-07-16: 다른 기기 변경사항까지 최신으로
   // ★ 탭을 옮길 때마다 최신 스캔 현황을 즉시 한 번 더 당겨옴 (5초 폴링 사이 텀 줄이기)
   if(vid==='v-slots' || vid==='v-scan' || vid==='v-log') pollScanState();
 }
@@ -2336,6 +2357,9 @@ document.getElementById('btnPickEnd').onclick = async () => {
   document.getElementById('pickTimerStat').textContent = `${worker} 완료 · ${mins}분`;
   if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'end' });
   toast(`피킹 완료 · ${mins}분 소요`, 'success');
+  // ★ 2026-07-16 신규: 지금 Scan Log 탭에 가 있지 않아도, 다음에 그 탭을 열면
+  //   바로 최신 KPI가 보이도록 갱신. 이미 그 탭이 열려있으면 즉시 반영됨.
+  renderKPI();
 };
 
 document.getElementById('btnRedoAuto').onclick = async () => {
@@ -2492,7 +2516,7 @@ function doScan(){
 const ISSUE_REASONS = [
   {v:'EXP', label:'EXP · 유통기한 지남'},
   {v:'NF', label:'NF · 재고 못 찾음'},
-  {v:'DAMAGED', label:'DAMAGED · 파손'},
+  {v:'DMG', label:'DMG · 파손'},
   {v:'OOS', label:'OOS · 품절'},
 ];
 let _lastScanCtx = null; // ★ 2026-07-16: 이슈 등록 버튼이 참조할 현재 스캔 결과 컨텍스트
@@ -2815,28 +2839,38 @@ async function renderKPI(){
   const res = await gasQuery('getBatchKPI', { batchId: state.batchId });
   if(!res.ok){ el.innerHTML = '<span style="color:var(--red)">KPI 조회 실패: ' + (res.error||'') + '</span>'; return; }
 
-  const pickRows = (res.pickTiming||[]).map(p =>
-    `<tr><td>${p.worker}</td><td>${p.sessions}건</td><td>${p.totalMinutes}분</td></tr>`).join('')
-    || '<tr><td colspan="3" style="color:var(--text-dim2)">피킹 기록 없음</td></tr>';
+  // ① 피킹 세션 목록 — 시작/종료/소요시간/실제 처리 SKU·PCS
+  const pickRows = (res.pickSessions||[]).map(p =>
+    `<tr><td>${p.worker}</td><td style="color:var(--text-dim2)">${p.pageRange||'-'}</td><td>${p.start}</td><td>${p.end}</td><td>${p.durationMinutes}분</td><td>${p.totalSku}</td><td>${p.totalQty.toLocaleString()}</td></tr>`).join('')
+    || '<tr><td colspan="7" style="color:var(--text-dim2)">피킹 기록 없음</td></tr>';
 
+  // ② 작업자별 Pass / 이슈(EXP·NF·Damaged·OOS) 건수·수량
   const scanRows = (res.scanStats||[]).map(s =>
-    `<tr><td>${s.worker}</td><td style="color:var(--green)">${s.pass}</td><td style="color:var(--amber)">${s.over}</td><td style="color:var(--red)">${s.error}</td></tr>`).join('')
+    `<tr><td>${s.worker}</td><td style="color:var(--green)">${s.pass}</td><td style="color:${s.issueCount>0?'var(--red)':'var(--text-dim2)'}">${s.issueCount}건</td><td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim2)'}">${s.issueQty.toLocaleString()}pcs</td></tr>`).join('')
     || '<tr><td colspan="4" style="color:var(--text-dim2)">스캔 기록 없음</td></tr>';
 
+  const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS'};
+  const byReason = res.totals.byReason || {};
+  const reasonSummary = Object.keys(byReason).length
+    ? Object.entries(byReason).map(([k,v]) => `${reasonLabel[k]||k} ${v.toLocaleString()}pcs`).join(' · ')
+    : '이슈 없음';
+
   el.innerHTML = `
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-      <div>
-        <div style="font-weight:700; color:var(--text); margin-bottom:6px;">① 작업자별 피킹 시간</div>
-        <table style="width:100%; font-size:11.5px;"><thead><tr style="color:var(--text-dim2)"><th style="text-align:left">작업자</th><th style="text-align:left">세션</th><th style="text-align:left">누적시간</th></tr></thead>
-        <tbody>${pickRows}</tbody></table>
-      </div>
-      <div>
-        <div style="font-weight:700; color:var(--text); margin-bottom:6px;">② 분류·검수 처리량 / 오류</div>
-        <table style="width:100%; font-size:11.5px;"><thead><tr style="color:var(--text-dim2)"><th style="text-align:left">작업자</th><th style="text-align:left">Pass</th><th style="text-align:left">Over</th><th style="text-align:left">Error</th></tr></thead>
-        <tbody>${scanRows}</tbody></table>
-      </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">① 작업자별 피킹 세션 (시작~종료 · 실제 처리 SKU/PCS)</div>
+      <table style="width:100%; font-size:11.5px;"><thead><tr style="color:var(--text-dim2)">
+        <th style="text-align:left">작업자</th><th style="text-align:left">담당페이지</th><th style="text-align:left">시작</th><th style="text-align:left">종료</th><th style="text-align:left">소요</th><th style="text-align:left">SKU</th><th style="text-align:left">PCS</th>
+      </tr></thead>
+      <tbody>${pickRows}</tbody></table>
     </div>
-    <div style="margin-top:10px; color:var(--text-dim2); font-size:11px;">③ 총 처리: Pass ${res.totals.pass} · Over ${res.totals.over} · Error ${res.totals.error}</div>
+    <div>
+      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">② 작업자별 분류·검수 현황 (Pass · 이슈)</div>
+      <table style="width:100%; font-size:11.5px;"><thead><tr style="color:var(--text-dim2)">
+        <th style="text-align:left">작업자</th><th style="text-align:left">Pass</th><th style="text-align:left">이슈 건수</th><th style="text-align:left">이슈 수량</th>
+      </tr></thead>
+      <tbody>${scanRows}</tbody></table>
+    </div>
+    <div style="margin-top:10px; color:var(--text-dim2); font-size:11px;">③ 총 처리: Pass ${res.totals.pass.toLocaleString()} · 이슈 ${res.totals.issueCount}건 (${reasonSummary})</div>
   `;
 }
 document.getElementById('btnRefreshKPI').onclick = renderKPI;
@@ -2933,9 +2967,23 @@ function renderWorkers(){
     if(!confirm('이 작업자를 삭제하시겠습니까?')) return;
     state.workers = state.workers.filter(w => w.id !== +b.dataset.del);
     renderWorkers();
+    saveBatchWorkersToServer(); // ★ 2026-07-16 신규
     toast('작업자 삭제', 'success');
   });
   populateWorkerSelect();
+}
+
+// ★ 2026-07-16 신규 — 작업자 명단 변경(추가/수정/삭제)마다 서버에 저장.
+//   실패해도 화면 작업은 막지 않되, 저장 실패는 콘솔에 남겨 나중에 추적 가능하게 함.
+async function saveBatchWorkersToServer(){
+  if(!GAS_READY) return;
+  try{
+    const res = await gasCall('setBatchWorkers', { workers: state.workers });
+    if(!res.ok) toast('⚠ 작업자 명단 서버 저장 실패 — 다시 시도해주세요', 'error');
+  }catch(e){
+    console.error('saveBatchWorkersToServer failed:', e);
+    toast('⚠ 작업자 명단 서버 저장 실패 — 네트워크 확인', 'error');
+  }
 }
 
 let editingWorkerId = null;
@@ -2965,6 +3013,7 @@ document.getElementById('workerModalSave').onclick = () => {
   }
   closeAllModals();
   renderWorkers();
+  saveBatchWorkersToServer(); // ★ 2026-07-16 신규 — 서버에 실제로 저장
 };
 
 // ═══════════════════════════════════════════════════════════
