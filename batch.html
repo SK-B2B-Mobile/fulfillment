@@ -341,10 +341,11 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .log-head h3{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim);}
 .log-head .count{font-family:var(--mono); font-size:11px; color:var(--text);}
 .log-body{max-height:520px; overflow-y:auto;}
-.log-row{display:grid; grid-template-columns:80px 1fr auto auto; gap:12px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--surface2); font-size:12px;}
+.log-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:10px 18px; border-bottom:1px solid var(--surface2); font-size:12px;}
 .log-row:last-child{border:none;}
-.log-time{font-family:var(--mono); font-size:10.5px; color:var(--text-dim2);}
-.log-msg{font-weight:500;}
+.log-time{font-family:var(--mono); font-size:10.5px; color:var(--text-dim2); flex-shrink:0; width:64px;}
+.log-msg{font-weight:500; flex:1 1 140px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.log-badges{display:flex; align-items:center; gap:6px; flex-shrink:0; margin-left:auto;}
 .log-msg small{color:var(--text-dim); font-family:var(--mono); margin-left:6px;}
 .log-slot{font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:4px; background:var(--surface3); color:var(--text);}
 .log-status{font-family:var(--mono); font-size:9.5px; padding:2px 6px; border-radius:3px; font-weight:700; letter-spacing:0.05em;}
@@ -718,8 +719,8 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
         <div id="kpiPanel" style="font-size:12px; color:var(--text-dim);">불러오는 중...</div>
       </div>
 
-      <div class="card" style="padding:0; overflow:hidden;">
-        <table>
+      <div class="card" style="padding:0; overflow-x:auto; -webkit-overflow-scrolling:touch;">
+        <table style="min-width:640px;">
           <thead>
             <tr>
               <th style="width:90px">Time</th>
@@ -2887,9 +2888,11 @@ function renderRecentScans(){
     <div class="log-row">
       <span class="log-time">${fmtClock(s.time)}</span>
       <span class="log-msg">${s.customer || '<span style="color:var(--red)">Unknown</span>'} <small>${s.barcode||''}</small></span>
-      <span class="log-slot">${s.slot ? String(s.slot).padStart(2,'0') : '-'}</span>
-      ${s.status==='pass' ? `<span class="log-slot" style="color:var(--green)">+${s.qty||1}</span>` : ''}
-      <span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span>
+      <span class="log-badges">
+        <span class="log-slot">${s.slot ? String(s.slot).padStart(2,'0') : '-'}</span>
+        ${s.status==='pass' ? `<span class="log-slot" style="color:var(--green)">+${s.qty||1}</span>` : ''}
+        <span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span>
+      </span>
     </div>`).join('');
 }
 
