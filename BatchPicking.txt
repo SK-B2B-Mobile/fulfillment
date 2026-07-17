@@ -22,6 +22,7 @@ const BITEMS_SHEET   = 'BatchItems';
 const SCANLOG_SHEET  = 'ScanLog';
 const PICKTIME_SHEET = 'PickTiming';
 const ISSUELOG_SHEET = 'IssueLog'; // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
+const BWORKERS_SHEET = 'BatchWorkers'; // ★ 2026-07-16 신규 — 총량피킹 "작업자 관리" 명단 서버 저장용
 
 function batchTz_() { return Session.getScriptTimeZone(); }
 function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
@@ -47,6 +48,8 @@ function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId',
 function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
 // ★ 2026-07-16 신규: 고객사(Invoice) 하나에 대해 등록된 이슈 한 건 = 한 행
 function issuelogSheet_() { return ensureBatchSheet_(ISSUELOG_SHEET, ['BatchId','IssueId','Timestamp','Worker','Barcode','SKU','Name','Invoice','Customer','Reason','Qty','Note','Status']); }
+// ★ 2026-07-16 신규: 작업자 명단 — Id/Name/Status 한 명당 한 행. batch.html의 로컬 하드코딩을 대체.
+function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name','Status']); }
 
 function generateBatchId_() {
   const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
@@ -449,7 +452,7 @@ function logScan(data) {
 }
 
 /* ===================== ④-2 logIssue (★ 2026-07-16 신규) =====================
- * 목적: EXP(유통기한)/NF(재고없음)/DAMAGED(파손)/OOS(품절) 등의 사유로
+ * 목적: EXP(유통기한)/NF(재고없음)/DMG(파손)/OOS(품절) 등의 사유로
  *       "특정 고객사 주문 한 건"에 대해 필요수량 일부(또는 전량)를
  *       채워줄 수 없을 때 등록. 등록된 수량만큼 그 고객사의 완료 판정
  *       기준(totalQty)에서 빠지므로, 나머지가 다 채워지면 정상적으로
@@ -599,42 +602,112 @@ function logPickTiming(data) {
   }
 }
 
-/* ===================== ⑧ getBatchKPI =====================
- * KPI 3종: ①피킹+분류검수 시간 ②오류/지연(over/error) ③처리량
+/* ===================== ⑧ getBatchKPI (★ 2026-07-16 개편) =====================
+ * KPI 2종:
+ *  ① 피킹 세션 목록 — 세션(시작~종료) 한 건당 한 줄. 작업자/담당페이지/
+ *     시작시각/종료시각/소요시간과 함께, 그 시간대에 그 작업자 이름으로
+ *     실제 스캔·분류 완료(pass)된 SKU 개수(distinct)/PCS 합계를 계산해
+ *     "이 사람이 그 시간 동안 실제로 얼마나 처리했는지"를 보여준다.
+ *     ※ 전제: 피킹한 사람과 스캔한 사람이 동일인(또는 그 시간대 담당자가
+ *       일치)이라고 가정. 담당 페이지(pageRange)는 참고용 메모일 뿐 실제
+ *       SKU/PCS 계산에는 쓰이지 않음 — PDF 파싱 단계에서 페이지-SKU
+ *       매핑이 저장되지 않아 계산 불가능하기 때문.
+ *  ② 작업자별 분류·검수 현황 — Pass 건수 + 이슈(EXP/NF/Damaged/OOS) 건수·수량.
+ *     예전엔 Over/Error(오조작성 스캔)를 보여줬는데, 작업자 평가에 의미가
+ *     적어서 실제 재고/품질 이슈 쪽으로 교체함.
  * 입력: batchId (문자열)
  * ============================================================ */
 function getBatchKPI(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
 
-    const pt = picktimeSheet_();
-    const ptLast = pt.getLastRow();
-    const pickByWorker = {};
-    if (ptLast >= 2) {
-      pt.getRange(2, 1, ptLast - 1, 6).getValues().forEach(r => {
+    // 이 배치의 pass 스캔 전체를 먼저 한 번에 읽어둔다 (세션별 SKU/PCS 계산과
+    // 작업자별 Pass 집계 양쪽에서 재사용)
+    const sl = scanlogSheet_();
+    const slLast = sl.getLastRow();
+    const passScans = []; // {worker, sku, qty, timeMs}
+    const scanByWorker = {}; // worker -> {pass}
+    let totalPass = 0;
+    if (slLast >= 2) {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
-        const w = r[1];
-        if (!pickByWorker[w]) pickByWorker[w] = { worker: w, sessions: 0, totalMinutes: 0 };
-        pickByWorker[w].sessions++;
-        pickByWorker[w].totalMinutes += Number(r[5]) || 0;
+        if (r[10] === 'undone' || r[9] !== 'pass') return;
+        const w = r[3];
+        const qty = Number(r[11]) || 1;
+        const ts = r[2];
+        const timeMs = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts)) ? ts.getTime() : NaN;
+        passScans.push({ worker: w, sku: r[5], qty: qty, timeMs: timeMs });
+        if (!scanByWorker[w]) scanByWorker[w] = { worker: w, pass: 0 };
+        scanByWorker[w].pass++;
+        totalPass++;
       });
     }
 
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
-    const scanByWorker = {};
-    let totalPass = 0, totalErr = 0, totalOver = 0;
-    if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 11).getValues().forEach(r => {
+    // ① 피킹 세션 목록
+    const pt = picktimeSheet_();
+    const ptLast = pt.getLastRow();
+    const sessions = [];
+    if (ptLast >= 2) {
+      pt.getRange(2, 1, ptLast - 1, 6).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
-        if (r[10] === 'undone') return;
-        const w = r[3], result = r[9];
-        if (!scanByWorker[w]) scanByWorker[w] = { worker: w, pass: 0, over: 0, error: 0 };
-        if (result === 'pass') { scanByWorker[w].pass++; totalPass++; }
-        else if (result === 'over') { scanByWorker[w].over++; totalOver++; }
-        else { scanByWorker[w].error++; totalErr++; }
+        const worker = r[1];
+        const startTs = r[3], endTs = r[4];
+        const startMs = (Object.prototype.toString.call(startTs) === '[object Date]' && !isNaN(startTs)) ? startTs.getTime() : NaN;
+        const endMs = (Object.prototype.toString.call(endTs) === '[object Date]' && !isNaN(endTs)) ? endTs.getTime() : NaN;
+
+        let totalSku = 0, totalQty = 0;
+        if (!isNaN(startMs) && !isNaN(endMs)) {
+          const skuSet = new Set();
+          passScans.forEach(sc => {
+            if (sc.worker !== worker) return;
+            if (isNaN(sc.timeMs) || sc.timeMs < startMs || sc.timeMs > endMs) return;
+            skuSet.add(sc.sku);
+            totalQty += sc.qty;
+          });
+          totalSku = skuSet.size;
+        }
+
+        sessions.push({
+          worker: worker,
+          pageRange: r[2] || '',
+          start: !isNaN(startMs) ? Utilities.formatDate(startTs, batchTz_(), 'HH:mm') : '-',
+          end: !isNaN(endMs) ? Utilities.formatDate(endTs, batchTz_(), 'HH:mm') : '진행중',
+          durationMinutes: Number(r[5]) || 0,
+          totalSku: totalSku, totalQty: totalQty,
+          _sortMs: isNaN(startMs) ? 0 : startMs,
+        });
       });
     }
+    sessions.sort((a, b) => b._sortMs - a._sortMs); // 최신순
+    sessions.forEach(s => delete s._sortMs);
+
+    // ② 작업자별 이슈(EXP/NF/Damaged/OOS) 집계
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const issueByWorker = {};
+    const issueTotalsByReason = {};
+    let totalIssueCount = 0, totalIssueQty = 0;
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[12] === 'undone') return;
+        const w = r[3], reason = r[9] || 'ETC', qty = Number(r[10]) || 0;
+        if (!issueByWorker[w]) issueByWorker[w] = { issueCount: 0, issueQty: 0 };
+        issueByWorker[w].issueCount++;
+        issueByWorker[w].issueQty += qty;
+        issueTotalsByReason[reason] = (issueTotalsByReason[reason] || 0) + qty;
+        totalIssueCount++; totalIssueQty += qty;
+      });
+    }
+
+    // scanByWorker(Pass)와 issueByWorker(이슈)를 작업자 기준으로 합쳐서 하나의 표로
+    const workerNames = new Set([...Object.keys(scanByWorker), ...Object.keys(issueByWorker)]);
+    const scanStats = Array.from(workerNames).map(w => ({
+      worker: w,
+      pass: (scanByWorker[w] || {}).pass || 0,
+      issueCount: (issueByWorker[w] || {}).issueCount || 0,
+      issueQty: (issueByWorker[w] || {}).issueQty || 0,
+    })).sort((a, b) => b.pass - a.pass);
 
     const row = _findBatchRow_(batchId);
     let batchInfo = null;
@@ -646,9 +719,14 @@ function getBatchKPI(batchId) {
     return {
       ok: true,
       batch: batchInfo,
-      pickTiming: Object.values(pickByWorker),
-      scanStats: Object.values(scanByWorker),
-      totals: { pass: totalPass, over: totalOver, error: totalErr }
+      pickSessions: sessions,
+      scanStats: scanStats,
+      totals: {
+        pass: totalPass,
+        issueCount: totalIssueCount,
+        issueQty: totalIssueQty,
+        byReason: issueTotalsByReason,
+      }
     };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -976,6 +1054,47 @@ function cleanupOldBatchData() {
  * 테스트 함수 — 에디터에서 testBatchPickingFlow 선택 후 ▶ 실행
  * 시트 5개가 자동 생성되고, 더미 배치 1개가 만들어집니다.
  * ===================================================== */
+/* ===================== ⑫ getBatchWorkers / setBatchWorkers (★ 2026-07-16 신규) =====================
+ * 목적: "Workers" 탭에서 추가/수정/삭제한 작업자 명단이 브라우저 메모리에만
+ *       있고 서버에 저장되지 않아, 새로고침하거나 다른 기기에서 열면 예전
+ *       하드코딩된 목록으로 돌아가던 문제를 고침. 명단이 적어서(보통 5~10명)
+ *       변경할 때마다 시트 전체를 지우고 다시 쓰는 단순한 방식 사용.
+ * ================================================================== */
+function getBatchWorkers() {
+  try {
+    const sh = bworkersSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: true, workers: [] }; // 비어있으면 클라이언트가 기본값 사용
+    const rows = sh.getRange(2, 1, last - 1, 3).getValues();
+    const workers = rows
+      .filter(r => r[1]) // 이름 없는 빈 행 제외
+      .map(r => ({ id: Number(r[0]) || 0, name: String(r[1]), status: r[2] || 'active' }));
+    return { ok: true, workers: workers };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+function setBatchWorkers(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const workers = data.workers || [];
+    const sh = bworkersSheet_();
+    const last = sh.getLastRow();
+    if (last > 1) sh.getRange(2, 1, last - 1, 3).clearContent();
+    if (workers.length > 0) {
+      const rows = workers.map(w => [w.id, w.name, w.status || 'active']);
+      sh.getRange(2, 1, rows.length, 3).setValues(rows);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function testBatchPickingFlow() {
   const created = createBatch({
     sumItems: [
