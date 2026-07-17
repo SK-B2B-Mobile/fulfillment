@@ -17,17 +17,8 @@
   var MIN_ZOOM = 0.62;    // 아무리 좁아도 이 이하로는 더 안 줄임(가독성 최저선)
   function applyAutoZoom() {
     var w = window.innerWidth;
-    var cw = document.documentElement.clientWidth;
     var z = w >= BASE_WIDTH ? 1 : Math.max(MIN_ZOOM, w / BASE_WIDTH);
     document.documentElement.style.zoom = z;
-    // ★ 2026-07-17 임시 진단용 — 이 기기가 실제로 측정하는 폭/줌값을
-    //   화면에 바로 찍어서 정확한 원인을 확인하기 위함 (원인 파악 후 제거 예정)
-    window.addEventListener('DOMContentLoaded', function(){
-      var badge = document.createElement('div');
-      badge.textContent = 'DEBUG w:' + w + ' cw:' + cw + ' dpr:' + (window.devicePixelRatio||'?') + ' z:' + z.toFixed(2);
-      badge.style.cssText = 'position:fixed; top:0; right:0; z-index:99999; background:#ff0055; color:#fff; font-size:11px; padding:4px 8px; font-family:monospace;';
-      document.body.appendChild(badge);
-    });
   }
   applyAutoZoom();
   window.addEventListener('resize', applyAutoZoom);
