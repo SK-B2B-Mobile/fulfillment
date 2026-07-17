@@ -328,6 +328,9 @@ function doPost(e) {
   if (op === 'logPickTiming')  return json_(logPickTiming(data));
   // ★ 2026-07-14 신규 — "패킹완료·슬롯비우기" 버튼
   if (op === 'clearSlot')      return json_(clearSlot(data));
+  // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
+  if (op === 'logIssue')       return json_(logIssue(data));
+  if (op === 'undoIssue')      return json_(undoIssue(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
