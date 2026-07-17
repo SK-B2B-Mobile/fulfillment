@@ -90,6 +90,27 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
 .empty-state h2{font-size:28px; color:var(--text-dim);}
 .empty-state p{font-family:var(--mono); font-size:16px; color:var(--text-dim); opacity:0.6;}
+
+/* ★ 2026-07-16 신규 — 이슈(EXP/NF/Damaged/OOS) 뱃지 + 상세 모달 */
+.card-top-right{display:flex; align-items:center; gap:8px;}
+.card-issue-badge{font-family:var(--mono); font-size:16px; font-weight:800; color:#FF4D6D; background:rgba(255,77,109,0.15); border:1.5px solid rgba(255,77,109,0.5); border-radius:8px; padding:3px 9px; cursor:pointer;}
+.card-issue-badge:hover{background:rgba(255,77,109,0.28);}
+.card.done .card-issue-badge{color:#04140D; background:rgba(4,20,13,0.18); border-color:rgba(4,20,13,0.4);}
+
+.issue-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:100; align-items:center; justify-content:center;}
+.issue-modal-overlay.open{display:flex;}
+.issue-modal{background:var(--surface); border:2px solid var(--border); border-radius:18px; width:min(640px, 90vw); max-height:80vh; display:flex; flex-direction:column; overflow:hidden;}
+.issue-modal-head{display:flex; justify-content:space-between; align-items:center; padding:22px 26px; border-bottom:2px solid var(--border);}
+.issue-modal-head h3{font-size:24px; font-weight:800;}
+.issue-modal-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:38px; height:38px; border-radius:10px; font-size:16px; cursor:pointer;}
+.issue-modal-body{padding:18px 26px; overflow-y:auto; display:flex; flex-direction:column; gap:12px;}
+.issue-modal-row{background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:12px; padding:14px 18px;}
+.issue-modal-row-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+.issue-modal-reason{font-family:var(--mono); font-size:15px; font-weight:800; color:#FF4D6D;}
+.issue-modal-qty{font-family:var(--mono); font-size:20px; font-weight:800;}
+.issue-modal-name{font-size:17px; font-weight:700; margin-bottom:4px;}
+.issue-modal-meta{font-family:var(--mono); font-size:13px; color:var(--text-dim);}
+.issue-modal-note{margin-top:6px; font-size:14px; color:var(--text-dim); font-style:italic;}
 </style>
 </head>
 <body>
@@ -116,6 +137,17 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
   <div class="empty-state">
     <h2>오늘의 배치를 기다리는 중...</h2>
     <p id="emptyMsg">CONFIG.GAS_URL 확인 중</p>
+  </div>
+</div>
+
+<!-- ★ 2026-07-16 신규 — 이슈(⚠) 뱃지 클릭 시 상세 목록 모달 -->
+<div class="issue-modal-overlay" id="issueModalOverlay">
+  <div class="issue-modal">
+    <div class="issue-modal-head">
+      <h3 id="issueModalTitle">이슈 목록</h3>
+      <button class="issue-modal-close" onclick="closeIssueModal()">✕</button>
+    </div>
+    <div class="issue-modal-body" id="issueModalBody"></div>
   </div>
 </div>
 
@@ -157,6 +189,8 @@ function shipClass(v){
   return (v === 'UPS' || v === 'PU' || v === 'TK') ? 'ship-' + v : 'ship-other';
 }
 
+let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상세 조회용
+
 function cardHtml(slot){
   if(!slot){
     return `<div class="card"><div class="card-empty">비어있음</div></div>`;
@@ -164,10 +198,18 @@ function cardHtml(slot){
   const pct = slot.totalQty > 0 ? Math.min(100, slot.scanned / slot.totalQty * 100) : 0;
   const flashClass = (prevStatus[slot.slotNum] && prevStatus[slot.slotNum] !== 'done' && slot.status === 'done') ? ' flash' : '';
   const numLabel = /^\d+$/.test(String(slot.slotNum)) ? String(slot.slotNum).padStart(2,'0') : String(slot.slotNum);
+  // ★ 2026-07-16 신규: 이슈(EXP/NF/Damaged/OOS)가 하나라도 있으면 뱃지 표시.
+  //   클릭하면 어떤 바코드가 몇 개 빠졌는지 상세 목록 팝업.
+  const issueBadge = slot.issueQty > 0
+    ? `<span class="card-issue-badge" data-invoice="${slot.invoice}">⚠ ${slot.issueQty.toLocaleString()}</span>`
+    : '';
   return `<div class="card ${slot.status}${flashClass}">
     <div class="card-top">
       <span class="card-slot">${numLabel}</span>
-      <span class="card-ship ${shipClass(slot.shipVia)}">${shipLabel(slot.shipVia)}</span>
+      <div class="card-top-right">
+        ${issueBadge}
+        <span class="card-ship ${shipClass(slot.shipVia)}">${shipLabel(slot.shipVia)}</span>
+      </div>
     </div>
     <div class="card-cust">${slot.customer || ''}</div>
     <div class="card-bottom">
@@ -181,8 +223,39 @@ function cardHtml(slot){
   </div>`;
 }
 
+// ★ 2026-07-16 신규 — 이슈 뱃지 클릭 시 상세 팝업
+function openIssueModal(invoice){
+  const slot = _slotsByInvoice[invoice];
+  if(!slot || !slot.issues || slot.issues.length === 0) return;
+  const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DAMAGED:'DAMAGED · 파손', OOS:'OOS · 품절'};
+  const rowsHtml = slot.issues.map(i => `
+    <div class="issue-modal-row">
+      <div class="issue-modal-row-top">
+        <span class="issue-modal-reason">${reasonLabel[i.reason] || i.reason}</span>
+        <span class="issue-modal-qty">${Number(i.qty).toLocaleString()}pcs</span>
+      </div>
+      <div class="issue-modal-name">${i.name || i.sku || ''}</div>
+      <div class="issue-modal-meta">바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time||'').slice(5,16)}</div>
+      ${i.note ? `<div class="issue-modal-note">"${i.note}"</div>` : ''}
+    </div>`).join('');
+  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${slot.issues.length}건`;
+  document.getElementById('issueModalBody').innerHTML = rowsHtml;
+  document.getElementById('issueModalOverlay').classList.add('open');
+}
+function closeIssueModal(){
+  document.getElementById('issueModalOverlay').classList.remove('open');
+}
+document.addEventListener('click', e => {
+  const badge = e.target.closest('.card-issue-badge');
+  if(badge){ openIssueModal(badge.dataset.invoice); return; }
+  if(e.target.id === 'issueModalOverlay') closeIssueModal();
+});
+
 function renderBoard(slots){
   const board = document.getElementById('board');
+  // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 참조할 수 있도록 invoice 기준으로 캐싱
+  _slotsByInvoice = {};
+  (slots || []).forEach(s => { if(s.invoice) _slotsByInvoice[s.invoice] = s; });
   if(!slots || slots.length === 0){
     board.innerHTML = `<div class="empty-state"><h2>오늘의 배치를 기다리는 중...</h2><p>슬롯이 배정되면 여기 자동으로 표시됩니다</p></div>`;
     return;
