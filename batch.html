@@ -2341,7 +2341,8 @@ document.getElementById('btnPickStart').onclick = async () => {
   document.getElementById('btnPickStart').disabled = true;
   document.getElementById('btnPickEnd').disabled = false;
   document.getElementById('pickWorkerSelect').disabled = true;
-  document.getElementById('pickPageRange').disabled = true;
+  // ★ 2026-07-16 수정: 담당 페이지는 피킹 도중에도 계속 메모/수정할 수 있어야
+  //   하는 칸이라 더 이상 잠그지 않음 (예전엔 disabled=true로 막아버렸음).
   document.getElementById('pickTimerStat').textContent = worker + ' 피킹 중...';
   if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange });
   else toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
@@ -2354,6 +2355,12 @@ document.getElementById('btnPickStart').onclick = async () => {
     saveBatchWorkersToServer();
     if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
   }
+  // ★ 2026-07-16 신규: pickWorkerSelect는 피킹 중엔 disabled라 populateWorkerSelect()의
+  //   재렌더링을 안 타므로(의도적으로 값이 안 바뀌게 막아둠), 지금 선택된 옵션의
+  //   "(Off)" 표시글자만 직접 지워서 즉시 Active로 보이게 함.
+  const pickSel = document.getElementById('pickWorkerSelect');
+  const selectedOpt = pickSel && pickSel.options[pickSel.selectedIndex];
+  if(selectedOpt) selectedOpt.textContent = worker;
 };
 document.getElementById('btnPickEnd').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
