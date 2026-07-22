@@ -514,6 +514,42 @@ function undoIssue(data) {
   }
 }
 
+/* ===================== ④-4 editIssue (★ 2026-07-22 신규) =====================
+ * 목적: 잘못 등록한 이슈를 "취소"하는 게 아니라, 사유/수량/메모를 그 자리에서
+ *       직접 고쳐서 저장. (undoIssue는 완전히 무효화만 시키는 것이고, 이건
+ *       "287pcs를 87pcs로 고친다" 같은 실제 수정 요청에 맞는 기능.)
+ * 입력: { issueId, reason, qty, note }
+ * ============================================================ */
+function editIssue(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const issueId = data.issueId;
+    if (!issueId) return { ok: false, error: 'issueId required' };
+    const qty = Number(data.qty) || 0;
+    if (qty <= 0) return { ok: false, error: 'qty must be > 0' };
+    const sh = issuelogSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: false, error: 'no issues' };
+    const ids = sh.getRange(2, 2, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(issueId)) {
+        const row = i + 2;
+        sh.getRange(row, 10).setValue(data.reason || 'ETC'); // J: Reason
+        sh.getRange(row, 11).setValue(qty);                  // K: Qty
+        sh.getRange(row, 12).setValue(data.note || '');      // L: Note
+        bumpVersion_();
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'issue not found' };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ===================== ⑤ undoScan =====================
  * 입력: { scanId }
  * → 실제 삭제 대신 Status를 'undone' 으로 변경 (동시 스캔 중 안전)
