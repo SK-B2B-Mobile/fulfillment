@@ -2593,14 +2593,29 @@ function doScan(){
       scanFeedback('err');
       return;
     }
+    // ★ 2026-07-22 신규 — 이미 다 배분된 SKU를 재스캔했을 때, "완료됐다"는
+    //   메시지만 보여주고 끝나면 작업자가 "그럼 이걸 어느 슬롯에 넣어야 하지?"
+    //   헷갈려함. 처음 스캔했을 때 어느 슬롯들로 나갔었는지 그대로 다시 보여줌.
+    //   (참고: 이 재스캔은 logScan(status:'over')로만 기록되고 'pass'가 아니라서
+    //   TV 현황판 집계(scanned)에는 절대 다시 카운트되지 않음 — 서버가 'pass'만 합산.)
+    const slotListHtml = sku.queue.map(q => `
+      <div class="target-card tsz-md" style="opacity:0.82;">
+        <div class="target-slot">${String(q.slot).padStart(2,'0')}</div>
+        <div class="target-info">
+          <div class="target-co">${q.customer}</div>
+          <div class="target-meta">이미 배분 완료됨</div>
+        </div>
+        <div class="target-qty">${q.need}<small>pcs</small></div>
+      </div>`).join('');
     el.innerHTML = `<div class="scan-result complete">
       <div class="product-name">${sku.name}</div>
       <div class="barcode-tag">${sku.barcode}</div>
       <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span></div>
-      <div class="slot-cta" style="background:var(--green); color:#04140D">
-        <div class="slot-cta-num"><span class="lbl">Complete</span></div>
-        <div class="slot-cta-co">전량 배분 완료<br><small>${sku.total}/${sku.total}</small></div>
+      <div class="slot-cta" style="background:var(--amber); color:#2b1a00; margin-bottom:10px;">
+        <div class="slot-cta-num"><span class="lbl">중복 스캔</span></div>
+        <div class="slot-cta-co">이미 스캔해서 전량 배분됐습니다<br><small>${sku.total}/${sku.total} · 아래 슬롯에 이미 넣으셨어요</small></div>
       </div>
+      <div class="target-grid tgrid-2">${slotListHtml}</div>
     </div>`;
     logScan({barcode:code, sku:sku.sku, customer:null, slot:null, status:'over'});
     scanFeedback('err');
@@ -2623,6 +2638,7 @@ const ISSUE_REASONS = [
   {v:'NF', label:'NF · 재고 못 찾음'},
   {v:'DMG', label:'DMG · 파손'},
   {v:'OOS', label:'OOS · 품절'},
+  {v:'SKUMIS', label:'SKUMIS · SKU 불일치'},
 ];
 let _lastScanCtx = null; // ★ 2026-07-16: 이슈 등록 버튼이 참조할 현재 스캔 결과 컨텍스트
 
@@ -3020,7 +3036,7 @@ async function renderKPI(){
     `<tr><td>${s.worker}</td><td style="color:var(--green)">${s.pass}</td><td style="color:${s.issueCount>0?'var(--red)':'var(--text-dim2)'}">${s.issueCount}건</td><td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim2)'}">${s.issueQty.toLocaleString()}pcs</td></tr>`).join('')
     || '<tr><td colspan="4" style="color:var(--text-dim2)">스캔 기록 없음</td></tr>';
 
-  const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS'};
+  const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS', SKUMIS:'SKUMIS'};
   const byReason = res.totals.byReason || {};
   const reasonSummary = Object.keys(byReason).length
     ? Object.entries(byReason).map(([k,v]) => `${reasonLabel[k]||k} ${v.toLocaleString()}pcs`).join(' · ')
@@ -3100,7 +3116,13 @@ function populateWorkerSelect(){
     : '<option value="">작업자 없음</option>';
 
   const sel = document.getElementById('workerSelect');
-  if(sel){
+  // ★ 2026-07-22 신규: 작업자가 지금 이 드롭다운을 탭해서 열어놓은 상태(포커스 중)에
+  //   폴링이 계속 innerHTML을 다시 그리면, 네이티브 선택 팝업이 깜빡이거나
+  //   저절로 닫히는 문제가 있었음. 열려있는 동안은 건드리지 않고 넘어감 —
+  //   다음 폴링 때(닫힌 뒤) 자동으로 다시 최신 상태로 갱신됨.
+  if(sel && document.activeElement === sel){
+    // 그래도 값 자체는 최신으로 유지(화면 하단 이니셜 등)
+  } else if(sel){
     const prev = state.currentWorker;
     sel.innerHTML = optsHtml;
     sel.value = all.some(w => w.name === prev) ? prev : (all[0]?.name || '');
@@ -3115,7 +3137,8 @@ function populateWorkerSelect(){
   }
 
   const pickSel = document.getElementById('pickWorkerSelect');
-  if(pickSel && !state.pickTimerRunning){
+  // ★ 2026-07-22 신규: 위와 같은 이유로, 열려있는 동안은 건드리지 않음
+  if(pickSel && !state.pickTimerRunning && document.activeElement !== pickSel){
     const prevPick = pickSel.value;
     // ★ 2026-07-22 신규: 다른 기기에서 이미 피킹 중인 사람은 선택 자체가
     //   안 되도록(disabled) + "🔴 ON · 14:02~" 표시로 누가 봐도 알 수 있게 함
