@@ -530,10 +530,6 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
         <button class="btn btn-ghost btn-sm" id="btnSwitchBatch" title="다른 미완료 배치로 전환">⇄ 다른 배치</button>
         <div id="switchBatchDropdown" style="display:none; position:absolute; top:calc(100% + 6px); right:0; z-index:50; background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:8px; min-width:280px; box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
       </div>
-      <div class="role-toggle" id="roleToggle">
-        <button class="on" data-role="manager">Manager</button>
-        <button data-role="worker">Worker</button>
-      </div>
     </div>
   </div>
 
@@ -932,7 +928,6 @@ async function syncSlotsToServer(){
 // State
 // ═══════════════════════════════════════════════════════════
 const state = {
-  role: 'manager',
   batchId: null,
   batchStartTs: null,
   sumFile: null,           // {items:[...], meta:{...}}
@@ -954,6 +949,7 @@ const state = {
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
+  activePickers: {}, // ★ 2026-07-22 신규: { "작업자명": "14:02"(시작시각) } — 지금 다른 기기에서 피킹 중인 사람
 };
 
 // Init slots (30개, 15+15)
@@ -2014,7 +2010,11 @@ function startScanPolling(){
   //   실시간성은 거의 그대로 유지.
   const jitter = Math.floor(Math.random()*1500);
   __scanPollTimer = setInterval(pollScanState, 5000+jitter);
+  // ★ 2026-07-22 신규: 다른 기기의 피킹 시작/종료를 이 화면에도 곧 반영하기 위한 폴링
+  if(!__activePickersTimer) __activePickersTimer = setInterval(pollActivePickers, 6000+jitter);
+  pollActivePickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
 }
+let __activePickersTimer = null;
 function stopScanPolling(){
   if(__scanPollTimer){ clearInterval(__scanPollTimer); __scanPollTimer = null; }
 }
@@ -2109,7 +2109,7 @@ document.querySelectorAll('nav button[data-view]').forEach(b => {
 function gotoView(vid){
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view===vid));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id===vid));
-  if(vid==='v-slots') renderSlots();
+  if(vid==='v-slots') { renderSlots(); pollActivePickers(); }
   if(vid==='v-scan'){ renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
   if(vid==='v-log'){ renderFullLog(); renderKPI(); }
   if(vid==='v-workers') loadBatchWorkersFromServer(); // ★ 2026-07-16: 다른 기기 변경사항까지 최신으로
@@ -2118,16 +2118,10 @@ function gotoView(vid){
 }
 
 // ═══════════════════════════════════════════════════════════
-// Role toggle (Manager / Worker) — cosmetic hint for now
+// (★ 2026-07-22: 아무 실질 기능 없이 탭 이동만 하던 Manager/Worker 토글 버튼
+//   제거함 — 작업자들이 "역할을 선택해야 하나" 오해하게 만들기만 했음.
+//   상단 01~04, M 탭으로 이미 어디든 이동 가능해서 대체 기능 필요 없음.)
 // ═══════════════════════════════════════════════════════════
-document.querySelectorAll('#roleToggle button').forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll('#roleToggle button').forEach(x => x.classList.toggle('on', x===b));
-    state.role = b.dataset.role;
-    if(state.role === 'worker') gotoView('v-scan');
-    else gotoView('v-slots');
-  };
-});
 
 // ═══════════════════════════════════════════════════════════
 // Slot rendering + DnD
@@ -2369,14 +2363,34 @@ document.getElementById('btnPickStart').onclick = async () => {
   const pageRange = pageFrom ? (pageTo ? `${pageFrom}-${pageTo}` : pageFrom) : '';
   if(!worker){ toast('작업자를 선택하세요', 'error'); return; }
   if(!state.batchId){ toast('먼저 배치를 시작하세요', 'error'); return; }
+  // ★ 2026-07-22 신규: 다른 기기에서 이미 피킹 중인 사람이면 즉시 차단(화면단 1차 확인)
+  if(state.activePickers[worker]){
+    toast(`⚠ ${worker}님은 이미 다른 기기에서 피킹 중입니다 (${state.activePickers[worker]}부터)`, 'error');
+    return;
+  }
   state.pickTimerRunning = true;
   state.pickTimerStart = Date.now();
   document.getElementById('btnPickStart').disabled = true;
   document.getElementById('btnPickEnd').disabled = false;
   document.getElementById('pickWorkerSelect').disabled = true;
   document.getElementById('pickTimerStat').textContent = worker + (pageRange ? ` · ${pageRange}페이지` : '') + ' 피킹 중...';
-  if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange });
-  else toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
+  if(GAS_READY){
+    const res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange });
+    // ★ 2026-07-22 신규: 화면단 체크를 통과했어도, 정말 거의 동시에 다른 기기가
+    //   먼저 시작해버린 경합 상황은 서버가 최종적으로 걸러줌 — 그 경우 되돌림.
+    if(!res.ok){
+      state.pickTimerRunning = false;
+      document.getElementById('btnPickStart').disabled = false;
+      document.getElementById('btnPickEnd').disabled = true;
+      document.getElementById('pickWorkerSelect').disabled = false;
+      document.getElementById('pickTimerStat').textContent = '';
+      toast(`⚠ ${worker}님은 방금 다른 기기에서 먼저 피킹을 시작했습니다`, 'error');
+      pollActivePickers();
+      return;
+    }
+  } else {
+    toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
+  }
 
   // ★ 2026-07-16 신규: 피킹 시작하면 그 작업자 Status를 자동으로 Active로 전환.
   //   Off 상태로 남아있으면 다음번 드롭다운/작업자 관리 화면에서 헷갈리기 때문.
@@ -2394,6 +2408,17 @@ document.getElementById('btnPickStart').onclick = async () => {
   if(selectedOpt) selectedOpt.textContent = worker;
   const dot = document.getElementById('pickWorkerDot');
   if(dot) dot.style.background = 'var(--green)';
+
+  // ★ 2026-07-22 신규 — 요청 2): 슬롯배치도에서 고른 작업자를 Scan & Sort의
+  //   작업자 선택에도 그대로 이어지게 함 — 따로 또 고를 필요 없음.
+  const wsel = document.getElementById('workerSelect');
+  if(wsel){
+    wsel.value = worker;
+    state.currentWorker = worker;
+    const initEl = document.getElementById('workerInitial');
+    if(initEl) initEl.textContent = worker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
+  }
+  pollActivePickers(); // 다른 기기 드롭다운에도 최대한 빨리 반영되도록 즉시 한 번 더
 };
 document.getElementById('btnPickEnd').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
@@ -2425,6 +2450,7 @@ document.getElementById('btnPickEnd').onclick = async () => {
   // ★ 2026-07-16 신규: 지금 Scan Log 탭에 가 있지 않아도, 다음에 그 탭을 열면
   //   바로 최신 KPI가 보이도록 갱신. 이미 그 탭이 열려있으면 즉시 반영됨.
   renderKPI();
+  pollActivePickers(); // ★ 2026-07-22 신규: 다른 기기에서 이 사람을 바로 다시 선택할 수 있도록 즉시 갱신
 };
 
 document.getElementById('btnRedoAuto').onclick = async () => {
@@ -2464,6 +2490,20 @@ function renderScanChips(){
 
 const scanInput = document.getElementById('scanInput');
 scanInput.addEventListener('keydown', e => { if(e.key==='Enter') doScan(); });
+// ★ 2026-07-22 신규 — 일부 스캐너 기기는 스캔 후 자동으로 Enter를 안 보내서,
+//   그 기기에서는 사람이 직접 Enter를 눌러야만 분류되는 문제가 있었음.
+//   Enter가 없어도 "사람이 타이핑하기엔 너무 빠른 속도로 연속 입력된 뒤 짧게
+//   멈추면" 스캐너가 다 찍은 것으로 보고 자동으로 분류함(Enter 보내는 기기는
+//   그대로 즉시 반응, 안 보내는 기기는 150ms 정지 후 자동 반응).
+let __scanAutoTimer = null;
+scanInput.addEventListener('input', () => {
+  clearTimeout(__scanAutoTimer);
+  const v = scanInput.value.trim();
+  if(v.length < 6) return; // 바코드로 보기엔 너무 짧으면(사람이 막 타이핑 시작한 경우 등) 무시
+  __scanAutoTimer = setTimeout(() => {
+    if(scanInput.value.trim() === v && v.length >= 6) doScan();
+  }, 150);
+});
 
 function currentTarget(sku){ return sku.queue.find(q => q.done < q.need); }
 
@@ -2903,13 +2943,25 @@ function updateScanStats(){
 
 function fmtClock(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0'); }
 
+// ★ 2026-07-22 신규 — 고객사 이름이 없는 스캔(pass가 아닌 경우)을 전부 "Unknown"으로
+//   뭉뚱그려 보여주던 것을, 실제 사유별로 정확히 구분해서 표시하도록 수정.
+//   예전엔 "이미 전량 배분된 SKU를 재스캔(over)"한 것도 "Unknown barcode"인 것처럼
+//   보여서 혼란을 줬음 — 바코드 자체는 정상 인식된 경우와 진짜 모르는 바코드는 다름.
+function scanCustomerLabel(s){
+  if(s.customer) return s.customer;
+  if(s.status === 'unknown') return '<span style="color:var(--red)">미등록 바코드</span>';
+  if(s.status === 'over') return '<span style="color:var(--amber)">이미 전량 배분됨(재스캔)</span>';
+  if(s.status === 'error') return '<span style="color:var(--red)">미배정 SKU</span>';
+  return '<span style="color:var(--red)">Unknown</span>';
+}
+
 function renderRecentScans(){
   const el = document.getElementById('recentScans');
   if(state.scans.length === 0){ el.innerHTML = '<div class="empty-log">스캔을 기다리는 중...</div>'; return; }
   el.innerHTML = state.scans.slice(0,20).map(s => `
     <div class="log-row">
       <span class="log-time">${fmtClock(s.time)}</span>
-      <span class="log-msg">${s.customer || '<span style="color:var(--red)">Unknown</span>'} <small>${s.barcode||''}</small></span>
+      <span class="log-msg">${scanCustomerLabel(s)} <small>${s.barcode||''}</small></span>
       <span class="log-badges">
         <span class="log-slot">${s.slot ? String(s.slot).padStart(2,'0') : '-'}</span>
         ${s.status==='pass' ? `<span class="log-slot" style="color:var(--green)">+${s.qty||1}</span>` : ''}
@@ -3013,7 +3065,7 @@ function renderFullLog(){
       <td><span class="log-time">${fmtClock(s.time)}</span></td>
       <td style="font-family:var(--mono); font-size:11px">${s.barcode||'-'}</td>
       <td>${s.sku||'-'}</td>
-      <td>${s.customer||'-'}</td>
+      <td>${s.customer || (s.status==='unknown'?'<span style="color:var(--red)">미등록 바코드</span>':s.status==='over'?'<span style="color:var(--amber)">전량완료(재스캔)</span>':s.status==='error'?'<span style="color:var(--red)">미배정 SKU</span>':'-')}</td>
       <td>${s.slot ? String(s.slot).padStart(2,'0') : '-'}</td>
       <td style="font-family:var(--mono); color:var(--green); font-weight:700;">${s.status==='pass' ? '+'+(s.qty||1) : '-'}</td>
       <td><span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span></td>
@@ -3065,11 +3117,35 @@ function populateWorkerSelect(){
   const pickSel = document.getElementById('pickWorkerSelect');
   if(pickSel && !state.pickTimerRunning){
     const prevPick = pickSel.value;
-    pickSel.innerHTML = optsHtml;
-    pickSel.value = all.some(w => w.name === prevPick) ? prevPick : (all[0]?.name || '');
+    // ★ 2026-07-22 신규: 다른 기기에서 이미 피킹 중인 사람은 선택 자체가
+    //   안 되도록(disabled) + "🔴 ON · 14:02~" 표시로 누가 봐도 알 수 있게 함
+    pickSel.innerHTML = all.map(w => {
+      const activeSince = state.activePickers[w.name];
+      const locked = !!activeSince;
+      const label = locked ? `${w.name} — 🔴 ON · ${activeSince}부터 피킹중` : `${w.name}${w.status!=='active' ? ' (Off)' : ''}`;
+      return `<option value="${w.name}" ${locked?'disabled':''}>${label}</option>`;
+    }).join('') || '<option value="">작업자 없음</option>';
+    // 예전 선택값이 지금은 잠겨있으면(다른 기기에서 시작함) 잠기지 않은 첫 사람으로 대체
+    const prevStillOk = all.some(w => w.name === prevPick) && !state.activePickers[prevPick];
+    pickSel.value = prevStillOk ? prevPick : (all.find(w => !state.activePickers[w.name])?.name || '');
     pickSel.onchange = updatePickWorkerDot;
   }
   updatePickWorkerDot();
+}
+
+// ★ 2026-07-22 신규 — 지금 피킹 중인 작업자 목록을 서버에서 받아와 드롭다운에 반영.
+//   슬롯배치도 탭에 있는 동안 주기적으로 호출해서, 다른 기기에서 누가 방금
+//   피킹을 시작/종료했는지 이 화면에도 곧 반영되게 함.
+async function pollActivePickers(){
+  if(!GAS_READY || !state.batchId) return;
+  try{
+    const res = await gasQuery('getActivePickers', { batchId: state.batchId });
+    if(!res.ok) return;
+    state.activePickers = res.active || {};
+    if(!state.pickTimerRunning) populateWorkerSelect(); // 내가 지금 피킹 중이면 내 드롭다운은 안 건드림
+  }catch(e){
+    console.error('pollActivePickers failed:', e);
+  }
 }
 
 // ★ 2026-07-16 신규 — 피킹 타이머 드롭다운 옆에 지금 선택된 작업자의
