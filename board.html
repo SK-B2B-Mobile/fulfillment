@@ -120,6 +120,9 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .issue-edit-cancel{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
 .issue-edit-save{background:#FF4D6D; color:#fff;}
 .issue-edit-save:disabled{opacity:0.6;}
+.issue-edit-delete{margin-top:4px; width:100%; padding:8px; background:none; border:1px dashed rgba(255,77,109,0.4); border-radius:6px; color:#FF4D6D; font-size:12px; font-weight:600; cursor:pointer;}
+.issue-edit-delete:hover{background:rgba(255,77,109,0.1);}
+.issue-edit-delete:disabled{opacity:0.6;}
 </style>
 </head>
 <body>
@@ -277,9 +280,10 @@ function openIssueModal(invoice){
         <input type="number" id="issueEditQty-${idx}" min="1" value="${i.qty}" placeholder="수량">
         <input type="text" id="issueEditNote-${idx}" value="${(i.note||'').replace(/"/g,'&quot;')}" placeholder="메모(선택)">
         <div class="issue-edit-actions">
-          <button class="issue-edit-cancel" data-idx="${idx}">취소</button>
+          <button class="issue-edit-cancel" data-idx="${idx}">닫기</button>
           <button class="issue-edit-save" data-idx="${idx}" data-issue-id="${i.issueId}">저장</button>
         </div>
+        <button class="issue-edit-delete" data-idx="${idx}" data-issue-id="${i.issueId}">🗑 이 이슈 전체 취소(삭제)</button>
       </div>
     </div>`).join('');
   document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${slot.issues.length}건`;
@@ -314,6 +318,25 @@ async function saveIssueEdit(issueId, idx){
   }
 }
 
+// ★ 2026-07-22 신규 — "🗑 이 이슈 전체 취소(삭제)": 값을 고치는 게 아니라
+//   이 이슈 자체를 완전히 없던 일로 만듦. 취소하면 그 수량만큼 다시 고객사의
+//   필요수량에 포함되어(완료 판정에서 다시 빠짐), 현황판이 정확한 상태로 갱신됨.
+async function deleteIssueFromBoard(issueId, idx){
+  if(!confirm('이 이슈를 완전히 취소하시겠습니까?\n다시 이 고객사의 필요수량에 포함되어 완료 처리되지 않은 상태로 돌아갑니다.\n(수량/사유만 고치려면 "닫기"를 누르고 값을 수정한 뒤 저장하세요)')) return;
+  const delBtn = document.querySelector(`.issue-edit-delete[data-idx="${idx}"]`);
+  delBtn.disabled = true;
+  delBtn.textContent = '취소하는 중...';
+  const res = await gasCall('undoIssue', { issueId });
+  if(res.ok){
+    await pollOnce(); // 최신 상태 즉시 반영
+    if(_issueModalInvoice) openIssueModal(_issueModalInvoice); // 모달도 최신 목록으로 다시 그림(이 건은 빠짐)
+  } else {
+    delBtn.disabled = false;
+    delBtn.textContent = '🗑 이 이슈 전체 취소(삭제)';
+    alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
 document.addEventListener('click', e => {
   const badge = e.target.closest('.card-issue-badge');
   if(badge){ openIssueModal(badge.dataset.invoice); return; }
@@ -333,6 +356,8 @@ document.addEventListener('click', e => {
   }
   const saveBtn = e.target.closest('.issue-edit-save');
   if(saveBtn){ saveIssueEdit(saveBtn.dataset.issueId, saveBtn.dataset.idx); return; }
+  const deleteBtn = e.target.closest('.issue-edit-delete');
+  if(deleteBtn){ deleteIssueFromBoard(deleteBtn.dataset.issueId, deleteBtn.dataset.idx); return; }
   if(e.target.id === 'issueModalOverlay') closeIssueModal();
 });
 
