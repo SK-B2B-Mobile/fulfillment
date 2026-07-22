@@ -575,6 +575,20 @@ function logPickTiming(data) {
     const sh = picktimeSheet_();
 
     if (data.action === 'start') {
+      // ★ 2026-07-22 신규: 두 기기에서 거의 동시에 같은 작업자로 "피킹 시작"을
+      //   누르는 경합 상황을 서버단에서 완전히 차단 — 이미 종료 안 된(진행중인)
+      //   세션이 있으면 새로 시작하지 못하게 막음. LockService로 감싸져 있어
+      //   이 체크와 appendRow 사이에 다른 요청이 끼어들 수 없음(원자적 처리).
+      const last0 = sh.getLastRow();
+      if (last0 >= 2) {
+        const rows0 = sh.getRange(2, 1, last0 - 1, 6).getValues();
+        for (let i = 0; i < rows0.length; i++) {
+          const hasEnd = (rows0[i][4] !== '' && rows0[i][4] !== null && rows0[i][4] !== undefined);
+          if (String(rows0[i][0]) === String(data.batchId) && String(rows0[i][1]) === String(data.worker) && !hasEnd) {
+            return { ok: false, error: 'already_picking', startedAt: rows0[i][3] };
+          }
+        }
+      }
       sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '']);
       return { ok: true };
     }
@@ -599,6 +613,45 @@ function logPickTiming(data) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/* ===================== ⑦-2 getActivePickers (★ 2026-07-22 신규) =====================
+ * 목적: "지금 이 순간 피킹 중인 작업자가 누구누구인지"를 기기 간에 공유해서,
+ *       한 사람이 이미 피킹 시작한 걸 다른 기기에서도 "ON"으로 보고 그 사람을
+ *       중복으로 선택 못 하게 하기 위함. PickTiming 시트에서 "시작은 있는데
+ *       종료가 없는" 줄을 찾으면 그게 지금 피킹 중이라는 뜻.
+ * 안전장치: 실수로 "피킹 종료"를 안 누르고 꺼버린 경우 그 사람이 영원히
+ *       "ON"으로 묶여버리는 걸 막기 위해, 시작한 지 4시간 넘으면 자동으로
+ *       무시함(끄는 걸 깜빡한 걸로 간주).
+ * 반환: { ok:true, active: { "작업자명": "14:02" (시작시각), ... } }
+ * ============================================================ */
+function getActivePickers(batchId) {
+  try {
+    if (!batchId) return { ok: false, error: 'batchId required' };
+    const sh = picktimeSheet_();
+    const last = sh.getLastRow();
+    const active = {};
+    const STALE_MS = 4 * 60 * 60 * 1000; // 4시간
+    const nowMs = Date.now();
+    if (last >= 2) {
+      sh.getRange(2, 1, last - 1, 6).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        const worker = r[1];
+        const startTs = r[3], endTs = r[4];
+        const hasStart = (Object.prototype.toString.call(startTs) === '[object Date]' && !isNaN(startTs));
+        const hasEnd = (endTs !== '' && endTs !== null && endTs !== undefined);
+        if (hasStart && !hasEnd) {
+          const age = nowMs - startTs.getTime();
+          if (age < STALE_MS) {
+            active[worker] = Utilities.formatDate(startTs, batchTz_(), 'HH:mm');
+          }
+        }
+      });
+    }
+    return { ok: true, active: active };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
 
