@@ -111,6 +111,15 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .issue-modal-name{font-size:17px; font-weight:700; margin-bottom:4px;}
 .issue-modal-meta{font-family:var(--mono); font-size:13px; color:var(--text-dim);}
 .issue-modal-note{margin-top:6px; font-size:14px; color:var(--text-dim); font-style:italic;}
+.issue-modal-edit-btn{margin-top:10px; width:100%; padding:9px; background:none; border:1px solid var(--border2); border-radius:8px; color:var(--text-dim); font-size:13px; font-weight:700; cursor:pointer;}
+.issue-modal-edit-btn:hover{background:rgba(255,255,255,0.06); color:var(--text);}
+.issue-edit-form{margin-top:10px; display:flex; flex-direction:column; gap:8px;}
+.issue-edit-form select, .issue-edit-form input{width:100%; padding:9px 10px; background:var(--bg); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:14px; box-sizing:border-box;}
+.issue-edit-actions{display:flex; gap:8px;}
+.issue-edit-cancel, .issue-edit-save{flex:1; padding:9px; border-radius:6px; border:none; font-weight:700; font-size:13px; cursor:pointer;}
+.issue-edit-cancel{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
+.issue-edit-save{background:#FF4D6D; color:#fff;}
+.issue-edit-save:disabled{opacity:0.6;}
 </style>
 </head>
 <body>
@@ -175,6 +184,20 @@ async function gasQuery(op, params){
     return { ok:false, error:String(e) };
   }
 }
+// ★ 2026-07-22 신규 — 이슈 되돌리기(undoIssue) 등 저장/변경 작업용 POST 호출
+async function gasCall(op, data){
+  if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
+  try{
+    const fd = new FormData();
+    fd.append('op', op);
+    fd.append('data', JSON.stringify(data || {}));
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd });
+    return await res.json();
+  }catch(e){
+    console.error('gasCall failed:', op, e);
+    return { ok:false, error:String(e) };
+  }
+}
 
 let currentBatchId = null;
 let prevStatus = {}; // slotNum -> 'waiting'|'active'|'done' (완료 순간 감지용 flash 처리)
@@ -227,12 +250,18 @@ function cardHtml(slot){
 }
 
 // ★ 2026-07-16 신규 — 이슈 뱃지 클릭 시 상세 팝업
+const ISSUE_REASON_OPTS = [
+  {v:'EXP', label:'EXP · 유통기한'}, {v:'NF', label:'NF · 재고없음'},
+  {v:'DMG', label:'DMG · 파손'}, {v:'OOS', label:'OOS · 품절'},
+  {v:'SKUMIS', label:'SKUMIS · SKU 불일치'},
+];
 function openIssueModal(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot || !slot.issues || slot.issues.length === 0) return;
+  _issueModalInvoice = invoice; // ★ 2026-07-22 신규: 수정 후 이 모달을 다시 그리기 위해 기억
   const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절', SKUMIS:'SKUMIS · SKU 불일치'};
-  const rowsHtml = slot.issues.map(i => `
-    <div class="issue-modal-row">
+  const rowsHtml = slot.issues.map((i, idx) => `
+    <div class="issue-modal-row" id="issueRow-${idx}">
       <div class="issue-modal-row-top">
         <span class="issue-modal-reason">${reasonLabel[i.reason] || i.reason}</span>
         <span class="issue-modal-qty">${Number(i.qty).toLocaleString()}pcs</span>
@@ -240,6 +269,18 @@ function openIssueModal(invoice){
       <div class="issue-modal-name">${i.name || i.sku || ''}</div>
       <div class="issue-modal-meta">바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time||'').slice(5,16)}</div>
       ${i.note ? `<div class="issue-modal-note">"${i.note}"</div>` : ''}
+      <button class="issue-modal-edit-btn" data-idx="${idx}">✎ 수정</button>
+      <div class="issue-edit-form" id="issueEditForm-${idx}" style="display:none">
+        <select id="issueEditReason-${idx}">
+          ${ISSUE_REASON_OPTS.map(r => `<option value="${r.v}" ${r.v===i.reason?'selected':''}>${r.label}</option>`).join('')}
+        </select>
+        <input type="number" id="issueEditQty-${idx}" min="1" value="${i.qty}" placeholder="수량">
+        <input type="text" id="issueEditNote-${idx}" value="${(i.note||'').replace(/"/g,'&quot;')}" placeholder="메모(선택)">
+        <div class="issue-edit-actions">
+          <button class="issue-edit-cancel" data-idx="${idx}">취소</button>
+          <button class="issue-edit-save" data-idx="${idx}" data-issue-id="${i.issueId}">저장</button>
+        </div>
+      </div>
     </div>`).join('');
   document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${slot.issues.length}건`;
   document.getElementById('issueModalBody').innerHTML = rowsHtml;
@@ -247,10 +288,51 @@ function openIssueModal(invoice){
 }
 function closeIssueModal(){
   document.getElementById('issueModalOverlay').classList.remove('open');
+  _issueModalInvoice = null;
 }
+let _issueModalInvoice = null; // ★ 2026-07-22 신규: 지금 열려있는 이슈 모달이 어느 고객사(invoice) 것인지
+
+// ★ 2026-07-22 신규 — "✎ 수정": 잘못 입력한 이슈를 취소하는 게 아니라
+//   사유/수량/메모를 그 자리에서 직접 고쳐서 저장. 저장하면 그 차이만큼
+//   고객사의 완료 판정 기준(필요수량)도 자동으로 다시 계산됨.
+async function saveIssueEdit(issueId, idx){
+  const reason = document.getElementById(`issueEditReason-${idx}`).value;
+  const qty = parseInt(document.getElementById(`issueEditQty-${idx}`).value, 10);
+  const note = document.getElementById(`issueEditNote-${idx}`).value.trim();
+  if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
+  const saveBtn = document.querySelector(`.issue-edit-save[data-idx="${idx}"]`);
+  saveBtn.disabled = true;
+  saveBtn.textContent = '저장 중...';
+  const res = await gasCall('editIssue', { issueId, reason, qty, note });
+  if(res.ok){
+    await pollOnce(); // 최신 상태(완료 판정 등) 즉시 반영
+    if(_issueModalInvoice) openIssueModal(_issueModalInvoice); // 모달도 수정된 값으로 다시 그림
+  } else {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '저장';
+    alert('수정 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
 document.addEventListener('click', e => {
   const badge = e.target.closest('.card-issue-badge');
   if(badge){ openIssueModal(badge.dataset.invoice); return; }
+  const editBtn = e.target.closest('.issue-modal-edit-btn');
+  if(editBtn){
+    const idx = editBtn.dataset.idx;
+    document.getElementById(`issueEditForm-${idx}`).style.display = 'flex';
+    editBtn.style.display = 'none';
+    return;
+  }
+  const cancelBtn = e.target.closest('.issue-edit-cancel');
+  if(cancelBtn){
+    const idx = cancelBtn.dataset.idx;
+    document.getElementById(`issueEditForm-${idx}`).style.display = 'none';
+    document.querySelector(`.issue-modal-edit-btn[data-idx="${idx}"]`).style.display = '';
+    return;
+  }
+  const saveBtn = e.target.closest('.issue-edit-save');
+  if(saveBtn){ saveIssueEdit(saveBtn.dataset.issueId, saveBtn.dataset.idx); return; }
   if(e.target.id === 'issueModalOverlay') closeIssueModal();
 });
 
