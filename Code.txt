@@ -197,6 +197,10 @@ function doGet(e) {
   if (op === 'getBatchWorkers') {
     return json_(getBatchWorkers());
   }
+  // ★ 2026-07-22 신규 — 지금 피킹 중인 작업자 목록(기기 간 중복 선택 방지용)
+  if (op === 'getActivePickers') {
+    return json_(getActivePickers((e.parameter || {}).batchId || ''));
+  }
 
   return json_({ ok: false, error: 'unknown op' });
 }
