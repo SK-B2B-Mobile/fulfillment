@@ -194,11 +194,18 @@ async function gasCall(op, data){
     const fd = new FormData();
     fd.append('op', op);
     fd.append('data', JSON.stringify(data || {}));
-    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd });
+    // ★ 2026-07-22 신규: 타임아웃이 없어서 서버 응답이 늦으면 "처리 중..."
+    //   상태로 무한정 멈춰있던 문제 수정 — 20초 넘으면 실패로 보고 사용자가
+    //   다시 시도할 수 있게 함.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd, signal: controller.signal });
+    clearTimeout(timer);
     return await res.json();
   }catch(e){
     console.error('gasCall failed:', op, e);
-    return { ok:false, error:String(e) };
+    const msg = (e && e.name === 'AbortError') ? '서버 응답이 너무 늦어서 중단했습니다(20초 초과). 다시 시도해주세요.' : String(e);
+    return { ok:false, error: msg };
   }
 }
 
