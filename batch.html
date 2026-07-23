@@ -2060,7 +2060,15 @@ async function fetchOccupiedSlots(){
   try{
     const res = await gasQuery('getOccupiedSlots', {});
     if(res.ok && Array.isArray(res.occupied)){
+      // ★ 2026-07-23 긴급 수정 — 심각한 버그: 이 함수는 "완료 처리 안 된 모든 배치"가
+      //   점유 중인 슬롯을 서버에서 받아오는데, 여기엔 지금 이 화면이 작업 중인
+      //   배치 자기 자신(state.batchId)도 포함되어 있었음. 그 결과 "자동 재배정"을
+      //   한 번이라도 누른 뒤 다시 누르면, 방금 자기가 배정받은 1~30번 자리조차
+      //   "다른 배치가 쓰는 중"으로 착각해서 스스로를 31번 밖으로 계속 밀어내는
+      //   사고가 있었음 (재배정할수록 점점 더 많은 인원이 31번 밖으로 밀려남).
+      //   해결: 서버 응답에 포함된 batchId로 "진짜 남의 배치"만 걸러서 반영.
       res.occupied.forEach(o => {
+        if(String(o.batchId) === String(state.batchId)) return; // 내 배치 자신 → 점유로 치지 않음
         const n = Number(o.slotNum);
         if(!isNaN(n)) state.occupiedSlots.add(n);
       });
