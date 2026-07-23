@@ -197,6 +197,11 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot-meta{font-family:var(--mono); font-size:10px; color:var(--text-dim); margin-top:4px; display:flex; gap:8px;}
 .slot-meta span{white-space:nowrap;}
 .slot.done .slot-meta{color:#04140D; opacity:0.75;}
+/* ★ 2026-07-23 신규 — 인보이스 번호는 작업자가 실물 박스와 대조하는 핵심 식별자라
+   나머지 메타 정보(Ship 등)보다 눈에 잘 띄어야 함 — 크기/굵기만 별도로 키움
+   (전체 카드 비율은 그대로 유지하기 위해 다른 요소는 손대지 않음) */
+.slot-invoice{font-size:12.5px; font-weight:800; color:var(--text); letter-spacing:0.01em;}
+.slot.done .slot-invoice{color:#04140D;}
 .slot-progress{display:flex; align-items:center; gap:6px; margin-top:auto; padding-top:8px;}
 .slot-progress-bar{flex:1; height:3px; background:var(--surface3); border-radius:2px; overflow:hidden;}
 .slot-progress-bar > div{height:100%; background:var(--amber); transition:width 0.3s;}
@@ -495,6 +500,9 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
   .slot-num{font-size:15px;}
   .slot-co{font-size:11px;}
   .slot-meta{font-size:9px; flex-wrap:wrap;}
+  /* ★ 2026-07-23 신규: 모바일(작업자 폰)에서는 인보이스 번호를 특히 더 키움 —
+     실제로 손에 들고 박스 라벨과 대조하는 화면이라 작은 글씨가 더 치명적임 */
+  .slot-invoice{font-size:15px; font-weight:800;}
   .queue-panel{padding:10px;}
   .cust-card{padding:8px 9px;}
   .complete-title{font-size:22px;}
@@ -2316,7 +2324,7 @@ function renderSlots(){
       </div>
       <div class="slot-meta">
         <span>Ship ${cf.meta.ship_date.slice(5)}</span>
-        <span style="color:var(--text-dim2)">${cf.meta.invoice_no}</span>
+        <span class="slot-invoice">${cf.meta.invoice_no}</span>
       </div>
       <div class="slot-progress">
         <div class="slot-progress-bar"><div style="width:${pct}%"></div></div>
