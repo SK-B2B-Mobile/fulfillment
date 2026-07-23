@@ -11,6 +11,7 @@
 :root{
   --bg:#05070D; --surface:#0D1220; --surface2:#131B30;
   --border:#212B45;
+  --border2:#2A3555;
   --text:#EDF1F9; --text-dim:#8A93AC;
   --amber:#F59E0B; --amber-bg:rgba(245,158,11,0.12);
   --green:#10D97E; --green-bg:rgba(16,217,126,0.12);
@@ -137,6 +138,19 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .issue-modal-note{margin-top:6px; font-size:14px; color:var(--text-dim); font-style:italic;}
 .issue-modal-edit-btn{margin-top:10px; width:100%; padding:9px; background:none; border:1px solid var(--border2); border-radius:8px; color:var(--text-dim); font-size:13px; font-weight:700; cursor:pointer;}
 .issue-modal-edit-btn:hover{background:rgba(255,255,255,0.06); color:var(--text);}
+
+/* ★ 2026-07-23 신규 — TV에서도 카드를 클릭해 이슈를 조회/추가할 수 있게 함
+   (기존엔 이미 이슈가 있는 카드의 배지를 눌러야만 "조회"만 가능했음) */
+.card{cursor:pointer;}
+.issue-modal-empty{font-size:14px; color:var(--text-dim); text-align:center; padding:10px 0;}
+.issue-new-form{background:rgba(255,255,255,0.03); border:1px solid var(--border2); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:10px; margin-top:4px;}
+.issue-new-form-title{font-size:13px; color:var(--text-dim); font-weight:800;}
+.issue-new-form label{font-size:12px; color:var(--text-dim); font-weight:700;}
+.issue-new-form select, .issue-new-form input{width:100%; padding:10px 12px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:14px; font-family:var(--sans); margin-top:4px;}
+.issue-new-form-row{display:flex; gap:10px;}
+.issue-new-form-row > div{flex:1;}
+.issue-new-form-submit{margin-top:2px; padding:12px; background:rgba(255,77,109,0.15); border:1px solid #FF4D6D; color:#FF4D6D; border-radius:8px; font-size:14px; font-weight:800; cursor:pointer;}
+.issue-new-form-submit:hover{background:rgba(255,77,109,0.25);}
 .issue-edit-form{margin-top:10px; display:flex; flex-direction:column; gap:8px;}
 .issue-edit-form select, .issue-edit-form input{width:100%; padding:9px 10px; background:var(--bg); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:14px; box-sizing:border-box;}
 .issue-edit-actions{display:flex; gap:8px;}
@@ -282,7 +296,7 @@ function cardHtml(slot){
   const issueBadge = slot.issueQty > 0
     ? `<span class="card-issue-badge" data-invoice="${slot.invoice}">⚠ ${slot.issueQty.toLocaleString()}</span>`
     : '';
-  return `<div class="card ${slot.status}${flashClass}">
+  return `<div class="card ${slot.status}${flashClass}" data-invoice="${slot.invoice}">
     <div class="card-top">
       <span class="card-slot">${numLabel}</span>
       <div class="card-top-right">
@@ -309,12 +323,36 @@ const ISSUE_REASON_OPTS = [
   {v:'DMG', label:'DMG · 파손'}, {v:'OOS', label:'OOS · 품절'},
   {v:'SKUMIS', label:'SKUMIS · SKU 불일치'},
 ];
-function openIssueModal(invoice){
+// ★ 2026-07-23 신규 — 배치 전체 아이템(고객사별 SKU 목록)을 한 번만 받아서 캐싱.
+//   "새 이슈 등록" 폼의 SKU 드롭다운을 채우는 데만 씀 (진행률 폴링과는 별개).
+let _batchItemsCache = { batchId: null, byInvoice: {} };
+async function ensureBatchItemsLoaded(){
+  if(_batchItemsCache.batchId === currentBatchId) return; // 이미 이 배치 걸로 캐싱됨
+  const res = await gasQuery('getBatch', { batchId: currentBatchId });
+  const byInvoice = {};
+  if(res.ok && Array.isArray(res.customers)){
+    res.customers.forEach(c => { byInvoice[c.invoice] = c.items || []; });
+  }
+  _batchItemsCache = { batchId: currentBatchId, byInvoice };
+}
+
+async function openIssueModal(invoice){
   const slot = _slotsByInvoice[invoice];
-  if(!slot || !slot.issues || slot.issues.length === 0) return;
-  _issueModalInvoice = invoice; // ★ 2026-07-22 신규: 수정 후 이 모달을 다시 그리기 위해 기억
+  if(!slot) return;
+  _issueModalInvoice = invoice;
+  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${(slot.issues||[]).length}건`;
+  document.getElementById('issueModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
+  document.getElementById('issueModalOverlay').classList.add('open');
+  await ensureBatchItemsLoaded();
+  renderIssueModalBody();
+}
+function renderIssueModalBody(){
+  const invoice = _issueModalInvoice;
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
   const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절', SKUMIS:'SKUMIS · SKU 불일치'};
-  const rowsHtml = slot.issues.map((i, idx) => `
+  const issues = slot.issues || [];
+  const rowsHtml = issues.length ? issues.map((i, idx) => `
     <div class="issue-modal-row" id="issueRow-${idx}">
       <div class="issue-modal-row-top">
         <span class="issue-modal-reason">${reasonLabel[i.reason] || i.reason}</span>
@@ -336,10 +374,78 @@ function openIssueModal(invoice){
         </div>
         <button class="issue-edit-delete" data-idx="${idx}" data-issue-id="${i.issueId}">🗑 이 이슈 전체 취소(삭제)</button>
       </div>
-    </div>`).join('');
-  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${slot.issues.length}건`;
-  document.getElementById('issueModalBody').innerHTML = rowsHtml;
-  document.getElementById('issueModalOverlay').classList.add('open');
+    </div>`).join('') : `<div class="issue-modal-empty">등록된 이슈 없음</div>`;
+
+  // ★ 2026-07-23 신규 — "+ 새 이슈 등록" 폼: 스캔 시점이 아니어도(예: 나중에 실물
+  //   확인하다 유통기한 지난 걸 발견) TV에서 바로 이슈를 등록할 수 있게 함.
+  const items = _batchItemsCache.byInvoice[invoice] || [];
+  const skuOptions = items.length
+    ? items.map(it => `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${it.name} (${it.sku}) · ${it.req_qty}pcs</option>`).join('')
+    : '';
+  const newFormHtml = `
+    <div class="issue-new-form">
+      <div class="issue-new-form-title">+ 새 이슈 등록</div>
+      <div>
+        <label>상품 (SKU)</label>
+        <select id="newIssueSku">${skuOptions || '<option>상품 목록을 불러올 수 없습니다</option>'}</select>
+      </div>
+      <div class="issue-new-form-row">
+        <div>
+          <label>사유</label>
+          <select id="newIssueReason">${ISSUE_REASON_OPTS.map(r => `<option value="${r.v}">${r.label}</option>`).join('')}</select>
+        </div>
+        <div>
+          <label>수량</label>
+          <input type="number" id="newIssueQty" min="1" placeholder="pcs">
+        </div>
+      </div>
+      <div>
+        <label>작업자(발견자)</label>
+        <input type="text" id="newIssueWorker" placeholder="이름 입력">
+      </div>
+      <div>
+        <label>메모(선택)</label>
+        <input type="text" id="newIssueNote" placeholder="예: 검수 중 발견, 유통기한 2026-06-01">
+      </div>
+      <button class="issue-new-form-submit" id="newIssueSubmitBtn">⚠ 이슈 등록</button>
+    </div>`;
+
+  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${issues.length}건`;
+  document.getElementById('issueModalBody').innerHTML = rowsHtml + newFormHtml;
+}
+async function submitNewIssueFromBoard(){
+  const invoice = _issueModalInvoice;
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  const skuSel = document.getElementById('newIssueSku');
+  const opt = skuSel.options[skuSel.selectedIndex];
+  const barcode = skuSel.value;
+  const name = opt ? opt.dataset.name : '';
+  const sku = opt ? opt.dataset.sku : '';
+  const reason = document.getElementById('newIssueReason').value;
+  const qty = parseInt(document.getElementById('newIssueQty').value, 10);
+  const worker = document.getElementById('newIssueWorker').value.trim();
+  const note = document.getElementById('newIssueNote').value.trim();
+
+  if(!barcode){ alert('상품을 선택하세요'); return; }
+  if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
+  if(!worker){ alert('작업자(발견자)를 입력해주세요'); return; }
+
+  const btn = document.getElementById('newIssueSubmitBtn');
+  btn.disabled = true; btn.textContent = '등록 중...';
+  const res = await gasCall('logIssue', {
+    batchId: currentBatchId, worker: worker,
+    barcode: barcode, sku: sku, name: name,
+    invoice: invoice, customer: slot.customer,
+    reason: reason, qty: qty, note: note,
+  });
+  if(res.ok){
+    await pollOnce();
+    if(_issueModalInvoice) renderIssueModalBody();
+  } else {
+    btn.disabled = false; btn.textContent = '⚠ 이슈 등록';
+    alert('등록 실패: ' + (res.error || '알 수 없는 오류'));
+  }
 }
 function closeIssueModal(){
   document.getElementById('issueModalOverlay').classList.remove('open');
@@ -361,7 +467,7 @@ async function saveIssueEdit(issueId, idx){
   const res = await gasCall('editIssue', { issueId, reason, qty, note });
   if(res.ok){
     await pollOnce(); // 최신 상태(완료 판정 등) 즉시 반영
-    if(_issueModalInvoice) openIssueModal(_issueModalInvoice); // 모달도 수정된 값으로 다시 그림
+    if(_issueModalInvoice) renderIssueModalBody(); // 모달도 수정된 값으로 다시 그림
   } else {
     saveBtn.disabled = false;
     saveBtn.textContent = '저장';
@@ -380,7 +486,7 @@ async function deleteIssueFromBoard(issueId, idx){
   const res = await gasCall('undoIssue', { issueId });
   if(res.ok){
     await pollOnce(); // 최신 상태 즉시 반영
-    if(_issueModalInvoice) openIssueModal(_issueModalInvoice); // 모달도 최신 목록으로 다시 그림(이 건은 빠짐)
+    if(_issueModalInvoice) renderIssueModalBody(); // 모달도 최신 목록으로 다시 그림(이 건은 빠짐)
   } else {
     delBtn.disabled = false;
     delBtn.textContent = '🗑 이 이슈 전체 취소(삭제)';
@@ -389,8 +495,10 @@ async function deleteIssueFromBoard(issueId, idx){
 }
 
 document.addEventListener('click', e => {
-  const badge = e.target.closest('.card-issue-badge');
-  if(badge){ openIssueModal(badge.dataset.invoice); return; }
+  // ★ 2026-07-23 수정: 이슈 배지뿐 아니라 카드 전체 아무 곳이나 눌러도 모달이 열리도록 확장
+  //   (이슈가 0건이어도 열려서 새로 등록할 수 있어야 하므로)
+  const card = e.target.closest('.card[data-invoice]');
+  if(card && !e.target.closest('.issue-modal, .issue-new-form')){ openIssueModal(card.dataset.invoice); return; }
   const editBtn = e.target.closest('.issue-modal-edit-btn');
   if(editBtn){
     const idx = editBtn.dataset.idx;
@@ -409,6 +517,8 @@ document.addEventListener('click', e => {
   if(saveBtn){ saveIssueEdit(saveBtn.dataset.issueId, saveBtn.dataset.idx); return; }
   const deleteBtn = e.target.closest('.issue-edit-delete');
   if(deleteBtn){ deleteIssueFromBoard(deleteBtn.dataset.issueId, deleteBtn.dataset.idx); return; }
+  const newIssueBtn = e.target.closest('#newIssueSubmitBtn');
+  if(newIssueBtn){ submitNewIssueFromBoard(); return; }
   if(e.target.id === 'issueModalOverlay') closeIssueModal();
 });
 
