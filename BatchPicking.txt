@@ -321,6 +321,33 @@ function clearSlot(data) {
       }
     }
 
+    // ★ 2026-07-23 신규 — 기존 검수 시스템(sk-worker 앱, Jobs 시트) 자동 반영.
+    //   총량피킹 스캔+이슈등록 = 사실상 검수와 같은 작업인데, 지금까지는
+    //   작업자가 sk-worker 앱에서 같은 송장에 대해 또 PASS/이슈를 중복
+    //   입력해야 했음. "패킹완료·슬롯비우기"는 사람이 마지막으로 눈으로
+    //   확인하고 누르는 확정 동작이라(스캔만으로 뜨는 "완료"보다 신뢰도가
+    //   높음 — 스캔 실수로 잠깐 완료 떴다 취소되는 경우가 있어서 그 시점엔
+    //   반영하지 않기로 함), 이 시점에 saveInspection()을 그대로 호출해서
+    //   sk-worker와 완전히 동일한 방식(PASS / ⚠ ISSUES(N))으로 Jobs 시트에
+    //   자동 기록함 — 작업자가 sk-worker 앱에 따로 또 입력할 필요 없어짐.
+    //   (Invoice가 Jobs 시트에 없는 경우 saveInspection이 조용히 ok:false만
+    //   반환하고 끝나서, 총량피킹 전용 주문이어도 슬롯비우기 자체는 영향 없음)
+    try {
+      const activeIssues = slot.issues || [];
+      saveInspection({
+        invoice: invoice,
+        pass: activeIssues.length === 0,
+        issues: activeIssues.map(i => ({ type: i.reason, barcode: i.barcode, qty: i.qty })),
+        memo: '총량피킹에서 자동 반영됨' + (data.worker ? (' · 작업자: ' + data.worker) : ''),
+        inspector: data.worker || '',
+        inspectedAt: batchNow_(),
+        inspEndAt: batchNow_(),
+      });
+    } catch (syncErr) {
+      // 검수 시스템 반영이 실패해도 슬롯비우기 자체는 정상 진행되도록 조용히 무시하고 로그만 남김
+      Logger.log('saveInspection 자동 반영 실패 (invoice=' + invoice + '): ' + String(syncErr));
+    }
+
     bumpVersion_();
     return { ok: true, autoFilled: autoFilled };
   } catch (e) {
@@ -329,6 +356,52 @@ function clearSlot(data) {
     lock.releaseLock();
   }
 }
+
+/* ===================== ①-2 setActiveBatch / getActiveBatch (★ 2026-07-23 신규) =====================
+ * 목적: 매니저가 PC에서 배치를 "이어서 작업"하면, 그건 그 PC 화면에만
+ *       적용되고 서버엔 아무 기록이 안 남아서 다른 기기(작업자 폰 등)는
+ *       여전히 "완료 처리 안 된 배치" 확인 화면을 각자 따로 클릭해야 했음.
+ *       → 매니저가 배치를 선택하면 서버에 "지금 활성 배치는 이거다"라고
+ *       기록해두고, 다른 기기들은 페이지를 열 때 이 기록을 확인해서
+ *       클릭 없이 자동으로 같은 배치를 불러오게 함.
+ *       (PropertiesService는 시트가 아니라 스크립트에 딸린 간단한
+ *       키-값 저장소라, 값 하나 저장하기엔 이게 훨씬 가볍고 빠름)
+ * ============================================================ */
+function setActiveBatch(data) {
+  try {
+    if (!data.batchId) return { ok: false, error: 'batchId required' };
+    PropertiesService.getScriptProperties().setProperty('activeBatchId', String(data.batchId));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+function clearActiveBatch() {
+  try {
+    PropertiesService.getScriptProperties().deleteProperty('activeBatchId');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+function getActiveBatch() {
+  try {
+    const id = PropertiesService.getScriptProperties().getProperty('activeBatchId');
+    if (!id) return { ok: true, batch: null };
+    const res = getBatch(id);
+    // 활성으로 기록된 배치가 이미 완료 처리됐거나 삭제된 경우, 기록을 정리하고 없다고 응답
+    if (!res.ok || !res.batch || res.batch.status === 'completed') {
+      PropertiesService.getScriptProperties().deleteProperty('activeBatchId');
+      return { ok: true, batch: null };
+    }
+    return res;
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 
 /* ===================== ③c getOccupiedSlots (★ 2026-07-14 신규) =====================
  * 완료 처리 안 된(활성 상태) 모든 배치를 통틀어, 아직 "비워지지" 않은
