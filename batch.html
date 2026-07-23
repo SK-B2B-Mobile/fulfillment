@@ -347,7 +347,7 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 
 /* ★ 2026-07-16 신규 — SKU(스캔) 단위 전체 이슈 등록(자동분배) */
 .sku-issue-bar{display:flex; justify-content:center; margin:2px 0 6px;}
-.sku-issue-btn{background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.4); color:var(--red); font-size:12px; font-weight:700; padding:9px 14px; border-radius:8px; cursor:pointer; width:100%;}
+.sku-issue-btn{background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.4); color:var(--red); font-size:13.5px; font-weight:700; padding:10px 14px; border-radius:8px; cursor:pointer; width:100%;}
 .sku-issue-btn:hover{background:rgba(255,77,109,0.18);}
 .sku-issue-form{margin:0 0 10px; padding:12px; background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:10px; display:flex; flex-direction:column; gap:8px;}
 .sku-issue-hint{font-size:11px; color:var(--text-dim); line-height:1.5;}
@@ -600,15 +600,15 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
         <div class="row" style="align-items:center; gap:10px;">
           <span style="font-size:11px; color:var(--text-dim2); font-family:var(--mono); text-transform:uppercase; letter-spacing:0.05em;">피킹 타이머 (KPI)</span>
           <span id="pickWorkerDot" title="Off/Active" style="width:9px; height:9px; border-radius:50%; background:var(--text-dim2); flex-shrink:0; transition:background 0.2s;"></span>
-          <select id="pickWorkerSelect" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:6px 10px; font-size:12.5px;"></select>
+          <select id="pickWorkerSelect" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 11px; font-size:14px;"></select>
           <div style="display:flex; align-items:center; gap:4px;">
-            <input type="number" id="pickPageFrom" placeholder="시작페이지" min="1" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:6px 8px; font-size:12.5px; width:80px;">
-            <span style="color:var(--text-dim2); font-size:12px;">~</span>
-            <input type="number" id="pickPageTo" placeholder="끝(선택)" min="1" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:6px 8px; font-size:12.5px; width:80px;">
-            <span style="color:var(--text-dim2); font-size:10.5px; font-family:var(--mono);">페이지</span>
+            <input type="number" id="pickPageFrom" placeholder="시작페이지" min="1" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 9px; font-size:14px; width:84px;">
+            <span style="color:var(--text-dim2); font-size:13px;">~</span>
+            <input type="number" id="pickPageTo" placeholder="끝(선택)" min="1" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 9px; font-size:14px; width:84px;">
+            <span style="color:var(--text-dim2); font-size:11px; font-family:var(--mono);">페이지</span>
           </div>
-          <button class="btn btn-primary btn-sm" id="btnPickStart">▶ 피킹 시작</button>
-          <button class="btn btn-ghost btn-sm" id="btnPickEnd" disabled>■ 피킹 종료</button>
+          <button class="btn btn-primary btn-sm" id="btnPickStart" style="font-size:13px; padding:7px 12px;">▶ 피킹 시작</button>
+          <button class="btn btn-ghost btn-sm" id="btnPickEnd" disabled style="font-size:13px; padding:7px 12px;">■ 피킹 종료</button>
           <div class="spacer"></div>
           <span id="pickTimerStat" style="font-size:11.5px; color:var(--text-dim); font-family:var(--mono);"></span>
         </div>
@@ -1223,6 +1223,9 @@ async function continueOpenBatch(batchId){
   startScanPolling();
   startStructurePolling();
   checkOpenBatches(); // 방금 고른 배치는 목록에서 빠지도록 다시 그림
+  // ★ 2026-07-23 신규: 서버에 "지금 활성 배치는 이거다"라고 기록 →
+  //   다른 기기들이 페이지를 열 때 클릭 없이 자동으로 같은 배치를 따라옴
+  if(GAS_READY) gasCall('setActiveBatch', { batchId: state.batchId });
   toast(`배치 ${state.batchId} 이어서 작업 시작`, 'success');
   gotoView('v-slots');
 }
@@ -1232,6 +1235,9 @@ async function completeOpenBatch(batchId){
   if(!confirm(`배치 ${batchId}를 완료 처리하시겠습니까?\n\n(스캔 기록은 그대로 남고, 목록에서만 사라집니다. 되돌릴 수 없으니 정말 다 끝난 배치인지 확인해주세요.)`)) return;
   const res = await gasCall('completeBatch', { batchId });
   if(!res.ok){ toast('완료 처리 실패: ' + (res.error||''), 'error'); return; }
+  // ★ 2026-07-23 신규: 완료된 배치가 활성 배치로 남아서 다른 기기들이 계속
+  //   자동으로 불러오는 일이 없도록, 이 배치가 활성 배치였다면 같이 정리
+  if(GAS_READY && state.batchId === batchId) gasCall('clearActiveBatch', {});
   toast(`배치 ${batchId} 완료 처리됨`, 'success');
   checkOpenBatches();
 }
@@ -1239,8 +1245,17 @@ async function completeOpenBatch(batchId){
 async function restoreBatchFromServer(){
   if(!GAS_READY) { tryRestoreDraftFromLocalStorage(); return; } // 데모 모드: 임시저장만 시도
   checkOpenBatches(); // ★ 2026-07-10: 오늘 배치 여부와 무관하게, 완료 처리 안 된 배치는 항상 매니저에게 보여줌
-  const res = await gasQuery('getBatch', {});
-  if(!res.ok || !res.batch) { tryRestoreDraftFromLocalStorage(); return; } // 오늘 진행중 배치 없음 → 임시저장 확인
+
+  // ★ 2026-07-23 신규: "오늘 배치"만 자동으로 찾던 것을, 매니저가 서버에
+  //   기록해둔 "활성 배치"부터 우선 확인하도록 변경. 이러면 매니저가 PC에서
+  //   어제 배치를 "이어서 작업하기"로 열었을 때, 다른 기기(작업자 폰 등)들도
+  //   페이지를 열면 클릭 없이 자동으로 같은 배치를 따라옴 (날짜 무관).
+  //   활성 배치 기록이 없으면(아무도 아직 안 정했으면) 예전처럼 "오늘 배치"를 확인.
+  let res = await gasQuery('getActiveBatch', {});
+  if(!res.ok || !res.batch){
+    res = await gasQuery('getBatch', {});
+  }
+  if(!res.ok || !res.batch) { tryRestoreDraftFromLocalStorage(); return; } // 진행중 배치 없음 → 임시저장 확인
 
   state.batchId = res.batch.batchId;
   state.sumFile = { meta:{}, items: res.sumItems || [] };
@@ -1838,6 +1853,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
     }
     state.batchId = created.batchId; // 서버가 발급한 정식 배치ID로 교체
     clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
+    gasCall('setActiveBatch', { batchId: state.batchId }); // ★ 2026-07-23 신규: 다른 기기들이 자동으로 이 새 배치를 따라오게 함
   }
 
   // ★ 2026-07-14 신규: 자동배정 전에 다른 미완료 배치들이 점유 중인 슬롯부터 확인
@@ -2258,7 +2274,7 @@ function renderSlots(){
       e.stopPropagation();
       const invoice = clearBtn.dataset.clear;
       clearBtn.disabled = true; clearBtn.textContent = '처리 중...';
-      const res = await gasCall('clearSlot', { batchId: state.batchId, invoice });
+      const res = await gasCall('clearSlot', { batchId: state.batchId, invoice, worker: state.currentWorker || '' });
       if(!res.ok){
         toast('슬롯 비우기 실패: ' + (res.error||'서버 오류'), 'error');
         clearBtn.disabled = false; clearBtn.textContent = '📦 패킹완료 · 슬롯비우기';
@@ -3021,7 +3037,10 @@ function showBatchComplete(){
   document.getElementById('cmpQty').textContent = totalQty.toLocaleString();
   document.getElementById('cmpTime').textContent = dur + 'm';
   document.getElementById('completeOverlay').classList.add('open');
-  if(GAS_READY && state.batchId) gasCall('completeBatch', { batchId: state.batchId });
+  if(GAS_READY && state.batchId){
+    gasCall('completeBatch', { batchId: state.batchId });
+    gasCall('clearActiveBatch', {}); // ★ 2026-07-23 신규: 완료된 배치를 다른 기기가 계속 자동으로 따라오지 않도록 정리
+  }
 }
 function closeComplete(){ document.getElementById('completeOverlay').classList.remove('open'); }
 function handoffToInspection(){
