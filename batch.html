@@ -1974,11 +1974,16 @@ function applyScanState(doneMap, scans, issueMap, issues){
   });
   // 2) 최근 스캔/전체 로그를 서버 기준으로 교체 → 모든 기기가 동일하게 봄
   //    (서버는 필드명이 result, 클라이언트 렌더 함수들은 status를 참조하므로 매핑)
-  state.scans = (scans || []).map(s => ({
-    ...s,
-    status: s.result,
-    time: new Date(String(s.time || '').replace(' ', 'T')),
-  }));
+  //    ★ 2026-07-22 신규: 이슈 등록 시 서버가 같이 남기는 상쇄용 보정 기록
+  //    (scanId가 "ADJ-"로 시작)은 집계용일 뿐 사람이 볼 필요가 없는 내부
+  //    기록이라, 화면에 뜨는 로그 목록에서는 제외함 (집계에는 이미 반영됨).
+  state.scans = (scans || [])
+    .filter(s => !String(s.scanId || '').startsWith('ADJ-'))
+    .map(s => ({
+      ...s,
+      status: s.result,
+      time: new Date(String(s.time || '').replace(' ', 'T')),
+    }));
   // ★ 2026-07-16 신규: 이슈 목록도 서버 기준으로 교체 (슬롯 카드에 상세 표시용)
   state.issues = (issues || []).map(i => ({
     ...i,
