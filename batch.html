@@ -750,6 +750,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
         <table style="min-width:640px;">
           <thead>
             <tr>
+              <th style="width:56px">#</th>
               <th style="width:90px">Time</th>
               <th style="width:140px">Barcode</th>
               <th>SKU</th>
@@ -761,7 +762,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             </tr>
           </thead>
           <tbody id="fullLogBody">
-            <tr><td colspan="8" class="empty-log" style="border:none">기록 없음</td></tr>
+            <tr><td colspan="9" class="empty-log" style="border:none">기록 없음</td></tr>
           </tbody>
         </table>
         </div>
@@ -3114,7 +3115,7 @@ function renderFullLog(){
   }
 
   if(filtered.length === 0){
-    el.innerHTML = `<tr><td colspan="8" class="empty-log" style="border:none">${q ? '검색 결과가 없습니다' : '기록 없음'}</td></tr>`;
+    el.innerHTML = `<tr><td colspan="9" class="empty-log" style="border:none">${q ? '검색 결과가 없습니다' : '기록 없음'}</td></tr>`;
     pagerEl.innerHTML = '';
     return;
   }
@@ -3125,8 +3126,21 @@ function renderFullLog(){
   const startIdx = (state.logPage - 1) * LOG_PAGE_SIZE;
   const pageItems = filtered.slice(startIdx, startIdx + LOG_PAGE_SIZE);
 
+  // ★ 2026-07-22 신규 — "몇 번 항목에 문제있다"고 전달하기 좋도록 고정 순번 부여.
+  //   화면은 최신순(내림차순)으로 보여주지만, 번호 자체는 "발생한 순서 그대로"
+  //   (가장 오래된 스캔이 1번)로 고정해서, 나중에 새 스캔이 쌓이거나 검색/페이지를
+  //   넘겨도 같은 스캔은 항상 같은 번호를 가리킴 — 번호가 계속 바뀌면 "12번요"라고
+  //   전달해도 그 사이에 새 스캔이 생기면 다른 걸 가리키게 되므로 이렇게 고정함.
+  if(!state._logSeqMap || state._logSeqMapCount !== state.scans.length){
+    const chrono = [...state.scans].sort((a,b) => a.time - b.time);
+    state._logSeqMap = new Map(chrono.map((s,i) => [s.scanId, i+1]));
+    state._logSeqMapCount = state.scans.length;
+  }
+  const seqMap = state._logSeqMap;
+
   el.innerHTML = pageItems.map(s => `
     <tr>
+      <td style="font-family:var(--mono); font-size:11px; color:var(--text-dim2);">${seqMap.get(s.scanId) || '-'}</td>
       <td><span class="log-time">${fmtClock(s.time)}</span></td>
       <td style="font-family:var(--mono); font-size:11px">${s.barcode||'-'}</td>
       <td>${s.sku||'-'}</td>
