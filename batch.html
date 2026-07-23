@@ -2107,6 +2107,17 @@ function applyScanState(doneMap, scans, issueMap, issues){
       //   → 다른 기기에서 이슈를 등록해도 이 기기가 폴링하는 순간 반영됨.
       const issueQty = (issueMap && issueMap[key]) || 0;
       q.need = Math.max(0, (q.origNeed != null ? q.origNeed : q.need) - issueQty);
+      // ★ 2026-07-23 긴급 수정 — 심각한 버그: 아래 클램프(q.done을 q.need로 자름)는
+      //   "이 SKU 한 줄"의 진행률 표시(초과분은 100%로만 보여줌)를 위한 것인데,
+      //   이 클램프된 값을 그대로 고객사 전체 합계(progressByInvoice)에도 써버려서,
+      //   SKU 하나라도 초과 스캔되면 그 초과분이 고객사 전체 합계에서 영구적으로
+      //   사라져 슬롯이 100%가 되어도 "완료(파란색)"로 절대 안 바뀌는 문제가 있었음
+      //   (TV는 고객사 단위로 통째로 합산해서 초과분도 인정하므로 완료로 뜨는데,
+      //   웹은 SKU별로 자른 값의 합이라 영원히 못 채워지는 불일치 발생).
+      //   해결: 클램프 전 원본값을 doneRaw로 따로 보관해서, 고객사 전체 합계는
+      //   doneRaw(초과분 포함)로 계산하고, 이 SKU 한 줄의 표시(0~100%)에만 클램프된
+      //   q.done을 씀 — TV(getSlotProgress)와 완전히 같은 기준으로 통일됨.
+      q.doneRaw = q.done;
       if(q.done > q.need) q.done = q.need;
     });
   });
@@ -2285,7 +2296,10 @@ function renderSlots(){
   const skuProgressByInvoice = {};
   Object.values(state.scanIndex).forEach(sku => sku.queue.forEach(q => {
     if(!progressByInvoice[q.invoice]) progressByInvoice[q.invoice] = {done:0, need:0};
-    progressByInvoice[q.invoice].done += q.done;
+    // ★ 2026-07-23 수정: q.done(SKU별로 need에 클램프된 값)이 아니라 q.doneRaw(초과분
+    //   포함 원본값)로 합산 — TV(getSlotProgress)의 "고객사 전체 스캔량" 계산과 통일.
+    //   (q.doneRaw가 없는 구버전 데이터 대비 폴백으로 q.done 사용)
+    progressByInvoice[q.invoice].done += (q.doneRaw != null ? q.doneRaw : q.done);
     progressByInvoice[q.invoice].need += q.need;
 
     if(!skuProgressByInvoice[q.invoice]) skuProgressByInvoice[q.invoice] = {doneSku:0, totalSku:0};
@@ -2299,8 +2313,10 @@ function renderSlots(){
     const cf = slot.assignedTo ? state.custFiles.find(c => c.meta.invoice_no === slot.assignedTo) : null;
     const p = cf ? progressByInvoice[cf.meta.invoice_no] || {done:0,need:0} : null;
     const sp = cf ? skuProgressByInvoice[cf.meta.invoice_no] || {doneSku:0,totalSku:cf.totalSkus||0} : null;
-    const status = !cf ? 'empty' : p.need>0 && p.done===p.need ? 'done' : p.done>0 ? 'active' : 'filled';
-    const pct = p && p.need>0 ? (p.done/p.need*100) : 0;
+    // ★ 2026-07-23 수정: 초과 스캔이 있어도(p.done > p.need) 완료로 잡히도록 === 대신 >= 사용
+    //   (TV의 "scanned >= effectiveTotal" 판정과 통일)
+    const status = !cf ? 'empty' : p.need>0 && p.done>=p.need ? 'done' : p.done>0 ? 'active' : 'filled';
+    const pct = p && p.need>0 ? Math.min(100, p.done/p.need*100) : 0;
     const numLabel = /^\d+$/.test(String(slot.num)) ? String(slot.num).padStart(2,'0') : String(slot.num);
 
     if(!cf){
