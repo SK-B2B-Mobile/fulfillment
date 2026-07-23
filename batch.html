@@ -2706,15 +2706,21 @@ scanInput.addEventListener('keydown', e => { if(e.key==='Enter') doScan(); });
 //   그 기기에서는 사람이 직접 Enter를 눌러야만 분류되는 문제가 있었음.
 //   Enter가 없어도 "사람이 타이핑하기엔 너무 빠른 속도로 연속 입력된 뒤 짧게
 //   멈추면" 스캐너가 다 찍은 것으로 보고 자동으로 분류함(Enter 보내는 기기는
-//   그대로 즉시 반응, 안 보내는 기기는 150ms 정지 후 자동 반응).
+//   그대로 즉시 반응, 안 보내는 기기는 300ms 정지 후 자동 반응).
+// ★ 2026-07-23 긴급 수정 — 이 배치의 실제 바코드는 전부 13자리(EAN-13)인데,
+//   기존엔 "6자리 이상 + 150ms 정지"만 되면 무조건 스캔 처리해버렸음. 그래서
+//   스캐너 전송이 중간에 아주 짧게(150ms) 끊기면(무선 스캐너에서 흔함) 앞부분
+//   6자리만 잘려서 "미등록 바코드"로 잘못 찍히는 사고가 있었음. 최소 길이를
+//   실제 바코드 길이에 맞춰 10자리로 올리고, 정지 판정 시간도 300ms로 늘려서
+//   전송이 살짝 끊겨도 "아직 스캔 중"으로 보고 좀 더 기다리게 함.
 let __scanAutoTimer = null;
 scanInput.addEventListener('input', () => {
   clearTimeout(__scanAutoTimer);
   const v = scanInput.value.trim();
-  if(v.length < 6) return; // 바코드로 보기엔 너무 짧으면(사람이 막 타이핑 시작한 경우 등) 무시
+  if(v.length < 10) return; // 바코드로 보기엔 너무 짧으면(사람이 막 타이핑 시작한 경우, 전송 중간 등) 무시
   __scanAutoTimer = setTimeout(() => {
-    if(scanInput.value.trim() === v && v.length >= 6) doScan();
-  }, 150);
+    if(scanInput.value.trim() === v && v.length >= 10) doScan();
+  }, 300);
 });
 
 function currentTarget(sku){ return sku.queue.find(q => q.done < q.need); }
