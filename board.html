@@ -424,12 +424,24 @@ async function pollOnce(){
       document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
       return;
     }
-    // 배치ID 아직 모르면 오늘자 배치부터 찾기
-    if(!currentBatchId){
+    // ★ 2026-07-23 신규: "오늘 배치"만 찾던 것을, 매니저가 서버에 기록해둔
+    //   "활성 배치"를 우선 확인하도록 변경 — batch.html에서 매니저가 배치를
+    //   새로 시작하거나 "이어서 작업하기"를 누르면 서버에 기록되는데, TV
+    //   현황판도 그 기록을 그대로 따라감 (어제 배치든 오늘 배치든 무관).
+    //   TV는 하루 종일 안 끄고 켜두는 경우가 많아서, 이미 배치를 하나 물고
+    //   있어도 매 폴링(8초)마다 계속 재확인함 — 매니저가 중간에 다른 배치로
+    //   전환하면 TV도 곧바로 자동으로 따라가게 하기 위함.
+    const activeRes = await gasQuery('getActiveBatch', {});
+    if(activeRes.ok && activeRes.batch && activeRes.batch.batchId !== currentBatchId){
+      currentBatchId = activeRes.batch.batchId;
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${activeRes.batch.date}`;
+    } else if(!currentBatchId){
+      // 활성 배치 기록이 아직 없으면(아무도 안 정했으면) 예전처럼 오늘자 배치라도 확인
       const b = await gasQuery('getBatch', {});
       if(!b.ok || !b.batch){
         document.getElementById('liveDot').className = 'status-dot off';
-        document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>오늘 진행중인 배치 없음';
+        document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
         return;
       }
       currentBatchId = b.batch.batchId;
