@@ -39,6 +39,26 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .status-dot{width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:8px;}
 .status-dot.live{background:var(--green); box-shadow:0 0 12px var(--green);}
 .status-dot.off{background:var(--gray);}
+.status-dot.manual{background:var(--amber); box-shadow:0 0 12px var(--amber);}
+
+/* ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 버튼/드롭다운
+   (batch.html의 활성 배치 전환과 별개 · 여기서 배치를 골라도
+   다른 기기/작업자 폰에는 전혀 영향 없음, TV 혼자만 조회) */
+.tb-switch-wrap{position:relative; margin-left:14px;}
+.tb-switch-btn{font-family:var(--sans); font-size:13px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:7px 14px; cursor:pointer;}
+.tb-switch-btn:hover{background:var(--border); color:var(--text);}
+.tb-switch-dd{display:none; position:absolute; top:calc(100% + 8px); left:0; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px; min-width:340px; box-shadow:0 10px 30px rgba(0,0,0,0.5);}
+.tb-switch-dd.open{display:block;}
+.tb-switch-row{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 8px; border-radius:8px; cursor:pointer;}
+.tb-switch-row:hover{background:var(--surface2);}
+.tb-switch-row .tb-sw-id{font-family:var(--mono); font-weight:800; font-size:14px;}
+.tb-switch-row .tb-sw-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
+.tb-switch-row .tb-sw-tag{font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; white-space:nowrap;}
+.tb-switch-empty{padding:12px 8px; font-size:12px; color:var(--text-dim);}
+.manual-banner{display:none; align-items:center; gap:10px; background:var(--amber-bg); border:1px solid var(--amber); color:var(--amber); font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px;}
+.manual-banner.show{display:flex;}
+.manual-banner button{font-family:var(--sans); font-size:12px; font-weight:700; background:none; border:1px solid var(--amber); color:var(--amber); border-radius:6px; padding:4px 10px; cursor:pointer;}
+.manual-banner button:hover{background:var(--amber); color:#1a1300;}
 
 /* ═══════════════ 슬롯 그리드 ═══════════════ */
 .board{padding:26px 36px; height:calc(100vh - 108px); overflow-y:auto;}
@@ -133,6 +153,13 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
     <div>
       <div class="tb-title">총량피킹 현황판</div>
       <div class="tb-sub" id="batchLabel"><span class="status-dot off" id="liveDot"></span>연결 대기중...</div>
+      <div class="manual-banner" id="manualBanner">
+        🔍 다른 배치 조회 중 (실시간 아님) <button id="btnBackToLive">실시간으로 돌아가기</button>
+      </div>
+    </div>
+    <div class="tb-switch-wrap">
+      <button class="tb-switch-btn" id="btnSwitchBatchTV">⇄ 다른 배치</button>
+      <div class="tb-switch-dd" id="switchBatchDropdownTV"></div>
     </div>
   </div>
   <div class="tb-right">
@@ -211,6 +238,12 @@ async function gasCall(op, data){
 
 let currentBatchId = null;
 let prevStatus = {}; // slotNum -> 'waiting'|'active'|'done' (완료 순간 감지용 flash 처리)
+
+// ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 모드.
+// null이면 평소대로 getActiveBatch(매니저가 batch.html에서 정한 활성 배치)를 실시간으로 따라감.
+// 값이 있으면 그 배치만 고정으로 조회하며, getActiveBatch 폴링은 건너뜀
+// (다른 기기에는 절대 영향 없음 — setActiveBatch를 호출하지 않는 순수 조회 전용).
+let manualBatchOverride = null; // { batchId, date } | null
 
 function fmtClock(){
   const d = new Date();
@@ -424,6 +457,14 @@ async function pollOnce(){
       document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
       return;
     }
+    // ★ 2026-07-23 신규: 매니저가 TV에서 직접 "다른 배치"를 골라 조회 중이면
+    //   (manualBatchOverride) 활성 배치 자동 추적을 건너뛰고 그 배치만 고정 조회.
+    //   이 모드는 다른 기기(작업자 폰 등)에는 전혀 영향을 주지 않는 TV 전용 조회.
+    if(manualBatchOverride){
+      currentBatchId = manualBatchOverride.batchId;
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot manual"></span>배치 ${currentBatchId} · ${manualBatchOverride.date}`;
+    } else {
     // ★ 2026-07-23 신규: "오늘 배치"만 찾던 것을, 매니저가 서버에 기록해둔
     //   "활성 배치"를 우선 확인하도록 변경 — batch.html에서 매니저가 배치를
     //   새로 시작하거나 "이어서 작업하기"를 누르면 서버에 기록되는데, TV
@@ -440,7 +481,8 @@ async function pollOnce(){
       // 활성 배치 기록이 아직 없으면(아무도 안 정했으면) 예전처럼 오늘자 배치라도 확인
       const b = await gasQuery('getBatch', {});
       if(!b.ok || !b.batch){
-        document.getElementById('liveDot').className = 'status-dot off';
+        const dot0 = document.getElementById('liveDot');
+        if(dot0) dot0.className = 'status-dot off';
         document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
         return;
       }
@@ -448,13 +490,18 @@ async function pollOnce(){
       document.getElementById('batchLabel').innerHTML =
         `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
     }
+    }
 
     const res = await gasQuery('getSlotProgress', { batchId: currentBatchId });
     if(!res.ok){
-      document.getElementById('liveDot').className = 'status-dot off';
+      const dot = document.getElementById('liveDot');
+      if(dot) dot.className = 'status-dot off';
       return;
     }
-    document.getElementById('liveDot').className = 'status-dot live';
+    // ★ 2026-07-23 수정: manual 모드일 땐 batchLabel에 id='liveDot'인 도트가 없으므로
+    //   (amber 'manual' 도트로 대체됨) null 체크 후 있을 때만 갱신.
+    const dot = document.getElementById('liveDot');
+    if(dot) dot.className = 'status-dot live';
     document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
     document.getElementById('doneBar').style.width =
       (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
@@ -468,6 +515,68 @@ async function pollOnce(){
 
 pollOnce();
 setInterval(pollOnce, POLL_MS);
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-07-23 신규 — TV "다른 배치 조회" 드롭다운
+// ─────────────────────────────────────────────────────────────
+// batch.html의 "⇄ 다른 배치"와 이름은 같지만 동작은 완전히 다름:
+// 여기서 배치를 골라도 setActiveBatch를 호출하지 않으므로
+// 작업자 폰/다른 TV 등 어떤 기기에도 영향을 주지 않는 순수 조회 전용.
+// (완료 처리된 배치는 목록에 안 뜸 — getOpenBatches가 미완료 배치만 반환)
+// ═══════════════════════════════════════════════════════════
+document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
+  e.stopPropagation();
+  const dd = document.getElementById('switchBatchDropdownTV');
+  if(dd.classList.contains('open')){ dd.classList.remove('open'); return; }
+
+  dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
+  dd.classList.add('open');
+
+  const res = await gasQuery('getOpenBatches', {});
+  if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
+  const list = res.batches || [];
+  if(!list.length){
+    dd.innerHTML = `<div class="tb-switch-empty">조회 가능한 미완료 배치가 없습니다</div>`;
+    return;
+  }
+  const today = new Date().toISOString().slice(0,10);
+  dd.innerHTML = list.map(b => {
+    const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+    const tag = isCurrent
+      ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+      : (b.date === today ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">오늘</span>` : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">이전 날짜</span>`);
+    return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
+      <div>
+        <div class="tb-sw-id">${b.batchId}</div>
+        <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · 스캔 통과 ${Number(b.scannedPass||0).toLocaleString()}건</div>
+      </div>
+      ${tag}
+    </div>`;
+  }).join('');
+  dd.querySelectorAll('[data-batch]').forEach(row => {
+    row.onclick = () => {
+      manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
+      document.getElementById('manualBanner').classList.add('show');
+      dd.classList.remove('open');
+      pollOnce(); // 고른 배치로 즉시 갱신
+    };
+  });
+};
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('switchBatchDropdownTV');
+  if(dd && dd.classList.contains('open') && !e.target.closest('#btnSwitchBatchTV') && !e.target.closest('#switchBatchDropdownTV')){
+    dd.classList.remove('open');
+  }
+});
+
+// "실시간으로 돌아가기" — 조회 모드를 끄고 다시 활성 배치 자동 추적으로 복귀
+document.getElementById('btnBackToLive').onclick = () => {
+  manualBatchOverride = null;
+  currentBatchId = null; // ★ 강제로 초기화해야 다음 폴링이 배치가 바뀐 걸로 인식해서 라벨을 다시 그림
+  document.getElementById('manualBanner').classList.remove('show');
+  pollOnce();
+};
+
 </script>
 </body>
 </html>
