@@ -1927,8 +1927,14 @@ document.getElementById('startBatchBtn').onclick = async () => {
   }
 
   buildScanIndex();
-  autoAssignSlots();
+  const assignResult = autoAssignSlots();
   await syncSlotsToServer();
+  // ★ 2026-07-23 신규: 30번(점유 제외)으로도 부족해서 31번 이후로 자동 확장된 인원이 있으면
+  //   반드시 매니저에게 알림 — 31번 이후는 실제 창고에 그만큼 여유 공간이 있어야 의미가 있으므로,
+  //   숫자를 눈으로 보고 실제 자리를 준비했는지 확인하도록 함.
+  if(assignResult && assignResult.overflowCount > 0){
+    toast(`⚠ 슬롯 30개로는 부족해 ${assignResult.overflowCount}명은 31번 이후 번호로 자동 배정했습니다 — 실제 여유 공간이 있는지 확인하세요`, 'error');
+  }
   // ★ 2026-07-09: 새 배치 시작 시에도 실시간 동기화 폴링 시작 (여러 기기 스캔 동기화)
   startScanPolling();
   startStructurePolling();
@@ -1986,6 +1992,8 @@ function buildScanIndex(){
 }
 
 // Rule: 1-15 = big orders (by qty desc), 16-30 = small orders (by qty desc)
+// ★ 2026-07-23 신규: 반환값을 { overflowCount } 형태로 바꿔서, 31번 이후로
+//   자동 확장된 인원이 몇 명인지 호출한 쪽(배치 시작/자동 재배정 버튼)에서 알 수 있게 함.
 function autoAssignSlots(){
   // Clear existing assignments
   state.slots.forEach(s => s.assignedTo = null);
@@ -2011,9 +2019,27 @@ function autoAssignSlots(){
       const slot = state.slots.find(s => s.num === slotNum);
       slot.assignedTo = cf.meta.invoice_no;
     }
-    // 빈 자리보다 고객사가 많으면 여기서 배정 안 되고 "미배정 대기"로 남음
-    // → 기존 "📍 임시 번호 부여" 버튼으로 매니저가 31번 이후로 수동 확장
   });
+
+  // ★ 2026-07-23 신규 — 1~30번(occupied 제외)으로도 부족하면, 31번부터 자동으로
+  //   이어서 배정 (예전엔 매니저가 남은 인원 전부를 "📍 임시 번호 부여"로
+  //   일일이 눌러야 했음). 다른 배치가 이미 31번 이후 번호를 쓰고 있으면
+  //   (occupied에 포함) 그 번호는 건너뛰고 다음 빈 번호를 찾음.
+  //   ⚠ 31번 이후는 실제 창고에 그만큼 여유 물리 공간이 있다는 전제이므로,
+  //   overflowCount를 호출부에 돌려줘서 매니저에게 반드시 안내함.
+  let overflowCount = 0;
+  const overflow = sorted.slice(availableSlotNums.length);
+  if(overflow.length){
+    let nextNum = 31;
+    overflow.forEach(cf => {
+      while(occupied.has(nextNum)) nextNum++;
+      let slot = state.slots.find(s => s.num === nextNum);
+      if(!slot){ slot = { num: nextNum, size: 'M', assignedTo: null }; state.slots.push(slot); }
+      slot.assignedTo = cf.meta.invoice_no;
+      nextNum++;
+      overflowCount++;
+    });
+  }
 
   // Update scanIndex queue with slot numbers + resort by ship_date
   const slotByInvoice = {};
@@ -2022,6 +2048,8 @@ function autoAssignSlots(){
     sku.queue.forEach(q => { q.slot = slotByInvoice[q.invoice]; });
     sku.queue.sort((a,b) => (a.ship_date||'9999').localeCompare(b.ship_date||'9999'));
   });
+
+  return { overflowCount }; // ★ 2026-07-23 신규: 31번 이후로 자동 확장된 인원 수 (호출부에서 안내 메시지에 사용)
 }
 
 // ★ 2026-07-14 신규 — 새 배치 만들기 전, 아직 완료 처리 안 된 다른 배치들이
@@ -2563,10 +2591,15 @@ document.getElementById('btnRedoAuto').onclick = async () => {
   //   그 사이 다른 배치의 슬롯이 비워져도(패킹완료·슬롯비우기) 반영이 안 됐음.
   //   버튼 누를 때마다 최신 상태를 다시 조회하도록 수정.
   await fetchOccupiedSlots();
-  autoAssignSlots();
+  const assignResult = autoAssignSlots();
   renderSlots();
   syncSlotsToServer();
-  toast('자동 재배정 완료 (최신 점유 슬롯 반영)', 'success');
+  // ★ 2026-07-23 신규: 31번 이후로 자동 확장된 인원이 있으면 별도로 명확히 알림
+  if(assignResult && assignResult.overflowCount > 0){
+    toast(`자동 재배정 완료 · ⚠ ${assignResult.overflowCount}명은 31번 이후 번호로 자동 확장됨 — 실제 여유 공간 확인 필요`, 'error');
+  } else {
+    toast('자동 재배정 완료 (최신 점유 슬롯 반영)', 'success');
+  }
 };
 document.getElementById('btnClearSlots').onclick = () => {
   state.slots.forEach(s => s.assignedTo = null);
