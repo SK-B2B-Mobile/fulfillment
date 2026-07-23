@@ -91,6 +91,10 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card.done .card-ship{background:rgba(4,20,13,0.18); color:#04140D;}
 .card-cust{font-size:30px; font-weight:700; margin-top:10px; line-height:1.2; flex:1; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
 .card.done .card-cust{color:#04140D;}
+/* ★ 2026-07-23 신규 — 인보이스 번호는 실물 박스 라벨과 대조하는 용도라 TV에도 필요하다는
+   현장 요청으로 추가. card-cust(고객사명)보다는 작지만, 다른 메타 정보보다는 눈에 띄게. */
+.card-invoice{font-family:var(--mono); font-size:20px; font-weight:800; color:var(--text-dim); margin-top:2px; letter-spacing:0.02em;}
+.card.done .card-invoice{color:#04140D; opacity:0.85;}
 .card-bottom{margin-top:12px;}
 .card-qty{font-family:var(--mono); font-size:26px; font-weight:700; color:var(--text-dim); margin-bottom:8px;}
 .card.active .card-qty, .card.done .card-qty{color:var(--text);}
@@ -281,6 +285,7 @@ function cardHtml(slot){
       </div>
     </div>
     <div class="card-cust">${slot.customer || ''}</div>
+    <div class="card-invoice">${slot.invoice || ''}</div>
     <div class="card-bottom">
       <div class="card-metarow">
         <span class="card-sku">SKU ${slot.doneSku||0}/${slot.totalSku||0}</span>
