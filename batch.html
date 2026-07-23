@@ -737,7 +737,16 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
         <div id="kpiPanel" style="font-size:12px; color:var(--text-dim);">불러오는 중...</div>
       </div>
 
-      <div class="card" style="padding:0; overflow-x:auto; -webkit-overflow-scrolling:touch;">
+      <!-- ★ 2026-07-22 신규: KPI와 확실히 구분되는 별도 카드로 분리 -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="row" style="align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
+          <h3 style="margin:0; font-size:13px;">④ 전체 스캔 이벤트</h3>
+          <div class="spacer"></div>
+          <input id="logSearchInput" type="text" placeholder="바코드·SKU·고객사·작업자 검색..."
+            style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 12px; font-size:12.5px; width:220px;">
+        </div>
+        <div id="logSearchInfo" style="font-size:11px; color:var(--text-dim2); margin-bottom:8px; display:none;"></div>
+        <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
         <table style="min-width:640px;">
           <thead>
             <tr>
@@ -755,6 +764,8 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             <tr><td colspan="8" class="empty-log" style="border:none">기록 없음</td></tr>
           </tbody>
         </table>
+        </div>
+        <div id="logPager" class="row" style="align-items:center; justify-content:center; gap:12px; margin-top:12px;"></div>
       </div>
     </div>
 
@@ -950,6 +961,8 @@ const state = {
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
   activePickers: {}, // ★ 2026-07-22 신규: { "작업자명": "14:02"(시작시각) } — 지금 다른 기기에서 피킹 중인 사람
+  logSearch: '', // ★ 2026-07-22 신규: 전체 스캔 로그 검색어
+  logPage: 1,    // ★ 2026-07-22 신규: 전체 스캔 로그 현재 페이지 (검색 결과 기준으로 페이징)
 };
 
 // Init slots (30개, 15+15)
@@ -3078,10 +3091,41 @@ document.getElementById('btnSyncBatch').onclick = async () => {
   btn.disabled = false; btn.textContent = '↺ 배치 데이터 동기화 (고객사·상품 다시 불러오기)';
 };
 
+const LOG_PAGE_SIZE = 50;
+
+// ★ 2026-07-22 신규 — 검색을 먼저 걸고 그 결과 안에서만 페이지를 나눔.
+//   (페이지부터 나누고 그 안에서 검색하면 "2페이지에 있는 항목은 검색 안 됨"
+//   문제가 생기므로, 반드시 이 순서로 처리해야 함)
 function renderFullLog(){
   const el = document.getElementById('fullLogBody');
-  if(state.scans.length === 0){ el.innerHTML = '<tr><td colspan="8" class="empty-log" style="border:none">기록 없음</td></tr>'; return; }
-  el.innerHTML = state.scans.map((s,i) => `
+  const pagerEl = document.getElementById('logPager');
+  const infoEl = document.getElementById('logSearchInfo');
+
+  const q = state.logSearch.trim().toLowerCase();
+  const filtered = q
+    ? state.scans.filter(s => [s.barcode, s.sku, s.customer, s.worker].some(v => String(v||'').toLowerCase().includes(q)))
+    : state.scans;
+
+  if(q){
+    infoEl.style.display = 'block';
+    infoEl.textContent = `"${state.logSearch}" 검색 결과 ${filtered.length}건 (전체 ${state.scans.length}건 중)`;
+  } else {
+    infoEl.style.display = 'none';
+  }
+
+  if(filtered.length === 0){
+    el.innerHTML = `<tr><td colspan="8" class="empty-log" style="border:none">${q ? '검색 결과가 없습니다' : '기록 없음'}</td></tr>`;
+    pagerEl.innerHTML = '';
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LOG_PAGE_SIZE));
+  if(state.logPage > totalPages) state.logPage = totalPages;
+  if(state.logPage < 1) state.logPage = 1;
+  const startIdx = (state.logPage - 1) * LOG_PAGE_SIZE;
+  const pageItems = filtered.slice(startIdx, startIdx + LOG_PAGE_SIZE);
+
+  el.innerHTML = pageItems.map(s => `
     <tr>
       <td><span class="log-time">${fmtClock(s.time)}</span></td>
       <td style="font-family:var(--mono); font-size:11px">${s.barcode||'-'}</td>
@@ -3090,23 +3134,52 @@ function renderFullLog(){
       <td>${s.slot ? String(s.slot).padStart(2,'0') : '-'}</td>
       <td style="font-family:var(--mono); color:var(--green); font-weight:700;">${s.status==='pass' ? '+'+(s.qty||1) : '-'}</td>
       <td><span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span></td>
-      <td>${s.status==='pass' ? `<button class="mini-btn danger" data-undo="${i}">↶ undo</button>` : ''}</td>
+      <td>${s.status==='pass' ? `<button class="mini-btn danger" data-undo-id="${s.scanId||''}">↶ undo</button>` : ''}</td>
     </tr>`).join('');
-  el.querySelectorAll('[data-undo]').forEach(b => {
+
+  // ★ 2026-07-22 수정: 예전엔 화면에 보이는 행의 배열 인덱스로 undo 대상을 찾아서,
+  //   검색/페이징 도입 후 엉뚱한 항목이 취소될 위험이 있었음. scanId로 실제
+  //   state.scans 전체에서 정확히 찾도록 수정(필터링·페이지와 무관하게 안전).
+  el.querySelectorAll('[data-undo-id]').forEach(b => {
     b.onclick = () => {
-      const scan = state.scans[+b.dataset.undo];
-      // find the queue item and decrement
+      const scanId = b.dataset.undoId;
+      const idx = state.scans.findIndex(s => s.scanId === scanId);
+      if(idx < 0) return;
+      const scan = state.scans[idx];
       for(const sku of Object.values(state.scanIndex)){
-        const q = sku.queue.find(q => q.invoice === scan.invoice);
-        if(q && sku.sku === scan.sku){ q.done = Math.max(0, q.done - (scan.qty || 1)); break; }
+        const qi = sku.queue.find(x => x.invoice === scan.invoice);
+        if(qi && sku.sku === scan.sku){ qi.done = Math.max(0, qi.done - (scan.qty || 1)); break; }
       }
-      state.scans.splice(+b.dataset.undo, 1);
+      state.scans.splice(idx, 1);
       renderFullLog(); renderSlots(); renderRecentScans(); updateScanStats();
-      if(GAS_READY && scan.scanId) gasCall('undoScan', { scanId: scan.scanId }).then(() => pollScanState());
+      if(GAS_READY && scanId) gasCall('undoScan', { scanId }).then(() => pollScanState());
       toast('스캔 취소', 'success');
     };
   });
+
+  // 페이지네이션 컨트롤
+  if(totalPages <= 1){
+    pagerEl.innerHTML = '';
+  } else {
+    pagerEl.innerHTML = `
+      <button class="btn btn-ghost btn-sm" id="logPrevBtn" ${state.logPage<=1?'disabled':''}>← 이전</button>
+      <span style="font-family:var(--mono); font-size:12px; color:var(--text-dim);">${state.logPage} / ${totalPages} 페이지 · ${filtered.length}건</span>
+      <button class="btn btn-ghost btn-sm" id="logNextBtn" ${state.logPage>=totalPages?'disabled':''}>다음 →</button>`;
+    document.getElementById('logPrevBtn').onclick = () => { state.logPage--; renderFullLog(); };
+    document.getElementById('logNextBtn').onclick = () => { state.logPage++; renderFullLog(); };
+  }
 }
+
+let __logSearchTimer = null;
+document.getElementById('logSearchInput').addEventListener('input', (e) => {
+  clearTimeout(__logSearchTimer);
+  __logSearchTimer = setTimeout(() => {
+    state.logSearch = e.target.value;
+    state.logPage = 1; // 검색어 바뀌면 항상 1페이지부터 다시
+    renderFullLog();
+  }, 200);
+});
+
 
 // ═══════════════════════════════════════════════════════════
 // Workers CRUD
