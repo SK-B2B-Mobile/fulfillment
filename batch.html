@@ -358,6 +358,27 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .sku-issue-hint{font-size:11px; color:var(--text-dim); line-height:1.5;}
 .sku-issue-form select, .sku-issue-form input[type=text]{width:100%; padding:9px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:13px; font-family:var(--sans);}
 
+/* ★ 2026-07-23 신규 — "이슈 추후 등록" 모달 (슬롯 카드에서 언제든 열 수 있음).
+   기존 스캔 중 이슈 폼(.issue-form)과 색감/톤은 맞추되, 독립된 오버레이 팝업으로 분리 */
+.retro-issue-overlay{position:fixed; inset:0; background:rgba(10,14,26,0.75); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:410; padding:20px;}
+.retro-issue-overlay.open{display:flex;}
+.retro-issue-modal{background:var(--surface); border:1px solid var(--border); border-radius:16px; width:min(480px, 100%); max-height:85vh; display:flex; flex-direction:column; overflow:hidden;}
+.retro-issue-head{display:flex; justify-content:space-between; align-items:center; padding:16px 18px; border-bottom:1px solid var(--border);}
+.retro-issue-head h3{font-size:15px; font-weight:800;}
+.retro-issue-head .sub{font-size:11.5px; color:var(--text-dim); font-family:var(--mono); margin-top:2px;}
+.retro-issue-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:30px; height:30px; border-radius:8px; font-size:14px; cursor:pointer;}
+.retro-issue-body{padding:16px 18px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;}
+.retro-issue-existing-row{background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:10px; padding:10px 12px; font-size:12.5px;}
+.retro-issue-existing-row .top{display:flex; justify-content:space-between; font-weight:800; color:var(--red);}
+.retro-issue-existing-row .meta{color:var(--text-dim); font-family:var(--mono); font-size:11px; margin-top:3px;}
+.retro-issue-existing-row button{margin-top:6px; font-size:11px; background:none; border:1px solid var(--border2); color:var(--text-dim); border-radius:6px; padding:4px 8px; cursor:pointer;}
+.retro-issue-existing-row button:hover{color:var(--red); border-color:var(--red);}
+.retro-issue-form{background:rgba(255,255,255,0.03); border:1px solid var(--border2); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:10px;}
+.retro-issue-form label{font-size:11px; color:var(--text-dim); font-weight:700;}
+.retro-issue-form select, .retro-issue-form input{width:100%; padding:9px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:13px; font-family:var(--sans); margin-top:4px;}
+.retro-issue-form-row{display:flex; gap:10px;}
+.retro-issue-form-row > div{flex:1;}
+
 @media (max-width:480px){
   .tgrid-2{grid-template-columns:1fr;} /* 폰/스캐너 좁은 화면에선 2단도 1단으로 */
 }
@@ -877,6 +898,22 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
 </div>
 
 <div class="toast-container" id="toastRoot"></div>
+
+<!-- ★ 2026-07-23 신규 — 이슈 추후 등록 모달: 슬롯 카드의 "⚠ 이슈" 버튼으로 언제든 열 수 있음.
+     스캔 중이 아니어도(예: 나중에 실물 확인하다 유통기한 지난 걸 발견) 이슈를 등록할 수 있게 함. -->
+<div class="retro-issue-overlay" id="retroIssueOverlay">
+  <div class="retro-issue-modal">
+    <div class="retro-issue-head">
+      <div>
+        <h3 id="retroIssueTitle">이슈 등록</h3>
+        <div class="sub" id="retroIssueSub">-</div>
+      </div>
+      <button class="retro-issue-close" onclick="closeRetroIssueModal()">✕</button>
+    </div>
+    <div class="retro-issue-body" id="retroIssueBody"></div>
+  </div>
+</div>
+
 
 <script>
 // ═══════════════════════════════════════════════════════════
@@ -2270,7 +2307,10 @@ function gotoView(vid){
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view===vid));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id===vid));
   if(vid==='v-slots') { renderSlots(); pollActivePickers(); }
-  if(vid==='v-scan'){ renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
+  // ★ 2026-07-23 수정: 예전엔 이 탭에 들어올 때 작업자 드롭다운을 안 건드리고 그대로
+  //   뒀는데, 그러면 마지막 폴링(최대 6.5초 전) 이후 다른 기기에서 작업자 명단이
+  //   바뀌었을 경우 잠깐 옛날 값이 보일 수 있었음. 탭 진입 즉시 최신으로 맞춤.
+  if(vid==='v-scan'){ populateWorkerSelect(); renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
   if(vid==='v-log'){ renderFullLog(); renderKPI(); }
   if(vid==='v-workers') loadBatchWorkersFromServer(); // ★ 2026-07-16: 다른 기기 변경사항까지 최신으로
   // ★ 탭을 옮길 때마다 최신 스캔 현황을 즉시 한 번 더 당겨옴 (5초 폴링 사이 텀 줄이기)
@@ -2331,6 +2371,7 @@ function renderSlots(){
         <div class="slot-badges">
           ${slot.otherBatchWarning ? `<span class="slot-badge" style="background:rgba(255,77,109,0.18); color:#FF4D6D; border:1px solid rgba(255,77,109,0.5);" title="${slot.otherBatchWarning.batchId}(${slot.otherBatchWarning.batchDate}) 배치의 &quot;${slot.otherBatchWarning.customer}&quot;도 이 번호를 쓰고 있습니다 — 실제 자리가 겹치는지 현장에서 확인하세요">⚠ 다른 배치와 번호 겹침</span>` : ''}
           <span class="slot-badge ship-${cf.meta.ship_via}">${cf.meta.ship_via}</span>
+          <button class="slot-badge" style="background:rgba(255,77,109,0.12); color:var(--red); border:1px solid rgba(255,77,109,0.4); cursor:pointer;" onclick="event.stopPropagation(); openRetroIssueModal('${cf.meta.invoice_no}')" title="이 고객사에 이슈를 나중에라도 등록/조회합니다">⚠ 이슈</button>
         </div>
       </div>
       <div class="slot-co">${cf.meta.customer}</div>
@@ -3095,6 +3136,150 @@ function submitIssue(idx){
   toast(`⚠ 이슈 등록됨 · ${r.customer} · ${qty}pcs`, 'success');
 }
 
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-07-23 신규 — 이슈 추후 등록 모달
+// ─────────────────────────────────────────────────────────────
+// 왜 필요한가: 기존 이슈 등록은 "스캔하는 그 순간"에만 가능했음. 그런데
+// 작업자가 스캔할 땐 문제없다고 판단했다가, 나중에(검수 중이나 그 이후)
+// 유통기한이 지난 걸 발견하는 등 "뒤늦게" 이슈가 생기는 경우가 실제로 있어서,
+// 스캔 흐름과 무관하게 슬롯 카드에서 언제든 이슈를 등록/조회/취소할 수 있게 함.
+// TV(board.html)의 이슈 모달과 최대한 같은 사용 경험이 되도록 맞춤.
+// ═══════════════════════════════════════════════════════════
+let _retroIssueInvoice = null;
+
+function getInvoiceSkuList(invoice){
+  // 이 고객사(invoice)가 필요로 하는 SKU 전체 목록을 scanIndex에서 뽑아옴
+  // (총량 리스트에서 만들어진 구조라 상품명/바코드가 다 들어있음)
+  const list = [];
+  Object.entries(state.scanIndex).forEach(([barcode, sku]) => {
+    const q = sku.queue.find(x => x.invoice === invoice);
+    if(q) list.push({barcode, name: sku.name, sku: sku.sku, need: q.need, done: q.done});
+  });
+  return list;
+}
+
+function openRetroIssueModal(invoice){
+  _retroIssueInvoice = invoice;
+  const cf = state.custFiles.find(c => c.meta.invoice_no === invoice);
+  if(!cf) return;
+  document.getElementById('retroIssueTitle').textContent = cf.meta.customer;
+  document.getElementById('retroIssueSub').textContent = `${invoice} · 이슈는 스캔 시점이 아니어도 언제든 등록할 수 있습니다`;
+  renderRetroIssueBody();
+  document.getElementById('retroIssueOverlay').classList.add('open');
+}
+function closeRetroIssueModal(){
+  document.getElementById('retroIssueOverlay').classList.remove('open');
+  _retroIssueInvoice = null;
+}
+
+function renderRetroIssueBody(){
+  const invoice = _retroIssueInvoice;
+  if(!invoice) return;
+  const skuList = getInvoiceSkuList(invoice);
+  const existing = (state.issues || []).filter(i => i.invoice === invoice);
+  const reasonLabel = {}; ISSUE_REASONS.forEach(r => reasonLabel[r.v] = r.label);
+
+  const existingHtml = existing.length
+    ? existing.map(i => `
+      <div class="retro-issue-existing-row">
+        <div class="top"><span>${reasonLabel[i.reason] || i.reason}</span><span>${Number(i.qty).toLocaleString()}pcs</span></div>
+        <div>${i.name || i.sku || ''}</div>
+        <div class="meta">바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time instanceof Date ? i.time.toISOString().slice(0,16).replace('T',' ') : String(i.time||'')).slice(5,16)}</div>
+        ${i.note ? `<div class="meta" style="font-style:italic">"${i.note}"</div>` : ''}
+        <button data-undo-issue="${i.issueId}">🗑 이 이슈 취소</button>
+      </div>`).join('')
+    : `<div style="font-size:12px; color:var(--text-dim); text-align:center; padding:6px 0;">등록된 이슈 없음</div>`;
+
+  const skuOptions = skuList.map(s => `<option value="${s.barcode}">${s.name} (${s.sku}) · 필요 ${s.need}pcs</option>`).join('');
+
+  document.getElementById('retroIssueBody').innerHTML = `
+    <div>
+      <div style="font-size:11px; color:var(--text-dim); font-weight:700; margin-bottom:6px;">기존 이슈 (${existing.length}건)</div>
+      ${existingHtml}
+    </div>
+    <div class="retro-issue-form">
+      <div style="font-size:11px; color:var(--text-dim); font-weight:700;">+ 새 이슈 등록</div>
+      <div>
+        <label>상품 (SKU)</label>
+        <select id="retroIssueSku">${skuOptions || '<option>이 고객사에 등록된 SKU 없음</option>'}</select>
+      </div>
+      <div class="retro-issue-form-row">
+        <div>
+          <label>사유</label>
+          <select id="retroIssueReason">${ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('')}</select>
+        </div>
+        <div>
+          <label>수량</label>
+          <input type="number" id="retroIssueQty" min="1" placeholder="pcs">
+        </div>
+      </div>
+      <div>
+        <label>작업자(발견자)</label>
+        <select id="retroIssueWorker">${state.workers.map(w => `<option value="${w.name}" ${w.name===state.currentWorker?'selected':''}>${w.name}</option>`).join('')}</select>
+      </div>
+      <div>
+        <label>메모(선택)</label>
+        <input type="text" id="retroIssueNote" placeholder="예: 검수 중 발견, 유통기한 2026-06-01">
+      </div>
+      <button class="btn btn-primary" style="margin-top:4px;" onclick="submitRetroIssue()">⚠ 이슈 등록</button>
+    </div>
+  `;
+}
+
+async function submitRetroIssue(){
+  const invoice = _retroIssueInvoice;
+  const cf = state.custFiles.find(c => c.meta.invoice_no === invoice);
+  if(!cf) return;
+  const barcode = document.getElementById('retroIssueSku').value;
+  const sku = state.scanIndex[barcode];
+  if(!sku){ toast('⚠️ 상품을 선택하세요', 'error'); return; }
+  const reason = document.getElementById('retroIssueReason').value;
+  const qty = parseInt(document.getElementById('retroIssueQty').value, 10);
+  const worker = document.getElementById('retroIssueWorker').value;
+  const note = document.getElementById('retroIssueNote').value.trim();
+
+  if(!qty || qty < 1){ toast('⚠️ 수량을 입력하세요', 'error'); return; }
+  if(!worker){ toast('⚠️ 작업자(발견자)를 선택하세요', 'error'); return; }
+
+  const q = sku.queue.find(x => x.invoice === invoice);
+  if(q && qty > q.need){ toast(`⚠️ 이 고객사에 남은 필요수량(${q.need}pcs)을 초과할 수 없습니다`, 'error'); return; }
+
+  // 1) 로컬 상태 즉시 반영 (submitIssue와 동일한 방식)
+  if(q){
+    q.need = Math.max(0, q.need - qty);
+    if(q.done > q.need) q.done = q.need;
+  }
+
+  const res = await gasCall('logIssue', {
+    batchId: state.batchId, worker: worker,
+    barcode: barcode, sku: sku.sku, name: sku.name,
+    invoice: invoice, customer: cf.meta.customer,
+    reason: reason, qty: qty, note: note,
+  });
+  if(!res.ok){ toast('⚠️ 이슈 저장 실패 — 다시 시도해주세요: ' + (res.error||''), 'error'); return; }
+
+  toast(`⚠ 이슈 등록됨 · ${cf.meta.customer} · ${qty}pcs`, 'success');
+  await pollScanState(); // 서버 최신 상태로 다시 동기화 (state.issues 갱신됨)
+  renderRetroIssueBody(); // 모달도 새 이슈 포함해서 다시 그림
+  if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+  checkBatchComplete();
+}
+
+async function undoRetroIssue(issueId){
+  if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어 완료 처리되지 않은 상태로 돌아갑니다.')) return;
+  const res = await gasCall('undoIssue', { issueId });
+  if(!res.ok){ toast('⚠️ 취소 실패: ' + (res.error||''), 'error'); return; }
+  toast('이슈가 취소되었습니다', 'success');
+  await pollScanState();
+  renderRetroIssueBody();
+  if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+}
+document.getElementById('retroIssueOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'retroIssueOverlay') closeRetroIssueModal();
+  const undoBtn = e.target.closest('[data-undo-issue]');
+  if(undoBtn) undoRetroIssue(undoBtn.dataset.undoIssue);
+});
+
 function logScan(entry){
   entry.time = new Date();
   entry.worker = state.currentWorker || '';
@@ -3370,14 +3555,25 @@ function populateWorkerSelect(){
   if(sel && document.activeElement === sel){
     // 그래도 값 자체는 최신으로 유지(화면 하단 이니셜 등)
   } else if(sel){
-    const prev = state.currentWorker;
+    // ★ 2026-07-23 긴급 수정 — 심각한 버그: state.currentWorker는 그동안 브라우저
+    //   메모리에만 있고 어디에도 저장되지 않았음. 그래서 페이지가 새로고침되거나
+    //   (네트워크 끊김, 배포로 인한 캐시 우회 재접속, 브라우저가 백그라운드 탭을
+    //   자동으로 새로고침하는 경우 등) state.currentWorker가 null로 리셋되면,
+    //   여기서 "이름이 있는 첫 번째 사람(all[0])"으로 자동 대체됐음 — 그런데
+    //   all[0]은 지금 이 기기를 쓰는 사람과 무관하게 "현재 활성 상태인 작업자
+    //   목록의 첫 번째"일 뿐이라, 완전히 다른 사람 이름으로 스캔이 기록되는
+    //   사고로 이어졌음. 이제 새로고침해도 살아남도록 localStorage에 저장/복원함.
+    const savedWorker = localStorage.getItem('sk_scan_worker');
+    const prev = state.currentWorker || savedWorker;
     sel.innerHTML = optsHtml;
     sel.value = all.some(w => w.name === prev) ? prev : (all[0]?.name || '');
     state.currentWorker = sel.value;
+    if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
     document.getElementById('workerInitial').textContent = state.currentWorker
       ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
     sel.onchange = () => {
       state.currentWorker = sel.value;
+      if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
       document.getElementById('workerInitial').textContent = state.currentWorker
         ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
     };
