@@ -268,7 +268,13 @@ function cardHtml(slot){
   if(!slot){
     return `<div class="card"><div class="card-empty">비어있음</div></div>`;
   }
-  const pct = slot.totalQty > 0 ? Math.min(100, slot.scanned / slot.totalQty * 100) : 0;
+  // ★ 2026-07-23 신규 — 예전엔 여기서 slot.totalQty(이슈 반영 전 원래 수량)를 분모로
+  //   썼는데, 완료(초록) 판정 자체는 서버가 effectiveTotal(이슈로 빠진 수량 뺀 실제
+  //   필요수량) 기준으로 이미 계산해서 보내주고 있어서, "초록불인데 숫자는 100%가
+  //   아닌" 것처럼 보이거나 batch.html(웹)과 분모 숫자가 서로 달라 혼란스러웠음.
+  //   이제 TV도 effectiveTotal을 분모로 써서 웹과 항상 같은 숫자를 보여줌.
+  const target = (slot.effectiveTotal !== undefined && slot.effectiveTotal !== null) ? slot.effectiveTotal : slot.totalQty;
+  const pct = target > 0 ? Math.min(100, slot.scanned / target * 100) : 0;
   const flashClass = (prevStatus[slot.slotNum] && prevStatus[slot.slotNum] !== 'done' && slot.status === 'done') ? ' flash' : '';
   const numLabel = /^\d+$/.test(String(slot.slotNum)) ? String(slot.slotNum).padStart(2,'0') : String(slot.slotNum);
   // ★ 2026-07-16 신규: 이슈(EXP/NF/Damaged/OOS)가 하나라도 있으면 뱃지 표시.
@@ -289,7 +295,7 @@ function cardHtml(slot){
     <div class="card-bottom">
       <div class="card-metarow">
         <span class="card-sku">SKU ${slot.doneSku||0}/${slot.totalSku||0}</span>
-        <span>${slot.scanned.toLocaleString()} / ${slot.totalQty.toLocaleString()} pcs</span>
+        <span>${slot.scanned.toLocaleString()} / ${target.toLocaleString()} pcs</span>
       </div>
       <div class="card-bar"><div style="width:${pct}%"></div></div>
       <div class="card-done-tag">✓ 완료 · 패킹 이동</div>
