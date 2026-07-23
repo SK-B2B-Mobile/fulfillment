@@ -3386,14 +3386,18 @@ async function renderKPI(){
   if(!res.ok){ el.innerHTML = '<span style="color:var(--red)">KPI 조회 실패: ' + (res.error||'') + '</span>'; return; }
 
   // ① 피킹 세션 목록 — 시작/종료/소요시간/실제 처리 SKU·PCS
+  // ★ 2026-07-23 신규 — 표 글씨가 너무 흐리다는 피드백 반영: 데이터 칸은 밝은
+  //   기본색(var(--text))에 살짝 굵게, 헤더는 흐리되(회색) 기존보다 진하게 조정.
+  //   (글자 크기가 아니라 "선명도"가 문제였던 것이라 폰트 크기는 그대로 두고
+  //   색상 대비만 확실히 높임)
   const pickRows = (res.pickSessions||[]).map(p =>
-    `<tr><td>${p.worker}</td><td style="color:var(--text-dim2)">${p.pageRange||'-'}</td><td>${p.start}</td><td>${p.end}</td><td>${p.durationMinutes}분</td><td>${p.totalSku}</td><td>${p.totalQty.toLocaleString()}</td></tr>`).join('')
-    || '<tr><td colspan="7" style="color:var(--text-dim2)">피킹 기록 없음</td></tr>';
+    `<tr><td>${p.worker}</td><td style="color:var(--text-dim)">${p.pageRange||'-'}</td><td>${p.start}</td><td>${p.end}</td><td>${p.durationMinutes}분</td><td>${p.totalSku}</td><td>${p.totalQty.toLocaleString()}</td></tr>`).join('')
+    || '<tr><td colspan="7" style="color:var(--text-dim)">피킹 기록 없음</td></tr>';
 
   // ② 작업자별 Pass / 이슈(EXP·NF·Damaged·OOS) 건수·수량
   const scanRows = (res.scanStats||[]).map(s =>
-    `<tr><td>${s.worker}</td><td style="color:var(--green)">${s.pass}</td><td style="color:${s.issueCount>0?'var(--red)':'var(--text-dim2)'}">${s.issueCount}건</td><td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim2)'}">${s.issueQty.toLocaleString()}pcs</td></tr>`).join('')
-    || '<tr><td colspan="4" style="color:var(--text-dim2)">스캔 기록 없음</td></tr>';
+    `<tr><td>${s.worker}</td><td style="color:var(--green); font-weight:700;">${s.pass}</td><td style="color:${s.issueCount>0?'var(--red)':'var(--text-dim)'}; font-weight:700;">${s.issueCount}건</td><td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim)'}; font-weight:700;">${s.issueQty.toLocaleString()}pcs</td></tr>`).join('')
+    || '<tr><td colspan="4" style="color:var(--text-dim)">스캔 기록 없음</td></tr>';
 
   const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS', SKUMIS:'SKUMIS'};
   const byReason = res.totals.byReason || {};
@@ -3405,7 +3409,7 @@ async function renderKPI(){
     <div style="margin-bottom:16px;">
       <div style="font-weight:700; color:var(--text); margin-bottom:6px;">① 작업자별 피킹 세션 (시작~종료 · 실제 처리 SKU/PCS)</div>
       <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
-      <table style="width:100%; min-width:520px; font-size:11.5px;"><thead><tr style="color:var(--text-dim2)">
+      <table style="width:100%; min-width:520px; font-size:11.5px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
         <th style="text-align:left">작업자</th><th style="text-align:left">담당페이지</th><th style="text-align:left">시작</th><th style="text-align:left">종료</th><th style="text-align:left">소요</th><th style="text-align:left">SKU</th><th style="text-align:left">PCS</th>
       </tr></thead>
       <tbody>${pickRows}</tbody></table>
@@ -3414,13 +3418,13 @@ async function renderKPI(){
     <div>
       <div style="font-weight:700; color:var(--text); margin-bottom:6px;">② 작업자별 분류·검수 현황 (Pass · 이슈)</div>
       <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
-      <table style="width:100%; min-width:340px; font-size:11.5px;"><thead><tr style="color:var(--text-dim2)">
+      <table style="width:100%; min-width:340px; font-size:11.5px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
         <th style="text-align:left">작업자</th><th style="text-align:left">Pass</th><th style="text-align:left">이슈 건수</th><th style="text-align:left">이슈 수량</th>
       </tr></thead>
       <tbody>${scanRows}</tbody></table>
       </div>
     </div>
-    <div style="margin-top:10px; color:var(--text-dim2); font-size:11px;">③ 총 처리: Pass ${res.totals.pass.toLocaleString()} · 이슈 ${res.totals.issueCount}건 (${reasonSummary})</div>
+    <div style="margin-top:10px; color:var(--text-dim); font-size:11px;">③ 총 처리: Pass ${res.totals.pass.toLocaleString()} · 이슈 ${res.totals.issueCount}건 (${reasonSummary})</div>
   `;
 }
 document.getElementById('btnRefreshKPI').onclick = renderKPI;
