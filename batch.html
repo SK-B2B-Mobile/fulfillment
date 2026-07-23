@@ -957,6 +957,9 @@ const state = {
   ],
   currentWorker: null,
   userHasUploaded: false, // ★ 2026-07-14 신규: 실제 파일 드롭 여부 — 임시저장 복원 경합 방지용
+  batchFormIsFreshDraft: false, // ★ 2026-07-23 신규: state.sumFile/custFiles가 "이 세션에서 사용자가 직접 새로 올린 것"인지
+                                 // (true) 아니면 "다른 배치를 복원/이어받기로 불러온 것"인지(false) 구분.
+                                 // false인 채로 01 Batch 탭에 들어가면 handleBatchTabEntry()가 확인 후 리셋함.
   previewBatchId: null, // ★ 2026-07-14 신규: STEP01 화면 표시 전용 — 절대 폴링에 쓰면 안 됨(state.batchId와 분리)
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호
@@ -1204,6 +1207,7 @@ async function continueOpenBatch(batchId){
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
   }));
+  state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존 배치를 불러온 것
   state.slots.forEach(s => { s.assignedTo = null; });
   state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
@@ -1264,6 +1268,7 @@ async function restoreBatchFromServer(){
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
   }));
+  state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존(활성) 배치를 복원한 것
   state.slots.forEach(s => { s.assignedTo = null; });
   state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
@@ -1428,6 +1433,7 @@ let __parsingLock = false; // 총량/고객사 드롭존 동시 파싱 방지 (R
 setupDropZone('dropSum', 'sumFile', true, async files => {
   if(!files.length) return;
   state.userHasUploaded = true; // ★ 2026-07-14: 실제로 드롭이 시작된 순간부터 임시저장 복원 차단
+  state.batchFormIsFreshDraft = true; // ★ 2026-07-23: 이 파일은 사용자가 지금 직접 올린 신규 초안임
   if(!serverAvailable()){
     toast('run_app.py 로 실행해야 파일 업로드가 됩니다 · 지금은 데모 데이터 사용', 'error');
     return;
@@ -1491,6 +1497,7 @@ setupDropZone('dropSum', 'sumFile', true, async files => {
 setupDropZone('dropCust', 'custFile', true, async files => {
   if(!files.length) return;
   state.userHasUploaded = true; // ★ 2026-07-14: 실제로 드롭이 시작된 순간부터 임시저장 복원 차단
+  state.batchFormIsFreshDraft = true; // ★ 2026-07-23: 이 파일은 사용자가 지금 직접 올린 신규 초안임
   if(!serverAvailable()){
     toast('run_app.py 로 실행해야 파일 업로드가 됩니다 · 지금은 데모 데이터 사용', 'error');
     return;
@@ -1654,6 +1661,62 @@ function renderFileTags(){
       toast('전체 초기화 완료', 'success');
     };
   }
+}
+
+// ★ 2026-07-23 신규 — "다른 배치(어제 이월분 등)가 이미 로드된 상태"에서
+//   "01 Batch" 탭으로 들어가면, 그 배치의 고객사 목록이 화면에 남아있는 채로
+//   오늘 새 PDF를 드롭하게 되어 어제+오늘이 합쳐지는 사고가 있었음
+//   (활성 배치 자동 동기화 추가로 새로 생긴 문제 — restoreBatchFromServer가
+//   페이지 열 때 자동으로 이전 활성 배치를 state.custFiles에 채워놓기 때문).
+//   "01 Batch" 탭에 들어갈 때 이미 로드된 배치가 있으면, 서버 데이터는 전혀
+//   건드리지 않고 화면(로컬 state)만 완전히 빈 새 배치 작성 폼으로 리셋한다.
+//   (기존 "전체 초기화" 버튼과 동일한 방식 + batchId/슬롯/폴링까지 같이 정리)
+function resetBatchFormForNewBatch(){
+  state.sumFile = null;
+  state.custFiles = [];
+  state.userHasUploaded = false;
+  state.batchFormIsFreshDraft = false;
+  state.batchId = null;
+  state.slots.forEach(s => { s.assignedTo = null; });
+  state.scanIndex = {};
+  state.clearedInvoices = new Set();
+  clearDraftFromLocalStorage();
+
+  const zs = document.getElementById('dropSum');
+  zs.className = 'drop';
+  zs.querySelector('.drop-title').textContent = '총량 피킹 리스트';
+  zs.querySelector('.drop-hint').textContent = 'GROUP PICKING CHECK LIST.pdf · 1차+2차 가능';
+  const zc = document.getElementById('dropCust');
+  zc.className = 'drop';
+  zc.querySelector('.drop-title').textContent = '고객사별 피킹 리스트';
+  zc.querySelector('.drop-hint').textContent = '여러 개 동시 선택 가능';
+
+  const chip = document.getElementById('batchChip');
+  if(chip){ chip.textContent = ''; chip.classList.remove('active'); }
+  document.querySelectorAll('nav button[data-view]').forEach(b => {
+    if(b.dataset.view === 'v-slots' || b.dataset.view === 'v-scan') b.disabled = true;
+  });
+
+  renderFileTags();
+  updateBatchStats();
+}
+
+// "01 Batch" 탭 진입 시, 이미 로드된 배치(어제 이월분 등)가 있으면 확인 후 리셋.
+// 이 배치가 없거나(=순수 신규 작성 중) 이미 이 폼에서 직접 업로드한 상태라면
+// (userHasUploaded=true) 그냥 통과 — 자기가 지금 만들던 걸 실수로 지우지 않도록.
+function handleBatchTabEntry(){
+  if(state.batchId && !state.batchFormIsFreshDraft){
+    const ok = confirm(
+      `⚠ 현재 배치 ${state.batchId}가 로드되어 있습니다.\n\n` +
+      `새 배치를 만들면 이 화면은 완전히 빈 상태로 초기화됩니다.\n` +
+      `(서버에 저장된 ${state.batchId}의 데이터는 전혀 삭제되지 않으며,\n` +
+      `"⇄ 다른 배치" 버튼으로 언제든 다시 불러올 수 있습니다.)\n\n` +
+      `새 배치를 만드시겠습니까?`
+    );
+    if(!ok) return false; // 취소 → 탭 이동 자체를 막음(기존 화면 유지)
+    resetBatchFormForNewBatch();
+  }
+  return true;
 }
 
 function updateBatchStats(){
@@ -1852,6 +1915,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
       return;
     }
     state.batchId = created.batchId; // 서버가 발급한 정식 배치ID로 교체
+    state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이제 "작성 중 초안"이 아니라 "실제 활성 배치"가 됨
     clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
     gasCall('setActiveBatch', { batchId: state.batchId }); // ★ 2026-07-23 신규: 다른 기기들이 자동으로 이 새 배치를 따라오게 함
   }
@@ -2139,7 +2203,13 @@ function startStructurePolling(){
 
 
 document.querySelectorAll('nav button[data-view]').forEach(b => {
-  b.onclick = () => { if(!b.disabled) gotoView(b.dataset.view); };
+  b.onclick = () => {
+    if(b.disabled) return;
+    // ★ 2026-07-23: "01 Batch" 탭은 다른 배치가 로드된 상태로 들어가면
+    //   데이터가 섞일 수 있어 진입 전 확인/리셋을 거침 (handleBatchTabEntry 참고)
+    if(b.dataset.view === 'v-batch' && !handleBatchTabEntry()) return;
+    gotoView(b.dataset.view);
+  };
 });
 function gotoView(vid){
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view===vid));
