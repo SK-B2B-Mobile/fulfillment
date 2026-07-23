@@ -201,6 +201,10 @@ function doGet(e) {
   if (op === 'getActivePickers') {
     return json_(getActivePickers((e.parameter || {}).batchId || ''));
   }
+  // ★ 2026-07-23 신규 — 매니저가 지정한 "지금 활성 배치"를 모든 기기가 조회
+  if (op === 'getActiveBatch') {
+    return json_(getActiveBatch());
+  }
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -342,6 +346,9 @@ function doPost(e) {
   if (op === 'editIssue')      return json_(editIssue(data)); // ★ 2026-07-22 신규
   // ★ 2026-07-16 신규 — 총량피킹 작업자 명단 서버 저장
   if (op === 'setBatchWorkers') return json_(setBatchWorkers(data));
+  // ★ 2026-07-23 신규 — 매니저가 배치를 이어서/새로 시작하면 서버에 "활성 배치" 기록
+  if (op === 'setActiveBatch')  return json_(setActiveBatch(data));
+  if (op === 'clearActiveBatch') return json_(clearActiveBatch());
 
   return json_({ ok: false, error: 'unknown op' });
 }
