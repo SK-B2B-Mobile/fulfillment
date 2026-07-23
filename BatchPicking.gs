@@ -476,6 +476,22 @@ function logIssue(data) {
       data.invoice, data.customer || '', data.reason || 'ETC',
       qty, data.note || '', 'active'
     ]);
+    // ★ 2026-07-22 신규 — 매우 중요한 버그 수정:
+    //   총량피킹은 "스캔 = 그 SKU를 필요로 하는 모든 고객사가 즉시 전량 pass
+    //   처리"되는 구조라서, 이슈를 나중에 등록해도 그 전에 이미 서버에는
+    //   "287개 pass"라는 기록이 그대로 남아있었음. 그래서 이슈를 취소(undone)
+    //   해도 이 phantom pass 기록 때문에 현황판이 계속 "완료"로 잘못 표시됨
+    //   (실제 사례: EXP 287개 이슈 취소했는데 TV엔 계속 287/287 완료로 남음).
+    //   → 이슈 등록과 동시에 그 수량만큼 상쇄하는 마이너스 pass 기록을 남겨서
+    //   실제 "확인된 처리량"이 정확해지도록 함. 이 보정 기록은 이슈를 나중에
+    //   취소해도 그대로 유지됨 — "이슈 취소"는 "필요수량에 다시 포함시킨다"는
+    //   뜻이지 "이미 스캔된 걸로 자동 확정한다"는 뜻이 아니기 때문
+    //   (다시 필요하다고 표시된 이상, 실제로 다시 스캔해서 확인해야 정확함).
+    scanlogSheet_().appendRow([
+      data.batchId, 'ADJ-' + issueId, batchNow_(), data.worker || '',
+      data.barcode || '', data.sku || '', '', data.customer || '',
+      data.invoice, 'pass', 'active', -qty
+    ]);
     bumpVersion_();
     return { ok: true, issueId: issueId };
   } catch (e) {
@@ -487,6 +503,10 @@ function logIssue(data) {
 
 /* ===================== ④-3 undoIssue (★ 2026-07-16 신규) =====================
  * 잘못 등록한 이슈를 취소 (삭제 대신 Status를 'undone'으로 변경)
+ * ★ 2026-07-22: logIssue가 같이 남긴 상쇄용 보정 스캔 기록(ADJ-이슈ID)은
+ *   여기서 일부러 건드리지 않음 — "이슈 취소"는 "다시 필요수량에 포함시킨다"
+ *   는 뜻이지 "그 수량이 이미 정상적으로 스캔된 걸로 자동 확정한다"는 뜻이
+ *   아니기 때문. 다시 필요하다고 표시된 이상, 실제로 재스캔해서 확인해야 함.
  * 입력: { issueId }
  * ============================================================ */
 function undoIssue(data) {
@@ -538,6 +558,20 @@ function editIssue(data) {
         sh.getRange(row, 10).setValue(data.reason || 'ETC'); // J: Reason
         sh.getRange(row, 11).setValue(qty);                  // K: Qty
         sh.getRange(row, 12).setValue(data.note || '');      // L: Note
+        // ★ 2026-07-22 신규: 수량을 고치면, logIssue가 같이 남겨둔 상쇄용
+        //   보정 스캔 기록(ADJ-이슈ID)의 수량도 같이 맞춰줘야 정확함.
+        const sl = scanlogSheet_();
+        const slLast = sl.getLastRow();
+        if (slLast >= 2) {
+          const scanIds = sl.getRange(2, 2, slLast - 1, 1).getValues();
+          const adjTarget = 'ADJ-' + issueId;
+          for (let j = 0; j < scanIds.length; j++) {
+            if (String(scanIds[j][0]) === adjTarget) {
+              sl.getRange(j + 2, 12).setValue(-qty); // L: Qty
+              break;
+            }
+          }
+        }
         bumpVersion_();
         return { ok: true };
       }
