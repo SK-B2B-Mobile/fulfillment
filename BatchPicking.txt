@@ -1041,6 +1041,7 @@ function getSlotProgress(batchId) {
           slotNum: isNaN(numericSlot) ? rawSlot : numericSlot,
           slotSize: r[8], invoice: invoice,
           customer: r[2], shipVia: r[4], totalQty: totalQty,
+          effectiveTotal: effectiveTotal, // ★ 2026-07-23 신규: 이슈 반영된 실제 필요수량 — TV가 웹(batch.html)과 같은 기준으로 보여주도록
           scanned: scanned, status: status,
           totalSku: skuStat.totalSku, doneSku: skuStat.doneSku,
           cleared: r[9] || '', // ★ 2026-07-14 신규: 비어있으면 "패킹완료·슬롯비우기" 버튼 표시 대상
