@@ -22,6 +22,10 @@ const BITEMS_SHEET   = 'BatchItems';
 const SCANLOG_SHEET  = 'ScanLog';
 const PICKTIME_SHEET = 'PickTiming';
 const ISSUELOG_SHEET = 'IssueLog'; // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
+// ★ 2026-07-22 신규 — 완료된 지 오래된 배치를 "삭제"가 아니라 "보관용 시트로 이동"
+//   시킬 때 쓰는 짝지어진 Archive_ 시트 이름들. 메인 시트는 가볍게 유지하면서도
+//   기록은 하나도 없어지지 않음(그냥 다른 탭으로 옮겨질 뿐).
+const ARCHIVE_PREFIX = 'Archive_';
 const BWORKERS_SHEET = 'BatchWorkers'; // ★ 2026-07-16 신규 — 총량피킹 "작업자 관리" 명단 서버 저장용
 
 function batchTz_() { return Session.getScriptTimeZone(); }
@@ -1116,6 +1120,124 @@ function getOpenBatches() {
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
+}
+
+/* ===================== ⑬ archiveOldBatches (★ 2026-07-22 신규) =====================
+ * 목적: 메인 시트(Batches/BatchCustomers/BatchItems/ScanLog/PickTiming/IssueLog)가
+ *       계속 쌓여서 느려지는 걸 막기 위해, "완료(completed)된 지 daysOld일이
+ *       지난 배치"의 데이터를 삭제하는 대신 Archive_ 접두사가 붙은 별도 시트로
+ *       옮김. 기록은 하나도 안 없어지고(Archive_ 시트에 그대로 있음), 매일
+ *       쓰는 메인 시트만 가벼워짐.
+ *
+ * 사용법 1) 수동 실행: Apps Script 에디터에서 함수 목록 archiveOldBatches 선택
+ *          → ▶ 실행 (기본 14일 지난 완료 배치를 옮김)
+ * 사용법 2) 자동 실행(매일 새벽): 함수 목록에서 setupArchiveTrigger 선택
+ *          → ▶ 실행 (한 번만 하면 그 뒤로 매일 새벽 자동으로 정리됨)
+ *          끄고 싶으면 removeArchiveTrigger 실행
+ * ===================================================================== */
+function archiveOldBatches(daysOld) {
+  daysOld = daysOld || 14; // 기본값: 완료된 지 14일 지난 배치부터 이동
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+
+    // 1) 옮길 대상 배치ID 목록 뽑기 — 완료 상태 + CompletedAt이 기준일보다 오래된 것만
+    const bSh = batchesSheet_();
+    const bLast = bSh.getLastRow();
+    if (bLast < 2) { Logger.log('Batches: 데이터 없음'); return { ok: true, archived: [] }; }
+    const bRows = bSh.getRange(2, 1, bLast - 1, 7).getValues();
+    const targetBatchIds = [];
+    bRows.forEach(r => {
+      const status = String(r[2] || '');
+      const completedAt = r[6];
+      const isDate = Object.prototype.toString.call(completedAt) === '[object Date]' && !isNaN(completedAt);
+      if (status === 'completed' && isDate && completedAt.getTime() < cutoffMs) {
+        targetBatchIds.push(String(r[0]));
+      }
+    });
+
+    if (targetBatchIds.length === 0) {
+      Logger.log('보관 대상 없음 (완료된 지 ' + daysOld + '일 넘은 배치 없음)');
+      return { ok: true, archived: [] };
+    }
+
+    // 2) 시트 6개 각각에 대해: 대상 배치 행은 Archive_ 시트로 복사 후 메인에서 제거
+    const sheetsToArchive = [
+      { name: BATCHES_SHEET,  get: batchesSheet_,  headers: ['BatchId','Date','Status','TotalSku','TotalQty','CreatedAt','CompletedAt'] },
+      { name: BCUST_SHEET,    get: bcustSheet_,     headers: ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared'] },
+      { name: BITEMS_SHEET,   get: bitemsSheet_,    headers: ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack'] },
+      { name: SCANLOG_SHEET,  get: scanlogSheet_,   headers: ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty'] },
+      { name: PICKTIME_SHEET, get: picktimeSheet_,  headers: ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes'] },
+      { name: ISSUELOG_SHEET, get: issuelogSheet_,  headers: ['BatchId','IssueId','Timestamp','Worker','Barcode','SKU','Name','Invoice','Customer','Reason','Qty','Note','Status'] },
+    ];
+
+    const summary = [];
+    sheetsToArchive.forEach(({ name, get, headers }) => {
+      const sh = get();
+      const last = sh.getLastRow();
+      const lastCol = sh.getLastColumn();
+      if (last < 2) { summary.push(name + ': 데이터 없음'); return; }
+
+      const allRows = sh.getRange(2, 1, last - 1, lastCol).getValues();
+      const toArchive = allRows.filter(r => targetBatchIds.indexOf(String(r[0])) !== -1);
+      const toKeep = allRows.filter(r => targetBatchIds.indexOf(String(r[0])) === -1);
+
+      if (toArchive.length > 0) {
+        const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + name, headers);
+        archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
+      }
+
+      sh.getRange(2, 1, last - 1, lastCol).clearContent();
+      if (toKeep.length > 0) {
+        sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep);
+      }
+
+      summary.push(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
+      Logger.log(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
+    });
+
+    Logger.log('✅ 보관 완료 — 배치 ' + targetBatchIds.length + '개 (' + targetBatchIds.join(', ') + ')');
+    return { ok: true, archived: targetBatchIds, summary: summary };
+  } catch (e) {
+    Logger.log('❌ archiveOldBatches 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
+function archiveOldBatchesDaily() {
+  archiveOldBatches(14);
+}
+
+function setupArchiveTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'archiveOldBatchesDaily') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  ScriptApp.newTrigger('archiveOldBatchesDaily')
+    .timeBased()
+    .atHour(2) // 새벽 2시~3시 사이 자동 실행 (한산한 시간대)
+    .everyDays(1)
+    .create();
+  Logger.log('✅ 트리거 설정 완료 — 매일 새벽 2시경, 완료된 지 14일 지난 배치를 Archive_ 시트로 자동 이동합니다.');
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    '매일 새벽 완료된 지 14일 지난 배치를 자동으로 보관 시트로 옮깁니다.',
+    '✅ 자동 보관 트리거 설정 완료',
+    5
+  );
+}
+
+function removeArchiveTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'archiveOldBatchesDaily') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  Logger.log('자동 보관 트리거 삭제됨');
 }
 
 /* =====================================================
