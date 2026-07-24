@@ -1227,7 +1227,10 @@ function getSlotProgress(batchId) {
     });
 
     const doneCount = slots.filter(s => s.status === 'done').length;
-    return { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
+    return {
+      ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length,
+      _debugVer: 'v2026-07-24-statusfix', // ★ 배포 확인용 — 이 필드가 안 보이면 예전 코드가 아직 돌고 있는 것
+    };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
