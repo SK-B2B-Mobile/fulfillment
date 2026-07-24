@@ -741,6 +741,12 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             <button class="btn btn-ghost btn-sm" id="btnSyncBatch" style="font-size:11px;">↺ 배치 데이터 동기화 (고객사·상품 다시 불러오기)</button>
           </div>
 
+          <!-- ★ 2026-07-23 신규 — 바코드가 훼손/인쇄불량 등으로 스캐너가 못 읽는
+               경우, 숫자를 직접 입력해서 처리할 수 있는 수동 입력 버튼 -->
+          <div class="row" style="margin-bottom:8px;">
+            <button class="btn btn-ghost btn-sm" id="btnManualScan" style="font-size:11px; width:100%; justify-content:center;">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
+          </div>
+
           <div class="scan-input-wrap">
             <span class="scan-icon">▤</span>
             <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus>
@@ -842,6 +848,21 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
 </div>
 
 <!-- Modals -->
+<div class="modal-bg" id="manualScanModal">
+  <div class="modal">
+    <h3>바코드 수동 입력</h3>
+    <p class="sub">스캐너가 인식 못 하는 바코드(훼손·인쇄불량 등)일 때, 숫자를 직접 입력해서 처리합니다. 실제 스캔한 것과 동일하게 처리됩니다.</p>
+    <div class="form-field">
+      <label>바코드 번호</label>
+      <input type="text" id="manualScanInput" placeholder="예: 8809562559924" inputmode="numeric" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-modal-close>취소</button>
+      <button class="btn btn-primary" id="manualScanSubmit">처리</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="workerModal">
   <div class="modal">
     <h3 id="workerModalTitle">작업자 추가</h3>
@@ -3726,6 +3747,25 @@ function openWorkerModal(id=null){
 }
 
 document.getElementById('btnAddWorker').onclick = () => openWorkerModal();
+
+// ★ 2026-07-23 신규 — 바코드 수동 입력. 스캐너가 못 읽는 바코드를 사람이 숫자로
+// 직접 입력해서, 실제 스캔한 것과 완전히 동일한 경로(doScan)로 처리함.
+document.getElementById('btnManualScan').onclick = () => {
+  document.getElementById('manualScanInput').value = '';
+  document.getElementById('manualScanModal').classList.add('open');
+  setTimeout(() => document.getElementById('manualScanInput').focus(), 50);
+};
+function submitManualScan(){
+  const code = document.getElementById('manualScanInput').value.trim();
+  if(!code){ toast('바코드 번호를 입력하세요', 'error'); return; }
+  closeAllModals();
+  scanInput.value = code;
+  doScan(); // 실제 스캔과 완전히 동일한 처리(중복 체크, SKU 매칭, 완료 판정 등)
+}
+document.getElementById('manualScanSubmit').onclick = submitManualScan;
+document.getElementById('manualScanInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter') submitManualScan();
+});
 document.getElementById('workerModalSave').onclick = () => {
   const name = document.getElementById('workerModalName').value.trim();
   if(!name){ toast('이름을 입력하세요', 'error'); return; }
