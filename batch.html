@@ -2415,9 +2415,13 @@ function renderSlots(){
 
     if(!skuProgressByInvoice[q.invoice]) skuProgressByInvoice[q.invoice] = {doneSku:0, totalSku:0};
     skuProgressByInvoice[q.invoice].totalSku += 1;
-    // ★ 2026-07-13 수정: '요청수량 100% 완료'가 아니라 '스캔이 1개라도 된 SKU'를 카운트
-    //   (TV 현황판 getSlotProgress와 동일한 기준으로 통일 — 안 그러면 화면마다 숫자가 다르게 보임)
-    if(q.done > 0) skuProgressByInvoice[q.invoice].doneSku += 1;
+    // ★ 2026-07-24 긴급 수정 — TV(GAS)에서 찾은 것과 같은 버그가 여기도 있었음:
+    //   "스캔이 1개라도 되면 완료"로 카운트해서, 500개 필요한데 5개만 스캔해도
+    //   "그 SKU 완료"로 잘못 잡혔음. q.need는 이미 이슈만큼 줄어든 "실제 필요수량"
+    //   이므로, q.done이 그걸 다 채웠을 때만(또는 이슈로 필요수량 자체가 0이 됐을
+    //   때만) 완료로 카운트하도록 수정. (q.done은 q.need로 클램프되어 있어 사실상
+    //   ===와 동일하지만, 방어적으로 >= 사용)
+    if(q.done >= q.need) skuProgressByInvoice[q.invoice].doneSku += 1;
   }));
 
   function slotHtml(slot){
