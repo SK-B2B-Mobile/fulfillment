@@ -108,8 +108,20 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-bar > div{height:100%; background:var(--amber); transition:width 0.5s;}
 .card.done .card-bar{background:rgba(4,20,13,0.18);}
 .card.done .card-bar > div{background:#04140D;}
-.card-done-tag{font-family:var(--mono); font-size:22px; font-weight:800; color:var(--green); margin-top:10px; display:none; align-items:center; gap:6px;}
-.card.done .card-done-tag{display:flex; color:#04140D;}
+/* ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 (구 .card-done-tag 정적 문구를 대체).
+   clearSlot(슬롯비우기)과 무관한 순수 표시용 상태. 체크하면 카드 전체가 블루로
+   바뀌어서, 초록(=완료했지만 아직 패킹존으로 안 옮김, 신경 써야 함)과 한눈에 구분됨. */
+.card-pack-check{display:none; align-items:center; gap:8px; cursor:pointer; margin-top:10px;}
+.card.done .card-pack-check{display:flex;}
+.card.done .card-pack-check .label{font-family:var(--mono); font-size:18px; font-weight:800; color:#04140D;}
+.card.done.moved{background:#2E0E22; border-color:#EC4899;}
+.card.done.moved .card-slot, .card.done.moved .card-cust, .card.done.moved .card-invoice,
+.card.done.moved .card-metarow, .card.done.moved .card-sku{color:var(--text);}
+.card-pack-check .box{width:22px; height:22px; border-radius:5px; border:2px solid #04140D; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+.card.done.moved .card-pack-check .box{border-color:#EC4899; background:#EC4899;}
+.card-pack-check .box svg{display:none; width:14px; height:14px;}
+.card.done.moved .card-pack-check .box svg{display:block;}
+.card.done.moved .card-pack-check .label{color:#EC4899;}
 .card-empty{display:flex; align-items:center; justify-content:center; height:100%; font-family:var(--mono); font-size:20px; color:var(--text-dim); opacity:0.4;}
 
 .empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
@@ -278,6 +290,21 @@ function shipClass(v){
 
 let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상세 조회용
 
+// ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
+// 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
+async function togglePackingMoved(invoice){
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  const next = !slot.movedToPacking;
+  slot.movedToPacking = next; // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
+  renderBoard(Object.values(_slotsByInvoice));
+  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, moved: next });
+  if(!res.ok){
+    slot.movedToPacking = !next; // 실패하면 원상복구
+    renderBoard(Object.values(_slotsByInvoice));
+  }
+}
+
 function cardHtml(slot){
   if(!slot){
     return `<div class="card"><div class="card-empty">비어있음</div></div>`;
@@ -296,7 +323,7 @@ function cardHtml(slot){
   const issueBadge = slot.issueQty > 0
     ? `<span class="card-issue-badge" data-invoice="${slot.invoice}">⚠ ${slot.issueQty.toLocaleString()}</span>`
     : '';
-  return `<div class="card ${slot.status}${flashClass}" data-invoice="${slot.invoice}">
+  return `<div class="card ${slot.status}${slot.movedToPacking?' moved':''}${flashClass}" data-invoice="${slot.invoice}">
     <div class="card-top">
       <span class="card-slot">${numLabel}</span>
       <div class="card-top-right">
@@ -312,7 +339,10 @@ function cardHtml(slot){
         <span>${slot.scanned.toLocaleString()} / ${target.toLocaleString()} pcs</span>
       </div>
       <div class="card-bar"><div style="width:${pct}%"></div></div>
-      <div class="card-done-tag">✓ 완료 · 패킹 이동</div>
+      <div class="card-pack-check" data-pack-invoice="${slot.invoice}">
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#04140D" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
+        <span class="label">${slot.movedToPacking ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
+      </div>
     </div>
   </div>`;
 }
@@ -495,6 +525,10 @@ async function deleteIssueFromBoard(issueId, idx){
 }
 
 document.addEventListener('click', e => {
+  // ★ 2026-07-23 신규: "패킹존 이동" 체크박스는 카드 안에 있지만 완전히 다른 동작
+  //   (이슈 모달을 열지 않고 그 자리에서 바로 토글) — 카드 클릭 판정보다 먼저 처리.
+  const packCheck = e.target.closest('.card-pack-check');
+  if(packCheck){ togglePackingMoved(packCheck.dataset.packInvoice); return; }
   // ★ 2026-07-23 수정: 이슈 배지뿐 아니라 카드 전체 아무 곳이나 눌러도 모달이 열리도록 확장
   //   (이슈가 0건이어도 열려서 새로 등록할 수 있어야 하므로)
   const card = e.target.closest('.card[data-invoice]');
