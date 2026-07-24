@@ -1164,11 +1164,14 @@ function getSlotProgress(batchId) {
         const bcKey = inv + '|' + String(r[4]);
         const scannedQty = scannedByInvoiceBarcode[bcKey] || 0;
         const issueQty = issueQtyByInvoiceBarcode[bcKey] || 0;
-        // ★ 2026-07-13 수정: "요청수량 100% 완료"가 아니라 "스캔이 1개라도 된 SKU"를
-        //   카운트하도록 변경. ★ 2026-07-16 추가: 이슈로 등록된 SKU도 "손을 댄"
-        //   것이므로(결론이 났으므로) 함께 카운트 — 안 그러면 이슈 처리해도
-        //   SKU 진행률이 영원히 안 올라가는 것처럼 보임.
-        if (scannedQty > 0 || issueQty > 0) skuStatsByInvoice[inv].doneSku++;
+        // ★ 2026-07-24 긴급 수정 — 심각한 버그: reqQty(이 SKU 한 줄의 필요수량)를
+        //   계산만 해두고 실제 비교에서는 안 쓰고 있었음(죽은 코드). 그래서
+        //   "스캔이나 이슈가 1건이라도 있으면 그 SKU는 완료"로 잘못 카운트됨 —
+        //   예: 500개 필요한데 5개만 스캔해도 "완료된 SKU 1개"로 잡힘. 그 결과
+        //   "SKU 8/8 다 됐다는데 총수량은 부족"한 앞뒤 안 맞는 화면이 발생했음.
+        //   이제 "스캔+이슈 합계가 필요수량을 실제로 채웠을 때"만 완료로 카운트함
+        //   (완료 판정 로직 scanned>=effectiveTotal과 같은 원칙을 SKU 단위로도 적용).
+        if (scannedQty + issueQty >= reqQty) skuStatsByInvoice[inv].doneSku++;
       });
     }
 
