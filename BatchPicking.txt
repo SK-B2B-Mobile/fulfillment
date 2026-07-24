@@ -1217,6 +1217,7 @@ function getSlotProgress(batchId) {
           movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용, clearSlot과 무관)
           issueQty: issueQty, // ★ 2026-07-16 신규: 현황판 "⚠ N" 뱃지용
           issues: issuesByInvoice[invoice] || [], // ★ 2026-07-16 신규: 뱃지 클릭 시 상세 목록
+          _dbg: { totalQty: totalQty, issueQty: issueQty, effectiveTotal: effectiveTotal, scanned: scanned, calc: (scanned >= effectiveTotal) }, // ★ 임시 디버그 — 화면 숫자를 잘못 읽는 걸 막기 위한 원본값
         });
       });
     }
