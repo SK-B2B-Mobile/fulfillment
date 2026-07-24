@@ -1294,6 +1294,7 @@ async function continueOpenBatch(batchId){
     meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
+    _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
   }));
   state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존 배치를 불러온 것
   state.slots.forEach(s => { s.assignedTo = null; });
@@ -1356,6 +1357,7 @@ async function restoreBatchFromServer(){
     meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
+    _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
   }));
   state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존(활성) 배치를 복원한 것
   state.slots.forEach(s => { s.assignedTo = null; });
@@ -1522,6 +1524,18 @@ let __parsingLock = false; // 총량/고객사 드롭존 동시 파싱 방지 (R
 
 setupDropZone('dropSum', 'sumFile', true, async files => {
   if(!files.length) return;
+  // ★ 2026-07-24 긴급 수정 — 심각한 재발 버그: "01 Batch 탭 진입 시 확인창"에만
+  //   의존했더니, 확인창을 취소하거나 어떤 이유로 못 보고 지나친 뒤 그대로
+  //   업로드하면 이전 배치(예: 어제 이월분) 데이터 위에 그대로 쌓여서 다시
+  //   합쳐지는 사고가 재발했음(어제 28건 + 오늘 19건 = 47건으로 잘못 인식).
+  //   그래서 확인창과 별개로, "새 파일을 실제로 드롭하는 이 순간" 자체에서
+  //   한 번 더 방어함: 지금 들고 있는 데이터가 이번 세션에 사용자가 직접 올린
+  //   신규 초안이 아니라(batchFormIsFreshDraft=false) 복원된 이전 배치 것이라면,
+  //   조용히 섞이게 두지 않고 자동으로 깨끗이 비운 뒤 업로드를 진행함.
+  if(!state.batchFormIsFreshDraft && (state.sumFile || state.custFiles.some(cf => cf._fromRestore))){
+    resetBatchFormForNewBatch();
+    toast('이전 배치 데이터가 남아있어 자동으로 정리하고 새로 시작합니다', 'success');
+  }
   state.userHasUploaded = true; // ★ 2026-07-14: 실제로 드롭이 시작된 순간부터 임시저장 복원 차단
   state.batchFormIsFreshDraft = true; // ★ 2026-07-23: 이 파일은 사용자가 지금 직접 올린 신규 초안임
   if(!serverAvailable()){
@@ -1586,6 +1600,11 @@ setupDropZone('dropSum', 'sumFile', true, async files => {
 
 setupDropZone('dropCust', 'custFile', true, async files => {
   if(!files.length) return;
+  // ★ 2026-07-24 긴급 수정: dropSum과 동일한 안전장치 (자세한 설명은 위 dropSum 참고)
+  if(!state.batchFormIsFreshDraft && (state.sumFile || state.custFiles.some(cf => cf._fromRestore))){
+    resetBatchFormForNewBatch();
+    toast('이전 배치 데이터가 남아있어 자동으로 정리하고 새로 시작합니다', 'success');
+  }
   state.userHasUploaded = true; // ★ 2026-07-14: 실제로 드롭이 시작된 순간부터 임시저장 복원 차단
   state.batchFormIsFreshDraft = true; // ★ 2026-07-23: 이 파일은 사용자가 지금 직접 올린 신규 초안임
   if(!serverAvailable()){
