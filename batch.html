@@ -2076,20 +2076,29 @@ function buildScanIndex(){
   for(const [bc, sumIt] of Object.entries(sumByBc)){
     const queue = [];
     state.custFiles.forEach(cf => {
+      // ★ 2026-07-24 긴급 수정 — 심각한 버그: 같은 고객사 PDF 안에 같은 바코드가
+      //   두 줄로 나뉘어 있으면(예: 분할 입고로 700개+570개) 예전엔 이걸 합치지
+      //   않고 큐 항목을 2개 따로 만들었음. 그러면 "누적 스캔량 1,260개"가
+      //   각 줄(700개 필요/570개 필요)마다 따로 비교돼서 둘 다 "완료"로 잘못
+      //   잡히는 사고가 있었음(진짜로는 1,270개 필요한데 1,260개로 완료 처리됨).
+      //   해결: 같은 바코드의 여러 줄을 먼저 합산해서 큐 항목 1개로 병합.
+      let mergedNeed = 0;
+      let found = false;
       cf.items.forEach(it => {
-        if(String(it.barcode) === bc){
-          queue.push({
-            customer: cf.meta.customer,
-            invoice: cf.meta.invoice_no,
-            ship_date: cf.meta.ship_date,
-            ship_via: cf.meta.ship_via,
-            slot: null,   // 슬롯 배정 후 채움
-            origNeed: it.req_qty, // ★ 2026-07-16 신규: 이슈 반영 전 원래 필요수량(불변)
-            need: it.req_qty,     // 이슈 등록되면 origNeed - 이슈수량으로 재계산됨
-            done: 0,
-          });
-        }
+        if(String(it.barcode) === bc){ mergedNeed += (it.req_qty || 0); found = true; }
       });
+      if(found){
+        queue.push({
+          customer: cf.meta.customer,
+          invoice: cf.meta.invoice_no,
+          ship_date: cf.meta.ship_date,
+          ship_via: cf.meta.ship_via,
+          slot: null,   // 슬롯 배정 후 채움
+          origNeed: mergedNeed, // ★ 2026-07-16 신규: 이슈 반영 전 원래 필요수량(불변) — 이제 중복 줄 합산값
+          need: mergedNeed,     // 이슈 등록되면 origNeed - 이슈수량으로 재계산됨
+          done: 0,
+        });
+      }
     });
     state.scanIndex[bc] = {
       sku: sumIt.sku, name: sumIt.name, rack: sumIt.rack, barcode: bc,
