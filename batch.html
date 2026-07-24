@@ -174,8 +174,22 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot.empty{border-style:dashed; background:var(--bg2);}
 .slot.dragover{border-color:var(--cyan) !important; background:var(--cyan-bg) !important;}
 @keyframes slotPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.35);} 50%{box-shadow:0 0 0 6px rgba(245,158,11,0);}}
-.slot-done-badge{display:none; align-items:center; gap:4px; font-family:var(--mono); font-size:10px; font-weight:800; color:var(--green); letter-spacing:0.05em; margin-top:4px;}
-.slot.done .slot-done-badge{display:flex; color:#04140D;}
+.slot-done-badge{display:none;}
+/* ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 (구 .slot-done-badge 정적 문구 대체).
+   clearSlot(슬롯비우기 버튼, 아래 .slot-clear-btn)과는 완전히 별개의 순수 표시용
+   상태. 체크하면 카드 전체가 블루로 바뀌어서 초록(=완료했지만 아직 패킹존으로
+   안 옮김, 신경 써야 함)과 한눈에 구분됨. */
+.slot-pack-check{display:none; align-items:center; gap:6px; cursor:pointer; margin-top:6px;}
+.slot.done .slot-pack-check{display:flex;}
+.slot-pack-check .label{font-family:var(--mono); font-size:10px; font-weight:800; color:#04140D; letter-spacing:0.05em;}
+.slot-pack-check .box{width:16px; height:16px; border-radius:4px; border:2px solid #04140D; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+.slot-pack-check .box svg{display:none; width:10px; height:10px;}
+.slot.done.moved{background:#2E0E22 !important; border-color:#EC4899 !important;}
+.slot.done.moved .slot-num, .slot.done.moved .slot-co, .slot.done.moved .slot-meta,
+.slot.done.moved .slot-invoice{color:var(--text) !important;}
+.slot.done.moved .slot-pack-check .label{color:#EC4899;}
+.slot.done.moved .slot-pack-check .box{border-color:#EC4899; background:#EC4899;}
+.slot.done.moved .slot-pack-check .box svg{display:block;}
 .slot-clear-btn{width:100%; margin-top:8px; padding:7px; border:1px solid #04140D; border-radius:6px; background:rgba(4,20,13,0.15); color:#04140D; font-weight:800; font-size:10.5px; cursor:pointer; font-family:var(--sans);}
 .slot-clear-btn:hover{background:rgba(4,20,13,0.28);}
 .slot-clear-btn:disabled{opacity:0.6; cursor:default;}
@@ -1007,6 +1021,7 @@ const state = {
                                  // false인 채로 01 Batch 탭에 들어가면 handleBatchTabEntry()가 확인 후 리셋함.
   previewBatchId: null, // ★ 2026-07-14 신규: STEP01 화면 표시 전용 — 절대 폴링에 쓰면 안 됨(state.batchId와 분리)
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
+  movedToPackingInvoices: new Set(), // ★ 2026-07-23 신규: "패킹존 이동" 체크된 고객사 (clearSlot과 무관한 순수 표시용)
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호 (더 이상 배정 차단엔 안 씀, 참고용)
   occupiedSlotDetail: {},     // ★ 2026-07-23 신규: num -> {batchId, batchDate, customer} — 경고 배지 표시 전용
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
@@ -1261,6 +1276,7 @@ async function continueOpenBatch(batchId){
     const slot = state.slots.find(s => s.num === Number(c.slotNum));
     if(slot) slot.assignedTo = c.invoice;
     if(c.cleared) state.clearedInvoices.add(c.invoice);
+    if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
   });
 
   buildScanIndex();
@@ -1322,6 +1338,7 @@ async function restoreBatchFromServer(){
     const slot = state.slots.find(s => s.num === Number(c.slotNum));
     if(slot) slot.assignedTo = c.invoice;
     if(c.cleared) state.clearedInvoices.add(c.invoice);
+    if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
   });
 
   document.getElementById('dropSum').className = 'drop filled';
@@ -1726,6 +1743,7 @@ function resetBatchFormForNewBatch(){
   state.slots.forEach(s => { s.assignedTo = null; });
   state.scanIndex = {};
   state.clearedInvoices = new Set();
+  state.movedToPackingInvoices = new Set();
   clearDraftFromLocalStorage();
 
   const zs = document.getElementById('dropSum');
@@ -2365,7 +2383,8 @@ function renderSlots(){
         <div class="slot-empty-msg">비어있음</div>
       </div>`;
     }
-    return `<div class="slot ${status}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
+    const moved = state.movedToPackingInvoices.has(cf.meta.invoice_no);
+    return `<div class="slot ${status}${moved?' moved':''}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
       <div class="slot-head">
         <span class="slot-num">${numLabel}</span>
         <div class="slot-badges">
@@ -2387,7 +2406,10 @@ function renderSlots(){
         <div class="slot-progress-bar"><div style="width:${pct}%"></div></div>
         <span class="slot-progress-txt">${p.done}/${p.need} pcs</span>
       </div>
-      <div class="slot-done-badge">✓ 완료 · 패킹 이동 가능</div>
+      <div class="slot-pack-check" data-pack-invoice="${cf.meta.invoice_no}" onclick="event.stopPropagation(); togglePackingMoved('${cf.meta.invoice_no}')">
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#04140D" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
+        <span class="label">${moved ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
+      </div>
       ${status==='done' ? (
         (state.clearedInvoices && state.clearedInvoices.has(cf.meta.invoice_no))
           ? `<div class="slot-cleared-tag">✓ 슬롯 비워짐 — 다음 배치에서 재사용 가능</div>`
@@ -2467,6 +2489,22 @@ function renderSlots(){
       renderSlots();
     };
   });
+
+  // ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
+  // 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
+  window.togglePackingMoved = async function(invoice){
+    const wasMoved = state.movedToPackingInvoices.has(invoice);
+    const next = !wasMoved;
+    if(next) state.movedToPackingInvoices.add(invoice); else state.movedToPackingInvoices.delete(invoice);
+    renderSlots(); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
+    const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice, moved: next });
+    if(!res.ok){
+      // 실패하면 원상복구
+      if(wasMoved) state.movedToPackingInvoices.add(invoice); else state.movedToPackingInvoices.delete(invoice);
+      renderSlots();
+      toast('패킹존 이동 상태 저장 실패: ' + (res.error||'서버 오류'), 'error');
+    }
+  };
 
   renderQueue();
 }
