@@ -1217,7 +1217,6 @@ function getSlotProgress(batchId) {
           movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용, clearSlot과 무관)
           issueQty: issueQty, // ★ 2026-07-16 신규: 현황판 "⚠ N" 뱃지용
           issues: issuesByInvoice[invoice] || [], // ★ 2026-07-16 신규: 뱃지 클릭 시 상세 목록
-          _dbg: { totalQty: totalQty, issueQty: issueQty, effectiveTotal: effectiveTotal, scanned: scanned, calc: (scanned >= effectiveTotal) }, // ★ 임시 디버그 — 화면 숫자를 잘못 읽는 걸 막기 위한 원본값
         });
       });
     }
@@ -1228,10 +1227,7 @@ function getSlotProgress(batchId) {
     });
 
     const doneCount = slots.filter(s => s.status === 'done').length;
-    return {
-      ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length,
-      _debugVer: 'v2026-07-24-statusfix', // ★ 배포 확인용 — 이 필드가 안 보이면 예전 코드가 아직 돌고 있는 것
-    };
+    return { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
