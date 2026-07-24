@@ -114,7 +114,13 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-pack-check{display:none; align-items:center; gap:8px; cursor:pointer; margin-top:10px;}
 .card.done .card-pack-check{display:flex;}
 .card.done .card-pack-check .label{font-family:var(--mono); font-size:18px; font-weight:800; color:#04140D;}
-.card.done.moved{background:#2E0E22; border-color:#EC4899;}
+.card.done.moved{background:#2E0E22; border-color:#EC4899;
+  animation: packMovedGlow 2.6s ease-in-out infinite; /* ★ 2026-07-24 신규: 너무 빠르지 않게, 은은하게 */
+}
+@keyframes packMovedGlow{
+  0%, 100%{ box-shadow: 0 0 0 0 rgba(236,72,153,0.0); border-color:#EC4899; }
+  50%{ box-shadow: 0 0 22px 4px rgba(236,72,153,0.55); border-color:#FF9FCB; }
+}
 .card.done.moved .card-slot, .card.done.moved .card-cust, .card.done.moved .card-invoice,
 .card.done.moved .card-metarow, .card.done.moved .card-sku{color:var(--text);}
 .card-pack-check .box{width:22px; height:22px; border-radius:5px; border:2px solid #04140D; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
@@ -340,7 +346,7 @@ function cardHtml(slot){
       </div>
       <div class="card-bar"><div style="width:${pct}%"></div></div>
       <div class="card-pack-check" data-pack-invoice="${slot.invoice}">
-        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#04140D" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
         <span class="label">${slot.movedToPacking ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
       </div>
     </div>
