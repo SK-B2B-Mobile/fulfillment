@@ -114,20 +114,24 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-pack-check{display:none; align-items:center; gap:8px; cursor:pointer; margin-top:10px;}
 .card.done .card-pack-check{display:flex;}
 .card.done .card-pack-check .label{font-family:var(--mono); font-size:18px; font-weight:800; color:#04140D;}
-.card.done.moved{background:#2E0E22; border-color:#EC4899;
-  animation: packMovedGlow 2.6s ease-in-out infinite; /* ★ 2026-07-24 신규: 너무 빠르지 않게, 은은하게 */
+/* ★ 2026-07-24 수정 — 완료(초록) 카드와 똑같은 방식: 테두리만이 아니라
+   카드 전체 배경을 진한 핑크로 꽉 채움(라인=배경 완전히 통일). 텍스트도
+   초록카드처럼 어두운 색으로. 애니메이션도 훨씬 강하고 눈에 띄게(밝기+그림자
+   크게 진동, 주기도 짧게). */
+.card.done.moved{background:#EC4899; border-color:#EC4899;
+  animation: packMovedGlow 1.6s ease-in-out infinite;
 }
 @keyframes packMovedGlow{
-  0%, 100%{ box-shadow: 0 0 0 0 rgba(236,72,153,0.0); border-color:#EC4899; }
-  50%{ box-shadow: 0 0 22px 4px rgba(236,72,153,0.55); border-color:#FF9FCB; }
+  0%, 100%{ background:#EC4899; border-color:#EC4899; box-shadow: 0 0 10px 2px rgba(236,72,153,0.35); }
+  50%{ background:#FF6FBF; border-color:#FFB3DD; box-shadow: 0 0 45px 12px rgba(255,111,191,0.95); }
 }
 .card.done.moved .card-slot, .card.done.moved .card-cust, .card.done.moved .card-invoice,
-.card.done.moved .card-metarow, .card.done.moved .card-sku{color:var(--text);}
+.card.done.moved .card-metarow, .card.done.moved .card-sku{color:#04140D !important;}
 .card-pack-check .box{width:22px; height:22px; border-radius:5px; border:2px solid #04140D; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
-.card.done.moved .card-pack-check .box{border-color:#EC4899; background:#EC4899;}
+.card.done.moved .card-pack-check .box{border-color:#04140D; background:#04140D;}
 .card-pack-check .box svg{display:none; width:14px; height:14px;}
 .card.done.moved .card-pack-check .box svg{display:block;}
-.card.done.moved .card-pack-check .label{color:#EC4899;}
+.card.done.moved .card-pack-check .label{color:#04140D !important;}
 .card-empty{display:flex; align-items:center; justify-content:center; height:100%; font-family:var(--mono); font-size:20px; color:var(--text-dim); opacity:0.4;}
 
 .empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
