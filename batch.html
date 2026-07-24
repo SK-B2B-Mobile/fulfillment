@@ -1285,6 +1285,13 @@ function renderOpenBatchesPanel(batches){
 
 // "이어서 작업하기" — 그 배치를 통째로 불러와서 지금 화면에서 이어서 작업
 async function continueOpenBatch(batchId){
+  // ★ 2026-07-24 신규 — 심각한 사고 방지: 이 배치로 전환하면 이 기기뿐 아니라
+  //   TV 현황판·다른 작업자 폰 등 "전체 기기"가 자동으로 같은 배치를 따라가도록
+  //   서버에 방송됨(setActiveBatch). 여러 탭을 켜놓고 작업하다가 예전 탭에서
+  //   무심코 이 버튼을 눌러서, 다른 기기들이 다시 옛날 배치로 튕겨나가는 사고가
+  //   실제로 있었음. 조용히 방송하지 않고 명확히 확인받도록 함.
+  if(!confirm(`배치 ${batchId}(으)로 전환하면 TV 현황판·다른 작업자 폰 등\n다른 모든 기기도 자동으로 이 배치로 같이 전환됩니다.\n\n계속하시겠습니까?`)) return;
+
   const res = await gasQuery('getBatch', { batchId });
   if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
 
@@ -3236,6 +3243,24 @@ function submitIssue(idx){
 // TV(board.html)의 이슈 모달과 최대한 같은 사용 경험이 되도록 맞춤.
 // ═══════════════════════════════════════════════════════════
 let _retroIssueInvoice = null;
+let _retroIssueSkuList = []; // ★ 2026-07-24 신규: 검색창 필터링용 정렬된 전체 목록 보관
+
+// ★ 2026-07-24 신규: SKU를 상품명보다 앞에 표시 (list는 이미 SKU순 정렬되어 들어옴)
+function renderRetroSkuOptionsHtml(list){
+  return list.map(s => `<option value="${s.barcode}">${s.sku || '(SKU없음)'} · ${s.name} · 필요 ${s.need}pcs</option>`).join('');
+}
+// ★ 2026-07-24 신규: SKU/상품명/바코드 전체를 대상으로 실시간 필터링
+function filterRetroIssueSkuOptions(query){
+  const sel = document.getElementById('retroIssueSku');
+  if(!sel) return;
+  const q = (query || '').trim().toLowerCase();
+  const filtered = !q ? _retroIssueSkuList : _retroIssueSkuList.filter(s =>
+    String(s.sku||'').toLowerCase().includes(q) ||
+    String(s.name||'').toLowerCase().includes(q) ||
+    String(s.barcode||'').toLowerCase().includes(q)
+  );
+  sel.innerHTML = filtered.length ? renderRetroSkuOptionsHtml(filtered) : '<option>검색 결과 없음</option>';
+}
 
 function getInvoiceSkuList(invoice){
   // 이 고객사(invoice)가 필요로 하는 SKU 전체 목록을 scanIndex에서 뽑아옴
@@ -3245,6 +3270,8 @@ function getInvoiceSkuList(invoice){
     const q = sku.queue.find(x => x.invoice === invoice);
     if(q) list.push({barcode, name: sku.name, sku: sku.sku, need: q.need, done: q.done});
   });
+  // ★ 2026-07-24 신규: SKU가 많을 때(200개+) 찾기 쉽도록 SKU 알파벳순 정렬 (TV와 동일 원칙)
+  list.sort((a, b) => String(a.sku||'').localeCompare(String(b.sku||'')));
   return list;
 }
 
@@ -3280,7 +3307,9 @@ function renderRetroIssueBody(){
       </div>`).join('')
     : `<div style="font-size:12px; color:var(--text-dim); text-align:center; padding:6px 0;">등록된 이슈 없음</div>`;
 
-  const skuOptions = skuList.map(s => `<option value="${s.barcode}">${s.name} (${s.sku}) · 필요 ${s.need}pcs</option>`).join('');
+  // ★ 2026-07-24 신규: SKU를 상품명보다 앞에, 검색창 필터링용으로 정렬된 목록 보관
+  _retroIssueSkuList = skuList;
+  const skuOptions = renderRetroSkuOptionsHtml(skuList);
 
   document.getElementById('retroIssueBody').innerHTML = `
     <div>
@@ -3290,8 +3319,11 @@ function renderRetroIssueBody(){
     <div class="retro-issue-form">
       <div style="font-size:11px; color:var(--text-dim); font-weight:700;">+ 새 이슈 등록</div>
       <div>
-        <label>상품 (SKU)</label>
-        <select id="retroIssueSku">${skuOptions || '<option>이 고객사에 등록된 SKU 없음</option>'}</select>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <label style="margin:0;">상품 (SKU)</label>
+          <input type="text" id="retroIssueSkuSearch" placeholder="🔍 SKU 검색..." style="width:55%; padding:6px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); margin-top:0;">
+        </div>
+        <select id="retroIssueSku" size="6" style="height:auto;">${skuOptions || '<option>이 고객사에 등록된 SKU 없음</option>'}</select>
       </div>
       <div class="retro-issue-form-row">
         <div>
@@ -3364,6 +3396,9 @@ async function undoRetroIssue(issueId){
   renderRetroIssueBody();
   if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
 }
+document.getElementById('retroIssueOverlay').addEventListener('input', (e) => {
+  if(e.target.id === 'retroIssueSkuSearch') filterRetroIssueSkuOptions(e.target.value);
+});
 document.getElementById('retroIssueOverlay').addEventListener('click', (e) => {
   if(e.target.id === 'retroIssueOverlay') closeRetroIssueModal();
   const undoBtn = e.target.closest('[data-undo-issue]');
