@@ -366,6 +366,29 @@ const ISSUE_REASON_OPTS = [
 // ★ 2026-07-23 신규 — 배치 전체 아이템(고객사별 SKU 목록)을 한 번만 받아서 캐싱.
 //   "새 이슈 등록" 폼의 SKU 드롭다운을 채우는 데만 씀 (진행률 폴링과는 별개).
 let _batchItemsCache = { batchId: null, byInvoice: {} };
+let _newIssueItemsSorted = []; // ★ 2026-07-24 신규: 검색창 필터링을 위해 정렬된 전체 목록을 따로 보관
+
+// ★ 2026-07-24 신규 — SKU를 상품명보다 앞에 표시(요청사항). items는 이미 SKU
+// 알파벳순으로 정렬되어 들어온다고 가정(renderIssueModalBody에서 정렬).
+function renderSkuOptionsHtml(items){
+  if(!items.length) return '<option>상품 목록을 불러올 수 없습니다</option>';
+  return items.map(it =>
+    `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${it.sku || '(SKU없음)'} · ${it.name} · ${it.req_qty}pcs</option>`
+  ).join('');
+}
+// ★ 2026-07-24 신규 — 검색창에 입력할 때마다 SKU/상품명/바코드 전체를 대상으로
+// 실시간 필터링(가장 정확한 건 SKU라고 안내드렸지만, 못 외운 경우 대비 전체 검색).
+function filterNewIssueSkuOptions(query){
+  const sel = document.getElementById('newIssueSku');
+  if(!sel) return;
+  const q = (query || '').trim().toLowerCase();
+  const filtered = !q ? _newIssueItemsSorted : _newIssueItemsSorted.filter(it =>
+    String(it.sku||'').toLowerCase().includes(q) ||
+    String(it.name||'').toLowerCase().includes(q) ||
+    String(it.barcode||'').toLowerCase().includes(q)
+  );
+  sel.innerHTML = filtered.length ? renderSkuOptionsHtml(filtered) : '<option>검색 결과 없음</option>';
+}
 async function ensureBatchItemsLoaded(){
   if(_batchItemsCache.batchId === currentBatchId) return; // 이미 이 배치 걸로 캐싱됨
   const res = await gasQuery('getBatch', { batchId: currentBatchId });
@@ -418,16 +441,21 @@ function renderIssueModalBody(){
 
   // ★ 2026-07-23 신규 — "+ 새 이슈 등록" 폼: 스캔 시점이 아니어도(예: 나중에 실물
   //   확인하다 유통기한 지난 걸 발견) TV에서 바로 이슈를 등록할 수 있게 함.
-  const items = _batchItemsCache.byInvoice[invoice] || [];
-  const skuOptions = items.length
-    ? items.map(it => `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${it.name} (${it.sku}) · ${it.req_qty}pcs</option>`).join('')
-    : '';
+  // ★ 2026-07-24 수정 — SKU가 200개까지도 있어서 하나하나 찾기 어렵다는 피드백:
+  //   (1) 표시 순서를 "SKU 먼저" + SKU 알파벳순 정렬로 바꾸고
+  //   (2) 옆에 검색창을 추가해서 SKU/상품명/바코드로 실시간 필터링되게 함.
+  _newIssueItemsSorted = (_batchItemsCache.byInvoice[invoice] || [])
+    .slice()
+    .sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
   const newFormHtml = `
     <div class="issue-new-form">
       <div class="issue-new-form-title">+ 새 이슈 등록</div>
       <div>
-        <label>상품 (SKU)</label>
-        <select id="newIssueSku">${skuOptions || '<option>상품 목록을 불러올 수 없습니다</option>'}</select>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label>상품 (SKU)</label>
+          <input type="text" id="newIssueSkuSearch" placeholder="🔍 SKU 검색..." style="width:55%; padding:6px 10px; font-size:13px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text);">
+        </div>
+        <select id="newIssueSku" size="6" style="height:auto;">${renderSkuOptionsHtml(_newIssueItemsSorted)}</select>
       </div>
       <div class="issue-new-form-row">
         <div>
@@ -534,6 +562,11 @@ async function deleteIssueFromBoard(issueId, idx){
   }
 }
 
+// ★ 2026-07-24 신규 — 이슈 등록 폼의 SKU 검색창은 매번 다시 그려지므로
+// document 레벨 위임으로 입력 이벤트를 잡음 (직접 바인딩하면 재렌더링마다 유실됨)
+document.addEventListener('input', e => {
+  if(e.target.id === 'newIssueSkuSearch') filterNewIssueSkuOptions(e.target.value);
+});
 document.addEventListener('click', e => {
   // ★ 2026-07-23 신규: "패킹존 이동" 체크박스는 카드 안에 있지만 완전히 다른 동작
   //   (이슈 모달을 열지 않고 그 자리에서 바로 토글) — 카드 클릭 판정보다 먼저 처리.
