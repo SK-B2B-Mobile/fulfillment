@@ -551,6 +551,104 @@ function autoClearStaleDoneSlots() {
  * 입력: { batchId, worker, barcode, sku, slot, customer, invoice, result }
  * result: 'pass' | 'over' | 'error'
  * ============================================================ */
+/* ===================== ④-0 syncInspectionFromPicking_ (★ 2026-07-24 신규) =====================
+ * 목적: 원래 개별오더 관리 시스템(fulfillment 대시보드 + sk-worker 앱)에서 하던
+ * "검수(Inspection)"를, 요즘 현장에서는 sk-worker 앱을 건너뛰고 총량피킹
+ * (batch.html) 스캔으로 대체하고 있어서, 그 스캔 결과가 자동으로 같은
+ * 스프레드시트의 Jobs 탭 Inspection 컬럼(PASS/ISSUES)에도 반영되도록 연결.
+ *
+ * 동작: 이 인보이스의 "실제 필요수량(effectiveTotal = 총수량 - 활성 이슈수량)"과
+ * "실제 스캔 통과 수량"을 다시 계산해서, 지금 이 순간 완료 상태인지 판정.
+ * Jobs 시트에 이미 기록된 값과 다르면(=방금 상태가 바뀌었으면)만 saveInspection()을
+ * 호출해서 갱신 — 스캔마다 매번 시트에 쓰지 않고, 실제로 상태가 바뀔 때만 씀.
+ *
+ * 호출 시점: logScan (스캔이 완료를 만들 수 있음), logIssue/undoIssue/editIssue
+ * (이슈 등록·취소·수정으로 필요수량 자체가 바뀌어 완료 여부가 뒤집힐 수 있음).
+ *
+ * ⚠ 이 연동은 100% best-effort임 — 여기서 에러가 나도 원래 스캔/이슈 처리
+ * 자체는 절대 실패하면 안 되므로, 호출부에서 항상 try/catch로 감싸서 씀.
+ * 입력: { batchId, invoice, worker }
+ * ================================================================================ */
+function syncInspectionFromPicking_(batchId, invoice, worker) {
+  if (!batchId || !invoice) return;
+
+  // 1) 이 인보이스의 총 필요수량(BatchCustomers) 찾기
+  const bc = bcustSheetSafe_();
+  const bcLast = bc.getLastRow();
+  if (bcLast < 2) return;
+  const bcRows = bc.getRange(2, 1, bcLast - 1, 11).getValues();
+  let totalQty = null;
+  for (let i = 0; i < bcRows.length; i++) {
+    if (String(bcRows[i][0]) === String(batchId) && String(bcRows[i][1]) === String(invoice)) {
+      totalQty = Number(bcRows[i][5]) || 0;
+      break;
+    }
+  }
+  if (totalQty === null) return; // 이 배치에 없는 인보이스면 아무것도 안 함
+
+  // 2) 활성 이슈 수량 합계 + 이슈 목록 (saveInspection의 issues 형식으로 변환)
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  let issueQty = 0;
+  const issues = [];
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[7]) !== String(invoice)) return;
+      if (r[12] === 'undone') return;
+      issueQty += Number(r[10]) || 0;
+      issues.push({ type: r[9] || 'ETC', barcode: r[4] || '', qty: Number(r[10]) || 0 });
+    });
+  }
+  const effectiveTotal = Math.max(0, totalQty - issueQty);
+
+  // 3) 실제 스캔 통과 수량 합계 (undone 제외, pass만) — 초과분도 그대로 인정
+  //    (batch.html 슬롯 완료 판정과 동일한 기준: q.doneRaw 합산과 동일 개념)
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  let scanned = 0;
+  if (slLast >= 2) {
+    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[8]) !== String(invoice)) return;
+      if (r[10] === 'undone') return;
+      if (r[9] !== 'pass') return;
+      scanned += Number(r[11]) || 0;
+    });
+  }
+
+  const isComplete = effectiveTotal > 0 && scanned >= effectiveTotal;
+  const isIssueOnly = issueQty > 0 && !isComplete && effectiveTotal === 0; // 전량이 이슈로 빠진 경우도 "검수 끝(이슈)"로 취급
+
+  // 4) Jobs 시트에서 이 인보이스가 이미 어떤 값인지 확인 → 다를 때만 씀 (불필요한 반복 저장 방지)
+  const jobsSS = ss_();
+  const jobsSheet = jobsSS.getSheetByName(JOBS_SHEET);
+  if (!jobsSheet) return;
+  const jobsLast = jobsSheet.getLastRow();
+  if (jobsLast < 2) return;
+  const jobsInvoiceCol = jobsSheet.getRange(2, 1, jobsLast - 1, 1).getValues();
+  let jobsRow = -1;
+  for (let i = 0; i < jobsInvoiceCol.length; i++) {
+    if (String(jobsInvoiceCol[i][0]).trim() === String(invoice).trim()) { jobsRow = i + 2; break; }
+  }
+  if (jobsRow === -1) return; // fulfillment 대시보드에 없는 인보이스(예: 오더 관리 시스템에 등록 안 된 경우)는 그냥 넘어감
+
+  const currentVal = String(jobsSheet.getRange(jobsRow, 19).getValue() || '').trim();
+  const shouldBePass = isComplete && issues.length === 0;
+  const shouldBeIssues = isComplete && issues.length > 0; // 완료는 됐지만 그 안에 이슈가 섞여 있으면 PASS 대신 ISSUES로
+
+  if (shouldBePass && currentVal !== '✓ PASS') {
+    saveInspection({ invoice: invoice, pass: true, issues: [], inspector: worker || '', inspEndAt: new Date().toISOString() });
+  } else if (shouldBeIssues) {
+    const expectedVal = '⚠ ISSUES(' + issues.length + ')';
+    if (currentVal !== expectedVal) {
+      saveInspection({ invoice: invoice, pass: false, issues: issues, inspector: worker || '', inspEndAt: new Date().toISOString() });
+    }
+  }
+  // isComplete가 false면(아직 덜 채워짐) 아무것도 안 씀 — 이미 PASS/ISSUES로 찍혀있던 걸
+  // "미완료"로 되돌리는 것까지는 하지 않음 (검수 결과를 함부로 지우는 위험 방지, 필요하면 매니저가 clearInspection 사용)
+}
+
 function logScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -567,6 +665,10 @@ function logScan(data) {
       //   어느 고객사로 보낼지 분류"하는 것이므로, 스캔 1번에 여러 개가 한번에
       //   해당 고객사 몫으로 카운트되어야 함.
     ]);
+    // ★ 2026-07-24 신규 — 원래 sk-worker 앱에서 하던 "검수"를 총량피킹 스캔이
+    //   대신하고 있으므로, 이 스캔으로 그 고객사가 방금 완료됐다면 Jobs 시트
+    //   Inspection에도 자동 반영. best-effort라 실패해도 스캔 자체는 성공 처리.
+    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
     return { ok: true, scanId: scanId };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -617,6 +719,8 @@ function logIssue(data) {
       data.invoice, 'pass', 'active', -qty
     ]);
     bumpVersion_();
+    // ★ 2026-07-24 신규: 이슈 등록으로 필요수량이 줄어들어 방금 완료로 바뀌었을 수 있음
+    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
     return { ok: true, issueId: issueId };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -646,6 +750,10 @@ function undoIssue(data) {
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(issueId)) {
         sh.getRange(i + 2, 13).setValue('undone');
+        // ★ 2026-07-24 신규: 이슈 취소로 필요수량이 다시 늘어나 완료 상태가
+        //   풀릴 수도, 반대로(다른 이슈 겹침 등) 그대로 완료일 수도 있음 — 재확인
+        const rowVals = sh.getRange(i + 2, 1, 1, 8).getValues()[0]; // A~H
+        try { syncInspectionFromPicking_(rowVals[0], rowVals[7], rowVals[3]); } catch (e) { /* 무시 */ }
         bumpVersion_();
         return { ok: true };
       }
@@ -697,6 +805,9 @@ function editIssue(data) {
           }
         }
         bumpVersion_();
+        // ★ 2026-07-24 신규: 수량/사유를 고치면 완료 여부가 바뀔 수 있음 — 재확인
+        const rowVals = sh.getRange(row, 1, 1, 8).getValues()[0]; // A~H
+        try { syncInspectionFromPicking_(rowVals[0], rowVals[7], rowVals[3]); } catch (e) { /* 무시 */ }
         return { ok: true };
       }
     }
