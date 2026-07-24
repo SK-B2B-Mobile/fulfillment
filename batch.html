@@ -2456,7 +2456,19 @@ function renderSlots(){
         <div class="slot-badges">
           ${slot.otherBatchWarning ? `<span class="slot-badge" style="background:rgba(255,77,109,0.18); color:#FF4D6D; border:1px solid rgba(255,77,109,0.5);" title="${slot.otherBatchWarning.batchId}(${slot.otherBatchWarning.batchDate}) 배치의 &quot;${slot.otherBatchWarning.customer}&quot;도 이 번호를 쓰고 있습니다 — 실제 자리가 겹치는지 현장에서 확인하세요">⚠ 다른 배치와 번호 겹침</span>` : ''}
           <span class="slot-badge ship-${cf.meta.ship_via}">${cf.meta.ship_via}</span>
-          <button class="slot-badge" style="background:rgba(255,77,109,0.12); color:var(--red); border:1px solid rgba(255,77,109,0.4); cursor:pointer;" onclick="event.stopPropagation(); openRetroIssueModal('${cf.meta.invoice_no}')" title="이 고객사에 이슈를 나중에라도 등록/조회합니다">⚠ 이슈</button>
+          ${(() => {
+            // ★ 2026-07-24 신규 — 이 버튼은 항상 떠 있는 "이슈 등록 팝업 열기" 버튼이라,
+            //   TV의 "⚠ N"(실제 이슈 있을 때만 뜨는 배지)과 겉보기엔 똑같아 보여서
+            //   "왜 웹엔 이슈 있다고 뜨는데 TV엔 안 뜨냐"는 혼동이 있었음. 실제로
+            //   등록된 이슈가 있을 때만 수량을 같이 보여줘서 TV와 한눈에 비교되게 함.
+            const invIssues = (state.issues || []).filter(i => i.invoice === cf.meta.invoice_no);
+            const invIssueQty = invIssues.reduce((a, i) => a + (Number(i.qty) || 0), 0);
+            const label = invIssueQty > 0 ? `⚠ 이슈 ${invIssueQty.toLocaleString()}` : '⚠ 이슈 등록';
+            const tip = invIssueQty > 0
+              ? `이미 등록된 이슈 ${invIssues.length}건(${invIssueQty}pcs) — 클릭해서 확인/추가`
+              : '이 고객사에 이슈를 나중에라도 등록/조회합니다';
+            return `<button class="slot-badge" style="background:rgba(255,77,109,0.12); color:var(--red); border:1px solid rgba(255,77,109,0.4); cursor:pointer;" onclick="event.stopPropagation(); openRetroIssueModal('${cf.meta.invoice_no}')" title="${tip}">${label}</button>`;
+          })()}
         </div>
       </div>
       <div class="slot-co">${cf.meta.customer}</div>
