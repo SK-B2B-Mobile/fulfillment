@@ -184,7 +184,13 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot-pack-check .label{font-family:var(--mono); font-size:10px; font-weight:800; color:#04140D; letter-spacing:0.05em;}
 .slot-pack-check .box{width:16px; height:16px; border-radius:4px; border:2px solid #04140D; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
 .slot-pack-check .box svg{display:none; width:10px; height:10px;}
-.slot.done.moved{background:#2E0E22 !important; border-color:#EC4899 !important;}
+.slot.done.moved{background:#2E0E22 !important; border-color:#EC4899 !important;
+  animation: packMovedGlowSlot 2.6s ease-in-out infinite; /* ★ 2026-07-24 신규: TV와 동일한 은은한 펄스 */
+}
+@keyframes packMovedGlowSlot{
+  0%, 100%{ box-shadow: 0 0 0 0 rgba(236,72,153,0.0); border-color:#EC4899 !important; }
+  50%{ box-shadow: 0 0 18px 3px rgba(236,72,153,0.5); border-color:#FF9FCB !important; }
+}
 .slot.done.moved .slot-num, .slot.done.moved .slot-co, .slot.done.moved .slot-meta,
 .slot.done.moved .slot-invoice{color:var(--text) !important;}
 .slot.done.moved .slot-pack-check .label{color:#EC4899;}
@@ -2428,7 +2434,7 @@ function renderSlots(){
         <span class="slot-progress-txt">${p.done}/${p.need} pcs</span>
       </div>
       <div class="slot-pack-check" data-pack-invoice="${cf.meta.invoice_no}" onclick="event.stopPropagation(); togglePackingMoved('${cf.meta.invoice_no}')">
-        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#04140D" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
         <span class="label">${moved ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
       </div>
       ${status==='done' ? (
