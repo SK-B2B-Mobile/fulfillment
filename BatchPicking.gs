@@ -46,7 +46,16 @@ function ensureBatchSheet_(name, headers) {
 }
 
 function batchesSheet_()  { return ensureBatchSheet_(BATCHES_SHEET,  ['BatchId','Date','Status','TotalSku','TotalQty','CreatedAt','CompletedAt']); }
-function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared']); }
+function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared','MovedToPacking']); }
+// ★ 2026-07-23 신규 — 이미 운영 중이던 시트는 10개 컬럼으로 만들어져 있어서,
+//   위 headers 배열을 바꿔도 기존 시트엔 11번째 컬럼(MovedToPacking)이 자동으로
+//   안 생김(ensureBatchSheet_는 신규 생성 시에만 헤더를 씀). 그래서 실제 사용
+//   시점에 헤더가 비어있으면 한 번만 채워주는 안전장치.
+function bcustSheetSafe_() {
+  const bc = bcustSheet_();
+  if (!bc.getRange(1, 11).getValue()) bc.getRange(1, 11).setValue('MovedToPacking');
+  return bc;
+}
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
 function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty']); }
 function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
@@ -167,14 +176,15 @@ function getBatch(batchId) {
       totalSku: bRow[3], totalQty: bRow[4], createdAt: bRow[5], completedAt: bRow[6]
     };
 
-    const bc = bcustSheet_();
+    const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     let customers = [];
     if (bcLast >= 2) {
-      const rows = bc.getRange(2, 1, bcLast - 1, 10).getValues();
+      const rows = bc.getRange(2, 1, bcLast - 1, 11).getValues();
       customers = rows.filter(r => String(r[0]) === String(resolvedId)).map(r => ({
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
-        totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || ''
+        totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || '',
+        movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크 상태도 복원 시 같이 가져옴
       }));
     }
 
@@ -231,6 +241,43 @@ function assignSlots(data) {
     }
     bumpVersion_();
     return { ok: true, updated: updated };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ===================== ③b-1 setPackingMoved (★ 2026-07-23 신규) =====================
+ * "패킹존 이동" 체크박스 — clearSlot(슬롯비우기/다른 고객사 자동교체)과는 완전히
+ * 별개의, 순수 확인용 표시 상태. 체크해도 슬롯 번호는 그대로 유지되고, 다른
+ * 배치/고객사가 자동으로 들어오지 않음. 그냥 "물리적으로 패킹존까지 옮겼다"는
+ * 것만 다른 기기(TV·다른 작업자 폰)와 동기화해서 보여주기 위한 것.
+ * 입력: { batchId, invoice, moved: true|false }
+ * ================================================================================ */
+function setPackingMoved(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const batchId = data.batchId, invoice = data.invoice;
+    if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
+    const moved = !!data.moved;
+
+    const bc = bcustSheetSafe_();
+    const last = bc.getLastRow();
+    const rows = bc.getRange(2, 1, last - 1, 2).getValues();
+    let found = false;
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(batchId)) continue;
+      if (String(rows[i][1]) !== String(invoice)) continue;
+      bc.getRange(i + 2, 11).setValue(moved ? batchNow_() : '');
+      found = true;
+      break;
+    }
+    if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
+
+    bumpVersion_();
+    return { ok: true, moved: moved };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
@@ -1015,11 +1062,11 @@ function getSlotProgress(batchId) {
     }
 
     // 고객사별 슬롯 정보 + 목표 수량
-    const bc = bcustSheet_();
+    const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     const slots = [];
     if (bcLast >= 2) {
-      bc.getRange(2, 1, bcLast - 1, 10).getValues().forEach(r => {
+      bc.getRange(2, 1, bcLast - 1, 11).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (!r[7] && r[7] !== 0) return; // 슬롯 미배정이면 현황판에 안 띄움
         const invoice = r[1];
@@ -1045,6 +1092,7 @@ function getSlotProgress(batchId) {
           scanned: scanned, status: status,
           totalSku: skuStat.totalSku, doneSku: skuStat.doneSku,
           cleared: r[9] || '', // ★ 2026-07-14 신규: 비어있으면 "패킹완료·슬롯비우기" 버튼 표시 대상
+          movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용, clearSlot과 무관)
           issueQty: issueQty, // ★ 2026-07-16 신규: 현황판 "⚠ N" 뱃지용
           issues: issuesByInvoice[invoice] || [], // ★ 2026-07-16 신규: 뱃지 클릭 시 상세 목록
         });
@@ -1239,7 +1287,7 @@ function archiveOldBatches(daysOld) {
     // 2) 시트 6개 각각에 대해: 대상 배치 행은 Archive_ 시트로 복사 후 메인에서 제거
     const sheetsToArchive = [
       { name: BATCHES_SHEET,  get: batchesSheet_,  headers: ['BatchId','Date','Status','TotalSku','TotalQty','CreatedAt','CompletedAt'] },
-      { name: BCUST_SHEET,    get: bcustSheet_,     headers: ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared'] },
+      { name: BCUST_SHEET,    get: bcustSheet_,     headers: ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared','MovedToPacking'] },
       { name: BITEMS_SHEET,   get: bitemsSheet_,    headers: ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack'] },
       { name: SCANLOG_SHEET,  get: scanlogSheet_,   headers: ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty'] },
       { name: PICKTIME_SHEET, get: picktimeSheet_,  headers: ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes'] },
