@@ -1152,28 +1152,36 @@ function getSlotProgress(batchId) {
     // 고객사별 "필요한 SKU 목록"을 읽어서 SKU 단위 완료 개수(doneSku/totalSku) 계산
     const bi = bitemsSheet_();
     const biLast = bi.getLastRow();
-    const skuStatsByInvoice = {}; // invoice -> {totalSku, doneSku}
+    // ★ 2026-07-24 긴급 수정 — 심각한 버그: 같은 바코드가 고객사 PDF에 두 줄로
+    //   나뉘어 있으면(예: 분할 입고로 700개+570개) 여기서 그걸 합치지 않고
+    //   각 줄을 "별도의 SKU"처럼 취급해서 각각 완료 판정을 내렸음. 그 결과
+    //   "누적 스캔량 1,260개"가 "700개 필요 줄"도, "570개 필요 줄"도 각각
+    //   통과해버려서, 실제로는 1,270개가 필요한데도 두 줄 다 완료로 잘못
+    //   카운트되는 사고가 있었음(=SKU는 다 됐다는데 총수량은 부족한 원인).
+    //   해결: 같은 invoice+barcode는 먼저 필요수량을 합산해서 "하나의 SKU"로
+    //   묶은 뒤에 완료 여부를 판정함.
+    const skuLinesByKey = {}; // "invoice|barcode" -> { invoice, reqQty(합산) }
     if (biLast >= 2) {
       bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const inv = r[1];
         if (!inv) return; // 총량 행(Invoice 빈값)은 제외 — 고객사 행만 집계
-        if (!skuStatsByInvoice[inv]) skuStatsByInvoice[inv] = { totalSku: 0, doneSku: 0 };
-        skuStatsByInvoice[inv].totalSku++;
-        const reqQty = Number(r[5]) || 0;
         const bcKey = inv + '|' + String(r[4]);
-        const scannedQty = scannedByInvoiceBarcode[bcKey] || 0;
-        const issueQty = issueQtyByInvoiceBarcode[bcKey] || 0;
-        // ★ 2026-07-24 긴급 수정 — 심각한 버그: reqQty(이 SKU 한 줄의 필요수량)를
-        //   계산만 해두고 실제 비교에서는 안 쓰고 있었음(죽은 코드). 그래서
-        //   "스캔이나 이슈가 1건이라도 있으면 그 SKU는 완료"로 잘못 카운트됨 —
-        //   예: 500개 필요한데 5개만 스캔해도 "완료된 SKU 1개"로 잡힘. 그 결과
-        //   "SKU 8/8 다 됐다는데 총수량은 부족"한 앞뒤 안 맞는 화면이 발생했음.
-        //   이제 "스캔+이슈 합계가 필요수량을 실제로 채웠을 때"만 완료로 카운트함
-        //   (완료 판정 로직 scanned>=effectiveTotal과 같은 원칙을 SKU 단위로도 적용).
-        if (scannedQty + issueQty >= reqQty) skuStatsByInvoice[inv].doneSku++;
+        if (!skuLinesByKey[bcKey]) skuLinesByKey[bcKey] = { invoice: inv, reqQty: 0 };
+        skuLinesByKey[bcKey].reqQty += Number(r[5]) || 0;
       });
     }
+    const skuStatsByInvoice = {}; // invoice -> {totalSku, doneSku}
+    Object.entries(skuLinesByKey).forEach(([bcKey, line]) => {
+      const inv = line.invoice;
+      if (!skuStatsByInvoice[inv]) skuStatsByInvoice[inv] = { totalSku: 0, doneSku: 0 };
+      skuStatsByInvoice[inv].totalSku++; // 바코드 기준 고유 SKU 1개로 카운트(중복 줄 병합됨)
+      const scannedQty = scannedByInvoiceBarcode[bcKey] || 0;
+      const issueQty = issueQtyByInvoiceBarcode[bcKey] || 0;
+      // 병합된(=진짜) 필요수량 기준으로, 스캔+이슈 합계가 그걸 채웠을 때만 완료로 카운트
+      // (완료 판정 로직 scanned>=effectiveTotal과 같은 원칙을 SKU 단위로도 적용).
+      if (scannedQty + issueQty >= line.reqQty) skuStatsByInvoice[inv].doneSku++;
+    });
 
     // 고객사별 슬롯 정보 + 목표 수량
     const bc = bcustSheetSafe_();
