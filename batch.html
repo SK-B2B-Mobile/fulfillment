@@ -3282,20 +3282,24 @@ function renderRetroSkuOptionsHtml(list){
   return list.map(s => {
     const short = Math.max(0, (s.need||0) - (s.done||0));
     const issueQty = Math.max(0, (s.origNeed||0) - (s.need||0));
-    let statusTxt, prefix;
+    let statusTxt, prefix, color;
     if(short > 0){
-      statusTxt = `⚠ ${s.done||0}/${s.need||0} (${short}개 부족)`;
+      statusTxt = `⚠ ${s.done||0}/${s.need||0} · 미스캔(${short}개) → 실물 찾아 스캔하세요`;
       prefix = '⚠ ';
+      color = 'var(--red)'; // 빨강 — 아직 스캔 안 된, 진짜 확인이 필요한 상품
     } else if(issueQty > 0){
       // ★ 2026-07-24 신규 — 스캔이 아니라 이슈(EXP 등)로 필요수량이 이미 채워진
       //   경우를 "완료"와 구분해서 명확히 보여줌 (계속 헷갈렸던 부분)
       statusTxt = `✓ 이슈로 처리됨(${issueQty}pcs)`;
       prefix = '✓ ';
+      color = 'var(--amber)'; // 앰버 — 스캔은 아니지만 이슈로 이미 결론난 상품
     } else {
       statusTxt = `✓ 완료`;
       prefix = '✓ ';
+      color = '#6B8F87'; // 차분한 톤 — 이미 끝난 것이라 눈에 안 띄어도 됨
     }
-    return `<option value="${s.barcode}">${prefix}${s.sku || '(SKU없음)'} · ${s.name} · ${statusTxt}</option>`;
+    const styleAttr = ` style="color:${color};${short>0?' font-weight:800;':''}"`;
+    return `<option value="${s.barcode}"${styleAttr}>${prefix}${s.sku || '(SKU없음)'} · ${s.name} · ${statusTxt}</option>`;
   }).join('');
 }
 // ★ 2026-07-24 신규: SKU/상품명/바코드 전체를 대상으로 실시간 필터링
@@ -3367,6 +3371,9 @@ function renderRetroIssueBody(){
     </div>
     <div class="retro-issue-form">
       <div style="font-size:11px; color:var(--text-dim); font-weight:700;">+ 새 이슈 등록</div>
+      <div style="font-size:11px; color:var(--text-dim); background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:8px 10px;">
+        💡 <b style="color:var(--amber)">⚠ 미스캔</b>은 실물을 찾아 <b>먼저 스캔</b>해보세요. 실물이 정말 없거나 문제(유통기한·파손 등)가 확인됐을 때만, 또는 <b>이미 출고됐는데 스캔만 깜빡했을 때</b>(사유: MISS·스캔누락)만 아래에서 골라 이슈로 등록하세요.
+      </div>
       <div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
           <label style="margin:0;">상품 (SKU)</label>
