@@ -3275,8 +3275,15 @@ let _retroIssueInvoice = null;
 let _retroIssueSkuList = []; // ★ 2026-07-24 신규: 검색창 필터링용 정렬된 전체 목록 보관
 
 // ★ 2026-07-24 신규: SKU를 상품명보다 앞에 표시 (list는 이미 SKU순 정렬되어 들어옴)
+// ★ 2026-07-24 신규 — "어떤 상품을 안 스캔했는지 모르겠다"는 피드백 반영:
+// 각 SKU 옆에 지금까지 얼마나 채워졌는지(완료/부족)를 같이 보여줘서,
+// 미완료 SKU를 목록만 보고 바로 찾을 수 있게 함(⚠ 표시 + 부족 수량).
 function renderRetroSkuOptionsHtml(list){
-  return list.map(s => `<option value="${s.barcode}">${s.sku || '(SKU없음)'} · ${s.name} · 필요 ${s.need}pcs</option>`).join('');
+  return list.map(s => {
+    const short = Math.max(0, (s.need||0) - (s.done||0));
+    const statusTxt = short > 0 ? `⚠ ${s.done||0}/${s.need||0} (${short}개 부족)` : `✓ 완료`;
+    return `<option value="${s.barcode}">${short>0?'⚠ ':'✓ '}${s.sku || '(SKU없음)'} · ${s.name} · ${statusTxt}</option>`;
+  }).join('');
 }
 // ★ 2026-07-24 신규: SKU/상품명/바코드 전체를 대상으로 실시간 필터링
 function filterRetroIssueSkuOptions(query){
