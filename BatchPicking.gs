@@ -1122,6 +1122,10 @@ function getInvoiceItemStatus(batchId, invoice) {
         const bc = String(r[4]);
         scannedByBarcode[bc] = (scannedByBarcode[bc] || 0) + (Number(r[11]) || 1);
       });
+      // ★ 2026-07-24 긴급 수정 — 같은 버그: 상쇄용 ADJ 기록 때문에 순 스캔량이
+      //   음수가 되면 "이슈로 이미 처리된 상품"이 "스캔 안 된 상품"처럼 잘못
+      //   보였음(예: "-10/10 (10개 부족)"). SKU별 순 스캔량은 0 밑으로 안 내려가게 고정.
+      Object.keys(scannedByBarcode).forEach(bc => { if (scannedByBarcode[bc] < 0) scannedByBarcode[bc] = 0; });
     }
     const il = issuelogSheet_();
     const ilLast = il.getLastRow();
@@ -1174,7 +1178,6 @@ function getSlotProgress(batchId) {
     // invoice+바코드 조합별로도 따로 집계 — SKU 단위 완료 판정용
     const sl = scanlogSheet_();
     const slLast = sl.getLastRow();
-    const scannedByInvoice = {};
     const scannedByInvoiceBarcode = {};
     if (slLast >= 2) {
       sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
@@ -1185,11 +1188,34 @@ function getSlotProgress(batchId) {
         //   컬럼)만큼 더함. 예전 데이터(Qty 컬럼 없음)는 1로 취급해 하위호환.
         const qty = Number(r[11]) || 1;
         const inv = r[8];
-        scannedByInvoice[inv] = (scannedByInvoice[inv] || 0) + qty;
         const key = inv + '|' + String(r[4]);
+        // ★ 2026-07-24 긴급 수정 — 심각한 버그 발견(현장 피드백으로 확인됨):
+        //   이슈 등록 시 남기는 상쇄 기록(scanId가 'ADJ-'로 시작, 마이너스 수량)은
+        //   "이 SKU를 스캔 안 했는데 총량 스캔 한 번에 모든 고객사가 자동으로
+        //   pass 처리되는 phantom pass"를 되돌리기 위한 것이었음. 그런데 애초에
+        //   phantom pass가 안 생겼던 경우(=그 SKU를 실제로 한 번도 스캔 안 하고
+        //   바로 이슈부터 등록한 경우, 흔한 정상 흐름), 상쇄할 게 없는데 마이너스만
+        //   남아서 그 SKU의 순수 스캔량이 영구적으로 음수가 됨. 이 음수가 "완료
+        //   판정 기준"에서 이슈 수량(effectiveTotal 계산)과 별개로 스캔량(scanned)
+        //   에서도 또 한 번 빠져서, 이슈로 이미 해결된 수량이 "진행량 부족"으로
+        //   이중으로 잡히는 사고가 있었음(예: 21번 슬롯이 실제로는 다 채워졌는데
+        //   계속 미완료로 표시됨). 해결: SKU 하나(=바코드+인보이스)의 순 스캔량은
+        //   절대 0 밑으로 안 내려가게(음수는 0으로) 고정한 뒤에 합산함.
         scannedByInvoiceBarcode[key] = (scannedByInvoiceBarcode[key] || 0) + qty;
       });
     }
+    // 위에서 구한 SKU별 순 스캔량을 0 밑으로 안 내려가게 고정 → 그걸 다시
+    // 인보이스 단위로 합산해서 "진짜 진행량"을 계산 (이슈로 이미 커버된 SKU는
+    // 스캔량 0으로 취급되어, effectiveTotal 쪽에서 이미 빠진 걸 여기서 또
+    // 빼는 이중 차감이 없어짐).
+    Object.keys(scannedByInvoiceBarcode).forEach(key => {
+      if (scannedByInvoiceBarcode[key] < 0) scannedByInvoiceBarcode[key] = 0;
+    });
+    const scannedByInvoice = {};
+    Object.entries(scannedByInvoiceBarcode).forEach(([key, qty]) => {
+      const inv = key.split('|')[0];
+      scannedByInvoice[inv] = (scannedByInvoice[inv] || 0) + qty;
+    });
 
     // ★ 2026-07-16 신규: EXP/NF/Damaged/OOS 등으로 등록된 이슈 수량 집계.
     //   이 수량만큼은 애초에 "필요하지 않았던 것"처럼 그 고객사(Invoice)의
@@ -1348,6 +1374,12 @@ function getScanState(batchId) {
           doneMap[key] = (doneMap[key] || 0) + qty;
         }
       });
+      // ★ 2026-07-24 긴급 수정 — getSlotProgress와 같은 버그: 이슈 등록 시 남는
+      //   상쇄 기록(ADJ-, 마이너스 수량)이 상쇄할 phantom pass가 없으면 그 SKU의
+      //   순 스캔량이 영구적으로 음수가 되어, 이미 이슈로 해결된 수량이 웹
+      //   화면(batch.html)에서도 "진행량 부족"으로 이중으로 잡히는 문제가 있었음.
+      //   SKU 하나(=인보이스+바코드)의 순 스캔량은 0 밑으로 안 내려가게 고정.
+      Object.keys(doneMap).forEach(key => { if (doneMap[key] < 0) doneMap[key] = 0; });
     }
 
     scans.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0)); // 최신순
