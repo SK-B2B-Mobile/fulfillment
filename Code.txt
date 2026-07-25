@@ -180,22 +180,10 @@ function doGet(e) {
   if (op === 'getSlotProgress') {
     return json_(getSlotProgress((e.parameter || {}).batchId || ''));
   }
-  // ★ 2026-07-24 임시 디버그용 — 특정 인보이스의 SKU별 내역을 전부 보여줌
-  //   (totalQty가 실제 주문과 다른 것 같을 때, 어느 줄이 중복/잘못됐는지 확인용)
-  if (op === 'debugInvoiceItems') {
+  // ★ 2026-07-24 신규 — 이슈 등록 팝업에서 "어떤 SKU가 부족한지" 보여주기 위한 조회
+  if (op === 'getInvoiceItemStatus') {
     const p = e.parameter || {};
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    const lines = [];
-    if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-        if (String(r[0]) !== String(p.batchId)) return;
-        if (String(r[1]) !== String(p.invoice)) return;
-        lines.push({ sku: r[2], name: r[3], barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
-      });
-    }
-    const sum = lines.reduce((a, l) => a + l.reqQty, 0);
-    return json_({ ok: true, invoice: p.invoice, lineCount: lines.length, sumOfLines: sum, lines: lines });
+    return json_(getInvoiceItemStatus(p.batchId || '', p.invoice || ''));
   }
   // ★ 2026-07-09 신규 — 기기간 실시간 스캔 동기화용
   if (op === 'getScanState') {
