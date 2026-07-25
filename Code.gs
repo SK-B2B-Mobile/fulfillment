@@ -191,8 +191,25 @@ function doGet(e) {
   if (op === 'forceSyncInspection') {
     const p = e.parameter || {};
     try {
-      syncInspectionFromPicking_(p.batchId || '', p.invoice || '', p.worker || '(수동 재동기화)');
-      return json_({ ok: true, message: '재동기화 시도 완료 — 시트를 새로고침해서 확인하세요' });
+      // ★ 2026-07-24 재수정 — 그냥 비워서 넘기면, 직전에 이미 잘못 박힌 값
+      //   (예: "(수동 재동기화)")이 "기존값 보존" 로직 때문에 그대로 남는 문제가
+      //   있었음. 그래서 "지금 활성 이슈 중 가장 최근 것을 등록한 실제 작업자"를
+      //   직접 찾아서 그 이름으로 정확히 복원함 — placeholder 대신 진짜 담당자.
+      let realWorker = '';
+      const il = issuelogSheet_();
+      const ilLast = il.getLastRow();
+      if (ilLast >= 2) {
+        let latestTime = null;
+        il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+          if (String(r[0]) !== String(p.batchId)) return;
+          if (String(r[7]) !== String(p.invoice)) return;
+          if (r[12] === 'undone') return;
+          const t = r[2] instanceof Date ? r[2].getTime() : 0;
+          if (latestTime === null || t > latestTime) { latestTime = t; realWorker = String(r[3] || ''); }
+        });
+      }
+      syncInspectionFromPicking_(p.batchId || '', p.invoice || '', realWorker);
+      return json_({ ok: true, message: '재동기화 완료 (담당자: ' + (realWorker || '(찾지 못함, 기존값 유지)') + ')' });
     } catch (e2) {
       return json_({ ok: false, error: String(e2 && e2.message || e2) });
     }
