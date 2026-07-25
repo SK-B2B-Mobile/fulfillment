@@ -1099,6 +1099,73 @@ function getBatchKPI(batchId) {
  *   (doneSku/totalSku)도 같이 계산해서 반환하도록 확장 — TV 화면에 QTY만
  *   나오고 SKU 개수가 안 보이던 문제 수정.
  * ============================================================ */
+/* ===================== ③d getInvoiceItemStatus (★ 2026-07-24 신규) =====================
+ * 목적: "이 고객사(인보이스) 중 어떤 SKU가 아직 안 채워졌는지 모르겠다"는
+ * 현장 피드백 반영 — 이슈 등록 팝업의 SKU 목록에서, 각 상품이 얼마나
+ * 스캔됐는지(완료/부족)를 같이 보여줘서 미완료 SKU를 목록만 보고 바로
+ * 찾을 수 있게 함. TV(board.html)가 이 함수를 씀 (웹은 이미 로컬 데이터로 계산 가능).
+ * 입력: batchId, invoice / 출력: { ok, items:[{sku,name,barcode,reqQty,scannedQty,issueQty,short}] }
+ * ================================================================================ */
+function getInvoiceItemStatus(batchId, invoice) {
+  try {
+    if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
+
+    const sl = scanlogSheet_();
+    const slLast = sl.getLastRow();
+    const scannedByBarcode = {};
+    if (slLast >= 2) {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[8]) !== String(invoice)) return;
+        if (r[10] === 'undone') return;
+        if (r[9] !== 'pass') return;
+        const bc = String(r[4]);
+        scannedByBarcode[bc] = (scannedByBarcode[bc] || 0) + (Number(r[11]) || 1);
+      });
+    }
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const issueByBarcode = {};
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[7]) !== String(invoice)) return;
+        if (r[12] === 'undone') return;
+        const bc = String(r[4]);
+        issueByBarcode[bc] = (issueByBarcode[bc] || 0) + (Number(r[10]) || 0);
+      });
+    }
+
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    const reqByBarcode = {}; // 같은 바코드 여러 줄이면 합산(★ 2026-07-24: 중복 줄 병합 버그 수정과 같은 원칙)
+    const nameByBarcode = {};
+    if (biLast >= 2) {
+      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[1]) !== String(invoice)) return;
+        const bc = String(r[4]);
+        reqByBarcode[bc] = (reqByBarcode[bc] || 0) + (Number(r[5]) || 0);
+        nameByBarcode[bc] = { sku: r[2], name: r[3] };
+      });
+    }
+
+    const items = Object.keys(reqByBarcode).map(bc => {
+      const reqQty = reqByBarcode[bc];
+      const scannedQty = scannedByBarcode[bc] || 0;
+      const issueQty = issueByBarcode[bc] || 0;
+      return {
+        barcode: bc, sku: (nameByBarcode[bc] || {}).sku || '', name: (nameByBarcode[bc] || {}).name || '',
+        reqQty: reqQty, scannedQty: scannedQty, issueQty: issueQty,
+        short: Math.max(0, reqQty - scannedQty - issueQty),
+      };
+    });
+    return { ok: true, invoice: invoice, items: items };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 function getSlotProgress(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
