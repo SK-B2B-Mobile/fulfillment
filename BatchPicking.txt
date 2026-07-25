@@ -569,7 +569,7 @@ function autoClearStaleDoneSlots() {
  * 자체는 절대 실패하면 안 되므로, 호출부에서 항상 try/catch로 감싸서 씀.
  * 입력: { batchId, invoice, worker }
  * ================================================================================ */
-function syncInspectionFromPicking_(batchId, invoice, worker) {
+function syncInspectionFromPicking_(batchId, invoice, worker, force) {
   if (!batchId || !invoice) return;
 
   // 1) 이 인보이스의 총 필요수량(BatchCustomers) 찾기
@@ -650,11 +650,15 @@ function syncInspectionFromPicking_(batchId, invoice, worker) {
   const shouldBePass = isComplete && issues.length === 0;
   const shouldBeIssues = isComplete && issues.length > 0; // 완료는 됐지만 그 안에 이슈가 섞여 있으면 PASS 대신 ISSUES로
 
-  if (shouldBePass && currentVal !== '✓ PASS') {
+  // ★ 2026-07-24 긴급 수정 — "상태 문구가 이전과 같으면 저장 생략"하는 최적화가,
+  //   담당자(Inspector) 이름만 고쳐야 하는 강제 재동기화(forceSyncInspection) 때도
+  //   똑같이 걸려서 아예 아무것도 안 써지는 사고가 있었음(상태는 그대로인데
+  //   담당자만 잘못돼 있던 경우). force=true면 문구가 같아도 무조건 다시 씀.
+  if (shouldBePass && (force || currentVal !== '✓ PASS')) {
     saveInspection({ invoice: invoice, pass: true, issues: [], inspector: worker || '', inspEndAt: new Date().toISOString() });
   } else if (shouldBeIssues) {
     const expectedVal = '⚠ ISSUES(' + issues.length + ')';
-    if (currentVal !== expectedVal) {
+    if (force || currentVal !== expectedVal) {
       saveInspection({ invoice: invoice, pass: false, issues: issues, inspector: worker || '', inspEndAt: new Date().toISOString() });
     }
   }
