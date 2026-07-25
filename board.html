@@ -369,15 +369,34 @@ const ISSUE_REASON_OPTS = [
 // ★ 2026-07-23 신규 — 배치 전체 아이템(고객사별 SKU 목록)을 한 번만 받아서 캐싱.
 //   "새 이슈 등록" 폼의 SKU 드롭다운을 채우는 데만 씀 (진행률 폴링과는 별개).
 let _batchItemsCache = { batchId: null, byInvoice: {} };
+// ★ 2026-07-24 신규 — "작업자(발견자)"를 직접 타이핑하지 않고, 이미 등록된
+// 작업자 명단(batch.html "Workers" 탭에서 관리하는 것과 동일한 명단)에서
+// 골라 쓰도록 함. 오타 방지 + 나중에 KPI 집계할 때 이름이 정확히 일치하게.
+let _workersCache = null; // null=아직 안 불러옴, [] 이상은 불러온 것
+async function ensureWorkersLoaded(){
+  if(_workersCache !== null) return; // 이미 한 번 불러왔으면 재사용 (배치 중 자주 안 바뀜)
+  try{
+    const res = await gasQuery('getBatchWorkers', {});
+    _workersCache = (res.ok && Array.isArray(res.workers)) ? res.workers : [];
+  }catch(e){ _workersCache = []; }
+}
 let _newIssueItemsSorted = []; // ★ 2026-07-24 신규: 검색창 필터링을 위해 정렬된 전체 목록을 따로 보관
 
 // ★ 2026-07-24 신규 — SKU를 상품명보다 앞에 표시(요청사항). items는 이미 SKU
 // 알파벳순으로 정렬되어 들어온다고 가정(renderIssueModalBody에서 정렬).
 function renderSkuOptionsHtml(items){
   if(!items.length) return '<option>상품 목록을 불러올 수 없습니다</option>';
-  return items.map(it =>
-    `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${it.sku || '(SKU없음)'} · ${it.name} · ${it.req_qty}pcs</option>`
-  ).join('');
+  return items.map(it => {
+    const st = _invoiceItemStatusByBarcode[String(it.barcode)];
+    let statusTxt = `${it.req_qty}pcs`;
+    let prefix = '';
+    if(st){
+      const short = (st.short != null) ? st.short : Math.max(0, (st.reqQty||0) - (st.scannedQty||0) - (st.issueQty||0));
+      statusTxt = short > 0 ? `⚠ ${st.scannedQty||0}/${st.reqQty||it.req_qty} (${short}개 부족)` : `✓ 완료`;
+      prefix = short > 0 ? '⚠ ' : '✓ ';
+    }
+    return `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
+  }).join('');
 }
 // ★ 2026-07-24 신규 — 검색창에 입력할 때마다 SKU/상품명/바코드 전체를 대상으로
 // 실시간 필터링(가장 정확한 건 SKU라고 안내드렸지만, 못 외운 경우 대비 전체 검색).
@@ -402,6 +421,7 @@ async function ensureBatchItemsLoaded(){
   _batchItemsCache = { batchId: currentBatchId, byInvoice };
 }
 
+let _invoiceItemStatusByBarcode = {}; // ★ 2026-07-24 신규: barcode -> {scannedQty, issueQty, short}
 async function openIssueModal(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
@@ -410,6 +430,16 @@ async function openIssueModal(invoice){
   document.getElementById('issueModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
   document.getElementById('issueModalOverlay').classList.add('open');
   await ensureBatchItemsLoaded();
+  await ensureWorkersLoaded();
+  // ★ 2026-07-24 신규 — "어떤 SKU가 부족한지 모르겠다"는 피드백: SKU별 스캔 상태를
+  //   따로 조회해서, 목록에서 미완료 SKU를 바로 찾을 수 있게 함.
+  _invoiceItemStatusByBarcode = {};
+  try{
+    const statusRes = await gasQuery('getInvoiceItemStatus', { batchId: currentBatchId, invoice });
+    if(statusRes.ok && Array.isArray(statusRes.items)){
+      statusRes.items.forEach(it => { _invoiceItemStatusByBarcode[String(it.barcode)] = it; });
+    }
+  }catch(e){ /* 상태 조회 실패해도 목록 자체는 그대로 보여줌(수량 표시만 안 나옴) */ }
   renderIssueModalBody();
 }
 function renderIssueModalBody(){
@@ -472,7 +502,9 @@ function renderIssueModalBody(){
       </div>
       <div>
         <label>작업자(발견자)</label>
-        <input type="text" id="newIssueWorker" placeholder="이름 입력">
+        <select id="newIssueWorker">${(_workersCache && _workersCache.length)
+          ? _workersCache.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
+          : '<option value="">등록된 작업자 없음 — batch.html Workers 탭에서 먼저 등록하세요</option>'}</select>
       </div>
       <div>
         <label>메모(선택)</label>
