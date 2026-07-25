@@ -362,6 +362,9 @@ const ISSUE_REASON_OPTS = [
   {v:'EXP', label:'EXP · 유통기한'}, {v:'NF', label:'NF · 재고없음'},
   {v:'DMG', label:'DMG · 파손'}, {v:'OOS', label:'OOS · 품절'},
   {v:'SKUMIS', label:'SKUMIS · SKU 불일치'},
+  // ★ 2026-07-24 신규 — 실제로는 정상 출고됐는데 작업자가 스캔만 깜빡한 경우.
+  //   진짜 결품/품질 문제와 헷갈리지 않게 별도 사유로 구분.
+  {v:'MISS', label:'MISS · 스캔 누락(실제 출고됨)'},
 ];
 // ★ 2026-07-23 신규 — 배치 전체 아이템(고객사별 SKU 목록)을 한 번만 받아서 캐싱.
 //   "새 이슈 등록" 폼의 SKU 드롭다운을 채우는 데만 씀 (진행률 폴링과는 별개).
@@ -413,7 +416,7 @@ function renderIssueModalBody(){
   const invoice = _issueModalInvoice;
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
-  const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절', SKUMIS:'SKUMIS · SKU 불일치'};
+  const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절', SKUMIS:'SKUMIS · SKU 불일치', MISS:'MISS · 스캔누락'};
   const issues = slot.issues || [];
   const rowsHtml = issues.length ? issues.map((i, idx) => `
     <div class="issue-modal-row" id="issueRow-${idx}">
