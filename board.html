@@ -146,7 +146,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 
 .issue-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:100; align-items:center; justify-content:center;}
 .issue-modal-overlay.open{display:flex;}
-.issue-modal{background:var(--surface); border:2px solid var(--border); border-radius:18px; width:min(640px, 90vw); max-height:80vh; display:flex; flex-direction:column; overflow:hidden;}
+.issue-modal{background:var(--surface); border:2px solid var(--border); border-radius:18px; width:min(920px, 94vw); max-height:86vh; display:flex; flex-direction:column; overflow:hidden;}
 .issue-modal-head{display:flex; justify-content:space-between; align-items:center; padding:22px 26px; border-bottom:2px solid var(--border);}
 .issue-modal-head h3{font-size:24px; font-weight:800;}
 .issue-modal-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:38px; height:38px; border-radius:10px; font-size:16px; cursor:pointer;}
@@ -392,8 +392,19 @@ function renderSkuOptionsHtml(items){
     let prefix = '';
     if(st){
       const short = (st.short != null) ? st.short : Math.max(0, (st.reqQty||0) - (st.scannedQty||0) - (st.issueQty||0));
-      statusTxt = short > 0 ? `⚠ ${st.scannedQty||0}/${st.reqQty||it.req_qty} (${short}개 부족)` : `✓ 완료`;
-      prefix = short > 0 ? '⚠ ' : '✓ ';
+      const issueQty = st.issueQty || 0;
+      if(short > 0){
+        statusTxt = `⚠ ${st.scannedQty||0}/${st.reqQty||it.req_qty} (${short}개 부족)`;
+        prefix = '⚠ ';
+      } else if(issueQty > 0){
+        // ★ 2026-07-24 신규 — 스캔이 아니라 이슈(EXP 등)로 필요수량이 이미 채워진
+        //   경우를 "완료"와 구분해서 명확히 보여줌 (계속 헷갈렸던 부분)
+        statusTxt = `✓ 이슈로 처리됨(${issueQty}pcs)`;
+        prefix = '✓ ';
+      } else {
+        statusTxt = `✓ 완료`;
+        prefix = '✓ ';
+      }
     }
     return `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
   }).join('');
@@ -488,7 +499,7 @@ function renderIssueModalBody(){
           <label>상품 (SKU)</label>
           <input type="text" id="newIssueSkuSearch" placeholder="🔍 SKU 검색..." style="width:55%; padding:6px 10px; font-size:13px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text);">
         </div>
-        <select id="newIssueSku" size="6" style="height:auto;">${renderSkuOptionsHtml(_newIssueItemsSorted)}</select>
+        <select id="newIssueSku" size="9" style="height:auto; font-size:15px;">${renderSkuOptionsHtml(_newIssueItemsSorted)}</select>
       </div>
       <div class="issue-new-form-row">
         <div>
@@ -502,9 +513,10 @@ function renderIssueModalBody(){
       </div>
       <div>
         <label>작업자(발견자)</label>
-        <select id="newIssueWorker">${(_workersCache && _workersCache.length)
+        <select id="newIssueWorker" onchange="document.getElementById('newIssueWorkerManual').style.display = (this.value==='__manual__') ? 'block' : 'none';">${(_workersCache && _workersCache.length)
           ? _workersCache.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
-          : '<option value="">등록된 작업자 없음 — batch.html Workers 탭에서 먼저 등록하세요</option>'}</select>
+          : '<option value="">등록된 작업자 없음</option>'}<option value="__manual__">✎ 명단에 없음 — 직접 입력</option></select>
+        <input type="text" id="newIssueWorkerManual" placeholder="이름 직접 입력" style="display:none; margin-top:8px;">
       </div>
       <div>
         <label>메모(선택)</label>
@@ -527,7 +539,10 @@ async function submitNewIssueFromBoard(){
   const sku = opt ? opt.dataset.sku : '';
   const reason = document.getElementById('newIssueReason').value;
   const qty = parseInt(document.getElementById('newIssueQty').value, 10);
-  const worker = document.getElementById('newIssueWorker').value.trim();
+  const workerSel = document.getElementById('newIssueWorker').value;
+  const worker = (workerSel === '__manual__')
+    ? document.getElementById('newIssueWorkerManual').value.trim()
+    : workerSel.trim();
   const note = document.getElementById('newIssueNote').value.trim();
 
   if(!barcode){ alert('상품을 선택하세요'); return; }
