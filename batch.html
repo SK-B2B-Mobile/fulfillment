@@ -2973,6 +2973,10 @@ const ISSUE_REASONS = [
   {v:'DMG', label:'DMG · 파손'},
   {v:'OOS', label:'OOS · 품절'},
   {v:'SKUMIS', label:'SKUMIS · SKU 불일치'},
+  // ★ 2026-07-24 신규 — 실제로는 정상 출고됐는데 작업자가 스캔만 깜빡한 경우.
+  //   EXP/NF/DMG/OOS(=진짜 재고·품질 문제)와는 성격이 전혀 다르므로 별도 사유로
+  //   구분해서, 나중에 "진짜 결품"과 "단순 스캔 누락"을 헷갈리지 않게 추적 가능.
+  {v:'MISS', label:'MISS · 스캔 누락(실제 출고됨)'},
 ];
 let _lastScanCtx = null; // ★ 2026-07-16: 이슈 등록 버튼이 참조할 현재 스캔 결과 컨텍스트
 
@@ -3549,7 +3553,7 @@ async function renderKPI(){
     `<tr><td>${s.worker}</td><td style="color:var(--green); font-weight:700;">${s.pass}</td><td style="color:${s.issueCount>0?'var(--red)':'var(--text-dim)'}; font-weight:700;">${s.issueCount}건</td><td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim)'}; font-weight:700;">${s.issueQty.toLocaleString()}pcs</td></tr>`).join('')
     || '<tr><td colspan="4" style="color:var(--text-dim)">스캔 기록 없음</td></tr>';
 
-  const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS', SKUMIS:'SKUMIS'};
+  const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS', SKUMIS:'SKUMIS', MISS:'MISS(스캔누락)'};
   const byReason = res.totals.byReason || {};
   const reasonSummary = Object.keys(byReason).length
     ? Object.entries(byReason).map(([k,v]) => `${reasonLabel[k]||k} ${v.toLocaleString()}pcs`).join(' · ')
