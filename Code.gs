@@ -185,6 +185,18 @@ function doGet(e) {
     const p = e.parameter || {};
     return json_(getInvoiceItemStatus(p.batchId || '', p.invoice || ''));
   }
+  // ★ 2026-07-24 신규 — 스캔/이슈 액션 없이도, 특정 인보이스의 fulfillment
+  //   대시보드 Inspection을 지금 당장 강제로 다시 계산해서 씀. 배포 직후 예전에
+  //   저장된 오래된 값을 새 액션 없이 바로 고치고 싶을 때 씀(1회성 유틸리티).
+  if (op === 'forceSyncInspection') {
+    const p = e.parameter || {};
+    try {
+      syncInspectionFromPicking_(p.batchId || '', p.invoice || '', p.worker || '(수동 재동기화)');
+      return json_({ ok: true, message: '재동기화 시도 완료 — 시트를 새로고침해서 확인하세요' });
+    } catch (e2) {
+      return json_({ ok: false, error: String(e2 && e2.message || e2) });
+    }
+  }
   // ★ 2026-07-09 신규 — 기기간 실시간 스캔 동기화용
   if (op === 'getScanState') {
     return json_(getScanState((e.parameter || {}).batchId || ''));
