@@ -604,18 +604,31 @@ function syncInspectionFromPicking_(batchId, invoice, worker) {
 
   // 3) 실제 스캔 통과 수량 합계 (undone 제외, pass만) — 초과분도 그대로 인정
   //    (batch.html 슬롯 완료 판정과 동일한 기준: q.doneRaw 합산과 동일 개념)
+  // ★ 2026-07-24 긴급 수정 — getSlotProgress/getScanState와 똑같은 버그가 여기도
+  //   있었음: 이슈 취소(undoIssue) 시 상쇄용 ADJ 기록은 일부러 안 지우는데(재스캔
+  //   유도 목적), 이 함수는 그 마이너스를 SKU별로 걸러내지 않고 인보이스 전체를
+  //   그냥 통째로 더해버려서, 취소된 이슈의 옛 상쇄기록이 계속 진행량을 깎아먹었음.
+  //   그래서 "완료"가 안 되는 것으로 잘못 계산되어, fulfillment 대시보드
+  //   Inspection 동기화 자체가 조용히 안 되는 사고로 이어졌음(예: 이슈 2건→1건
+  //   취소했는데 구글시트엔 계속 2건으로 남음). SKU(바코드)별로 순 스캔량을
+  //   먼저 구해서 0 밑으로 안 내려가게 고정한 뒤에 합산하도록 수정.
   const sl = scanlogSheet_();
   const slLast = sl.getLastRow();
-  let scanned = 0;
+  const scannedByBarcode = {};
   if (slLast >= 2) {
     sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       if (String(r[8]) !== String(invoice)) return;
       if (r[10] === 'undone') return;
       if (r[9] !== 'pass') return;
-      scanned += Number(r[11]) || 0;
+      const bc = String(r[4]);
+      scannedByBarcode[bc] = (scannedByBarcode[bc] || 0) + (Number(r[11]) || 0);
     });
   }
+  let scanned = 0;
+  Object.keys(scannedByBarcode).forEach(bc => {
+    scanned += Math.max(0, scannedByBarcode[bc]); // SKU별로 0 밑으로 안 내려가게 고정한 뒤 합산
+  });
 
   const isComplete = effectiveTotal > 0 && scanned >= effectiveTotal;
   const isIssueOnly = issueQty > 0 && !isComplete && effectiveTotal === 0; // 전량이 이슈로 빠진 경우도 "검수 끝(이슈)"로 취급
