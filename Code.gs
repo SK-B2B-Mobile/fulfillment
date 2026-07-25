@@ -208,7 +208,7 @@ function doGet(e) {
           if (latestTime === null || t > latestTime) { latestTime = t; realWorker = String(r[3] || ''); }
         });
       }
-      syncInspectionFromPicking_(p.batchId || '', p.invoice || '', realWorker);
+      syncInspectionFromPicking_(p.batchId || '', p.invoice || '', realWorker, true);
       return json_({ ok: true, message: '재동기화 완료 (담당자: ' + (realWorker || '(찾지 못함, 기존값 유지)') + ')' });
     } catch (e2) {
       return json_({ ok: false, error: String(e2 && e2.message || e2) });
