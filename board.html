@@ -390,23 +390,28 @@ function renderSkuOptionsHtml(items){
     const st = _invoiceItemStatusByBarcode[String(it.barcode)];
     let statusTxt = `${it.req_qty}pcs`;
     let prefix = '';
+    let color = ''; // ★ 2026-07-24 신규: 부족/이슈처리/완료를 색으로도 구분(빨강=부족, 눈에 확 띄게)
     if(st){
       const short = (st.short != null) ? st.short : Math.max(0, (st.reqQty||0) - (st.scannedQty||0) - (st.issueQty||0));
       const issueQty = st.issueQty || 0;
       if(short > 0){
-        statusTxt = `⚠ ${st.scannedQty||0}/${st.reqQty||it.req_qty} (${short}개 부족)`;
+        statusTxt = `⚠ ${st.scannedQty||0}/${st.reqQty||it.req_qty} · 미스캔(${short}개) → 실물 찾아 스캔하세요`;
         prefix = '⚠ ';
+        color = '#FF4D6D'; // 빨강 — 아직 스캔 안 된, 진짜 확인이 필요한 상품
       } else if(issueQty > 0){
         // ★ 2026-07-24 신규 — 스캔이 아니라 이슈(EXP 등)로 필요수량이 이미 채워진
         //   경우를 "완료"와 구분해서 명확히 보여줌 (계속 헷갈렸던 부분)
         statusTxt = `✓ 이슈로 처리됨(${issueQty}pcs)`;
         prefix = '✓ ';
+        color = '#F59E0B'; // 앰버 — 스캔은 아니지만 이슈로 이미 결론난 상품
       } else {
         statusTxt = `✓ 완료`;
         prefix = '✓ ';
+        color = '#6B8F87'; // 차분한 초록 — 정상 스캔 완료(눈에 안 띄어도 됨, 이미 끝난 것)
       }
     }
-    return `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}">${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
+    const styleAttr = color ? ` style="color:${color};${color==='#FF4D6D'?' font-weight:800;':''}"` : '';
+    return `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}"${styleAttr}>${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
   }).join('');
 }
 // ★ 2026-07-24 신규 — 검색창에 입력할 때마다 SKU/상품명/바코드 전체를 대상으로
@@ -494,6 +499,9 @@ function renderIssueModalBody(){
   const newFormHtml = `
     <div class="issue-new-form">
       <div class="issue-new-form-title">+ 새 이슈 등록</div>
+      <div style="font-size:12px; color:var(--text-dim); background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:8px 10px; margin-bottom:2px;">
+        💡 <b style="color:#F59E0B">⚠ 미스캔</b>은 실물을 찾아 <b>먼저 스캔</b>해보세요. 실물이 정말 없거나 문제(유통기한·파손 등)가 확인됐을 때만, 또는 <b>이미 출고됐는데 스캔만 깜빡했을 때</b>(사유: MISS·스캔누락)만 아래에서 골라 이슈로 등록하세요.
+      </div>
       <div>
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <label>상품 (SKU)</label>
