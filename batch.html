@@ -382,7 +382,7 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
    기존 스캔 중 이슈 폼(.issue-form)과 색감/톤은 맞추되, 독립된 오버레이 팝업으로 분리 */
 .retro-issue-overlay{position:fixed; inset:0; background:rgba(10,14,26,0.75); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; z-index:410; padding:20px;}
 .retro-issue-overlay.open{display:flex;}
-.retro-issue-modal{background:var(--surface); border:1px solid var(--border); border-radius:16px; width:min(480px, 100%); max-height:85vh; display:flex; flex-direction:column; overflow:hidden;}
+.retro-issue-modal{background:var(--surface); border:1px solid var(--border); border-radius:16px; width:min(760px, 96vw); max-height:88vh; display:flex; flex-direction:column; overflow:hidden;}
 .retro-issue-head{display:flex; justify-content:space-between; align-items:center; padding:16px 18px; border-bottom:1px solid var(--border);}
 .retro-issue-head h3{font-size:15px; font-weight:800;}
 .retro-issue-head .sub{font-size:11.5px; color:var(--text-dim); font-family:var(--mono); margin-top:2px;}
@@ -3281,8 +3281,21 @@ let _retroIssueSkuList = []; // ★ 2026-07-24 신규: 검색창 필터링용 �
 function renderRetroSkuOptionsHtml(list){
   return list.map(s => {
     const short = Math.max(0, (s.need||0) - (s.done||0));
-    const statusTxt = short > 0 ? `⚠ ${s.done||0}/${s.need||0} (${short}개 부족)` : `✓ 완료`;
-    return `<option value="${s.barcode}">${short>0?'⚠ ':'✓ '}${s.sku || '(SKU없음)'} · ${s.name} · ${statusTxt}</option>`;
+    const issueQty = Math.max(0, (s.origNeed||0) - (s.need||0));
+    let statusTxt, prefix;
+    if(short > 0){
+      statusTxt = `⚠ ${s.done||0}/${s.need||0} (${short}개 부족)`;
+      prefix = '⚠ ';
+    } else if(issueQty > 0){
+      // ★ 2026-07-24 신규 — 스캔이 아니라 이슈(EXP 등)로 필요수량이 이미 채워진
+      //   경우를 "완료"와 구분해서 명확히 보여줌 (계속 헷갈렸던 부분)
+      statusTxt = `✓ 이슈로 처리됨(${issueQty}pcs)`;
+      prefix = '✓ ';
+    } else {
+      statusTxt = `✓ 완료`;
+      prefix = '✓ ';
+    }
+    return `<option value="${s.barcode}">${prefix}${s.sku || '(SKU없음)'} · ${s.name} · ${statusTxt}</option>`;
   }).join('');
 }
 // ★ 2026-07-24 신규: SKU/상품명/바코드 전체를 대상으로 실시간 필터링
@@ -3304,7 +3317,7 @@ function getInvoiceSkuList(invoice){
   const list = [];
   Object.entries(state.scanIndex).forEach(([barcode, sku]) => {
     const q = sku.queue.find(x => x.invoice === invoice);
-    if(q) list.push({barcode, name: sku.name, sku: sku.sku, need: q.need, done: q.done});
+    if(q) list.push({barcode, name: sku.name, sku: sku.sku, need: q.need, done: q.done, origNeed: (q.origNeed!=null?q.origNeed:q.need)});
   });
   // ★ 2026-07-24 신규: SKU가 많을 때(200개+) 찾기 쉽도록 SKU 알파벳순 정렬 (TV와 동일 원칙)
   list.sort((a, b) => String(a.sku||'').localeCompare(String(b.sku||'')));
@@ -3359,7 +3372,7 @@ function renderRetroIssueBody(){
           <label style="margin:0;">상품 (SKU)</label>
           <input type="text" id="retroIssueSkuSearch" placeholder="🔍 SKU 검색..." style="width:55%; padding:6px 8px; font-size:12px; background:var(--surface); border:1px solid var(--border2); border-radius:6px; color:var(--text); margin-top:0;">
         </div>
-        <select id="retroIssueSku" size="6" style="height:auto;">${skuOptions || '<option>이 고객사에 등록된 SKU 없음</option>'}</select>
+        <select id="retroIssueSku" size="9" style="height:auto; font-size:14px;">${skuOptions || '<option>이 고객사에 등록된 SKU 없음</option>'}</select>
       </div>
       <div class="retro-issue-form-row">
         <div>
@@ -3373,7 +3386,8 @@ function renderRetroIssueBody(){
       </div>
       <div>
         <label>작업자(발견자)</label>
-        <select id="retroIssueWorker">${state.workers.map(w => `<option value="${w.name}" ${w.name===state.currentWorker?'selected':''}>${w.name}</option>`).join('')}</select>
+        <select id="retroIssueWorker" onchange="document.getElementById('retroIssueWorkerManual').style.display = (this.value==='__manual__') ? 'block' : 'none';">${state.workers.map(w => `<option value="${w.name}" ${w.name===state.currentWorker?'selected':''}>${w.name}</option>`).join('')}<option value="__manual__">✎ 명단에 없음 — 직접 입력</option></select>
+        <input type="text" id="retroIssueWorkerManual" placeholder="이름 직접 입력" style="display:none; margin-top:6px;">
       </div>
       <div>
         <label>메모(선택)</label>
@@ -3393,7 +3407,10 @@ async function submitRetroIssue(){
   if(!sku){ toast('⚠️ 상품을 선택하세요', 'error'); return; }
   const reason = document.getElementById('retroIssueReason').value;
   const qty = parseInt(document.getElementById('retroIssueQty').value, 10);
-  const worker = document.getElementById('retroIssueWorker').value;
+  const workerSel = document.getElementById('retroIssueWorker').value;
+  const worker = (workerSel === '__manual__')
+    ? document.getElementById('retroIssueWorkerManual').value.trim()
+    : workerSel;
   const note = document.getElementById('retroIssueNote').value.trim();
 
   if(!qty || qty < 1){ toast('⚠️ 수량을 입력하세요', 'error'); return; }
