@@ -1821,18 +1821,13 @@ function resetBatchFormForNewBatch(){
 // "01 Batch" 탭 진입 시, 이미 로드된 배치(어제 이월분 등)가 있으면 확인 후 리셋.
 // 이 배치가 없거나(=순수 신규 작성 중) 이미 이 폼에서 직접 업로드한 상태라면
 // (userHasUploaded=true) 그냥 통과 — 자기가 지금 만들던 걸 실수로 지우지 않도록.
+// ★ 2026-07-27 수정 — 예전엔 여기서 "새 배치를 만드시겠습니까?" 확인창을 띄워서
+// 통과해야만 01 Batch 탭에 들어갈 수 있었음. 그런데 그러면 예전 배치를 정리
+// (완료 처리)하러 이 탭의 상단 경고 패널(openBatchesPanel)을 보러 가는 것조차
+// 막혀버리는 부작용이 있었음. 실제 데이터 섞임 방지는 이제 "파일을 실제로
+// 드롭하는 순간"(dropSum/dropCust 핸들러)에 자동으로 걸러주는 안전장치가
+// 따로 있으므로, 여기서는 확인 없이 자유롭게 드나들 수 있게 함.
 function handleBatchTabEntry(){
-  if(state.batchId && !state.batchFormIsFreshDraft){
-    const ok = confirm(
-      `⚠ 현재 배치 ${state.batchId}가 로드되어 있습니다.\n\n` +
-      `새 배치를 만들면 이 화면은 완전히 빈 상태로 초기화됩니다.\n` +
-      `(서버에 저장된 ${state.batchId}의 데이터는 전혀 삭제되지 않으며,\n` +
-      `"⇄ 다른 배치" 버튼으로 언제든 다시 불러올 수 있습니다.)\n\n` +
-      `새 배치를 만드시겠습니까?`
-    );
-    if(!ok) return false; // 취소 → 탭 이동 자체를 막음(기존 화면 유지)
-    resetBatchFormForNewBatch();
-  }
   return true;
 }
 
