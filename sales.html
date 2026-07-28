@@ -59,6 +59,7 @@ a{color:inherit;}
 .search-row input::placeholder{color:var(--text-dim);}
 
 .table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
+.table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed;}
 thead th{background:var(--surface2); text-align:left; padding:11px 12px; font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 thead th.new-col{color:var(--green); background:rgba(16,217,126,0.06);}
@@ -266,20 +267,22 @@ td.new-col{background:rgba(16,217,126,0.03);}
     </div>
 
     <div class="table-wrap">
+      <div class="table-scroll">
       <table>
         <colgroup>
-          <col style="width:11%"><col style="width:19%"><col style="width:9%"><col style="width:9%">
-          <col style="width:8%"><col style="width:9%"><col style="width:14%"><col style="width:12%"><col style="width:9%">
+          <col style="width:10%"><col style="width:17%"><col style="width:8%"><col style="width:8%">
+          <col style="width:7%"><col style="width:8%"><col style="width:13%"><col style="width:10%"><col style="width:10%"><col style="width:9%">
         </colgroup>
         <thead>
           <tr>
             <th>Invoice#</th><th>Customer Name</th><th>Ship Out</th><th>Picking Started</th>
             <th>Method</th><th>Amount</th>
-            <th class="new-col">Fulfillment Status</th><th class="new-col">Moved to Packing</th><th class="new-col">Details</th>
+            <th class="new-col">Fulfillment Status</th><th class="new-col">Moved to Packing</th><th class="new-col">Dimensions</th><th class="new-col">Details</th>
           </tr>
         </thead>
-        <tbody id="sheet-tbody"><tr><td colspan="9" style="text-align:center;padding:30px;"><span class="spinner"></span>Loading...</td></tr></tbody>
+        <tbody id="sheet-tbody"><tr><td colspan="10" style="text-align:center;padding:30px;"><span class="spinner"></span>Loading...</td></tr></tbody>
       </table>
+      </div>
       <div class="pager">
         <div class="pager-left">
           <span id="pager-summary">–</span>
@@ -293,10 +296,6 @@ td.new-col{background:rgba(16,217,126,0.03);}
         </div>
         <div class="pager-right" id="pager-buttons"></div>
       </div>
-    </div>
-
-    <div class="footer-note">
-      <b>Note:</b> "Details" only shows up when there's something worth checking (issues or unscanned items). Items that are truly short show as ❌ red; items physically picked but just not scanned show as 🔵 blue — safe to invoice.
     </div>
   </div>
 
@@ -411,7 +410,7 @@ function showNamePopover(evt, fullName){
 async function loadSheetOverview(){
   const res = await gasGet({ op:'getSalesOverview' });
   if (!res || !res.ok){
-    document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
+    document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
     return;
   }
   SHEET_JOBS = res.jobs || [];
@@ -434,6 +433,15 @@ function classifyInsp(insp){
   return {status:'pending'};
 }
 
+function dimsBadge(o){
+  const needs = (o.method==='TRUCKING'||o.method==='TK'||o.method==='UPS');
+  if (!needs) return '<span class="detail-dash">—</span>';
+  const n = o.dimsCount || 0;
+  return n>0
+    ? '<span class="badge pass">✓ Saved ('+n+')</span>'
+    : '<span class="badge pending">Pending</span>';
+}
+
 function renderSheet(){
   const q = (document.getElementById('sheet-search-input').value||'').trim().toUpperCase();
   const filtered = SHEET_JOBS.filter(o => !q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q));
@@ -445,7 +453,7 @@ function renderSheet(){
 
   const tbody = document.getElementById('sheet-tbody');
   if (!pageRows.length){
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-dim);">No matching orders.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-dim);">No matching orders.</td></tr>';
   } else {
     tbody.innerHTML = pageRows.map(o=>{
       const c = classifyInsp(o.inspection);
@@ -464,6 +472,7 @@ function renderSheet(){
         <td class="mono">${fmtMoney(o.amount)}</td>
         <td class="new-col">${badge}</td>
         <td class="new-col">${movedBadge}</td>
+        <td class="new-col">${dimsBadge(o)}</td>
         <td class="new-col">${link}</td>
       </tr>`;
     }).join('');
@@ -518,6 +527,8 @@ async function loadToday(){
     else badge = '<span class="badge pending">'+insp+'</span>';
     const movedBadge = j.movedToPacking ? '<span class="badge moved-yes">✓ Packing</span>' : '<span class="badge moved-no">Not Moved</span>';
     const methodBadge = j.method ? '<span class="badge method">'+j.method+'</span>' : '';
+    const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
+    const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="badge pass">✓ Dims</span>' : '<span class="badge pending">No Dims</span>') : '';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')">
       <div class="today-row-left">
         <span class="today-inv">${j.invoice||''}</span>
@@ -528,6 +539,7 @@ async function loadToday(){
         ${methodBadge}
         ${badge}
         ${movedBadge}
+        ${dimsBadgeJ}
         <span class="today-time">${j.inspEnd||''}</span>
       </div>
     </div>`;
@@ -693,6 +705,10 @@ async function doSearch(){
 
   let statusHtml, itemsSectionHtml='';
   const movedHtml = `<span class="status-small ${res.movedToPacking?'moved-yes':'moved-no'}">${res.movedToPacking?'✓ Moved to Packing':'Not Moved to Packing Yet'}</span>`;
+  const needsDimsRes = (res.method==='TRUCKING'||res.method==='TK'||res.method==='UPS');
+  const dimsSavedHtml = needsDimsRes
+    ? `<span class="status-small ${res.dimsCount>0?'moved-yes':'moved-no'}">${res.dimsCount>0?'✓ Dimensions Saved ('+res.dimsCount+')':'Dimensions Not Entered'}</span>`
+    : '';
 
   if (status==='pending'){
     statusHtml = '<span class="status-big pending">⏳ Not Inspected Yet</span>';
@@ -754,6 +770,7 @@ async function doSearch(){
       <div class="status-stack">
         ${statusHtml}
         ${status!=='pending' ? movedHtml : ''}
+        ${status!=='pending' ? dimsSavedHtml : ''}
       </div>
     </div>
     ${itemsSectionHtml}
