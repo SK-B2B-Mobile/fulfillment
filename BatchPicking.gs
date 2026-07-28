@@ -1811,6 +1811,7 @@ function saveDimensions(data) {
  * Jobs(검수결과) + BatchCustomers(패킹존이동) + IssueLog(빠진 상품 상세)
  * + Dimensions(치수)를 한 번에 묶어서 반환. 영업팀에게 필요 없는 정보
  * (작업자 실적, 다른 배치 현황 등)는 애초에 응답에 포함하지 않음.
+ * ★ 2026-07-28 추가 — pickStart(작업/피킹 시작일) 필드 추가.
  * ------------------------------------------------------------------- */
 function getSalesInvoiceDetail(invoice) {
   try {
@@ -1843,6 +1844,15 @@ function getSalesInvoiceDetail(invoice) {
     const inspectionRaw = String(jv('inspection') || '').trim();
     const inspector = String(jv('inspector') || '').trim();
     const inspEndRaw = String(jv('insp end') || '');
+    // ★ 2026-07-28 신규 — 작업(피킹) 시작일. StartAtISO의 날짜 부분만 추출.
+    const startISORaw = jv('startatiso');
+    let pickStart = '';
+    if (startISORaw instanceof Date && !isNaN(startISORaw)) {
+      pickStart = Utilities.formatDate(startISORaw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    } else {
+      const s = String(startISORaw || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10);
+    }
 
     // 2) BatchCustomers에서 패킹존 이동 여부 (가장 최근 매치를 사용)
     const bc = bcustSheetSafe_();
@@ -1881,6 +1891,7 @@ function getSalesInvoiceDetail(invoice) {
       invoice: invoice,
       customer: customer,
       shipDate: shipDate,
+      pickStart: pickStart,
       method: method,
       amount: amount,
       inspectionRaw: inspectionRaw,
