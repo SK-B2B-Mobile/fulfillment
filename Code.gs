@@ -38,6 +38,12 @@ function bumpVersion_() {
   // ★ 2026-07-14 신규: 데이터가 실제로 바뀌면 listJobs 캐시를 즉시 지워서,
   //   다음 조회부터는(캐시 만료 8초를 기다리지 않고) 곧바로 최신 데이터를 읽음
   try { CacheService.getScriptCache().remove('listJobs_cache_v1'); } catch (e) {}
+  // ★ 2026-07-28 신규 — 영업 공유 페이지(sales.html) 캐시도 같이 비움.
+  //   디멘션 저장/검수/패킹존이동 등 거의 모든 쓰기 작업이 이 함수를 거치므로,
+  //   여기서 같이 지워주면 "방금 저장했는데 목록에 안 보임" 문제 없이
+  //   짧은 캐시(속도용)와 즉시반영(정확성)을 둘 다 챙길 수 있음.
+  try { CacheService.getScriptCache().remove('salesOverview_cache_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) {}
 }
 
 // === Header map cache ===
@@ -2572,6 +2578,13 @@ function buildMovedToPackingMap_() {
  * ===================================================== */
 function getSalesTodayList() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'salesToday_cache_v1';
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 그냥 새로 조회 */ }
+    }
+
     const sh = SHEET_();
     const hdr = headerMapCached_();
     const norm = normalizeHeaderName_;
@@ -2621,7 +2634,9 @@ function getSalesTodayList() {
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
 
-    return { ok: true, jobs: jobs, date: today };
+    const out = { ok: true, jobs: jobs, date: today };
+    try { cache.put(cacheKey, JSON.stringify(out), 15); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
   }
@@ -2634,6 +2649,13 @@ function getSalesTodayList() {
  * ===================================================== */
 function getSalesOverview() {
   try {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'salesOverview_cache_v1';
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 그냥 새로 조회 */ }
+    }
+
     const sh = SHEET_();
     const hdr = headerMapCached_();
     const norm = normalizeHeaderName_;
@@ -2653,39 +2675,53 @@ function getSalesOverview() {
     if (!iInv) return { ok: true, jobs: [] };
 
     const tz = Session.getScriptTimeZone();
-    const lastCol = sh.getLastColumn();
-    const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const n = lastRow - 1;
+
+    // ★ 2026-07-28 신규 — 성능 개선: 예전엔 전체 컬럼(lastCol개)을 통째로
+    //   읽었는데, 실제 쓰는 건 9개뿐이라 나머지(잠금·비고 등)까지 매번 읽는
+    //   낭비가 있었음. 필요한 컬럼만 각각 읽도록 바꿔서 시트에서 오고가는
+    //   데이터량을 크게 줄임(getSalesTodayList와 동일한 방식).
+    const invVals      = sh.getRange(2, iInv, n, 1).getValues();
+    const remarksVals  = iRemarks  ? sh.getRange(2, iRemarks,  n, 1).getValues() : null;
+    const shipVals      = iShip    ? sh.getRange(2, iShip,     n, 1).getValues() : null;
+    const truckVals    = iTruck    ? sh.getRange(2, iTruck,    n, 1).getValues() : null;
+    const amountVals   = iAmount   ? sh.getRange(2, iAmount,   n, 1).getValues() : null;
+    const inspVals     = iInsp     ? sh.getRange(2, iInsp,     n, 1).getValues() : null;
+    const inspEndVals  = iInspEnd  ? sh.getRange(2, iInspEnd,  n, 1).getValues() : null;
+    const archVals     = iArch     ? sh.getRange(2, iArch,     n, 1).getValues() : null;
+    const createdVals  = iCreated  ? sh.getRange(2, iCreated,  n, 1).getValues() : null;
+    const startISOVals = iStartISO ? sh.getRange(2, iStartISO, n, 1).getValues() : null;
+
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
 
     const jobs = [];
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      if (iArch) {
-        const a = String(r[iArch - 1] || '').trim().toLowerCase();
+    for (let i = 0; i < n; i++) {
+      if (archVals) {
+        const a = String(archVals[i][0] || '').trim().toLowerCase();
         if (a === 'true' || a === '1' || a === 'y' || a === 'yes') continue;
       }
-      const invoice = String(r[iInv - 1] || '');
+      const invoice = String(invVals[i][0] || '');
       if (!invoice) continue;
-      const shipRaw = iShip ? r[iShip - 1] : '';
+      const shipRaw = shipVals ? shipVals[i][0] : '';
       const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
-      const createdRaw = iCreated ? r[iCreated - 1] : '';
-      // ★ 신규 — 작업(피킹) 시작일. StartAtISO의 날짜 부분만 추출.
+      const createdRaw = createdVals ? createdVals[i][0] : '';
+      // 작업(피킹) 시작일 — StartAtISO의 날짜 부분만 추출.
       let pickStart = '';
-      if (iStartISO) {
-        const sv = r[iStartISO - 1];
+      if (startISOVals) {
+        const sv = startISOVals[i][0];
         if (sv instanceof Date && !isNaN(sv)) pickStart = Utilities.formatDate(sv, tz, 'yyyy-MM-dd');
         else { const s = String(sv || '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10); }
       }
       jobs.push({
         invoice: invoice,
-        remarks: iRemarks ? r[iRemarks - 1] : '',
+        remarks: remarksVals ? remarksVals[i][0] : '',
         shipDate: shipDate,
         pickStart: pickStart,
-        method: iTruck ? r[iTruck - 1] : '',
-        amount: iAmount ? r[iAmount - 1] : '',
-        inspection: iInsp ? String(r[iInsp - 1] || '').trim() : '',
-        inspEnd: iInspEnd ? formatInspEnd_(r[iInspEnd - 1]) : '',
+        method: truckVals ? truckVals[i][0] : '',
+        amount: amountVals ? amountVals[i][0] : '',
+        inspection: inspVals ? String(inspVals[i][0] || '').trim() : '',
+        inspEnd: inspEndVals ? formatInspEnd_(inspEndVals[i][0]) : '',
         movedToPacking: !!movedMap[invoice],
         dimsCount: (dimsMap[invoice] || {}).count || 0,
         createdAt: createdRaw ? String(createdRaw) : ''
@@ -2694,7 +2730,9 @@ function getSalesOverview() {
     // 최근 생성된 순
     jobs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
-    return { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
+    const out = { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
+    try { cache.put(cacheKey, JSON.stringify(out), 15); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
   }
