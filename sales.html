@@ -37,10 +37,54 @@ a{color:inherit;}
 .sync-dot.busy{background:var(--amber); box-shadow:0 0 8px var(--amber); animation:blink 1s infinite;}
 @keyframes blink{0%,100%{opacity:1} 50%{opacity:0.3}}
 
-.wrap{padding:26px 32px; max-width:1000px; margin:0 auto;}
+.tabs{display:flex; gap:8px;}
+.tab-btn{font-family:var(--sans); font-size:13.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:9px 16px; cursor:pointer; transition:all 0.15s;}
+.tab-btn:hover{color:var(--text); border-color:var(--border2);}
+.tab-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
+
+.wrap{padding:26px 32px; max-width:1440px; margin:0 auto;}
+.screen{display:none;}
+.screen.active{display:block;}
+
 .section-head{margin-bottom:16px;}
 .section-head h2{font-size:19px; font-weight:800;}
 .section-head p{font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin-top:6px; line-height:1.6;}
+
+.sheet-note{background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:13px 18px; font-size:12.5px; color:var(--text-dim); margin-bottom:16px; line-height:1.7;}
+.sheet-note b{color:var(--text);}
+.hidden-tag{display:inline-block; background:var(--gray-bg); color:var(--text-dim); font-family:var(--mono); font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; margin-left:5px; vertical-align:2px;}
+
+.search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 16px; margin-bottom:16px; max-width:420px;}
+.search-row svg{color:var(--text-dim); flex-shrink:0;}
+.search-row input{flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:13.5px;}
+.search-row input::placeholder{color:var(--text-dim);}
+
+.table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow-x:auto;}
+table{width:100%; border-collapse:collapse; font-size:12.5px;}
+thead th{background:var(--surface2); text-align:left; padding:12px 13px; font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); white-space:nowrap;}
+thead th.new-col{color:var(--green); background:rgba(16,217,126,0.06);}
+tbody td{padding:12px 13px; border-bottom:1px solid var(--border); vertical-align:middle; white-space:nowrap;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:rgba(255,255,255,0.02);}
+td.new-col{background:rgba(16,217,126,0.03);}
+.mono{font-family:var(--mono);}
+.dim{color:var(--text-dim);}
+
+.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11.5px; font-weight:800; padding:4px 9px; border-radius:6px; white-space:nowrap;}
+.badge.pass{background:var(--green-bg); color:var(--green);}
+.badge.issue{background:var(--red-bg); color:#FF7A7A;}
+.badge.gap{background:var(--blue-bg); color:#8FBBFF;}
+.badge.pending{background:var(--gray-bg); color:var(--text-dim);}
+.badge.moved-yes{background:var(--purple-bg); color:#C4B0FF;}
+.badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
+.badge.method{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
+
+.detail-link{font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--blue); text-decoration:none; cursor:pointer; border-bottom:1px dashed var(--blue);}
+.detail-link:hover{color:#93C1FF;}
+.detail-dash{color:var(--gray); font-family:var(--mono);}
+
+.footer-note{margin-top:20px; padding:15px 20px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12px; color:var(--text-dim); line-height:1.7;}
+.footer-note b{color:var(--text);}
 
 .lookup-top{display:flex; gap:12px; margin-bottom:22px;}
 .search-box{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 18px;}
@@ -57,19 +101,12 @@ a{color:inherit;}
 .today-row{display:flex; align-items:center; justify-content:space-between; padding:13px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; gap:12px; flex-wrap:wrap;}
 .today-row:last-child{border-bottom:none;}
 .today-row:hover{background:var(--surface2);}
-.today-row-left{display:flex; align-items:center; gap:16px;}
+.today-row-left{display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
 .today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
 .today-cust{font-size:12.5px; color:var(--text-dim);}
 .today-time{font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
 .today-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
-
-.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11.5px; font-weight:800; padding:4px 9px; border-radius:6px; white-space:nowrap;}
-.badge.pass{background:var(--green-bg); color:var(--green);}
-.badge.issue{background:var(--red-bg); color:#FF7A7A;}
-.badge.gap{background:var(--blue-bg); color:#8FBBFF;}
-.badge.pending{background:var(--gray-bg); color:var(--text-dim);}
-.badge.moved-yes{background:var(--purple-bg); color:#C4B0FF;}
-.badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
+.today-row-right{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
 
 .detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
 .detail-card.show{display:block;}
@@ -176,36 +213,79 @@ a{color:inherit;}
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
+  <div class="tabs">
+    <button class="tab-btn active" onclick="showScreen('sheet')">① Sales Sheet Preview</button>
+    <button class="tab-btn" onclick="showScreen('lookup')">② Order Detail Lookup</button>
+  </div>
   <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting...</span></div>
 </div>
 
 <div class="wrap">
-  <div class="section-head">
-    <h2>Order Fulfillment Detail</h2>
-    <p>Search by invoice, or click an order from today's list below. Anyone can view; the Edit button next to Shipping Dimensions is open for Packing to fill in — no login needed.</p>
-  </div>
 
-  <div class="lookup-top">
-    <div class="search-box">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-      <input id="search-input" placeholder="Enter invoice number (e.g. IN00460209)" onkeydown="if(event.key==='Enter')doSearch()">
+  <!-- ===================== Screen 1 ===================== -->
+  <div class="screen active" id="screen-sheet">
+    <div class="section-head">
+      <h2>WMS Invoice and Issue — New Columns</h2>
+      <p>Live from the same Jobs data the warehouse uses. Fulfillment Status and Moved to Packing update automatically — no manual entry.</p>
     </div>
-    <button class="search-btn" onclick="doSearch()">Search</button>
-  </div>
 
-  <div class="today-panel">
-    <div class="today-head">
-      <h3>Completed Today</h3>
-      <span class="count" id="today-count">Loading...</span>
+    <div class="sheet-note">
+      Showing the most recent 500 active orders. <b>Print?</b> and <b>Issue?</b><span class="hidden-tag">SALES-OWNED, NOT SHOWN HERE</span> live on the separate Sales-owned sheet and aren't part of this view.
     </div>
-    <div id="today-list"><div class="today-empty"><span class="spinner"></span>Loading...</div></div>
+
+    <div class="search-row">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="renderSheet()">
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Invoice#</th><th>Customer Name</th><th>Ship Out Date</th>
+            <th>Shipping Method</th><th>Invoice Amount</th>
+            <th class="new-col">Fulfillment Status</th><th class="new-col">Moved to Packing</th><th class="new-col">Details</th>
+          </tr>
+        </thead>
+        <tbody id="sheet-tbody"><tr><td colspan="8" style="text-align:center;padding:30px;"><span class="spinner"></span>Loading...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="footer-note">
+      <b>Note:</b> "Details" only shows up when there's something worth checking (issues or unscanned items). Items that are truly short show as ❌ red; items physically picked but just not scanned show as 🔵 blue — safe to invoice.
+    </div>
   </div>
 
-  <div class="detail-card" id="detail-card"></div>
-  <div class="empty-state" id="empty-state">
-    <div class="icon">🔍</div>
-    Search an invoice number above, or click an order from today's list.
+  <!-- ===================== Screen 2 ===================== -->
+  <div class="screen" id="screen-lookup">
+    <div class="section-head">
+      <h2>Order Fulfillment Detail</h2>
+      <p>Search by invoice, or click an order from today's list below. Anyone can view; the Edit button next to Shipping Dimensions is open for Packing to fill in — no login needed.</p>
+    </div>
+
+    <div class="lookup-top">
+      <div class="search-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="search-input" placeholder="Enter invoice number (e.g. IN00460209)" onkeydown="if(event.key==='Enter')doSearch()">
+      </div>
+      <button class="search-btn" onclick="doSearch()">Search</button>
+    </div>
+
+    <div class="today-panel">
+      <div class="today-head">
+        <h3>Completed Today</h3>
+        <span class="count" id="today-count">Loading...</span>
+      </div>
+      <div id="today-list"><div class="today-empty"><span class="spinner"></span>Loading...</div></div>
+    </div>
+
+    <div class="detail-card" id="detail-card"></div>
+    <div class="empty-state" id="empty-state">
+      <div class="icon">🔍</div>
+      Search an invoice number above, or click an order from today's list.
+    </div>
   </div>
+
 </div>
 
 <script>
@@ -218,6 +298,7 @@ const REASON_LABEL = {EXP:'Expired', NF:'Not Found In Stock', DMG:'Damaged', OOS
 const REAL_ISSUE = ['EXP','NF','DMG','OOS','SKUMIS'];
 
 let CURRENT_ORDER = null;
+let SHEET_JOBS = [];
 
 function setSync(state, text){
   const dot = document.getElementById('syncDot');
@@ -247,61 +328,92 @@ async function gasPost(op, data){
   }
 }
 
-function needsDims(order){ return order.method==='TRUCKING' || order.method==='UPS'; }
-function dimUnitLabel(order){ return order.method==='TRUCKING' ? 'Pallet' : 'Box'; }
-function dimUnitLabelPlural(order){ return order.method==='TRUCKING' ? 'Pallets' : 'Boxes'; }
+function needsDims(order){ return order.method==='TRUCKING' || order.method==='TK' || order.method==='UPS'; }
+function dimUnitLabel(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallet' : 'Box'; }
+function dimUnitLabelPlural(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallets' : 'Boxes'; }
 
-function classify(order){
-  const insp = String(order.inspectionRaw || '').trim();
+function classifyInsp(insp, hasItems){
+  insp = String(insp||'').trim();
   if (!insp) return {status:'pending'};
-  const items = order.items || [];
-  if (items.length === 0) return {status:'pass'};
-  const real = items.filter(i=>REAL_ISSUE.includes(i.reason));
-  const gap = items.filter(i=>i.reason==='MISS');
-  if (real.length > 0) return {status:'issue', real, gap};
-  return {status:'gap-only', real:[], gap};
+  if (insp.indexOf('PASS') >= 0) return {status:'pass'};
+  if (insp.indexOf('ISSUES') >= 0) return {status:'issues-summary'}; // detail split happens after fetching items
+  return {status:'pending'};
 }
 
 function fmtMoney(n){ n = Number(n)||0; return n ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'; }
 
-function todayStr(){
-  const d = new Date();
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+/* ===================== Screen 1: Sheet Preview ===================== */
+async function loadSheetOverview(){
+  const res = await gasGet({ op:'getSalesOverview' });
+  if (!res || !res.ok){
+    document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
+    return;
+  }
+  SHEET_JOBS = res.jobs || [];
+  renderSheet();
 }
 
+function renderSheet(){
+  const q = (document.getElementById('sheet-search-input').value||'').trim().toUpperCase();
+  const tbody = document.getElementById('sheet-tbody');
+  const rows = SHEET_JOBS.filter(o => !q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q));
+  if (!rows.length){
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim);">No matching orders.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(o=>{
+    const c = classifyInsp(o.inspection);
+    let badge, link='<span class="detail-dash">—</span>';
+    if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
+    else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
+    else { badge = '<span class="badge issue">⚠ '+o.inspection+'</span>'; link = '<a class="detail-link" onclick="jumpToInvoice(\''+o.invoice+'\')">Details →</a>'; }
+    const movedBadge = o.movedToPacking ? '<span class="badge moved-yes">✓ Yes</span>' : '<span class="badge moved-no">No</span>';
+    return `<tr>
+      <td class="mono" style="font-weight:800">${o.invoice}</td>
+      <td>${o.remarks||''}</td>
+      <td class="mono dim">${o.shipDate||'-'}</td>
+      <td class="dim">${o.method||'-'}</td>
+      <td class="mono">${fmtMoney(o.amount)}</td>
+      <td class="new-col">${badge}</td>
+      <td class="new-col">${movedBadge}</td>
+      <td class="new-col">${link}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ===================== Screen 2: Lookup ===================== */
 async function loadToday(){
-  const res = await gasGet({ op:'listJobs' });
+  const res = await gasGet({ op:'getSalesTodayList' });
   if (!res || !res.ok){
     document.getElementById('today-list').innerHTML = '<div class="today-empty">Could not load today\\u2019s list.</div>';
     document.getElementById('today-count').textContent = '';
     return;
   }
-  const today = todayStr();
-  const jobs = (res.jobs || []).filter(j => {
-    const insp = String(j.inspection || j.Inspection || '').trim();
-    const inspEnd = String(j.inspEnd || j['Insp. End'] || '');
-    return insp && inspEnd.indexOf(today) === 0;
-  });
+  const jobs = res.jobs || [];
   document.getElementById('today-count').textContent = jobs.length + ' orders';
   if (!jobs.length){
     document.getElementById('today-list').innerHTML = '<div class="today-empty">No orders completed yet today.</div>';
     return;
   }
   document.getElementById('today-list').innerHTML = jobs.map(j=>{
-    const insp = String(j.inspection || j.Inspection || '').trim();
+    const insp = String(j.inspection || '').trim();
     let badge;
     if (insp.indexOf('PASS') >= 0) badge = '<span class="badge pass">✓ PASS</span>';
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="badge issue">⚠ '+insp+'</span>';
     else badge = '<span class="badge pending">'+insp+'</span>';
-    const inspEnd = String(j.inspEnd || j['Insp. End'] || '');
+    const movedBadge = j.movedToPacking ? '<span class="badge moved-yes">✓ Packing</span>' : '<span class="badge moved-no">Not Moved</span>';
+    const methodBadge = j.method ? '<span class="badge method">'+j.method+'</span>' : '';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')">
       <div class="today-row-left">
         <span class="today-inv">${j.invoice||''}</span>
         <span class="today-cust">${j.remarks||''}</span>
+        <span class="today-time">Ship ${j.shipDate||'-'}</span>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div class="today-row-right">
+        ${methodBadge}
         ${badge}
-        <span class="today-time">${inspEnd}</span>
+        ${movedBadge}
+        <span class="today-time">${j.inspEnd||''}</span>
       </div>
     </div>`;
   }).join('');
@@ -309,6 +421,7 @@ async function loadToday(){
 
 function jumpToInvoice(inv){
   document.getElementById('search-input').value = inv;
+  showScreen('lookup', true);
   doSearch();
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -451,26 +564,36 @@ async function doSearch(){
   CURRENT_ORDER = res;
   empty.style.display='none';
   card.classList.add('show');
-  const c = classify(res);
+
+  const items = res.items || [];
+  const insp = String(res.inspectionRaw || '').trim();
+  let status, real=[], gap=[];
+  if (!insp) status = 'pending';
+  else if (items.length === 0) status = 'pass';
+  else {
+    real = items.filter(i=>REAL_ISSUE.includes(i.reason));
+    gap = items.filter(i=>i.reason==='MISS');
+    status = real.length>0 ? 'issue' : 'gap-only';
+  }
 
   let statusHtml, itemsSectionHtml='';
   const movedHtml = `<span class="status-small ${res.movedToPacking?'moved-yes':'moved-no'}">${res.movedToPacking?'✓ Moved to Packing':'Not Moved to Packing Yet'}</span>`;
 
-  if (c.status==='pending'){
+  if (status==='pending'){
     statusHtml = '<span class="status-big pending">⏳ Not Inspected Yet</span>';
-  } else if (c.status==='pass'){
+  } else if (status==='pass'){
     statusHtml = '<span class="status-big pass">✓ ALL ITEMS PICKED — NO ISSUES</span>';
   } else {
-    statusHtml = c.real.length>0
-      ? '<span class="status-big issue">⚠ ' + c.real.length + ' ITEM(S) SHORT</span>'
+    statusHtml = real.length>0
+      ? '<span class="status-big issue">⚠ ' + real.length + ' ITEM(S) SHORT</span>'
       : '<span class="status-big gap">ALL ITEMS PICKED — SCAN NOT LOGGED</span>';
 
     let legend = '<div class="legend">';
-    if (c.real.length>0) legend += '<div class="legend-item"><span class="legend-dot short"></span>Short — not actually picked</div>';
-    if (c.gap.length>0) legend += '<div class="legend-item"><span class="legend-dot gap"></span>Physically picked, just not scanned — no shortage</div>';
+    if (real.length>0) legend += '<div class="legend-item"><span class="legend-dot short"></span>Short — not actually picked</div>';
+    if (gap.length>0) legend += '<div class="legend-item"><span class="legend-dot gap"></span>Physically picked, just not scanned — no shortage</div>';
     legend += '</div>';
 
-    const rows = c.real.map(i=>`<div class="item-row short">
+    const rows = real.map(i=>`<div class="item-row short">
         <div class="item-icon">❌</div>
         <div class="item-body">
           <div class="item-idline"><span class="item-sku">${i.sku}</span><span class="item-barcode">${i.barcode}</span></div>
@@ -478,7 +601,7 @@ async function doSearch(){
         </div>
         <span class="item-tag short">${REASON_LABEL[i.reason]||i.reason}</span>
         <div class="item-qty">${i.qty} pcs</div>
-      </div>`).join('') + c.gap.map(i=>`<div class="item-row gaprow">
+      </div>`).join('') + gap.map(i=>`<div class="item-row gaprow">
         <div class="item-icon">🔵</div>
         <div class="item-body">
           <div class="item-idline"><span class="item-sku">${i.sku}</span><span class="item-barcode">${i.barcode}</span></div>
@@ -489,16 +612,16 @@ async function doSearch(){
       </div>`).join('');
 
     let noteHtml = '';
-    if (c.gap.length>0 && c.real.length>0){
+    if (gap.length>0 && real.length>0){
       noteHtml = '<div class="note-box gap-note"><b>Note:</b> This order mixes real shortages with items that were physically picked but not scanned in time. Blue (🔵) items are fine to invoice as shipped; only red (❌) items are actually missing.</div>';
-    } else if (c.gap.length>0 && c.real.length===0){
+    } else if (gap.length>0 && real.length===0){
       noteHtml = '<div class="note-box gap-note"><b>Note:</b> Everything on this order was fully picked. Warehouse just didn&#39;t log the scan. No shortage — safe to invoice in full.</div>';
     }
 
     itemsSectionHtml = `<div class="section-title-row"><span class="section-title">Item Detail</span></div>${legend}${rows}${noteHtml}`;
   }
 
-  const dimsHtml = (c.status==='pending') ? '' : renderDimsSection(res);
+  const dimsHtml = (status==='pending') ? '' : renderDimsSection(res);
 
   card.innerHTML = `
     <div class="detail-head">
@@ -514,12 +637,20 @@ async function doSearch(){
       </div>
       <div class="status-stack">
         ${statusHtml}
-        ${c.status!=='pending' ? movedHtml : ''}
+        ${status!=='pending' ? movedHtml : ''}
       </div>
     </div>
     ${itemsSectionHtml}
     ${dimsHtml}
   `;
+}
+
+function showScreen(name, skipHistory){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>{
+    b.classList.toggle('active', (name==='sheet'&&i===0)||(name==='lookup'&&i===1));
+  });
 }
 
 (async function init(){
@@ -528,7 +659,7 @@ async function doSearch(){
     return;
   }
   setSync('busy', 'Loading...');
-  await loadToday();
+  await Promise.all([loadSheetOverview(), loadToday()]);
   setSync('ok', 'Connected');
 })();
 </script>
