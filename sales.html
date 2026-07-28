@@ -25,11 +25,14 @@
 html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; min-height:100%;}
 a{color:inherit;}
 
-.topbar{display:flex; align-items:center; justify-content:space-between; padding:18px 32px; border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; gap:14px;}
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:16px 32px; border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; gap:14px;}
 .tb-left{display:flex; align-items:center; gap:16px;}
-.tb-logo{width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:18px;}
+.tb-logo{width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:18px; flex-shrink:0;}
 .tb-title{font-size:19px; font-weight:800; letter-spacing:-0.01em;}
 .tb-sub{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-top:2px;}
+.tb-clock{font-family:var(--mono); text-align:right; line-height:1.3;}
+.tb-clock .time{font-size:19px; font-weight:800; color:var(--text);}
+.tb-clock .date{font-size:11.5px; color:var(--text-dim); letter-spacing:0.03em;}
 .sync-pill{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12px; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:999px; padding:7px 14px;}
 .sync-dot{width:8px; height:8px; border-radius:50%; background:var(--gray);}
 .sync-dot.ok{background:var(--green); box-shadow:0 0 8px var(--green);}
@@ -42,7 +45,7 @@ a{color:inherit;}
 .tab-btn:hover{color:var(--text); border-color:var(--border2);}
 .tab-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
 
-.wrap{padding:26px 32px; max-width:1440px; margin:0 auto;}
+.wrap{padding:24px 32px; max-width:1320px; margin:0 auto;}
 .screen{display:none;}
 .screen.active{display:block;}
 
@@ -50,41 +53,65 @@ a{color:inherit;}
 .section-head h2{font-size:19px; font-weight:800;}
 .section-head p{font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin-top:6px; line-height:1.6;}
 
-.sheet-note{background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:13px 18px; font-size:12.5px; color:var(--text-dim); margin-bottom:16px; line-height:1.7;}
-.sheet-note b{color:var(--text);}
-.hidden-tag{display:inline-block; background:var(--gray-bg); color:var(--text-dim); font-family:var(--mono); font-size:10px; font-weight:800; padding:2px 6px; border-radius:4px; margin-left:5px; vertical-align:2px;}
-
 .search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 16px; margin-bottom:16px; max-width:420px;}
 .search-row svg{color:var(--text-dim); flex-shrink:0;}
 .search-row input{flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:13.5px;}
 .search-row input::placeholder{color:var(--text-dim);}
 
-.table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow-x:auto;}
-table{width:100%; border-collapse:collapse; font-size:12.5px;}
-thead th{background:var(--surface2); text-align:left; padding:12px 13px; font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); white-space:nowrap;}
+.table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
+table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed;}
+thead th{background:var(--surface2); text-align:left; padding:11px 12px; font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 thead th.new-col{color:var(--green); background:rgba(16,217,126,0.06);}
-tbody td{padding:12px 13px; border-bottom:1px solid var(--border); vertical-align:middle; white-space:nowrap;}
+tbody td{padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 tbody tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:rgba(255,255,255,0.02);}
 td.new-col{background:rgba(16,217,126,0.03);}
 .mono{font-family:var(--mono);}
 .dim{color:var(--text-dim);}
+.cust-name{cursor:pointer; border-bottom:1px dotted var(--border2);}
+.cust-name:hover{color:var(--text); border-bottom-color:var(--text-dim);}
 
-.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11.5px; font-weight:800; padding:4px 9px; border-radius:6px; white-space:nowrap;}
+.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11px; font-weight:800; padding:4px 8px; border-radius:6px; white-space:nowrap;}
 .badge.pass{background:var(--green-bg); color:var(--green);}
 .badge.issue{background:var(--red-bg); color:#FF7A7A;}
 .badge.gap{background:var(--blue-bg); color:#8FBBFF;}
 .badge.pending{background:var(--gray-bg); color:var(--text-dim);}
-.badge.moved-yes{background:var(--purple-bg); color:#C4B0FF;}
 .badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 .badge.method{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
+
+/* ★ 패킹존 이동 완료 — 반짝이는 애니메이션 */
+.badge.moved-yes{
+  background:var(--purple-bg); color:#C4B0FF; position:relative; overflow:hidden;
+  border:1px solid rgba(139,92,246,0.5);
+}
+.badge.moved-yes::after{
+  content:''; position:absolute; top:0; left:-60%; width:40%; height:100%;
+  background:linear-gradient(120deg, transparent, rgba(196,176,255,0.55), transparent);
+  animation:sparkleSweep 2.6s ease-in-out infinite;
+}
+@keyframes sparkleSweep{
+  0%{ left:-60%; }
+  45%{ left:120%; }
+  100%{ left:120%; }
+}
 
 .detail-link{font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--blue); text-decoration:none; cursor:pointer; border-bottom:1px dashed var(--blue);}
 .detail-link:hover{color:#93C1FF;}
 .detail-dash{color:var(--gray); font-family:var(--mono);}
 
-.footer-note{margin-top:20px; padding:15px 20px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12px; color:var(--text-dim); line-height:1.7;}
-.footer-note b{color:var(--text);}
+/* ── 페이지네이션 ── */
+.pager{display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid var(--border); background:var(--surface2); flex-wrap:wrap; gap:12px;}
+.pager-left{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
+.pager-left select{background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:12px; padding:5px 8px; border-radius:6px; cursor:pointer;}
+.pager-right{display:flex; align-items:center; gap:4px;}
+.pg-btn{background:var(--surface); border:1px solid var(--border); color:var(--text-dim); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 11px; border-radius:6px; cursor:pointer;}
+.pg-btn:hover:not(:disabled){color:var(--text); border-color:var(--border2);}
+.pg-btn:disabled{opacity:0.35; cursor:default;}
+.pg-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
+.pg-ellipsis{color:var(--text-dim); font-family:var(--mono); font-size:12px; padding:0 4px;}
+
+/* ── 고객명 팝오버 ── */
+.name-popover{position:fixed; z-index:500; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; padding:9px 13px; font-size:12.5px; color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,0.5); max-width:280px; word-break:break-word;}
 
 .lookup-top{display:flex; gap:12px; margin-bottom:22px;}
 .search-box{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 18px;}
@@ -101,9 +128,9 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .today-row{display:flex; align-items:center; justify-content:space-between; padding:13px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; gap:12px; flex-wrap:wrap;}
 .today-row:last-child{border-bottom:none;}
 .today-row:hover{background:var(--surface2);}
-.today-row-left{display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
-.today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
-.today-cust{font-size:12.5px; color:var(--text-dim);}
+.today-row-left{display:flex; align-items:center; gap:14px; flex-wrap:wrap; min-width:0;}
+.today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px; flex-shrink:0;}
+.today-cust{font-size:12.5px; color:var(--text-dim); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-time{font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
 .today-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
 .today-row-right{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
@@ -113,7 +140,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .detail-head{display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:18px; border-bottom:1px solid var(--border); margin-bottom:18px; gap:16px; flex-wrap:wrap;}
 .detail-inv{font-family:var(--mono); font-size:24px; font-weight:800;}
 .detail-cust{font-size:14px; color:var(--text-dim); margin-top:4px;}
-.detail-meta{display:flex; gap:26px; margin-top:14px; flex-wrap:wrap;}
+.detail-meta{display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;}
 .meta-item .k{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em;}
 .meta-item .v{font-size:13.5px; font-weight:700; margin-top:3px;}
 .status-stack{display:flex; flex-direction:column; align-items:flex-end; gap:8px;}
@@ -124,7 +151,8 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .status-big.gap{background:var(--blue-bg); color:#8FBBFF;}
 .status-big.pending{background:var(--gray-bg); color:var(--text-dim);}
 .status-small{display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:8px;}
-.status-small.moved-yes{background:var(--purple-bg); color:#C4B0FF;}
+.status-small.moved-yes{background:var(--purple-bg); color:#C4B0FF; position:relative; overflow:hidden; border:1px solid rgba(139,92,246,0.5);}
+.status-small.moved-yes::after{content:''; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(120deg, transparent, rgba(196,176,255,0.55), transparent); animation:sparkleSweep 2.6s ease-in-out infinite;}
 .status-small.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 
 .section-title-row{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;}
@@ -217,7 +245,10 @@ td.new-col{background:rgba(16,217,126,0.03);}
     <button class="tab-btn active" onclick="showScreen('sheet')">① Sales Sheet Preview</button>
     <button class="tab-btn" onclick="showScreen('lookup')">② Order Detail Lookup</button>
   </div>
-  <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting...</span></div>
+  <div style="display:flex; align-items:center; gap:18px;">
+    <div class="tb-clock"><div class="time" id="clockTime">--:--:-- --</div><div class="date" id="clockDate">----- -- --</div></div>
+    <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting...</span></div>
+  </div>
 </div>
 
 <div class="wrap">
@@ -229,26 +260,39 @@ td.new-col{background:rgba(16,217,126,0.03);}
       <p>Live from the same Jobs data the warehouse uses. Fulfillment Status and Moved to Packing update automatically — no manual entry.</p>
     </div>
 
-    <div class="sheet-note">
-      Showing the most recent 500 active orders. <b>Print?</b> and <b>Issue?</b><span class="hidden-tag">SALES-OWNED, NOT SHOWN HERE</span> live on the separate Sales-owned sheet and aren't part of this view.
-    </div>
-
     <div class="search-row">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-      <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="renderSheet()">
+      <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="onSheetSearch()">
     </div>
 
     <div class="table-wrap">
       <table>
+        <colgroup>
+          <col style="width:11%"><col style="width:19%"><col style="width:9%"><col style="width:9%">
+          <col style="width:8%"><col style="width:9%"><col style="width:14%"><col style="width:12%"><col style="width:9%">
+        </colgroup>
         <thead>
           <tr>
-            <th>Invoice#</th><th>Customer Name</th><th>Ship Out Date</th>
-            <th>Shipping Method</th><th>Invoice Amount</th>
+            <th>Invoice#</th><th>Customer Name</th><th>Ship Out</th><th>Picking Started</th>
+            <th>Method</th><th>Amount</th>
             <th class="new-col">Fulfillment Status</th><th class="new-col">Moved to Packing</th><th class="new-col">Details</th>
           </tr>
         </thead>
-        <tbody id="sheet-tbody"><tr><td colspan="8" style="text-align:center;padding:30px;"><span class="spinner"></span>Loading...</td></tr></tbody>
+        <tbody id="sheet-tbody"><tr><td colspan="9" style="text-align:center;padding:30px;"><span class="spinner"></span>Loading...</td></tr></tbody>
       </table>
+      <div class="pager">
+        <div class="pager-left">
+          <span id="pager-summary">–</span>
+          <span>· Rows per page</span>
+          <select id="rows-per-page" onchange="onRowsPerPageChange()">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="30">30</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+        <div class="pager-right" id="pager-buttons"></div>
+      </div>
     </div>
 
     <div class="footer-note">
@@ -299,6 +343,8 @@ const REAL_ISSUE = ['EXP','NF','DMG','OOS','SKUMIS'];
 
 let CURRENT_ORDER = null;
 let SHEET_JOBS = [];
+let SHEET_PAGE = 1;
+let SHEET_PAGE_SIZE = 20;
 
 function setSync(state, text){
   const dot = document.getElementById('syncDot');
@@ -306,6 +352,18 @@ function setSync(state, text){
   dot.className = 'sync-dot' + (state ? ' '+state : '');
   t.textContent = text;
 }
+
+/* ── Live clock ── */
+function tickClock(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  let h = d.getHours(); const ampm = h>=12?'PM':'AM'; h = h%12 || 12;
+  document.getElementById('clockTime').textContent = `${pad(h)}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${ampm}`;
+  const days=['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  document.getElementById('clockDate').textContent = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${days[d.getDay()]}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
 
 async function gasGet(params){
   if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
@@ -331,55 +389,112 @@ async function gasPost(op, data){
 function needsDims(order){ return order.method==='TRUCKING' || order.method==='TK' || order.method==='UPS'; }
 function dimUnitLabel(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallet' : 'Box'; }
 function dimUnitLabelPlural(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallets' : 'Boxes'; }
-
-function classifyInsp(insp, hasItems){
-  insp = String(insp||'').trim();
-  if (!insp) return {status:'pending'};
-  if (insp.indexOf('PASS') >= 0) return {status:'pass'};
-  if (insp.indexOf('ISSUES') >= 0) return {status:'issues-summary'}; // detail split happens after fetching items
-  return {status:'pending'};
-}
-
 function fmtMoney(n){ n = Number(n)||0; return n ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'; }
+
+/* ── Customer name popover (for long names) ── */
+function showNamePopover(evt, fullName){
+  evt.stopPropagation();
+  document.querySelectorAll('.name-popover').forEach(el=>el.remove());
+  const pop = document.createElement('div');
+  pop.className = 'name-popover';
+  pop.textContent = fullName;
+  document.body.appendChild(pop);
+  const rect = evt.target.getBoundingClientRect();
+  pop.style.left = Math.min(rect.left, window.innerWidth - 300) + 'px';
+  pop.style.top = (rect.bottom + 6) + 'px';
+  setTimeout(()=>{
+    document.addEventListener('click', function closeIt(){ pop.remove(); document.removeEventListener('click', closeIt); });
+  }, 0);
+}
 
 /* ===================== Screen 1: Sheet Preview ===================== */
 async function loadSheetOverview(){
   const res = await gasGet({ op:'getSalesOverview' });
   if (!res || !res.ok){
-    document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
+    document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
     return;
   }
   SHEET_JOBS = res.jobs || [];
+  SHEET_PAGE = 1;
   renderSheet();
+}
+
+function onSheetSearch(){ SHEET_PAGE = 1; renderSheet(); }
+function onRowsPerPageChange(){
+  SHEET_PAGE_SIZE = parseInt(document.getElementById('rows-per-page').value, 10);
+  SHEET_PAGE = 1;
+  renderSheet();
+}
+
+function classifyInsp(insp){
+  insp = String(insp||'').trim();
+  if (!insp) return {status:'pending'};
+  if (insp.indexOf('PASS') >= 0) return {status:'pass'};
+  if (insp.indexOf('ISSUES') >= 0) return {status:'issues'};
+  return {status:'pending'};
 }
 
 function renderSheet(){
   const q = (document.getElementById('sheet-search-input').value||'').trim().toUpperCase();
+  const filtered = SHEET_JOBS.filter(o => !q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q));
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / SHEET_PAGE_SIZE));
+  if (SHEET_PAGE > totalPages) SHEET_PAGE = totalPages;
+  const start = (SHEET_PAGE - 1) * SHEET_PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + SHEET_PAGE_SIZE);
+
   const tbody = document.getElementById('sheet-tbody');
-  const rows = SHEET_JOBS.filter(o => !q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q));
-  if (!rows.length){
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim);">No matching orders.</td></tr>';
-    return;
+  if (!pageRows.length){
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-dim);">No matching orders.</td></tr>';
+  } else {
+    tbody.innerHTML = pageRows.map(o=>{
+      const c = classifyInsp(o.inspection);
+      let badge, link='<span class="detail-dash">—</span>';
+      if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
+      else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
+      else { badge = '<span class="badge issue">⚠ '+o.inspection+'</span>'; link = '<a class="detail-link" onclick="jumpToInvoice(\''+o.invoice+'\')">Details →</a>'; }
+      const movedBadge = o.movedToPacking ? '<span class="badge moved-yes">✓ Yes</span>' : '<span class="badge moved-no">No</span>';
+      const custName = (o.remarks||'').replace(/'/g,'&#39;');
+      return `<tr>
+        <td class="mono" style="font-weight:800">${o.invoice}</td>
+        <td><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
+        <td class="mono dim">${o.shipDate||'-'}</td>
+        <td class="mono dim">${o.pickStart||'-'}</td>
+        <td class="dim">${o.method||'-'}</td>
+        <td class="mono">${fmtMoney(o.amount)}</td>
+        <td class="new-col">${badge}</td>
+        <td class="new-col">${movedBadge}</td>
+        <td class="new-col">${link}</td>
+      </tr>`;
+    }).join('');
   }
-  tbody.innerHTML = rows.map(o=>{
-    const c = classifyInsp(o.inspection);
-    let badge, link='<span class="detail-dash">—</span>';
-    if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
-    else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
-    else { badge = '<span class="badge issue">⚠ '+o.inspection+'</span>'; link = '<a class="detail-link" onclick="jumpToInvoice(\''+o.invoice+'\')">Details →</a>'; }
-    const movedBadge = o.movedToPacking ? '<span class="badge moved-yes">✓ Yes</span>' : '<span class="badge moved-no">No</span>';
-    return `<tr>
-      <td class="mono" style="font-weight:800">${o.invoice}</td>
-      <td>${o.remarks||''}</td>
-      <td class="mono dim">${o.shipDate||'-'}</td>
-      <td class="dim">${o.method||'-'}</td>
-      <td class="mono">${fmtMoney(o.amount)}</td>
-      <td class="new-col">${badge}</td>
-      <td class="new-col">${movedBadge}</td>
-      <td class="new-col">${link}</td>
-    </tr>`;
-  }).join('');
+
+  document.getElementById('pager-summary').textContent =
+    filtered.length ? `${start+1}–${Math.min(start+SHEET_PAGE_SIZE, filtered.length)} of ${filtered.length}` : '0 of 0';
+  renderPager(totalPages);
 }
+
+function renderPager(totalPages){
+  const cur = SHEET_PAGE;
+  const btns = [];
+  btns.push(`<button class="pg-btn" ${cur<=1?'disabled':''} onclick="gotoPage(${cur-1})">‹ Prev</button>`);
+  const pages = [];
+  if (totalPages <= 7){ for (let i=1;i<=totalPages;i++) pages.push(i); }
+  else {
+    pages.push(1);
+    if (cur > 3) pages.push('...');
+    for (let i=Math.max(2,cur-1); i<=Math.min(totalPages-1,cur+1); i++) pages.push(i);
+    if (cur < totalPages-2) pages.push('...');
+    pages.push(totalPages);
+  }
+  pages.forEach(p=>{
+    if (p==='...') btns.push('<span class="pg-ellipsis">…</span>');
+    else btns.push(`<button class="pg-btn${p===cur?' active':''}" onclick="gotoPage(${p})">${p}</button>`);
+  });
+  btns.push(`<button class="pg-btn" ${cur>=totalPages?'disabled':''} onclick="gotoPage(${cur+1})">Next ›</button>`);
+  document.getElementById('pager-buttons').innerHTML = btns.join('');
+}
+function gotoPage(p){ SHEET_PAGE = p; renderSheet(); }
 
 /* ===================== Screen 2: Lookup ===================== */
 async function loadToday(){
@@ -406,7 +521,7 @@ async function loadToday(){
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')">
       <div class="today-row-left">
         <span class="today-inv">${j.invoice||''}</span>
-        <span class="today-cust">${j.remarks||''}</span>
+        <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
         <span class="today-time">Ship ${j.shipDate||'-'}</span>
       </div>
       <div class="today-row-right">
@@ -421,7 +536,7 @@ async function loadToday(){
 
 function jumpToInvoice(inv){
   document.getElementById('search-input').value = inv;
-  showScreen('lookup', true);
+  showScreen('lookup');
   doSearch();
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -629,6 +744,7 @@ async function doSearch(){
         <div class="detail-inv">${res.invoice}</div>
         <div class="detail-cust">${res.customer||''}</div>
         <div class="detail-meta">
+          <div class="meta-item"><div class="k">Picking Started</div><div class="v">${res.pickStart||'-'}</div></div>
           <div class="meta-item"><div class="k">Ship Date</div><div class="v">${res.shipDate||'-'}</div></div>
           <div class="meta-item"><div class="k">Shipping Method</div><div class="v">${res.method||'-'}</div></div>
           <div class="meta-item"><div class="k">Inspector</div><div class="v">${res.inspector||'-'}</div></div>
@@ -645,7 +761,7 @@ async function doSearch(){
   `;
 }
 
-function showScreen(name, skipHistory){
+function showScreen(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.tab-btn').forEach((b,i)=>{
