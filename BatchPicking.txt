@@ -1924,7 +1924,7 @@ function getSalesInvoiceDetail(invoice) {
             const reason = m[1].toUpperCase();
             const barcode = m[2];
             const qty = Number(m[3]) || 0;
-            items.push({ sku: '', name: '', barcode: barcode, reason: reason, qty: qty, note: '(from saved inspection note — original issue record has been archived)' });
+            items.push({ sku: '', name: '', barcode: barcode, reason: reason, qty: qty, note: '(reconstructed from the saved inspection note — this order was inspected via the manual screen, not total-picking)' });
           });
           // 바코드로 SKU/상품명 역추적. TV 현황판(board.html)도 결국 같은
           // BatchItems 원본을 보고 정확히 표시하므로, 이 인보이스 한정으로
@@ -1960,7 +1960,7 @@ function getSalesInvoiceDetail(invoice) {
             items.forEach(it => {
               const found = nameByBarcode[String(it.barcode).trim()];
               if (found && (found.sku || found.name)) { it.sku = found.sku || it.barcode; it.name = found.name || '(no product name on file)'; }
-              else { it.sku = it.barcode; it.name = '(product name unavailable — not found in current or archived records)'; }
+              else { it.sku = it.barcode; it.name = '(product name not available — this issue was recorded through the manual inspection screen, before item detail tracking existed)'; }
             });
           }
         }
