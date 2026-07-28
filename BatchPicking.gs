@@ -1926,19 +1926,29 @@ function getSalesInvoiceDetail(invoice) {
             const qty = Number(m[3]) || 0;
             items.push({ sku: '', name: '', barcode: barcode, reason: reason, qty: qty, note: '(from saved inspection note — original issue record has been archived)' });
           });
-          // 바코드로 SKU/상품명 역추적 (BatchItems에서 이 인보이스 소속 행 중 매칭)
+          // 바코드로 SKU/상품명 역추적. TV 현황판(board.html)도 결국 같은
+          // BatchItems 원본을 보고 정확히 표시하므로, 이 인보이스 한정으로
+          // 좁혀서 못 찾는 경우가 있어(다른 고객사 행에만 이름이 채워져
+          // 있거나 하는 경우) 바코드 하나로 시트 전체에서 매칭하도록 넓힘.
           if (items.length) {
             const bi = bitemsSheet_();
             const biLast = bi.getLastRow();
             if (biLast >= 2) {
               const nameByBarcode = {};
               bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-                if (String(r[1]).trim() !== invoice) return;
-                nameByBarcode[String(r[4])] = { sku: r[2], name: r[3] };
+                const bc = String(r[4] || '').trim();
+                if (!bc) return;
+                // 같은 바코드에 이미 이름이 채워진 행이 있으면 그대로 두고,
+                // 아직 없으면(또는 총량 행이 먼저 채워져도) 이름이 있는 쪽을 우선함
+                const existing = nameByBarcode[bc];
+                const name = String(r[3] || '').trim();
+                if (!existing || (!existing.name && name)) {
+                  nameByBarcode[bc] = { sku: r[2], name: r[3] };
+                }
               });
               items.forEach(it => {
-                const found = nameByBarcode[it.barcode];
-                if (found) { it.sku = found.sku; it.name = found.name; }
+                const found = nameByBarcode[String(it.barcode).trim()];
+                if (found && (found.sku || found.name)) { it.sku = found.sku || it.barcode; it.name = found.name || '(no product name on file)'; }
                 else { it.sku = it.barcode; it.name = '(product name unavailable — original record archived)'; }
               });
             }
