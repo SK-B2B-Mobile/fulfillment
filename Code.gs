@@ -2597,6 +2597,7 @@ function getSalesTodayList() {
     const inspEndVals = sh.getRange(2, iInspEnd, lastRow - 1, 1).getValues();
 
     const movedMap = buildMovedToPackingMap_();
+    const dimsMap = buildDimsExistsMap_();
 
     const jobs = [];
     for (let i = 0; i < invVals.length; i++) {
@@ -2614,7 +2615,8 @@ function getSalesTodayList() {
         method: truckVals ? truckVals[i][0] : '',
         inspection: insp,
         inspEnd: inspEnd,
-        movedToPacking: !!movedMap[invoice]
+        movedToPacking: !!movedMap[invoice],
+        dimsCount: (dimsMap[invoice] || {}).count || 0
       });
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
@@ -2654,6 +2656,7 @@ function getSalesOverview() {
     const lastCol = sh.getLastColumn();
     const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
     const movedMap = buildMovedToPackingMap_();
+    const dimsMap = buildDimsExistsMap_();
 
     const jobs = [];
     for (let i = 0; i < rows.length; i++) {
@@ -2684,6 +2687,7 @@ function getSalesOverview() {
         inspection: iInsp ? String(r[iInsp - 1] || '').trim() : '',
         inspEnd: iInspEnd ? formatInspEnd_(r[iInspEnd - 1]) : '',
         movedToPacking: !!movedMap[invoice],
+        dimsCount: (dimsMap[invoice] || {}).count || 0,
         createdAt: createdRaw ? String(createdRaw) : ''
       });
     }
