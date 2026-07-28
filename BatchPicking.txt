@@ -1851,8 +1851,9 @@ function getSalesInvoiceDetail(invoice) {
 
     const allData = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
     let jobRow = null;
+    let jobRowIndex = -1;
     for (let i = 0; i < allData.length; i++) {
-      if (String(allData[i][invCol - 1]).trim() === invoice) { jobRow = allData[i]; break; }
+      if (String(allData[i][invCol - 1]).trim() === invoice) { jobRow = allData[i]; jobRowIndex = i + 2; break; }
     }
     if (!jobRow) return { ok: false, error: 'Invoice not found: ' + invoice };
 
@@ -1904,6 +1905,46 @@ function getSalesInvoiceDetail(invoice) {
           reason: r[9] || '', qty: Number(r[10]) || 0, note: r[11] || ''
         });
       });
+    }
+    // ★ 2026-07-28 신규 — IssueLog에서 못 찾았는데 검수결과는 "⚠ ISSUES"인 경우
+    //   (archiveOldBatches로 오래된 배치의 IssueLog가 Archive_IssueLog로 옮겨진
+    //   경우 등) — Jobs 시트 검수결과 셀에 남아있는 메모(saveInspection이 검수
+    //   시점에 한 번 적어둔 것, 절대 안 지워짐)를 대신 파싱해서 최소한의 상세
+    //   (사유/바코드/수량)라도 보여줌. SKU/상품명은 BatchItems에서 바코드로
+    //   역으로 찾아봄(없으면 바코드만 표시).
+    if (items.length === 0 && inspectionRaw.indexOf('ISSUES') >= 0 && jobRowIndex > 0) {
+      try {
+        const noteCol = hm['inspection'];
+        const noteText = noteCol ? sh.getRange(jobRowIndex, noteCol).getNote() : '';
+        if (noteText) {
+          const lineRe = /^([A-Za-z]+):\s*Barcode\s+(\S+)\s+x\s+(\d+)\s*pcs/;
+          noteText.split('\n').forEach(line => {
+            const m = line.trim().match(lineRe);
+            if (!m) return;
+            const reason = m[1].toUpperCase();
+            const barcode = m[2];
+            const qty = Number(m[3]) || 0;
+            items.push({ sku: '', name: '', barcode: barcode, reason: reason, qty: qty, note: '(from saved inspection note — original issue record has been archived)' });
+          });
+          // 바코드로 SKU/상품명 역추적 (BatchItems에서 이 인보이스 소속 행 중 매칭)
+          if (items.length) {
+            const bi = bitemsSheet_();
+            const biLast = bi.getLastRow();
+            if (biLast >= 2) {
+              const nameByBarcode = {};
+              bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+                if (String(r[1]).trim() !== invoice) return;
+                nameByBarcode[String(r[4])] = { sku: r[2], name: r[3] };
+              });
+              items.forEach(it => {
+                const found = nameByBarcode[it.barcode];
+                if (found) { it.sku = found.sku; it.name = found.name; }
+                else { it.sku = it.barcode; it.name = '(product name unavailable — original record archived)'; }
+              });
+            }
+          }
+        }
+      } catch (e) { /* best-effort — 못 읽어도 나머지 응답은 그대로 진행 */ }
     }
 
     // 4) 디멘션
