@@ -195,6 +195,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .dims-meta{font-family:var(--mono); font-size:10.5px; color:var(--text-dim);}
 
 .dim-row{display:grid; grid-template-columns:36px 1fr 1fr 1fr 90px 32px; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--border);}
+.dim-row.box-only{grid-template-columns:36px 160px 32px;}
 .dim-row:last-child{border-bottom:none;}
 .dim-row .idx{font-family:var(--mono); font-weight:800; color:var(--text-dim); font-size:12px;}
 .dim-row input{background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:8px 10px; color:var(--text); font-family:var(--mono); font-size:12.5px; width:100%; outline:none;}
@@ -460,7 +461,7 @@ function renderSheet(){
       let badge, link='<span class="detail-dash">—</span>';
       if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
       else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
-      else { badge = '<span class="badge issue">⚠ '+o.inspection+'</span>'; link = '<a class="detail-link" onclick="jumpToInvoice(\''+o.invoice+'\')">Details →</a>'; }
+      else { badge = '<span class="badge issue">'+o.inspection+'</span>'; link = '<a class="detail-link" onclick="jumpToInvoice(\''+o.invoice+'\')">Details →</a>'; }
       const movedBadge = o.movedToPacking ? '<span class="badge moved-yes">✓ Yes</span>' : '<span class="badge moved-no">No</span>';
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
       return `<tr>
@@ -523,7 +524,7 @@ async function loadToday(){
     const insp = String(j.inspection || '').trim();
     let badge;
     if (insp.indexOf('PASS') >= 0) badge = '<span class="badge pass">✓ PASS</span>';
-    else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="badge issue">⚠ '+insp+'</span>';
+    else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="badge issue">'+insp+' — click for details</span>';
     else badge = '<span class="badge pending">'+insp+'</span>';
     const movedBadge = j.movedToPacking ? '<span class="badge moved-yes">✓ Packing</span>' : '<span class="badge moved-no">Not Moved</span>';
     const methodBadge = '<span class="badge method">'+(j.method || '-')+'</span>';
@@ -579,7 +580,7 @@ function renderDimsPanel(order, editing){
     }
     const totalWt = order.dims.reduce((s,d)=>s+(Number(d.wt)||0),0);
     const rows = order.dims.map((d,i)=>{
-      const spec = (d.l&&d.w&&d.h) ? `${d.l}" × ${d.w}" × ${d.h}"` : '(size not recorded)';
+      const spec = (d.l&&d.w&&d.h) ? `${d.l}" × ${d.w}" × ${d.h}"` : (isUPS ? '' : '(size not recorded)');
       return `<div class="dim-view-row"><span class="idx">#${i+1}</span><span class="spec">${spec}</span><span class="wt">${d.wt} lbs</span></div>`;
     }).join('');
     return `<div class="dims-panel">
@@ -592,18 +593,10 @@ function renderDimsPanel(order, editing){
     </div>`;
   }
 
-  const rows = (order.dims && order.dims.length ? order.dims : [{l:'',w:'',h:'',wt:''}]).map((d,i)=>`
-    <div class="dim-row">
-      <span class="idx">#${i+1}</span>
-      <div class="dim-field"><span class="lbl">L (in)</span><input type="number" value="${d.l||''}" placeholder="—"></div>
-      <div class="dim-field"><span class="lbl">W (in)</span><input type="number" value="${d.w||''}" placeholder="—"></div>
-      <div class="dim-field"><span class="lbl">H (in)</span><input type="number" value="${d.h||''}" placeholder="—"></div>
-      <div class="dim-field"><span class="lbl">Weight (lbs)</span><input type="number" value="${d.wt||''}"></div>
-      <button class="dim-remove" onclick="this.closest('.dim-row').remove()">✕</button>
-    </div>`).join('');
+  const rows = (order.dims && order.dims.length ? order.dims : [{l:'',w:'',h:'',wt:''}]).map((d,i)=>buildDimEditRow(i, d, isUPS)).join('');
   return `<div class="dims-panel">
     <div class="dims-head-row">
-      <span class="dims-unit-label">${unitPl}${isUPS?' — weight required, size optional':''}</span>
+      <span class="dims-unit-label">${unitPl}${isUPS?' — weight only, no size needed':''}</span>
     </div>
     <div id="dims-rows-editor">${rows}</div>
     <button class="dims-add-btn" onclick="addDimRow()">+ Add ${unit}</button>
@@ -616,6 +609,27 @@ function renderDimsPanel(order, editing){
   </div>`;
 }
 
+// ★ UPS는 박스 번호 + 무게만 필요(사이즈 불필요), TK(팔렛)는 L×W×H+무게 전부 필요.
+//   행 하나를 만드는 로직을 공통 함수로 빼서 addDimRow()에서도 재사용.
+function buildDimEditRow(idx, d, isUPS){
+  d = d || {};
+  if (isUPS){
+    return `<div class="dim-row box-only" data-ups="1">
+      <span class="idx">#${idx+1}</span>
+      <div class="dim-field"><span class="lbl">Weight (lbs)</span><input type="number" value="${d.wt||''}"></div>
+      <button class="dim-remove" onclick="this.closest('.dim-row').remove()">✕</button>
+    </div>`;
+  }
+  return `<div class="dim-row" data-ups="0">
+    <span class="idx">#${idx+1}</span>
+    <div class="dim-field"><span class="lbl">L (in)</span><input type="number" value="${d.l||''}" placeholder="—"></div>
+    <div class="dim-field"><span class="lbl">W (in)</span><input type="number" value="${d.w||''}" placeholder="—"></div>
+    <div class="dim-field"><span class="lbl">H (in)</span><input type="number" value="${d.h||''}" placeholder="—"></div>
+    <div class="dim-field"><span class="lbl">Weight (lbs)</span><input type="number" value="${d.wt||''}"></div>
+    <button class="dim-remove" onclick="this.closest('.dim-row').remove()">✕</button>
+  </div>`;
+}
+
 function startDimsEdit(){
   document.getElementById('dims-panel-container').innerHTML = renderDimsPanel(CURRENT_ORDER, true);
 }
@@ -624,17 +638,14 @@ function cancelDimsEdit(){
 }
 function addDimRow(){
   const container = document.getElementById('dims-rows-editor');
-  const idx = container.children.length + 1;
-  const row = document.createElement('div');
-  row.className = 'dim-row';
-  row.innerHTML = `<span class="idx">#${idx}</span>
-    <div class="dim-field"><span class="lbl">L (in)</span><input type="number" placeholder="—"></div>
-    <div class="dim-field"><span class="lbl">W (in)</span><input type="number" placeholder="—"></div>
-    <div class="dim-field"><span class="lbl">H (in)</span><input type="number" placeholder="—"></div>
-    <div class="dim-field"><span class="lbl">Weight (lbs)</span><input type="number"></div>
-    <button class="dim-remove" onclick="this.closest('.dim-row').remove()">✕</button>`;
+  const idx = container.children.length;
+  const isUPS = CURRENT_ORDER && CURRENT_ORDER.method === 'UPS';
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = buildDimEditRow(idx, {}, isUPS);
+  const row = wrapper.firstElementChild;
   container.appendChild(row);
-  const wtInput = row.querySelectorAll('input')[3];
+  const inputs = row.querySelectorAll('input');
+  const wtInput = inputs[inputs.length - 1];
   if (wtInput) wtInput.focus();
 }
 
@@ -642,9 +653,15 @@ async function saveDimsReal(){
   const rows = document.querySelectorAll('#dims-rows-editor .dim-row');
   const dims = [];
   rows.forEach(r=>{
+    const isUPSRow = r.dataset.ups === '1';
     const inputs = r.querySelectorAll('input');
-    const l = inputs[0].value, w = inputs[1].value, h = inputs[2].value, wt = inputs[3].value;
-    if (wt) dims.push({l:l?Number(l):null, w:w?Number(w):null, h:h?Number(h):null, wt:Number(wt)});
+    if (isUPSRow){
+      const wt = inputs[0].value;
+      if (wt) dims.push({l:null, w:null, h:null, wt:Number(wt)});
+    } else {
+      const l = inputs[0].value, w = inputs[1].value, h = inputs[2].value, wt = inputs[3].value;
+      if (wt) dims.push({l:l?Number(l):null, w:w?Number(w):null, h:h?Number(h):null, wt:Number(wt)});
+    }
   });
   const btn = document.getElementById('dims-save-btn');
   const errFlash = document.getElementById('dims-error-flash');
