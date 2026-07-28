@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SK Fulfillment · Sales Lookup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05070D; --surface:#0D1220; --surface2:#131B30;
+  --border:#212B45; --border2:#2A3555;
+  --text:#EDF1F9; --text-dim:#8A93AC;
+  --amber:#F59E0B; --amber-bg:rgba(245,158,11,0.12);
+  --green:#10D97E; --green-bg:rgba(16,217,126,0.12);
+  --red:#EF4444; --red-bg:rgba(239,68,68,0.12);
+  --blue:#3B82F6; --blue-bg:rgba(59,130,246,0.12);
+  --purple:#8B5CF6; --purple-bg:rgba(139,92,246,0.12);
+  --gray:#3A4560; --gray-bg:rgba(58,69,96,0.25);
+  --sans:'Inter',-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; min-height:100%;}
+a{color:inherit;}
+
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:18px 32px; border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; gap:14px;}
+.tb-left{display:flex; align-items:center; gap:16px;}
+.tb-logo{width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:18px;}
+.tb-title{font-size:19px; font-weight:800; letter-spacing:-0.01em;}
+.tb-sub{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-top:2px;}
+.sync-pill{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12px; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:999px; padding:7px 14px;}
+.sync-dot{width:8px; height:8px; border-radius:50%; background:var(--gray);}
+.sync-dot.ok{background:var(--green); box-shadow:0 0 8px var(--green);}
+.sync-dot.err{background:var(--red); box-shadow:0 0 8px var(--red);}
+.sync-dot.busy{background:var(--amber); box-shadow:0 0 8px var(--amber); animation:blink 1s infinite;}
+@keyframes blink{0%,100%{opacity:1} 50%{opacity:0.3}}
+
+.wrap{padding:26px 32px; max-width:1000px; margin:0 auto;}
+.section-head{margin-bottom:16px;}
+.section-head h2{font-size:19px; font-weight:800;}
+.section-head p{font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin-top:6px; line-height:1.6;}
+
+.lookup-top{display:flex; gap:12px; margin-bottom:22px;}
+.search-box{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 18px;}
+.search-box input{flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:14px; text-transform:uppercase;}
+.search-box input::placeholder{color:var(--text-dim); text-transform:none;}
+.search-box svg{color:var(--text-dim); flex-shrink:0;}
+.search-btn{background:var(--blue); border:none; border-radius:12px; padding:0 22px; color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; font-family:var(--sans);}
+.search-btn:hover{background:#5B9BFF;}
+
+.today-panel{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; margin-bottom:22px;}
+.today-head{padding:15px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+.today-head h3{font-size:14px; font-weight:800;}
+.today-head .count{font-family:var(--mono); font-size:12.5px; color:var(--text-dim);}
+.today-row{display:flex; align-items:center; justify-content:space-between; padding:13px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; gap:12px; flex-wrap:wrap;}
+.today-row:last-child{border-bottom:none;}
+.today-row:hover{background:var(--surface2);}
+.today-row-left{display:flex; align-items:center; gap:16px;}
+.today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
+.today-cust{font-size:12.5px; color:var(--text-dim);}
+.today-time{font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
+.today-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
+
+.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11.5px; font-weight:800; padding:4px 9px; border-radius:6px; white-space:nowrap;}
+.badge.pass{background:var(--green-bg); color:var(--green);}
+.badge.issue{background:var(--red-bg); color:#FF7A7A;}
+.badge.gap{background:var(--blue-bg); color:#8FBBFF;}
+.badge.pending{background:var(--gray-bg); color:var(--text-dim);}
+.badge.moved-yes{background:var(--purple-bg); color:#C4B0FF;}
+.badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
+
+.detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
+.detail-card.show{display:block;}
+.detail-head{display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:18px; border-bottom:1px solid var(--border); margin-bottom:18px; gap:16px; flex-wrap:wrap;}
+.detail-inv{font-family:var(--mono); font-size:24px; font-weight:800;}
+.detail-cust{font-size:14px; color:var(--text-dim); margin-top:4px;}
+.detail-meta{display:flex; gap:26px; margin-top:14px; flex-wrap:wrap;}
+.meta-item .k{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em;}
+.meta-item .v{font-size:13.5px; font-weight:700; margin-top:3px;}
+.status-stack{display:flex; flex-direction:column; align-items:flex-end; gap:8px;}
+
+.status-big{display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:13.5px; font-weight:800; padding:7px 14px; border-radius:10px; text-align:right;}
+.status-big.pass{background:var(--green-bg); color:var(--green);}
+.status-big.issue{background:var(--red-bg); color:#FF7A7A;}
+.status-big.gap{background:var(--blue-bg); color:#8FBBFF;}
+.status-big.pending{background:var(--gray-bg); color:var(--text-dim);}
+.status-small{display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:8px;}
+.status-small.moved-yes{background:var(--purple-bg); color:#C4B0FF;}
+.status-small.moved-no{background:var(--gray-bg); color:var(--text-dim);}
+
+.section-title-row{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;}
+.section-title-row:first-of-type{margin-top:0;}
+.section-title{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim);}
+
+.legend{display:flex; gap:18px; margin-bottom:12px; flex-wrap:wrap;}
+.legend-item{display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--text-dim);}
+.legend-dot{width:9px; height:9px; border-radius:3px;}
+.legend-dot.short{background:var(--red);}
+.legend-dot.gap{background:var(--blue);}
+
+.item-row{display:flex; align-items:center; gap:14px; padding:13px 15px; border-radius:10px; margin-bottom:8px; border:1px solid var(--border);}
+.item-row.short{background:rgba(239,68,68,0.06); border-color:rgba(239,68,68,0.3);}
+.item-row.gaprow{background:rgba(59,130,246,0.06); border-color:rgba(59,130,246,0.3);}
+.item-icon{font-size:18px; width:26px; text-align:center; flex-shrink:0;}
+.item-body{flex:1; min-width:0;}
+.item-idline{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+.item-sku{font-family:var(--mono); font-size:11.5px; color:var(--text-dim); font-weight:700;}
+.item-barcode{font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--surface2); padding:1px 6px; border-radius:4px;}
+.item-name{font-size:13.5px; font-weight:700; margin-top:3px;}
+.item-tag{font-family:var(--mono); font-size:10.5px; font-weight:800; padding:3px 8px; border-radius:6px; white-space:nowrap;}
+.item-tag.short{background:var(--red-bg); color:#FF7A7A;}
+.item-tag.gaprow{background:var(--blue-bg); color:#8FBBFF;}
+.item-qty{font-family:var(--mono); font-weight:800; font-size:13.5px; min-width:52px; text-align:right;}
+
+.note-box{background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:13px 18px; margin-top:6px; font-size:12.5px; color:var(--text-dim); line-height:1.7;}
+.note-box b{color:var(--text);}
+.note-box.gap-note{border-color:rgba(59,130,246,0.35); background:rgba(59,130,246,0.05);}
+.note-box.gap-note b{color:#8FBBFF;}
+
+.edit-pencil-btn{background:var(--surface2); border:1px solid var(--border2); border-radius:8px; padding:6px 12px; color:var(--text-dim); font-size:11.5px; font-weight:700; cursor:pointer; font-family:var(--sans); display:inline-flex; align-items:center; gap:6px;}
+.edit-pencil-btn:hover{color:var(--text); border-color:var(--purple);}
+
+.dims-panel{background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:16px 18px;}
+.dims-panel.empty{text-align:center; padding:22px 18px;}
+.dims-head-row{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
+.dims-unit-label{font-family:var(--mono); font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;}
+.dims-meta{font-family:var(--mono); font-size:10.5px; color:var(--text-dim);}
+
+.dim-row{display:grid; grid-template-columns:36px 1fr 1fr 1fr 90px 32px; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--border);}
+.dim-row:last-child{border-bottom:none;}
+.dim-row .idx{font-family:var(--mono); font-weight:800; color:var(--text-dim); font-size:12px;}
+.dim-row input{background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:8px 10px; color:var(--text); font-family:var(--mono); font-size:12.5px; width:100%; outline:none;}
+.dim-row input:focus{border-color:var(--purple);}
+.dim-row .lbl{font-size:9.5px; color:var(--text-dim); margin-bottom:3px; text-transform:uppercase; letter-spacing:0.04em;}
+.dim-field{display:flex; flex-direction:column;}
+.dim-remove{background:none; border:none; color:var(--red); cursor:pointer; font-size:16px; opacity:0.7;}
+.dim-remove:hover{opacity:1;}
+
+.dim-view-row{display:flex; align-items:center; gap:14px; padding:11px 0; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:13px;}
+.dim-view-row:last-child{border-bottom:none;}
+.dim-view-row .idx{font-weight:800; color:var(--text-dim); width:26px;}
+.dim-view-row .spec{flex:1; color:var(--text);}
+.dim-view-row .wt{color:var(--amber); font-weight:800;}
+
+.dims-add-btn{margin-top:10px; width:100%; padding:11px; background:var(--purple-bg); border:1px dashed var(--purple); border-radius:9px; color:#C4B0FF; font-weight:700; font-size:12.5px; cursor:pointer; font-family:var(--sans);}
+.dims-save-row{display:flex; gap:10px; margin-top:14px;}
+.dims-save-btn{flex:1; padding:13px; background:var(--purple); border:none; border-radius:10px; color:#fff; font-weight:800; font-size:13.5px; cursor:pointer; font-family:var(--sans);}
+.dims-save-btn:hover{background:#7C4FE0;}
+.dims-save-btn:disabled{opacity:0.5; cursor:default;}
+.dims-cancel-btn{padding:13px 18px; background:none; border:1px solid var(--border2); border-radius:10px; color:var(--text-dim); font-weight:700; font-size:13px; cursor:pointer; font-family:var(--sans);}
+.dims-saved-flash{display:none; margin-top:10px; padding:9px 14px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-size:12px; font-weight:700; text-align:center;}
+.dims-saved-flash.show{display:block;}
+.dims-error-flash{display:none; margin-top:10px; padding:9px 14px; background:var(--red-bg); border:1px solid var(--red); border-radius:8px; color:#FF7A7A; font-size:12px; font-weight:700; text-align:center;}
+.dims-error-flash.show{display:block;}
+.big-add-btn{width:100%; padding:16px; background:var(--purple); border:none; border-radius:12px; color:#fff; font-weight:800; font-size:14px; cursor:pointer; font-family:var(--sans); display:flex; align-items:center; justify-content:center; gap:8px;}
+.big-add-btn:hover{background:#7C4FE0;}
+.empty-dims-label{color:var(--text-dim); font-size:12.5px; margin-bottom:14px;}
+
+.no-dims-note{padding:14px 18px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12.5px; color:var(--text-dim);}
+
+.empty-state{text-align:center; padding:60px 20px; color:var(--text-dim);}
+.empty-state .icon{font-size:36px; margin-bottom:10px;}
+.spinner{display:inline-block; width:16px; height:16px; border:2px solid var(--border2); border-top-color:var(--purple); border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:-3px; margin-right:8px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="tb-left">
+    <div class="tb-logo">SK</div>
+    <div>
+      <div class="tb-title">Sales Lookup</div>
+      <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
+    </div>
+  </div>
+  <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting...</span></div>
+</div>
+
+<div class="wrap">
+  <div class="section-head">
+    <h2>Order Fulfillment Detail</h2>
+    <p>Search by invoice, or click an order from today's list below. Anyone can view; the Edit button next to Shipping Dimensions is open for Packing to fill in — no login needed.</p>
+  </div>
+
+  <div class="lookup-top">
+    <div class="search-box">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="search-input" placeholder="Enter invoice number (e.g. IN00460209)" onkeydown="if(event.key==='Enter')doSearch()">
+    </div>
+    <button class="search-btn" onclick="doSearch()">Search</button>
+  </div>
+
+  <div class="today-panel">
+    <div class="today-head">
+      <h3>Completed Today</h3>
+      <span class="count" id="today-count">Loading...</span>
+    </div>
+    <div id="today-list"><div class="today-empty"><span class="spinner"></span>Loading...</div></div>
+  </div>
+
+  <div class="detail-card" id="detail-card"></div>
+  <div class="empty-state" id="empty-state">
+    <div class="icon">🔍</div>
+    Search an invoice number above, or click an order from today's list.
+  </div>
+</div>
+
+<script>
+const CONFIG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec'
+};
+const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
+
+const REASON_LABEL = {EXP:'Expired', NF:'Not Found In Stock', DMG:'Damaged', OOS:'Out of Stock', SKUMIS:'SKU Mismatch', MISS:'Not Scanned (Picked OK)'};
+const REAL_ISSUE = ['EXP','NF','DMG','OOS','SKUMIS'];
+
+let CURRENT_ORDER = null;
+
+function setSync(state, text){
+  const dot = document.getElementById('syncDot');
+  const t = document.getElementById('syncText');
+  dot.className = 'sync-dot' + (state ? ' '+state : '');
+  t.textContent = text;
+}
+
+async function gasGet(params){
+  if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
+  try {
+    const qs = new URLSearchParams(Object.assign({t:Date.now()}, params)).toString();
+    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`);
+    return await res.json();
+  } catch(e) {
+    return { ok:false, error: String(e && e.message || e) };
+  }
+}
+async function gasPost(op, data){
+  if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
+  try {
+    const fd = new URLSearchParams({ op, data: JSON.stringify(data) });
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd });
+    return await res.json();
+  } catch(e) {
+    return { ok:false, error: String(e && e.message || e) };
+  }
+}
+
+function needsDims(order){ return order.method==='TRUCKING' || order.method==='UPS'; }
+function dimUnitLabel(order){ return order.method==='TRUCKING' ? 'Pallet' : 'Box'; }
+function dimUnitLabelPlural(order){ return order.method==='TRUCKING' ? 'Pallets' : 'Boxes'; }
+
+function classify(order){
+  const insp = String(order.inspectionRaw || '').trim();
+  if (!insp) return {status:'pending'};
+  const items = order.items || [];
+  if (items.length === 0) return {status:'pass'};
+  const real = items.filter(i=>REAL_ISSUE.includes(i.reason));
+  const gap = items.filter(i=>i.reason==='MISS');
+  if (real.length > 0) return {status:'issue', real, gap};
+  return {status:'gap-only', real:[], gap};
+}
+
+function fmtMoney(n){ n = Number(n)||0; return n ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'; }
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+async function loadToday(){
+  const res = await gasGet({ op:'listJobs' });
+  if (!res || !res.ok){
+    document.getElementById('today-list').innerHTML = '<div class="today-empty">Could not load today\\u2019s list.</div>';
+    document.getElementById('today-count').textContent = '';
+    return;
+  }
+  const today = todayStr();
+  const jobs = (res.jobs || []).filter(j => {
+    const insp = String(j.inspection || j.Inspection || '').trim();
+    const inspEnd = String(j.inspEnd || j['Insp. End'] || '');
+    return insp && inspEnd.indexOf(today) === 0;
+  });
+  document.getElementById('today-count').textContent = jobs.length + ' orders';
+  if (!jobs.length){
+    document.getElementById('today-list').innerHTML = '<div class="today-empty">No orders completed yet today.</div>';
+    return;
+  }
+  document.getElementById('today-list').innerHTML = jobs.map(j=>{
+    const insp = String(j.inspection || j.Inspection || '').trim();
+    let badge;
+    if (insp.indexOf('PASS') >= 0) badge = '<span class="badge pass">✓ PASS</span>';
+    else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="badge issue">⚠ '+insp+'</span>';
+    else badge = '<span class="badge pending">'+insp+'</span>';
+    const inspEnd = String(j.inspEnd || j['Insp. End'] || '');
+    return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')">
+      <div class="today-row-left">
+        <span class="today-inv">${j.invoice||''}</span>
+        <span class="today-cust">${j.remarks||''}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${badge}
+        <span class="today-time">${inspEnd}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function jumpToInvoice(inv){
+  document.getElementById('search-input').value = inv;
+  doSearch();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function renderDimsSection(order){
+  if (!needsDims(order)){
+    return `<div class="section-title-row"><span class="section-title">Shipping Dimensions</span></div>
+      <div class="no-dims-note">Pick Up (PU) order — no shipping dimensions needed. Customer picks up in person.</div>`;
+  }
+  return `<div class="section-title-row">
+      <span class="section-title">Shipping Dimensions</span>
+    </div>
+    <div id="dims-panel-container">${renderDimsPanel(order, false)}</div>`;
+}
+
+function renderDimsPanel(order, editing){
+  const unit = dimUnitLabel(order);
+  const unitPl = dimUnitLabelPlural(order);
+  const isUPS = order.method === 'UPS';
+  const hasDims = order.dims && order.dims.length > 0;
+
+  if (!editing){
+    if (!hasDims){
+      return `<div class="dims-panel empty">
+        <div class="empty-dims-label">No dimensions entered yet.</div>
+        <button class="big-add-btn" onclick="startDimsEdit()">✏️ Enter ${unitPl} & Weight</button>
+      </div>`;
+    }
+    const totalWt = order.dims.reduce((s,d)=>s+(Number(d.wt)||0),0);
+    const rows = order.dims.map((d,i)=>{
+      const spec = (d.l&&d.w&&d.h) ? `${d.l}" × ${d.w}" × ${d.h}"` : '(size not recorded)';
+      return `<div class="dim-view-row"><span class="idx">#${i+1}</span><span class="spec">${spec}</span><span class="wt">${d.wt} lbs</span></div>`;
+    }).join('');
+    return `<div class="dims-panel">
+      <div class="dims-head-row">
+        <span class="dims-unit-label">${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs</span>
+        <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
+      </div>
+      ${rows}
+      <div class="dims-meta" style="margin-top:10px;">Entered by ${order.dimsBy||'-'} · ${order.dimsAt||'-'}</div>
+    </div>`;
+  }
+
+  const rows = (order.dims && order.dims.length ? order.dims : [{l:'',w:'',h:'',wt:''}]).map((d,i)=>`
+    <div class="dim-row">
+      <span class="idx">#${i+1}</span>
+      <div class="dim-field"><span class="lbl">L (in)</span><input type="number" value="${d.l||''}" placeholder="—"></div>
+      <div class="dim-field"><span class="lbl">W (in)</span><input type="number" value="${d.w||''}" placeholder="—"></div>
+      <div class="dim-field"><span class="lbl">H (in)</span><input type="number" value="${d.h||''}" placeholder="—"></div>
+      <div class="dim-field"><span class="lbl">Weight (lbs)</span><input type="number" value="${d.wt||''}"></div>
+      <button class="dim-remove" onclick="this.closest('.dim-row').remove()">✕</button>
+    </div>`).join('');
+  return `<div class="dims-panel">
+    <div class="dims-head-row">
+      <span class="dims-unit-label">${unitPl}${isUPS?' — weight required, size optional':''}</span>
+    </div>
+    <div id="dims-rows-editor">${rows}</div>
+    <button class="dims-add-btn" onclick="addDimRow()">+ Add ${unit}</button>
+    <div class="dims-save-row">
+      <button class="dims-save-btn" id="dims-save-btn" onclick="saveDimsReal()">💾 Save Dimensions</button>
+      <button class="dims-cancel-btn" onclick="cancelDimsEdit()">Cancel</button>
+    </div>
+    <div class="dims-saved-flash" id="dims-saved-flash">✓ Saved</div>
+    <div class="dims-error-flash" id="dims-error-flash">Could not save — check connection and try again.</div>
+  </div>`;
+}
+
+function startDimsEdit(){
+  document.getElementById('dims-panel-container').innerHTML = renderDimsPanel(CURRENT_ORDER, true);
+}
+function cancelDimsEdit(){
+  document.getElementById('dims-panel-container').innerHTML = renderDimsPanel(CURRENT_ORDER, false);
+}
+function addDimRow(){
+  const container = document.getElementById('dims-rows-editor');
+  const idx = container.children.length + 1;
+  const row = document.createElement('div');
+  row.className = 'dim-row';
+  row.innerHTML = `<span class="idx">#${idx}</span>
+    <div class="dim-field"><span class="lbl">L (in)</span><input type="number" placeholder="—"></div>
+    <div class="dim-field"><span class="lbl">W (in)</span><input type="number" placeholder="—"></div>
+    <div class="dim-field"><span class="lbl">H (in)</span><input type="number" placeholder="—"></div>
+    <div class="dim-field"><span class="lbl">Weight (lbs)</span><input type="number"></div>
+    <button class="dim-remove" onclick="this.closest('.dim-row').remove()">✕</button>`;
+  container.appendChild(row);
+  const wtInput = row.querySelectorAll('input')[3];
+  if (wtInput) wtInput.focus();
+}
+
+async function saveDimsReal(){
+  const rows = document.querySelectorAll('#dims-rows-editor .dim-row');
+  const dims = [];
+  rows.forEach(r=>{
+    const inputs = r.querySelectorAll('input');
+    const l = inputs[0].value, w = inputs[1].value, h = inputs[2].value, wt = inputs[3].value;
+    if (wt) dims.push({l:l?Number(l):null, w:w?Number(w):null, h:h?Number(h):null, wt:Number(wt)});
+  });
+  const btn = document.getElementById('dims-save-btn');
+  const errFlash = document.getElementById('dims-error-flash');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Saving...';
+  errFlash.classList.remove('show');
+
+  const res = await gasPost('saveDimensions', { invoice: CURRENT_ORDER.invoice, dims, enteredBy: 'Packing (tablet)' });
+
+  if (res && res.ok){
+    CURRENT_ORDER.dims = dims;
+    CURRENT_ORDER.dimsBy = 'Packing (tablet)';
+    CURRENT_ORDER.dimsAt = 'Just now';
+    document.getElementById('dims-panel-container').innerHTML = renderDimsPanel(CURRENT_ORDER, false);
+    const flash = document.getElementById('dims-saved-flash');
+    if (flash) { flash.classList.add('show'); setTimeout(()=>flash.classList.remove('show'), 2500); }
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = '💾 Save Dimensions';
+    errFlash.classList.add('show');
+  }
+}
+
+async function doSearch(){
+  const q = document.getElementById('search-input').value.trim().toUpperCase();
+  const card = document.getElementById('detail-card');
+  const empty = document.getElementById('empty-state');
+  if (!q) return;
+
+  empty.style.display = 'block';
+  empty.innerHTML = '<div class="icon"><span class="spinner"></span></div>Looking up '+q+'...';
+  card.classList.remove('show');
+
+  const res = await gasGet({ op:'getSalesInvoiceDetail', invoice:q });
+
+  if (!res || !res.ok){
+    CURRENT_ORDER = null;
+    card.classList.remove('show');
+    empty.style.display='block';
+    empty.innerHTML = '<div class="icon">❌</div>'+ (res && res.error ? res.error : 'No order found for: '+q);
+    return;
+  }
+
+  CURRENT_ORDER = res;
+  empty.style.display='none';
+  card.classList.add('show');
+  const c = classify(res);
+
+  let statusHtml, itemsSectionHtml='';
+  const movedHtml = `<span class="status-small ${res.movedToPacking?'moved-yes':'moved-no'}">${res.movedToPacking?'✓ Moved to Packing':'Not Moved to Packing Yet'}</span>`;
+
+  if (c.status==='pending'){
+    statusHtml = '<span class="status-big pending">⏳ Not Inspected Yet</span>';
+  } else if (c.status==='pass'){
+    statusHtml = '<span class="status-big pass">✓ ALL ITEMS PICKED — NO ISSUES</span>';
+  } else {
+    statusHtml = c.real.length>0
+      ? '<span class="status-big issue">⚠ ' + c.real.length + ' ITEM(S) SHORT</span>'
+      : '<span class="status-big gap">ALL ITEMS PICKED — SCAN NOT LOGGED</span>';
+
+    let legend = '<div class="legend">';
+    if (c.real.length>0) legend += '<div class="legend-item"><span class="legend-dot short"></span>Short — not actually picked</div>';
+    if (c.gap.length>0) legend += '<div class="legend-item"><span class="legend-dot gap"></span>Physically picked, just not scanned — no shortage</div>';
+    legend += '</div>';
+
+    const rows = c.real.map(i=>`<div class="item-row short">
+        <div class="item-icon">❌</div>
+        <div class="item-body">
+          <div class="item-idline"><span class="item-sku">${i.sku}</span><span class="item-barcode">${i.barcode}</span></div>
+          <div class="item-name">${i.name}</div>
+        </div>
+        <span class="item-tag short">${REASON_LABEL[i.reason]||i.reason}</span>
+        <div class="item-qty">${i.qty} pcs</div>
+      </div>`).join('') + c.gap.map(i=>`<div class="item-row gaprow">
+        <div class="item-icon">🔵</div>
+        <div class="item-body">
+          <div class="item-idline"><span class="item-sku">${i.sku}</span><span class="item-barcode">${i.barcode}</span></div>
+          <div class="item-name">${i.name}</div>
+        </div>
+        <span class="item-tag gaprow">${REASON_LABEL[i.reason]||i.reason}</span>
+        <div class="item-qty">${i.qty} pcs</div>
+      </div>`).join('');
+
+    let noteHtml = '';
+    if (c.gap.length>0 && c.real.length>0){
+      noteHtml = '<div class="note-box gap-note"><b>Note:</b> This order mixes real shortages with items that were physically picked but not scanned in time. Blue (🔵) items are fine to invoice as shipped; only red (❌) items are actually missing.</div>';
+    } else if (c.gap.length>0 && c.real.length===0){
+      noteHtml = '<div class="note-box gap-note"><b>Note:</b> Everything on this order was fully picked. Warehouse just didn&#39;t log the scan. No shortage — safe to invoice in full.</div>';
+    }
+
+    itemsSectionHtml = `<div class="section-title-row"><span class="section-title">Item Detail</span></div>${legend}${rows}${noteHtml}`;
+  }
+
+  const dimsHtml = (c.status==='pending') ? '' : renderDimsSection(res);
+
+  card.innerHTML = `
+    <div class="detail-head">
+      <div>
+        <div class="detail-inv">${res.invoice}</div>
+        <div class="detail-cust">${res.customer||''}</div>
+        <div class="detail-meta">
+          <div class="meta-item"><div class="k">Ship Date</div><div class="v">${res.shipDate||'-'}</div></div>
+          <div class="meta-item"><div class="k">Shipping Method</div><div class="v">${res.method||'-'}</div></div>
+          <div class="meta-item"><div class="k">Inspector</div><div class="v">${res.inspector||'-'}</div></div>
+          <div class="meta-item"><div class="k">Inspection Completed</div><div class="v">${res.inspEnd||'-'}</div></div>
+        </div>
+      </div>
+      <div class="status-stack">
+        ${statusHtml}
+        ${c.status!=='pending' ? movedHtml : ''}
+      </div>
+    </div>
+    ${itemsSectionHtml}
+    ${dimsHtml}
+  `;
+}
+
+(async function init(){
+  if (!GAS_READY){
+    setSync('err', 'GAS_URL not set');
+    return;
+  }
+  setSync('busy', 'Loading...');
+  await loadToday();
+  setSync('ok', 'Connected');
+})();
+</script>
+
+</body>
+</html>
