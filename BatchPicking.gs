@@ -1736,3 +1736,163 @@ function testBatchPickingFlow() {
 
   Logger.log('★ 테스트 데이터 정리하려면 Batches/BatchCustomers/BatchItems/ScanLog/PickTiming 시트에서 batchId="' + batchId + '" 행들을 수동 삭제하세요.');
 }
+/* =====================================================================
+ * ★★★ 영업 공유 — 오더 검수 상세 조회 + 배송 디멘션 (신규 추가) ★★★
+ * 목적: 카톡(이슈 공유)+슬랙(디멘션 공유) 두 채널을 이 페이지 하나로 통합.
+ * 이 블록 전체를 BatchPicking.gs 맨 끝에 붙여넣으세요.
+ * ===================================================================== */
+
+const DIMENSIONS_SHEET = 'Dimensions';
+function dimensionsSheet_() {
+  return ensureBatchSheet_(DIMENSIONS_SHEET, ['Invoice','BoxIndex','L','W','H','Weight','EnteredBy','EnteredAt']);
+}
+
+/* ---------------------------------------------------------------------
+ * getDimensions_(invoice) — 내부 헬퍼. 인보이스 하나의 팔렛/박스 목록 조회.
+ * ------------------------------------------------------------------- */
+function getDimensions_(invoice) {
+  const sh = dimensionsSheet_();
+  const last = sh.getLastRow();
+  const dims = [];
+  let enteredBy = '', enteredAt = '';
+  if (last >= 2) {
+    sh.getRange(2, 1, last - 1, 8).getValues().forEach(r => {
+      if (String(r[0]).trim() !== String(invoice).trim()) return;
+      dims.push({ idx: Number(r[1]) || 0, l: r[2] || null, w: r[3] || null, h: r[4] || null, wt: Number(r[5]) || 0 });
+      if (r[6]) enteredBy = String(r[6]);
+      if (r[7]) enteredAt = String(r[7]);
+    });
+    dims.sort((a, b) => a.idx - b.idx);
+  }
+  return { dims: dims, enteredBy: enteredBy, enteredAt: enteredAt };
+}
+
+/* ---------------------------------------------------------------------
+ * saveDimensions(data) — 패킹 작업자가 팔렛/박스 치수+무게 저장.
+ * data: { invoice, dims: [{l,w,h,wt}, ...], enteredBy }
+ * 기존 이 인보이스의 행을 전부 지우고 새로 씀(전체 교체 방식 — 목록이
+ * 짧아서 부분수정보다 통째로 다시 쓰는 게 더 단순하고 버그가 적음).
+ * ------------------------------------------------------------------- */
+function saveDimensions(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    const list = Array.isArray(data.dims) ? data.dims : [];
+    const enteredBy = String((data && data.enteredBy) || '').trim();
+
+    const sh = dimensionsSheet_();
+    const last = sh.getLastRow();
+    if (last >= 2) {
+      const rows = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]).trim() === invoice) sh.deleteRow(i + 2);
+      }
+    }
+    const now = batchNow_();
+    const newRows = list
+      .filter(d => d && (Number(d.wt) > 0))
+      .map((d, idx) => [invoice, idx + 1, d.l || '', d.w || '', d.h || '', Number(d.wt) || 0, enteredBy, now]);
+    if (newRows.length) {
+      sh.getRange(sh.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
+    }
+    bumpVersion_();
+    return { ok: true, count: newRows.length };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * getSalesInvoiceDetail(invoice) — 영업팀 상세조회 페이지 전용 API.
+ * Jobs(검수결과) + BatchCustomers(패킹존이동) + IssueLog(빠진 상품 상세)
+ * + Dimensions(치수)를 한 번에 묶어서 반환. 영업팀에게 필요 없는 정보
+ * (작업자 실적, 다른 배치 현황 등)는 애초에 응답에 포함하지 않음.
+ * ------------------------------------------------------------------- */
+function getSalesInvoiceDetail(invoice) {
+  try {
+    invoice = String(invoice || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    // 1) Jobs 시트에서 기본 정보 + 검수결과
+    const sh = SHEET_();
+    const hm = headerMapCached_();
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: false, error: 'no jobs data' };
+    const invCol = hm['invoice'];
+    if (!invCol) return { ok: false, error: 'invoice column not found' };
+
+    const allData = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+    let jobRow = null;
+    for (let i = 0; i < allData.length; i++) {
+      if (String(allData[i][invCol - 1]).trim() === invoice) { jobRow = allData[i]; break; }
+    }
+    if (!jobRow) return { ok: false, error: 'Invoice not found: ' + invoice };
+
+    function jv(name) { const c = hm[name]; return c ? jobRow[c - 1] : ''; }
+    const customer = String(jv('remarks') || '');
+    const shipDateRaw = jv('ship date');
+    const shipDate = shipDateRaw instanceof Date
+      ? Utilities.formatDate(shipDateRaw, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(shipDateRaw || '');
+    const method = String(jv('trucking') || '');
+    const amount = jv('amount');
+    const inspectionRaw = String(jv('inspection') || '').trim();
+    const inspector = String(jv('inspector') || '').trim();
+    const inspEndRaw = String(jv('insp end') || '');
+
+    // 2) BatchCustomers에서 패킹존 이동 여부 (가장 최근 매치를 사용)
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    let movedToPacking = false;
+    if (bcLast >= 2) {
+      const bcRows = bc.getRange(2, 1, bcLast - 1, 11).getValues();
+      for (let i = bcRows.length - 1; i >= 0; i--) {
+        if (String(bcRows[i][1]).trim() === invoice) {
+          movedToPacking = !!bcRows[i][10];
+          break;
+        }
+      }
+    }
+
+    // 3) IssueLog에서 이 인보이스의 활성 이슈 상세 (SKU/상품명/바코드/사유/수량)
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const items = [];
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[7]).trim() !== invoice) return;
+        if (r[12] === 'undone') return;
+        items.push({
+          sku: r[5] || '', name: r[6] || '', barcode: r[4] || '',
+          reason: r[9] || '', qty: Number(r[10]) || 0, note: r[11] || ''
+        });
+      });
+    }
+
+    // 4) 디멘션
+    const dimsResult = getDimensions_(invoice);
+
+    return {
+      ok: true,
+      invoice: invoice,
+      customer: customer,
+      shipDate: shipDate,
+      method: method,
+      amount: amount,
+      inspectionRaw: inspectionRaw,
+      inspector: inspector,
+      inspEnd: inspEndRaw,
+      movedToPacking: movedToPacking,
+      items: items,
+      dims: dimsResult.dims,
+      dimsBy: dimsResult.enteredBy,
+      dimsAt: dimsResult.enteredAt
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
