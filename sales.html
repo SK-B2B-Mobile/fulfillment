@@ -661,6 +661,11 @@ async function saveDimsReal(){
     document.getElementById('dims-panel-container').innerHTML = renderDimsPanel(CURRENT_ORDER, false);
     const flash = document.getElementById('dims-saved-flash');
     if (flash) { flash.classList.add('show'); setTimeout(()=>flash.classList.remove('show'), 2500); }
+    // ★ 저장(삭제 포함) 성공 후 "Completed Today" 목록과 시트 미리보기도 같이
+    //   새로고침 — 안 그러면 페이지 처음 열 때 불러온 옛 디멘션 상태(✓ Dims)가
+    //   실제로 다 지웠는데도 화면에 계속 남아있는 것처럼 보이는 문제가 있었음.
+    loadToday();
+    loadSheetOverview();
   } else {
     btn.disabled = false;
     btn.innerHTML = '💾 Save Dimensions';
