@@ -240,6 +240,22 @@ function doGet(e) {
     return json_(getActiveBatch());
   }
 
+  // ★ 2026-07-28 신규 — 영업 공유: 오더 검수 상세 + 배송 디멘션 조회
+  if (op === 'getSalesInvoiceDetail') {
+    return json_(getSalesInvoiceDetail((e.parameter || {}).invoice || ''));
+  }
+  // ★ 2026-07-28 신규 — 영업 공유: "오늘 완료된 오더" 목록 전용 경량 조회.
+  //   listJobs는 전체 오더 + 이슈건마다 개별 getNote() 호출까지 있어서 느림.
+  //   영업 페이지는 오늘 것 몇 건만 필요하므로, 서버에서 날짜 필터링 후
+  //   최소 필드만 반환해서 훨씬 빠르게 함.
+  if (op === 'getSalesTodayList') {
+    return json_(getSalesTodayList());
+  }
+  // ★ 2026-07-28 신규 — 영업 공유: 시트 미리보기 화면 (검수 여부 무관 전체 목록)
+  if (op === 'getSalesOverview') {
+    return json_(getSalesOverview());
+  }
+
   return json_({ ok: false, error: 'unknown op' });
 }
 
@@ -384,6 +400,9 @@ function doPost(e) {
   // ★ 2026-07-23 신규 — 매니저가 배치를 이어서/새로 시작하면 서버에 "활성 배치" 기록
   if (op === 'setActiveBatch')  return json_(setActiveBatch(data));
   if (op === 'clearActiveBatch') return json_(clearActiveBatch());
+
+  // ★ 2026-07-28 신규 — 영업 공유: 패킹 작업자가 배송 디멘션(치수/무게) 저장
+  if (op === 'saveDimensions') return json_(saveDimensions(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -2520,6 +2539,160 @@ function getWorkerKPI(dateStr) {
 
   } catch(e) {
     return { ok: false, error: String(e), workers: [], totals: {} };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * buildMovedToPackingMap_() — BatchCustomers 시트를 한 번만 읽어서
+ * {invoice: movedToPacking(boolean)} 맵으로 만듦. 여러 인보이스를
+ * 한꺼번에 조회할 때(오늘 목록, 시트 미리보기) 인보이스마다 따로
+ * 시트를 뒤지지 않도록 공통 재사용.
+ * ------------------------------------------------------------------- */
+function buildMovedToPackingMap_() {
+  const map = {};
+  try {
+    const bc = bcustSheetSafe_();
+    const last = bc.getLastRow();
+    if (last >= 2) {
+      bc.getRange(2, 1, last - 1, 11).getValues().forEach(r => {
+        const inv = String(r[1] || '').trim();
+        if (!inv) return;
+        map[inv] = !!r[10]; // 나중 행(더 최근 배치)이 앞선 값을 덮어씀 = 최신 상태 유지
+      });
+    }
+  } catch (e) { /* best-effort */ }
+  return map;
+}
+
+/* =====================================================
+ * ★ 2026-07-28 신규 — 영업 공유: 오늘 완료된 오더 경량 조회
+ * listJobs 전체를 재사용하지 않고, Jobs 시트에서 딱 필요한 필드만
+ * 읽고 오늘 날짜(Insp. End 기준)로 서버에서 걸러서 반환.
+ * ISSUES 건마다 getNote()를 개별 호출하지 않으므로 훨씬 빠름.
+ * ===================================================== */
+function getSalesTodayList() {
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, jobs: [] };
+
+    const iInv      = hdr[norm('Invoice')];
+    const iRemarks   = hdr[norm('Remarks')];
+    const iShip      = hdr[norm('Ship Date')];
+    const iTruck     = hdr[norm('Trucking')];
+    const iInsp      = hdr[norm('Inspection')];
+    const iInspEnd   = hdr[norm('Insp. End')];
+    if (!iInv || !iInsp || !iInspEnd) return { ok: true, jobs: [] };
+
+    const tz = Session.getScriptTimeZone();
+    const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+    const invVals     = sh.getRange(2, iInv, lastRow - 1, 1).getValues();
+    const remarksVals = iRemarks ? sh.getRange(2, iRemarks, lastRow - 1, 1).getValues() : null;
+    const shipVals    = iShip ? sh.getRange(2, iShip, lastRow - 1, 1).getValues() : null;
+    const truckVals   = iTruck ? sh.getRange(2, iTruck, lastRow - 1, 1).getValues() : null;
+    const inspVals    = sh.getRange(2, iInsp, lastRow - 1, 1).getValues();
+    const inspEndVals = sh.getRange(2, iInspEnd, lastRow - 1, 1).getValues();
+
+    const movedMap = buildMovedToPackingMap_();
+
+    const jobs = [];
+    for (let i = 0; i < invVals.length; i++) {
+      const insp = String(inspVals[i][0] || '').trim();
+      if (!insp) continue;
+      const inspEnd = formatInspEnd_(inspEndVals[i][0]);
+      if (!inspEnd || inspEnd.indexOf(today) !== 0) continue;
+      const invoice = String(invVals[i][0] || '');
+      const shipRaw = shipVals ? shipVals[i][0] : '';
+      const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
+      jobs.push({
+        invoice: invoice,
+        remarks: remarksVals ? remarksVals[i][0] : '',
+        shipDate: shipDate,
+        method: truckVals ? truckVals[i][0] : '',
+        inspection: insp,
+        inspEnd: inspEnd,
+        movedToPacking: !!movedMap[invoice]
+      });
+    }
+    jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
+
+    return { ok: true, jobs: jobs, date: today };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e), jobs: [] };
+  }
+}
+
+/* =====================================================
+ * ★ 2026-07-28 신규 — 영업 공유: 시트 미리보기 화면용 전체 목록
+ * (검수 여부 무관, 보관 처리(archived) 안 된 것 전부) — 시뮬레이션의
+ * "① Sales Sheet Preview" 화면을 실제 데이터로 재현.
+ * ===================================================== */
+function getSalesOverview() {
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, jobs: [] };
+
+    const iInv      = hdr[norm('Invoice')];
+    const iRemarks   = hdr[norm('Remarks')];
+    const iShip      = hdr[norm('Ship Date')];
+    const iTruck     = hdr[norm('Trucking')];
+    const iAmount    = hdr[norm('Amount')];
+    const iInsp      = hdr[norm('Inspection')];
+    const iInspEnd   = hdr[norm('Insp. End')];
+    const iArch      = hdr[norm('archived')];
+    const iCreated   = hdr[norm('Created At')];
+    const iStartISO  = hdr[norm('StartAtISO')];
+    if (!iInv) return { ok: true, jobs: [] };
+
+    const tz = Session.getScriptTimeZone();
+    const lastCol = sh.getLastColumn();
+    const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    const movedMap = buildMovedToPackingMap_();
+
+    const jobs = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (iArch) {
+        const a = String(r[iArch - 1] || '').trim().toLowerCase();
+        if (a === 'true' || a === '1' || a === 'y' || a === 'yes') continue;
+      }
+      const invoice = String(r[iInv - 1] || '');
+      if (!invoice) continue;
+      const shipRaw = iShip ? r[iShip - 1] : '';
+      const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
+      const createdRaw = iCreated ? r[iCreated - 1] : '';
+      // ★ 신규 — 작업(피킹) 시작일. StartAtISO의 날짜 부분만 추출.
+      let pickStart = '';
+      if (iStartISO) {
+        const sv = r[iStartISO - 1];
+        if (sv instanceof Date && !isNaN(sv)) pickStart = Utilities.formatDate(sv, tz, 'yyyy-MM-dd');
+        else { const s = String(sv || '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10); }
+      }
+      jobs.push({
+        invoice: invoice,
+        remarks: iRemarks ? r[iRemarks - 1] : '',
+        shipDate: shipDate,
+        pickStart: pickStart,
+        method: iTruck ? r[iTruck - 1] : '',
+        amount: iAmount ? r[iAmount - 1] : '',
+        inspection: iInsp ? String(r[iInsp - 1] || '').trim() : '',
+        inspEnd: iInspEnd ? formatInspEnd_(r[iInspEnd - 1]) : '',
+        movedToPacking: !!movedMap[invoice],
+        createdAt: createdRaw ? String(createdRaw) : ''
+      });
+    }
+    // 최근 생성된 순
+    jobs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+    return { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e), jobs: [] };
   }
 }
 
