@@ -717,12 +717,22 @@ async function doSearch(){
   const items = res.items || [];
   const insp = String(res.inspectionRaw || '').trim();
   let status, real=[], gap=[];
+  // ★ 2026-07-28 수정 — 예전엔 items.length===0이면 무조건 'pass'로 판정해서,
+  //   Jobs 시트엔 "⚠ ISSUES(1)"로 찍혀있는데 IssueLog 쪽에서 그 이슈를 못 찾는
+  //   경우(취소/수정 후 재동기화가 안 된 경우 등) "NO ISSUES"라고 잘못 보여주는
+  //   사고가 있었음. 이제는 Jobs 시트의 검수결과 문구를 먼저 확인해서, ISSUES로
+  //   찍혀있는데 상세를 못 찾으면 "없다"고 하지 않고 "확인 필요"로 명확히 구분.
   if (!insp) status = 'pending';
-  else if (items.length === 0) status = 'pass';
-  else {
-    real = items.filter(i=>REAL_ISSUE.includes(i.reason));
-    gap = items.filter(i=>i.reason==='MISS');
-    status = real.length>0 ? 'issue' : 'gap-only';
+  else if (insp.indexOf('ISSUES') >= 0) {
+    if (items.length === 0) {
+      status = 'issue-no-detail';
+    } else {
+      real = items.filter(i=>REAL_ISSUE.includes(i.reason));
+      gap = items.filter(i=>i.reason==='MISS');
+      status = real.length>0 ? 'issue' : 'gap-only';
+    }
+  } else {
+    status = 'pass';
   }
 
   let statusHtml, itemsSectionHtml='';
@@ -736,6 +746,12 @@ async function doSearch(){
     statusHtml = '<span class="status-big pending">⏳ Not Inspected Yet</span>';
   } else if (status==='pass'){
     statusHtml = '<span class="status-big pass">✓ ALL ITEMS PICKED — NO ISSUES</span>';
+  } else if (status==='issue-no-detail'){
+    statusHtml = '<span class="status-big issue">⚠ ISSUE RECORDED — DETAIL NOT FOUND</span>';
+    itemsSectionHtml = `<div class="section-title-row"><span class="section-title">Item Detail</span></div>
+      <div class="note-box gap-note" style="border-color:rgba(239,68,68,0.35); background:rgba(239,68,68,0.05);">
+        <b style="color:#FF7A7A;">Note:</b> The warehouse system marked this order as having an issue (${insp}), but the specific item detail couldn't be found — this can happen if the issue was edited or removed after packing was already confirmed. <b>Don't treat this as "no issues."</b> Please check with the warehouse team directly before invoicing this order.
+      </div>`;
   } else {
     statusHtml = real.length>0
       ? '<span class="status-big issue">⚠ ' + real.length + ' ITEM(S) SHORT</span>'
