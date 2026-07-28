@@ -1931,27 +1931,37 @@ function getSalesInvoiceDetail(invoice) {
           // 좁혀서 못 찾는 경우가 있어(다른 고객사 행에만 이름이 채워져
           // 있거나 하는 경우) 바코드 하나로 시트 전체에서 매칭하도록 넓힘.
           if (items.length) {
-            const bi = bitemsSheet_();
-            const biLast = bi.getLastRow();
-            if (biLast >= 2) {
-              const nameByBarcode = {};
-              bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+            const nameByBarcode = {};
+            function scanForNames_(sh) {
+              if (!sh) return;
+              const last = sh.getLastRow();
+              if (last < 2) return;
+              sh.getRange(2, 1, last - 1, 7).getValues().forEach(r => {
                 const bc = String(r[4] || '').trim();
                 if (!bc) return;
-                // 같은 바코드에 이미 이름이 채워진 행이 있으면 그대로 두고,
-                // 아직 없으면(또는 총량 행이 먼저 채워져도) 이름이 있는 쪽을 우선함
                 const existing = nameByBarcode[bc];
                 const name = String(r[3] || '').trim();
                 if (!existing || (!existing.name && name)) {
                   nameByBarcode[bc] = { sku: r[2], name: r[3] };
                 }
               });
-              items.forEach(it => {
-                const found = nameByBarcode[String(it.barcode).trim()];
-                if (found && (found.sku || found.name)) { it.sku = found.sku || it.barcode; it.name = found.name || '(no product name on file)'; }
-                else { it.sku = it.barcode; it.name = '(product name unavailable — original record archived)'; }
-              });
             }
+            scanForNames_(bitemsSheet_());
+            // ★ 2026-07-28 신규 — 라이브 시트에서 못 찾으면, archiveOldBatches로
+            //   옮겨진 보관 시트(Archive_BatchItems)까지 같이 찾아봄. 이 이슈가
+            //   붙은 오더의 원본 배치가 이미 정리(보관)됐을 경우를 대비.
+            const stillMissing = items.some(it => !nameByBarcode[String(it.barcode).trim()]);
+            if (stillMissing) {
+              try {
+                const archiveSh = ss_().getSheetByName(ARCHIVE_PREFIX + BITEMS_SHEET);
+                scanForNames_(archiveSh);
+              } catch (e) { /* 보관 시트가 없거나 읽기 실패해도 나머지 응답은 진행 */ }
+            }
+            items.forEach(it => {
+              const found = nameByBarcode[String(it.barcode).trim()];
+              if (found && (found.sku || found.name)) { it.sku = found.sku || it.barcode; it.name = found.name || '(no product name on file)'; }
+              else { it.sku = it.barcode; it.name = '(product name unavailable — not found in current or archived records)'; }
+            });
           }
         }
       } catch (e) { /* best-effort — 못 읽어도 나머지 응답은 그대로 진행 */ }
