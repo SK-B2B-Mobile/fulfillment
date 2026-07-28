@@ -526,7 +526,7 @@ async function loadToday(){
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="badge issue">⚠ '+insp+'</span>';
     else badge = '<span class="badge pending">'+insp+'</span>';
     const movedBadge = j.movedToPacking ? '<span class="badge moved-yes">✓ Packing</span>' : '<span class="badge moved-no">Not Moved</span>';
-    const methodBadge = j.method ? '<span class="badge method">'+j.method+'</span>' : '';
+    const methodBadge = '<span class="badge method">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="badge pass">✓ Dims</span>' : '<span class="badge pending">No Dims</span>') : '';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')">
