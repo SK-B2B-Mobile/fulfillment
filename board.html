@@ -299,6 +299,12 @@ function shipClass(v){
 }
 
 let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상세 조회용
+// ★ 2026-07-28 신규 — 패킹존 이동 체크가 8초 폴링에 되돌아가던 경쟁상태 버그 수정용.
+// 클릭 직후 서버 저장이 아직 안 끝난 상태에서 폴링이 먼저 돌면, 폴링이 가져온
+// "아직 안 바뀐" 값으로 화면을 통째로 덮어써서 핑크가 다시 초록으로 되돌아갔음.
+// 저장 요청을 보낸 인보이스는 여기 기록해두고, renderBoard가 폴링 데이터로 화면을
+// 새로 그릴 때 "서버 값이 아직 이 값을 안 따라왔으면" 보류값을 그대로 유지하도록 함.
+let _pendingPackMoves = {}; // invoice -> boolean (서버 확인 대기중인 낙관적 값)
 
 // ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
 // 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
@@ -306,13 +312,18 @@ async function togglePackingMoved(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
   const next = !slot.movedToPacking;
+  _pendingPackMoves[invoice] = next; // ★ 신규: 폴링이 이 값을 되돌리지 못하게 보류 등록
   slot.movedToPacking = next; // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
   renderBoard(Object.values(_slotsByInvoice));
   const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, moved: next });
   if(!res.ok){
+    delete _pendingPackMoves[invoice]; // 실패 시 보류 해제하고 원상복구
     slot.movedToPacking = !next; // 실패하면 원상복구
     renderBoard(Object.values(_slotsByInvoice));
   }
+  // 성공 시엔 _pendingPackMoves를 여기서 지우지 않음 — 다음 폴링이 서버 값을 읽어와서
+  // 이 값과 실제로 일치하는 걸 renderBoard 안에서 확인하는 순간 자동으로 정리됨.
+  // 이렇게 해야 폴링 타이밍과 무관하게 항상 정확한(그리고 절대 되돌아가지 않는) 화면 유지.
 }
 
 function cardHtml(slot){
@@ -657,11 +668,26 @@ document.addEventListener('click', e => {
   if(e.target.id === 'issueModalOverlay') closeIssueModal();
 });
 
-function renderBoard(slots){
+function renderBoard(slots, fromPoll){
   const board = document.getElementById('board');
   // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 참조할 수 있도록 invoice 기준으로 캐싱
   _slotsByInvoice = {};
-  (slots || []).forEach(s => { if(s.invoice) _slotsByInvoice[s.invoice] = s; });
+  (slots || []).forEach(s => {
+    if(!s.invoice) return;
+    // ★ 2026-07-28 신규 — 보류중인 패킹존 이동 값이 있으면(방금 클릭해서 서버에
+    //   저장 요청을 보냈지만 아직 반영 안 됐을 수 있는 경우), 실제 서버 폴링
+    //   데이터(fromPoll=true)일 때만 비교해서 정리함. 클릭 직후 자체 낙관적
+    //   재렌더링(fromPoll 없음)에서는 절대 여기서 지우지 않음 — 그 호출은 항상
+    //   방금 세팅한 값 그대로라 비교하면 즉시(너무 이르게) 지워져버리기 때문.
+    if(fromPoll && Object.prototype.hasOwnProperty.call(_pendingPackMoves, s.invoice)){
+      if(s.movedToPacking === _pendingPackMoves[s.invoice]){
+        delete _pendingPackMoves[s.invoice];
+      } else {
+        s.movedToPacking = _pendingPackMoves[s.invoice];
+      }
+    }
+    _slotsByInvoice[s.invoice] = s;
+  });
   if(!slots || slots.length === 0){
     board.innerHTML = `<div class="empty-state"><h2>오늘의 배치를 기다리는 중...</h2><p>슬롯이 배정되면 여기 자동으로 표시됩니다</p></div>`;
     return;
@@ -761,7 +787,7 @@ async function pollOnce(){
     document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
     document.getElementById('doneBar').style.width =
       (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
-    renderBoard(res.slots);
+    renderBoard(res.slots, true);
   }catch(e){
     // ★ 2026-07-17 신규: 폴링 중 예상 못한 오류가 나도 콘솔에만 남기고
     //   다음 8초 뒤 폴링은 그대로 이어지게 함(화면이 아예 멈추지 않도록)
