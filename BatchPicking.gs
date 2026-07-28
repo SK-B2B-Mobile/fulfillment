@@ -1748,6 +1748,29 @@ function dimensionsSheet_() {
 }
 
 /* ---------------------------------------------------------------------
+ * buildDimsExistsMap_() — Dimensions 시트를 한 번만 읽어서
+ * {invoice: {count, totalWt}} 맵으로 만듦. 여러 인보이스를 한꺼번에
+ * 조회할 때(오늘 목록, 시트 미리보기) 인보이스마다 따로 뒤지지 않도록.
+ * ------------------------------------------------------------------- */
+function buildDimsExistsMap_() {
+  const map = {};
+  try {
+    const sh = dimensionsSheet_();
+    const last = sh.getLastRow();
+    if (last >= 2) {
+      sh.getRange(2, 1, last - 1, 6).getValues().forEach(r => {
+        const inv = String(r[0] || '').trim();
+        if (!inv) return;
+        if (!map[inv]) map[inv] = { count: 0, totalWt: 0 };
+        map[inv].count++;
+        map[inv].totalWt += Number(r[5]) || 0;
+      });
+    }
+  } catch (e) { /* best-effort */ }
+  return map;
+}
+
+/* ---------------------------------------------------------------------
  * getDimensions_(invoice) — 내부 헬퍼. 인보이스 하나의 팔렛/박스 목록 조회.
  * ------------------------------------------------------------------- */
 function getDimensions_(invoice) {
@@ -1901,7 +1924,8 @@ function getSalesInvoiceDetail(invoice) {
       items: items,
       dims: dimsResult.dims,
       dimsBy: dimsResult.enteredBy,
-      dimsAt: dimsResult.enteredAt
+      dimsAt: dimsResult.enteredAt,
+      dimsCount: dimsResult.dims.length
     };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
