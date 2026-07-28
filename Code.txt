@@ -2635,7 +2635,7 @@ function getSalesTodayList() {
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
 
     const out = { ok: true, jobs: jobs, date: today };
-    try { cache.put(cacheKey, JSON.stringify(out), 15); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    try { cache.put(cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
@@ -2731,7 +2731,7 @@ function getSalesOverview() {
     jobs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
     const out = { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
-    try { cache.put(cacheKey, JSON.stringify(out), 15); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    try { cache.put(cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
