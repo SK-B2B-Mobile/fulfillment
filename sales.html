@@ -154,7 +154,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .plain-tag.method-pu{color:#8FBBFF; font-weight:700;}
 /* ★ 피킹 진행 상태 — 시작됐으면 초록 깜빡임, 대기중이면 기존 회색 톤 */
 .badge.picking-active{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.5);}
-.badge.picking-active .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; animation:blink 1s infinite;}
+.badge.picking-active .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; animation:blink 1s infinite; flex-shrink:0;}
 .badge.picking-waiting{background:var(--gray-bg); color:var(--text-dim);}
 
 .detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
@@ -433,7 +433,7 @@ function methodClass(m){
 function pickingBadge(o){
   const insp = String(o.inspection||'').trim();
   if (insp) return '<span class="detail-dash">—</span>';
-  if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>In Progress</span>';
+  if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>Active</span>';
   return '<span class="badge picking-waiting">⏳ Waiting</span>';
 }
 
