@@ -79,15 +79,19 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .badge.pending{background:var(--gray-bg); color:var(--text-dim);}
 .badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 .badge.method{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
+/* ★ 배송방법별 색상 구분 */
+.badge.method.method-tk{background:rgba(245,158,11,0.12); color:var(--amber); border-color:rgba(245,158,11,0.4);}
+.badge.method.method-ups{background:rgba(139,92,246,0.12); color:#C4B0FF; border-color:rgba(139,92,246,0.4);}
+.badge.method.method-pu{background:rgba(59,130,246,0.12); color:#8FBBFF; border-color:rgba(59,130,246,0.4);}
 
-/* ★ 패킹존 이동 완료 — 반짝이는 애니메이션 */
+/* ★ 패킹존 이동 완료 — 초록색(Dimensions Saved와 동일 톤)으로 통일 + 반짝이는 애니메이션 */
 .badge.moved-yes{
-  background:var(--purple-bg); color:#C4B0FF; position:relative; overflow:hidden;
-  border:1px solid rgba(139,92,246,0.5);
+  background:var(--green-bg); color:var(--green); position:relative; overflow:hidden;
+  border:1px solid rgba(16,217,126,0.5);
 }
 .badge.moved-yes::after{
   content:''; position:absolute; top:0; left:-60%; width:40%; height:100%;
-  background:linear-gradient(120deg, transparent, rgba(196,176,255,0.55), transparent);
+  background:linear-gradient(120deg, transparent, rgba(16,217,126,0.55), transparent);
   animation:sparkleSweep 2.6s ease-in-out infinite;
 }
 @keyframes sparkleSweep{
@@ -142,9 +146,16 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .plain-tag.pass{color:var(--green);}
 .plain-tag.issue{color:#FF7A7A;}
 .plain-tag.pending{color:var(--text-dim); font-weight:500;}
-.plain-tag.moved-yes{color:#C4B0FF;}
+.plain-tag.moved-yes{color:var(--green);}
 .plain-tag.moved-no{color:var(--text-dim); font-weight:500;}
 .plain-tag.method{color:var(--text-dim); font-weight:500;}
+.plain-tag.method-tk{color:var(--amber); font-weight:700;}
+.plain-tag.method-ups{color:#C4B0FF; font-weight:700;}
+.plain-tag.method-pu{color:#8FBBFF; font-weight:700;}
+/* ★ 피킹 진행 상태 — 시작됐으면 초록 깜빡임, 대기중이면 기존 회색 톤 */
+.badge.picking-active{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.5);}
+.badge.picking-active .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; animation:blink 1s infinite;}
+.badge.picking-waiting{background:var(--gray-bg); color:var(--text-dim);}
 
 .detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
 .detail-card.show{display:block;}
@@ -162,8 +173,8 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .status-big.gap{background:var(--blue-bg); color:#8FBBFF;}
 .status-big.pending{background:var(--gray-bg); color:var(--text-dim);}
 .status-small{display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:8px;}
-.status-small.moved-yes{background:var(--purple-bg); color:#C4B0FF; position:relative; overflow:hidden; border:1px solid rgba(139,92,246,0.5);}
-.status-small.moved-yes::after{content:''; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(120deg, transparent, rgba(196,176,255,0.55), transparent); animation:sparkleSweep 2.6s ease-in-out infinite;}
+.status-small.moved-yes{background:var(--green-bg); color:var(--green); position:relative; overflow:hidden; border:1px solid rgba(16,217,126,0.5);}
+.status-small.moved-yes::after{content:''; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(120deg, transparent, rgba(16,217,126,0.55), transparent); animation:sparkleSweep 2.6s ease-in-out infinite;}
 .status-small.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 
 .section-title-row{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;}
@@ -281,14 +292,14 @@ td.new-col{background:rgba(16,217,126,0.03);}
       <div class="table-scroll">
       <table>
         <colgroup>
-          <col style="width:10%"><col style="width:17%"><col style="width:8%"><col style="width:8%">
-          <col style="width:7%"><col style="width:8%"><col style="width:13%"><col style="width:10%"><col style="width:10%"><col style="width:9%">
+          <col style="width:10%"><col style="width:18%"><col style="width:8%"><col style="width:8%">
+          <col style="width:7%"><col style="width:8%"><col style="width:13%"><col style="width:11%"><col style="width:8%"><col style="width:9%">
         </colgroup>
         <thead>
           <tr>
-            <th>Invoice#</th><th>Customer Name</th><th>Ship Out</th><th>Picking Started</th>
+            <th>Invoice#</th><th>Customer Name</th><th>Ship Out</th><th>Picking</th>
             <th>Method</th><th>Amount</th>
-            <th class="new-col">Fulfillment Status</th><th class="new-col">Moved to Packing</th><th class="new-col">Dimensions</th><th class="new-col">Details</th>
+            <th class="new-col">Fulfillment Status</th><th class="new-col" style="cursor:pointer;" onclick="showNamePopover(event, 'Moved to Packing')" title="Click for full label">Moved to Packing</th><th class="new-col">Dimensions</th><th class="new-col">Details</th>
           </tr>
         </thead>
         <tbody id="sheet-tbody"><tr><td colspan="10" style="text-align:center;padding:30px;"><span class="spinner"></span>Loading...</td></tr></tbody>
@@ -408,6 +419,24 @@ function dimUnitLabel(order){ return (order.method==='TRUCKING'||order.method===
 function dimUnitLabelPlural(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallets' : 'Boxes'; }
 function fmtMoney(n){ n = Number(n)||0; return n ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'; }
 
+// ★ 배송방법(TK/UPS/PU)별 색상 클래스 — 다른 값(FedEx 등)이 들어와도 안전하게 기본톤 사용
+function methodClass(m){
+  const v = String(m||'').toUpperCase();
+  if (v==='TK' || v==='TRUCKING') return 'method-tk';
+  if (v==='UPS') return 'method-ups';
+  if (v==='PU' || v==='PICK UP' || v==='PICKUP') return 'method-pu';
+  return '';
+}
+
+// ★ 피킹 진행 상태 뱃지 — 검수 전(미완료) 오더에 한해서만 의미가 있음.
+//   이미 검수 완료된 건(PASS/ISSUES)은 Fulfillment Status가 이미 알려주므로 "—"로 비움.
+function pickingBadge(o){
+  const insp = String(o.inspection||'').trim();
+  if (insp) return '<span class="detail-dash">—</span>';
+  if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>In Progress</span>';
+  return '<span class="badge picking-waiting">⏳ Waiting</span>';
+}
+
 /* ── Customer name popover (for long names) ── */
 function showNamePopover(evt, fullName){
   evt.stopPropagation();
@@ -485,8 +514,8 @@ function renderSheet(){
         <td class="mono" style="font-weight:800">${o.invoice}</td>
         <td><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
         <td class="mono dim">${o.shipDate||'-'}</td>
-        <td class="mono dim">${o.pickStart||'-'}</td>
-        <td class="dim">${o.method||'-'}</td>
+        <td>${pickingBadge(o)}</td>
+        <td><span class="badge method ${methodClass(o.method)}">${o.method||'-'}</span></td>
         <td class="mono">${fmtMoney(o.amount)}</td>
         <td class="new-col">${badge}</td>
         <td class="new-col">${movedBadge}</td>
@@ -544,7 +573,7 @@ async function loadToday(){
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="plain-tag issue">'+insp+' →</span>';
     else badge = '<span class="plain-tag pending">'+insp+'</span>';
     const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Packing</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
-    const methodBadge = '<span class="plain-tag method">'+(j.method || '-')+'</span>';
+    const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">No Dims</span>') : '<span class="today-time">—</span>';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
@@ -811,7 +840,6 @@ async function doSearch(){
         <div class="detail-inv">${res.invoice}</div>
         <div class="detail-cust">${res.customer||''}</div>
         <div class="detail-meta">
-          <div class="meta-item"><div class="k">Picking Started</div><div class="v">${res.pickStart||'-'}</div></div>
           <div class="meta-item"><div class="k">Ship Date</div><div class="v">${res.shipDate||'-'}</div></div>
           <div class="meta-item"><div class="k">Shipping Method</div><div class="v">${res.method||'-'}</div></div>
           <div class="meta-item"><div class="k">Inspector</div><div class="v">${res.inspector||'-'}</div></div>
