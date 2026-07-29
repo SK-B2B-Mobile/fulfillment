@@ -398,7 +398,7 @@ let _newIssueItemsSorted = []; // ★ 2026-07-24 신규: 검색창 필터링을 
 function renderSkuOptionsHtml(items){
   if(!items.length) return '<option>상품 목록을 불러올 수 없습니다</option>';
   return items.map(it => {
-    const st = _invoiceItemStatusByBarcode[String(it.barcode)];
+    const st = _invoiceItemStatusByBarcode[String(it.barcode)+'|'+String(it.sku)];
     let statusTxt = `${it.req_qty}pcs`;
     let prefix = '';
     let color = ''; // ★ 2026-07-24 신규: 부족/이슈처리/완료를 색으로도 구분(빨강=부족, 눈에 확 띄게)
@@ -464,7 +464,10 @@ async function openIssueModal(invoice){
   try{
     const statusRes = await gasQuery('getInvoiceItemStatus', { batchId: currentBatchId, invoice });
     if(statusRes.ok && Array.isArray(statusRes.items)){
-      statusRes.items.forEach(it => { _invoiceItemStatusByBarcode[String(it.barcode)] = it; });
+      // ★ 2026-07-29 긴급 수정 — 바코드만으로 캐싱하면, 같은 바코드에 서로 다른
+      //   SKU가 걸려있는 경우(어제 발견된 사고 케이스와 동일 원인) 하나가 다른
+      //   하나를 덮어써서 잘못된 진행률이 표시될 수 있었음. 바코드+SKU 조합으로 키 변경.
+      statusRes.items.forEach(it => { _invoiceItemStatusByBarcode[String(it.barcode)+'|'+String(it.sku)] = it; });
     }
   }catch(e){ /* 상태 조회 실패해도 목록 자체는 그대로 보여줌(수량 표시만 안 나옴) */ }
   renderIssueModalBody();
@@ -504,8 +507,18 @@ function renderIssueModalBody(){
   // ★ 2026-07-24 수정 — SKU가 200개까지도 있어서 하나하나 찾기 어렵다는 피드백:
   //   (1) 표시 순서를 "SKU 먼저" + SKU 알파벳순 정렬로 바꾸고
   //   (2) 옆에 검색창을 추가해서 SKU/상품명/바코드로 실시간 필터링되게 함.
-  _newIssueItemsSorted = (_batchItemsCache.byInvoice[invoice] || [])
-    .slice()
+  // ★ 2026-07-29 긴급 수정 — BatchItems 원본에 같은 SKU가 여러 줄(분할입고 등)로
+  //   나뉘어 있으면, 예전엔 병합 없이 그대로 나열해서 후보 목록에 같은 상품이
+  //   두 번(또는 그 이상) 중복으로 뜨는 버그가 있었음. 시스템 다른 계산 로직은
+  //   전부 바코드+SKU 기준으로 병합해서 쓰는데 이 목록만 빠져 있었음.
+  //   바코드+SKU가 같은 줄은 수량을 합산해서 하나로 병합한 뒤에 정렬함.
+  const mergedByKey = {};
+  (_batchItemsCache.byInvoice[invoice] || []).forEach(it => {
+    const key = String(it.barcode) + '|' + String(it.sku);
+    if(!mergedByKey[key]) mergedByKey[key] = Object.assign({}, it, { req_qty: 0 });
+    mergedByKey[key].req_qty += (Number(it.req_qty) || 0);
+  });
+  _newIssueItemsSorted = Object.values(mergedByKey)
     .sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
   const newFormHtml = `
     <div class="issue-new-form">
