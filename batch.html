@@ -2478,7 +2478,15 @@ function renderSlots(){
     const sp = cf ? skuProgressByInvoice[cf.meta.invoice_no] || {doneSku:0,totalSku:cf.totalSkus||0} : null;
     // ★ 2026-07-23 수정: 초과 스캔이 있어도(p.done > p.need) 완료로 잡히도록 === 대신 >= 사용
     //   (TV의 "scanned >= effectiveTotal" 판정과 통일)
-    const status = !cf ? 'empty' : p.need>0 && p.done>=p.need ? 'done' : p.done>0 ? 'active' : 'filled';
+    // ★ 2026-07-29 긴급 수정 — TV(GAS getSlotProgress)에서 찾은 것과 같은 심각한
+    //   버그가 여기도 있었음: "완료(done)" 판정이 수량 합계(p.done>=p.need)만
+    //   보고 있어서, SKU가 여러 개인 슬롯에서 어떤 SKU는 덜 스캔되고 다른 SKU는
+    //   초과 스캔되면 합계 수량은 우연히 맞아떨어져도 실제로는 특정 SKU가 하나도
+    //   안 채워진 채로 "완료"로 잘못 표시될 수 있었음(실제 사례: SKU 148/156인데
+    //   카드가 완료로 뜸). 이제 수량 조건과 "SKU 단위로도 전부 채워졌는지
+    //   (doneSku>=totalSku)"를 둘 다 만족해야만 완료로 판정.
+    const skuComplete = !sp || sp.totalSku === 0 || sp.doneSku >= sp.totalSku;
+    const status = !cf ? 'empty' : (p.need>0 && p.done>=p.need && skuComplete) ? 'done' : p.done>0 ? 'active' : 'filled';
     const pct = p && p.need>0 ? Math.min(100, p.done/p.need*100) : 0;
     const numLabel = /^\d+$/.test(String(slot.num)) ? String(slot.num).padStart(2,'0') : String(slot.num);
 
