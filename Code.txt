@@ -717,7 +717,8 @@ function listJobs_textSafe_() {
   const lastCol = sh.getLastColumn();
   const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
-  const jobs = rows.map(r => ({
+  const jobs = rows.map((r, i) => ({
+    _rowIndex: i + 2, // ★ 2026-07-29 신규: 원본 시트 행 번호를 미리 저장해둠(아래 메모 읽기용)
     invoice: iInv ? r[iInv - 1] : '',
     amount: iAmount ? r[iAmount - 1] : '',
     shipDate: iShip ? r[iShip - 1] : '',
@@ -742,17 +743,24 @@ function listJobs_textSafe_() {
     inspectionNote: '',
   }));
 
-  jobs.forEach((job, i) => {
-    if (String(job.inspection || '').indexOf('ISSUES') >= 0) {
-      try {
-        job.inspectionNote = sh.getRange(i + 2, iInsp).getNote() || '';
-      } catch(e) { job.inspectionNote = ''; }
-    }
-  });
-
+  // ★ 2026-07-29 성능 개선 — 예전엔 "이미 보관 처리(archived)돼서 화면에 안 보일
+  //   행"까지도 이슈 메모(getNote, 행마다 개별 API 호출이라 느림)를 전부 읽은
+  //   뒤에야 걸러냈음. Jobs 시트가 수천 행까지 쌓인 상태라, 캐시가 만료된 직후
+  //   첫 조회(cold load)마다 이 불필요한 메모 읽기가 누적되어 "fetchData timed
+  //   out"까지 발생하는 원인이 됐음. 필터링을 먼저 해서, 실제로 화면에 보일
+  //   행에 대해서만 메모를 읽도록 순서를 바꿈 — 결과는 완전히 동일하고 속도만 개선됨.
   const cleaned = jobs.filter(j => {
     const v = String(j.archived || '').trim().toLowerCase();
     return !(v === 'true' || v === '1' || v === 'y' || v === 'yes');
+  });
+
+  cleaned.forEach(job => {
+    if (String(job.inspection || '').indexOf('ISSUES') >= 0) {
+      try {
+        job.inspectionNote = sh.getRange(job._rowIndex, iInsp).getNote() || '';
+      } catch(e) { job.inspectionNote = ''; }
+    }
+    delete job._rowIndex; // 내부용 필드라 응답에는 안 실어 보냄
   });
 
   return { ok: true, jobs: cleaned };
