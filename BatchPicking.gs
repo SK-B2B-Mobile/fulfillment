@@ -1233,17 +1233,10 @@ function getSlotProgress(batchId) {
         scannedByKey[key] = (scannedByKey[key] || 0) + qty;
       });
     }
-    // 위에서 구한 SKU별 순 스캔량을 0 밑으로 안 내려가게 고정 → 그걸 다시
-    // 인보이스 단위로 합산해서 "진짜 진행량"을 계산 (이슈로 이미 커버된 SKU는
-    // 스캔량 0으로 취급되어, effectiveTotal 쪽에서 이미 빠진 걸 여기서 또
-    // 빼는 이중 차감이 없어짐).
+    // 위에서 구한 SKU별 순 스캔량을 0 밑으로 안 내려가게 고정 (인보이스 합계는
+    // skuLinesByKey를 구한 뒤 "각 줄의 필요수량으로 캡핑"해서 계산함 — 아래 참고)
     Object.keys(scannedByKey).forEach(key => {
       if (scannedByKey[key] < 0) scannedByKey[key] = 0;
-    });
-    const scannedByInvoice = {};
-    Object.entries(scannedByKey).forEach(([key, qty]) => {
-      const inv = key.split('|')[0];
-      scannedByInvoice[inv] = (scannedByInvoice[inv] || 0) + qty;
     });
 
     // ★ 2026-07-16 신규: EXP/NF/Damaged/OOS 등으로 등록된 이슈 수량 집계.
@@ -1295,6 +1288,24 @@ function getSlotProgress(batchId) {
         skuLinesByKey[bcKey].reqQty += Number(r[5]) || 0;
       });
     }
+
+    // ★ 2026-07-29 설계 변경 — 예전엔 스캔량을 인보이스 단위로 그냥 다 더해서,
+    //   SKU 한 줄이 필요수량보다 많이 찍혀도 그 초과분까지 합계에 그대로
+    //   반영됐음. 그 결과 "SKU 30/30(전부 완료)"인데 "수량 767/731"처럼 분자가
+    //   분모를 넘는 앞뒤 안 맞는 숫자가 노출되는 사고가 있었음. 현장에서는
+    //   작업자가 정확한 수량만 가져오는 게 원칙이라(초과가 있으면 안 됨), 이제
+    //   SKU 한 줄의 기여분을 "그 줄의 필요수량(이슈 반영)"으로 캡핑한 뒤에만
+    //   인보이스 합계에 더함 — 이러면 수학적으로 분자가 분모를 절대 못 넘고,
+    //   "SKU 전부 완료"와 "수량 100%"가 항상 정확히 일치하게 됨.
+    const scannedByInvoice = {};
+    Object.entries(skuLinesByKey).forEach(([key, line]) => {
+      const inv = line.invoice;
+      const scannedQty = scannedByKey[key] || 0;
+      const issueQty = issueQtyByKey[key] || 0;
+      const lineCap = Math.max(0, line.reqQty - issueQty); // 이 줄이 실제로 채워야 할 몫
+      const cappedContribution = Math.min(scannedQty, lineCap); // 초과분은 버림
+      scannedByInvoice[inv] = (scannedByInvoice[inv] || 0) + cappedContribution;
+    });
     const skuStatsByInvoice = {}; // invoice -> {totalSku, doneSku}
     Object.entries(skuLinesByKey).forEach(([key, line]) => {
       const inv = line.invoice;
