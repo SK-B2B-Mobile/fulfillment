@@ -82,7 +82,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 /* ★ 배송방법별 색상 구분 */
 .badge.method.method-tk{background:rgba(245,158,11,0.12); color:var(--amber); border-color:rgba(245,158,11,0.4);}
 .badge.method.method-ups{background:rgba(139,92,246,0.12); color:#C4B0FF; border-color:rgba(139,92,246,0.4);}
-.badge.method.method-pu{background:rgba(59,130,246,0.12); color:#8FBBFF; border-color:rgba(59,130,246,0.4);}
+.badge.method.method-pu{background:rgba(45,212,191,0.14); color:#5EEAD4; border-color:rgba(45,212,191,0.45);}
 
 /* ★ 패킹존 이동 완료 — 초록색(Dimensions Saved와 동일 톤)으로 통일 + 반짝이는 애니메이션 */
 .badge.moved-yes{
@@ -151,11 +151,12 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .plain-tag.method{color:var(--text-dim); font-weight:500;}
 .plain-tag.method-tk{color:var(--amber); font-weight:700;}
 .plain-tag.method-ups{color:#C4B0FF; font-weight:700;}
-.plain-tag.method-pu{color:#8FBBFF; font-weight:700;}
+.plain-tag.method-pu{color:#5EEAD4; font-weight:700;}
 /* ★ 피킹 진행 상태 — 시작됐으면 초록 깜빡임, 대기중이면 기존 회색 톤 */
 .badge.picking-active{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.5);}
 .badge.picking-active .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; animation:blink 1s infinite; flex-shrink:0;}
 .badge.picking-waiting{background:var(--gray-bg); color:var(--text-dim);}
+.badge.picking-waiting .dot-static{width:7px; height:7px; border-radius:50%; background:var(--text-dim); display:inline-block; flex-shrink:0;}
 
 .detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
 .detail-card.show{display:block;}
@@ -434,7 +435,7 @@ function pickingBadge(o){
   const insp = String(o.inspection||'').trim();
   if (insp) return '<span class="detail-dash">—</span>';
   if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>Active</span>';
-  return '<span class="badge picking-waiting">⏳ Waiting</span>';
+  return '<span class="badge picking-waiting"><span class="dot-static"></span>Waiting</span>';
 }
 
 /* ── Customer name popover (for long names) ── */
