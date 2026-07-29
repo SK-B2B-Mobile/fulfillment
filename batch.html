@@ -2262,17 +2262,16 @@ function applyScanState(doneMap, scans, issueMap, issues){
         //   → 다른 기기에서 이슈를 등록해도 이 기기가 폴링하는 순간 반영됨.
         const issueQty = (issueMap && issueMap[key]) || 0;
         q.need = Math.max(0, (q.origNeed != null ? q.origNeed : q.need) - issueQty);
-        // ★ 2026-07-23 긴급 수정 — 심각한 버그: 아래 클램프(q.done을 q.need로 자름)는
-        //   "이 SKU 한 줄"의 진행률 표시(초과분은 100%로만 보여줌)를 위한 것인데,
-        //   이 클램프된 값을 그대로 고객사 전체 합계(progressByInvoice)에도 써버려서,
-        //   SKU 하나라도 초과 스캔되면 그 초과분이 고객사 전체 합계에서 영구적으로
-        //   사라져 슬롯이 100%가 되어도 "완료(파란색)"로 절대 안 바뀌는 문제가 있었음
-        //   (TV는 고객사 단위로 통째로 합산해서 초과분도 인정하므로 완료로 뜨는데,
-        //   웹은 SKU별로 자른 값의 합이라 영원히 못 채워지는 불일치 발생).
-        //   해결: 클램프 전 원본값을 doneRaw로 따로 보관해서, 고객사 전체 합계는
-        //   doneRaw(초과분 포함)로 계산하고, 이 SKU 한 줄의 표시(0~100%)에만 클램프된
-        //   q.done을 씀 — TV(getSlotProgress)와 완전히 같은 기준으로 통일됨.
-        q.doneRaw = q.done;
+        // ★ 2026-07-29 설계 변경 — 예전(2026-07-23)엔 클램프된 값을 고객사 전체
+        //   합계에 쓰면 초과 스캔분이 사라져서 슬롯이 영원히 100%가 안 되는
+        //   문제가 있어서, 클램프 안 된 원본값(doneRaw)을 따로 보관해 합계에는
+        //   그걸 쓰도록 했었음. 하지만 이 방식은 "필요수량보다 많이 찍힌 게
+        //   합계에 그대로 반영"되는 부작용이 있어서(예: SKU 30/30인데 수량은
+        //   767/731처럼 분자가 분모를 넘는 앞뒤 안 맞는 숫자 노출), 현장 요구사항
+        //   ("작업자는 정확한 수량만 가져온다 — 초과는 있어서는 안 됨")에 맞춰
+        //   전면 재설계함. 이제는 SKU 한 줄이 완료되면 딱 필요수량만큼만(그 이상은
+        //   버림) 합계에 반영함 — 이러면 "SKU 30/30"과 "수량 합계 100%"가 항상
+        //   수학적으로 정확히 일치하고, 분자가 분모를 넘는 경우 자체가 생길 수 없음.
         if(q.done > q.need) q.done = q.need;
       });
     });
@@ -2455,10 +2454,13 @@ function renderSlots(){
   const skuProgressByInvoice = {};
   Object.values(state.scanIndex).flatMap(entry => [entry, ...(entry.altVariants||[])]).forEach(sku => sku.queue.forEach(q => {
     if(!progressByInvoice[q.invoice]) progressByInvoice[q.invoice] = {done:0, need:0};
-    // ★ 2026-07-23 수정: q.done(SKU별로 need에 클램프된 값)이 아니라 q.doneRaw(초과분
-    //   포함 원본값)로 합산 — TV(getSlotProgress)의 "고객사 전체 스캔량" 계산과 통일.
-    //   (q.doneRaw가 없는 구버전 데이터 대비 폴백으로 q.done 사용)
-    progressByInvoice[q.invoice].done += (q.doneRaw != null ? q.doneRaw : q.done);
+    // ★ 2026-07-29 설계 변경 — 예전엔 초과 스캔분(doneRaw)까지 합계에 그대로
+    //   더해서 "767/731" 같은 앞뒤 안 맞는 숫자가 그대로 노출됐음(분자가 분모를
+    //   넘어감). 현장에서는 작업자가 정확한 수량을 가져오는 게 원칙이라, 필요
+    //   수량을 넘는 초과분은 애초에 합계에 포함시키지 않기로 함 — SKU 한 줄당
+    //   기여분을 그 줄의 필요수량(q.need)으로 캡핑한 값(q.done)만 더해서,
+    //   고객사 전체 합계가 수학적으로 절대 필요수량을 못 넘게 함.
+    progressByInvoice[q.invoice].done += q.done;
     progressByInvoice[q.invoice].need += q.need;
 
     if(!skuProgressByInvoice[q.invoice]) skuProgressByInvoice[q.invoice] = {doneSku:0, totalSku:0};
