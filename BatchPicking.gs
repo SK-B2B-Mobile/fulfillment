@@ -1323,9 +1323,19 @@ function getSlotProgress(batchId) {
         //   예) 20개 필요 중 3개가 EXP로 등록되면 → 17개만 채우면 완료.
         const effectiveTotal = Math.max(0, totalQty - issueQty);
         const skuStat = skuStatsByInvoice[invoice] || { totalSku: Number(r[6]) || 0, doneSku: 0 };
+        // ★ 2026-07-29 긴급 수정 — 심각한 사고 발견: "완료(초록)" 판정이 예전엔
+        //   전체 수량 합계(scanned>=effectiveTotal)만 보고 있었음. 그런데 SKU가
+        //   여러 개인 슬롯에서 어떤 SKU는 덜 스캔되고 다른 SKU는 초과 스캔되면,
+        //   합계 수량은 우연히 딱 맞아떨어져도 실제로는 특정 SKU가 하나도 안
+        //   채워진 채로 "완료"라고 잘못 표시되는 사고가 있었음(실제 사례: SKU
+        //   148/156인데 카드가 초록색으로 뜸). 이제 수량 조건과 "SKU 단위로도
+        //   전부 채워졌는지(doneSku>=totalSku)"를 둘 다 만족해야만 완료로 판정.
+        const skuComplete = skuStat.totalSku > 0 ? (skuStat.doneSku >= skuStat.totalSku) : true;
         let status = 'waiting';
         if (scanned > 0 && scanned < effectiveTotal) status = 'active';
-        if (effectiveTotal >= 0 && totalQty > 0 && scanned >= effectiveTotal) status = 'done';
+        if (effectiveTotal >= 0 && totalQty > 0 && scanned >= effectiveTotal) {
+          status = skuComplete ? 'done' : 'active'; // 수량은 찼는데 SKU가 덜 끝났으면 진행중으로 유지
+        }
         // ★ 매니저가 "임시A" 같은 문자 라벨로 수동 배정한 슬롯도 있을 수 있어
         //   숫자로 안 바뀌면 원래 값을 그대로 씀 (화면 정렬은 숫자만 우선순위로)
         const rawSlot = r[7];
