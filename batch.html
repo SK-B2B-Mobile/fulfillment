@@ -2735,10 +2735,25 @@ document.getElementById('btnPickStart').onclick = async () => {
   const pageRange = pageFrom ? (pageTo ? `${pageFrom}-${pageTo}` : pageFrom) : '';
   if(!worker){ toast('작업자를 선택하세요', 'error'); return; }
   if(!state.batchId){ toast('먼저 배치를 시작하세요', 'error'); return; }
+  await startPickTimer(worker, pageRange, false);
+};
+
+// ★ 2026-08-03 신규 — 피킹 시작 로직을 함수로 분리 + force 파라미터 추가.
+//   태블릿이 새로고침되는 등으로 "종료" 버튼을 누를 방법이 없어져버린 orphan
+//   세션 때문에 이름 선택도 종료도 다 막히는 교착 상태가 실제로 발생했음.
+//   이제 막히면 "강제 종료 후 새로 시작"을 선택할 수 있는 확인창을 띄움.
+async function startPickTimer(worker, pageRange, force){
   // ★ 2026-07-22 신규: 다른 기기에서 이미 피킹 중인 사람이면 즉시 차단(화면단 1차 확인)
-  if(state.activePickers[worker]){
-    toast(`⚠ ${worker}님은 이미 다른 기기에서 피킹 중입니다 (${state.activePickers[worker]}부터)`, 'error');
-    return;
+  if(!force && state.activePickers[worker]){
+    const ok = confirm(
+      `⚠ ${worker}님은 이미 피킹 중으로 등록되어 있습니다 (${state.activePickers[worker]}부터).\n\n` +
+      `실제로 다른 기기에서 작업 중이면 취소를 눌러주세요.\n` +
+      `만약 이 기기가 새로고침되면서 세션 기록만 남은 경우라면(교착 상태),\n` +
+      `강제로 그 세션을 종료 처리하고 새로 시작할 수 있습니다.\n\n` +
+      `강제 종료 후 새로 시작할까요?`
+    );
+    if(!ok) return;
+    force = true;
   }
   state.pickTimerRunning = true;
   state.pickTimerStart = Date.now();
@@ -2747,7 +2762,7 @@ document.getElementById('btnPickStart').onclick = async () => {
   document.getElementById('pickWorkerSelect').disabled = true;
   document.getElementById('pickTimerStat').textContent = worker + (pageRange ? ` · ${pageRange}페이지` : '') + ' 피킹 중...';
   if(GAS_READY){
-    const res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange });
+    const res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
     // ★ 2026-07-22 신규: 화면단 체크를 통과했어도, 정말 거의 동시에 다른 기기가
     //   먼저 시작해버린 경합 상황은 서버가 최종적으로 걸러줌 — 그 경우 되돌림.
     if(!res.ok){
@@ -2756,10 +2771,16 @@ document.getElementById('btnPickStart').onclick = async () => {
       document.getElementById('btnPickEnd').disabled = true;
       document.getElementById('pickWorkerSelect').disabled = false;
       document.getElementById('pickTimerStat').textContent = '';
+      if(res.error === 'already_picking' && !force){
+        // 서버 쪽에서도 막힌 경우 — 강제 재시도 여부를 다시 물어봄
+        await startPickTimer(worker, pageRange, false);
+        return;
+      }
       toast(`⚠ ${worker}님은 방금 다른 기기에서 먼저 피킹을 시작했습니다`, 'error');
       pollActivePickers();
       return;
     }
+    if(force) toast(`✓ 이전 세션을 강제 종료하고 ${worker}님 피킹을 새로 시작했습니다`, 'success');
   } else {
     toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
   }
@@ -2791,7 +2812,7 @@ document.getElementById('btnPickStart').onclick = async () => {
     if(initEl) initEl.textContent = worker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
   }
   pollActivePickers(); // 다른 기기 드롭다운에도 최대한 빨리 반영되도록 즉시 한 번 더
-};
+}
 document.getElementById('btnPickEnd').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
   const mins = Math.round((Date.now() - (state.pickTimerStart||Date.now())) / 60000);
@@ -3634,10 +3655,21 @@ function renderRecentScans(){
 // Batch complete detection
 // ═══════════════════════════════════════════════════════════
 function checkBatchComplete(){
-  const allDone = Object.values(state.scanIndex)
-    .flatMap(entry => [entry, ...(entry.altVariants||[])])
-    .every(sku => sku.queue.every(q => q.done >= q.need));
-  if(allDone) showBatchComplete();
+  // ★ 2026-08-03 긴급 수정 — 심각한 버그: JS의 Array.every()는 빈 배열에
+  //   대해 무조건 true를 반환함("확인할 게 없으니 전부 통과"). 새 배치를 막
+  //   올린 직후처럼 state.scanIndex가 아직 안 채워진 "빈 상태"를 이 함수가
+  //   지나가면, "확인할 SKU가 없네 → 전부 완료!"로 잘못 판단해서 슬롯 0개인
+  //   상태에서도 "배치 완료" 팝업이 뜨고, 심지어 서버에 자동으로 completeBatch
+  //   요청까지 보내버리는 사고로 이어졌음(실제 발생). 이제 확인할 SKU/큐
+  //   항목이 실제로 1개 이상 있을 때만 완료 판정을 하도록 안전장치 추가.
+  const allEntries = Object.values(state.scanIndex).flatMap(entry => [entry, ...(entry.altVariants||[])]);
+  if (allEntries.length === 0) return; // 데이터가 아직 안 채워진 상태 — 절대 완료로 오판하지 않음
+  let totalQueueItems = 0;
+  const allDone = allEntries.every(sku => {
+    totalQueueItems += sku.queue.length;
+    return sku.queue.every(q => q.done >= q.need);
+  });
+  if (allDone && totalQueueItems > 0) showBatchComplete();
 }
 
 function showBatchComplete(){
