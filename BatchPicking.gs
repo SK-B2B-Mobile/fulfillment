@@ -1884,6 +1884,10 @@ function getSalesInvoiceDetail(invoice) {
     if (!invoice) return { ok: false, error: 'invoice required' };
 
     // 1) Jobs 시트에서 기본 정보 + 검수결과
+    // ★ 2026-08-03 성능 개선 — 예전엔 인보이스 하나 찾으려고 Jobs 시트 전체
+    //   (모든 행 × 모든 컬럼)를 통째로 읽었음. 시트가 계속 커지면서 이게
+    //   느려져서 상세조회가 무한 로딩처럼 보이는 원인이 됐음. 이제 인보이스
+    //   컬럼 하나만 먼저 좁게 읽어서 행 위치를 찾고, 그 한 행만 읽도록 변경.
     const sh = SHEET_();
     const hm = headerMapCached_();
     const lastRow = sh.getLastRow();
@@ -1891,13 +1895,13 @@ function getSalesInvoiceDetail(invoice) {
     const invCol = hm['invoice'];
     if (!invCol) return { ok: false, error: 'invoice column not found' };
 
-    const allData = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
-    let jobRow = null;
+    const invColVals = sh.getRange(2, invCol, lastRow - 1, 1).getValues();
     let jobRowIndex = -1;
-    for (let i = 0; i < allData.length; i++) {
-      if (String(allData[i][invCol - 1]).trim() === invoice) { jobRow = allData[i]; jobRowIndex = i + 2; break; }
+    for (let i = 0; i < invColVals.length; i++) {
+      if (String(invColVals[i][0]).trim() === invoice) { jobRowIndex = i + 2; break; }
     }
-    if (!jobRow) return { ok: false, error: 'Invoice not found: ' + invoice };
+    if (jobRowIndex < 0) return { ok: false, error: 'Invoice not found: ' + invoice };
+    const jobRow = sh.getRange(jobRowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
 
     function jv(name) { const c = hm[name]; return c ? jobRow[c - 1] : ''; }
     const customer = String(jv('remarks') || '');
@@ -1921,32 +1925,38 @@ function getSalesInvoiceDetail(invoice) {
     }
 
     // 2) BatchCustomers에서 패킹존 이동 여부 (가장 최근 매치를 사용)
+    // ★ 2026-08-03 성능 개선 — 11개 컬럼 전체 대신 인보이스 컬럼만 먼저 좁게 읽음
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     let movedToPacking = false;
     if (bcLast >= 2) {
-      const bcRows = bc.getRange(2, 1, bcLast - 1, 11).getValues();
-      for (let i = bcRows.length - 1; i >= 0; i--) {
-        if (String(bcRows[i][1]).trim() === invoice) {
-          movedToPacking = !!bcRows[i][10];
+      const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
+      for (let i = bcInvVals.length - 1; i >= 0; i--) {
+        if (String(bcInvVals[i][0]).trim() === invoice) {
+          movedToPacking = !!bc.getRange(i + 2, 11).getValue();
           break;
         }
       }
     }
 
     // 3) IssueLog에서 이 인보이스의 활성 이슈 상세 (SKU/상품명/바코드/사유/수량)
+    // ★ 2026-08-03 성능 개선 — 13개 컬럼 전체를 모든 행에서 읽던 것을, 인보이스
+    //   컬럼(H, 8번째)만 먼저 좁게 스캔해서 매칭 행 위치를 찾고, 그 몇 안 되는
+    //   매칭 행만 전체 컬럼으로 읽도록 변경 (보통 한 인보이스당 이슈는 몇 건 안 됨).
     const il = issuelogSheet_();
     const ilLast = il.getLastRow();
     const items = [];
     if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[7]).trim() !== invoice) return;
-        if (r[12] === 'undone') return;
+      const ilInvVals = il.getRange(2, 8, ilLast - 1, 1).getValues();
+      for (let i = 0; i < ilInvVals.length; i++) {
+        if (String(ilInvVals[i][0]).trim() !== invoice) continue;
+        const r = il.getRange(i + 2, 1, 1, 13).getValues()[0];
+        if (r[12] === 'undone') continue;
         items.push({
           sku: r[5] || '', name: r[6] || '', barcode: r[4] || '',
           reason: r[9] || '', qty: Number(r[10]) || 0, note: r[11] || ''
         });
-      });
+      }
     }
     // ★ 2026-07-28 신규 — IssueLog에서 못 찾았는데 검수결과는 "⚠ ISSUES"인 경우
     //   (archiveOldBatches로 오래된 배치의 IssueLog가 Archive_IssueLog로 옮겨진
