@@ -907,7 +907,18 @@ function logPickTiming(data) {
         for (let i = 0; i < rows0.length; i++) {
           const hasEnd = (rows0[i][4] !== '' && rows0[i][4] !== null && rows0[i][4] !== undefined);
           if (String(rows0[i][0]) === String(data.batchId) && String(rows0[i][1]) === String(data.worker) && !hasEnd) {
-            return { ok: false, error: 'already_picking', startedAt: rows0[i][3] };
+            if (!data.force) {
+              return { ok: false, error: 'already_picking', startedAt: rows0[i][3] };
+            }
+            // ★ 2026-08-03 신규 — 강제 시작: 태블릿이 새로고침되는 등으로 원래
+            //   기기가 "종료"를 누를 방법이 없어져 버린 orphan(고아) 세션을
+            //   지금 시각으로 자동 종료 처리한 뒤, 새 세션을 시작함. 작업자/매니저가
+            //   명시적으로 "강제 종료 후 새로 시작"을 선택했을 때만 이 경로를 탐.
+            const forceEndTs = batchNow_();
+            const forceMins = Math.round((new Date(forceEndTs) - new Date(rows0[i][3])) / 60000);
+            sh.getRange(i + 2, 5).setValue(forceEndTs);
+            sh.getRange(i + 2, 6).setValue(forceMins);
+            break; // 한 작업자당 열린 세션은 최대 1개이므로 찾으면 종료 처리 후 계속 진행
           }
         }
       }
