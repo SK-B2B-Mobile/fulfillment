@@ -398,20 +398,30 @@ async function gasGet(params){
   if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
   try {
     const qs = new URLSearchParams(Object.assign({t:Date.now()}, params)).toString();
-    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`);
+    // ★ 2026-08-03 신규 — 서버가 아주 느려지거나 응답을 안 주는 경우에도 화면이
+    //   영원히 "Looking up..." 상태로 멈춰있지 않도록 25초 타임아웃 추가.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`, { signal: controller.signal });
+    clearTimeout(timer);
     return await res.json();
   } catch(e) {
-    return { ok:false, error: String(e && e.message || e) };
+    const timedOut = e && e.name === 'AbortError';
+    return { ok:false, error: timedOut ? 'Request timed out (25s) — please try again' : String(e && e.message || e) };
   }
 }
 async function gasPost(op, data){
   if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
   try {
     const fd = new URLSearchParams({ op, data: JSON.stringify(data) });
-    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd, signal: controller.signal });
+    clearTimeout(timer);
     return await res.json();
   } catch(e) {
-    return { ok:false, error: String(e && e.message || e) };
+    const timedOut = e && e.name === 'AbortError';
+    return { ok:false, error: timedOut ? 'Request timed out (25s) — please try again' : String(e && e.message || e) };
   }
 }
 
