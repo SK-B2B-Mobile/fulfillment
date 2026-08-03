@@ -1062,6 +1062,7 @@ const state = {
   activePickers: {}, // ★ 2026-07-22 신규: { "작업자명": "14:02"(시작시각) } — 지금 다른 기기에서 피킹 중인 사람
   logSearch: '', // ★ 2026-07-22 신규: 전체 스캔 로그 검색어
   logPage: 1,    // ★ 2026-07-22 신규: 전체 스캔 로그 현재 페이지 (검색 결과 기준으로 페이징)
+  batchCompleteShown: false, // ★ 2026-08-03 신규: "모든 분류 완료" 팝업을 한 번만 띄우기 위한 플래그
 };
 
 // Init slots (30개, 15+15)
@@ -1804,6 +1805,7 @@ function resetBatchFormForNewBatch(){
   state.scanIndex = {};
   state.clearedInvoices = new Set();
   state.movedToPackingInvoices = new Set();
+  state.batchCompleteShown = false; // ★ 2026-08-03 신규: 새 배치는 완료 팝업을 다시 정상적으로 띄울 수 있어야 함
   clearDraftFromLocalStorage();
 
   const zs = document.getElementById('dropSum');
@@ -2540,7 +2542,7 @@ function renderSlots(){
       ${status==='done' ? (
         (state.clearedInvoices && state.clearedInvoices.has(cf.meta.invoice_no))
           ? `<div class="slot-cleared-tag">✓ 슬롯 비워짐 — 다음 배치에서 재사용 가능</div>`
-          : `<button class="slot-clear-btn" data-clear="${cf.meta.invoice_no}">📦 패킹완료 · 슬롯비우기</button>`
+          : `<button class="slot-clear-btn" data-clear="${cf.meta.invoice_no}">📦 패킹완료 처리</button>`
       ) : ''}
       <div class="slot-actions">
         <button class="slot-action" data-remove="${slot.num}">비우기</button>
@@ -2598,21 +2600,16 @@ function renderSlots(){
       const res = await gasCall('clearSlot', { batchId: state.batchId, invoice, worker: state.currentWorker || '' });
       if(!res.ok){
         toast('슬롯 비우기 실패: ' + (res.error||'서버 오류'), 'error');
-        clearBtn.disabled = false; clearBtn.textContent = '📦 패킹완료 · 슬롯비우기';
+        clearBtn.disabled = false; clearBtn.textContent = '📦 패킹완료 처리';
         return;
       }
       if(!state.clearedInvoices) state.clearedInvoices = new Set();
       state.clearedInvoices.add(invoice);
-      // ★ 2026-07-14 신규: 서버가 이 자리에 다른 배치의 대기 고객사를 자동으로
-      //   채웠으면(사이즈 매칭) 그 결과를 바로 알려줌
-      if(res.autoFilled){
-        const af = res.autoFilled;
-        toast(`슬롯 ${af.slotNum}번 비워짐 → ${af.customer}(${af.batchId})가 자동 배정됨 (${af.sizeClass==='L'?'대량':'소량'} 매칭)`, 'success');
-        // 지금 보고 있는 배치가 방금 자동배정된 그 배치라면, 화면도 바로 최신화
-        if(af.batchId === state.batchId) await refreshBatchStructure(true);
-      } else {
-        toast('슬롯이 비워졌습니다 — 다음 배치에서 이 번호를 재사용할 수 있습니다', 'success');
-      }
+      // ★ 2026-08-03 설계 변경(매니저 요청) — 슬롯비우기를 눌러도 더 이상 다른
+      //   고객사가 자동으로 채워지지 않음. 이 슬롯의 오더 정보는 배치가 끝날
+      //   때까지(=다른 배치로 전환하기 전까지) 그대로 화면에 남아있음 — 패킹/
+      //   출고 작업자가 계속 보면서 물건을 챙길 수 있게 하기 위함.
+      toast('패킹완료 처리됨 — 이 오더 정보는 배치가 끝날 때까지 그대로 남아있습니다', 'success');
       renderSlots();
     };
   });
@@ -3669,7 +3666,20 @@ function checkBatchComplete(){
     totalQueueItems += sku.queue.length;
     return sku.queue.every(q => q.done >= q.need);
   });
-  if (allDone && totalQueueItems > 0) showBatchComplete();
+  // ★ 2026-08-03 신규 — 심각한 버그 #2: pollScanState()가 몇 초마다 이 함수를
+  //   계속 부르는데, "이미 한 번 보여줬다"는 기록이 전혀 없어서 배치가 100%
+  //   완료 상태로 남아있는 동안 폴링이 돌 때마다 "모든 분류 완료" 팝업이 계속
+  //   반복해서 다시 떴음(닫아도 몇 초 뒤 또 뜸). 게다가 showBatchComplete()가
+  //   호출될 때마다 서버에 completeBatch/clearActiveBatch 요청도 매번 다시
+  //   보내고 있었음. 이제 한 번 보여준 뒤엔 다시 안 띄우고, 아직 완료 안 된
+  //   상태로 되돌아가면(이슈 취소 등으로) 다음 완료 시점에 다시 뜨도록 리셋함.
+  if (allDone && totalQueueItems > 0) {
+    if (state.batchCompleteShown) return;
+    state.batchCompleteShown = true;
+    showBatchComplete();
+  } else {
+    state.batchCompleteShown = false;
+  }
 }
 
 function showBatchComplete(){
