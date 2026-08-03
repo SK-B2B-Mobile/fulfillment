@@ -746,7 +746,17 @@ function renderBoard(slots, fromPoll){
   prevStatus = next;
 }
 
+// ★ 2026-08-03 신규 — "다른 배치 조회"에서 배치를 고르면 즉시 pollOnce()를
+// 한 번 더 부르는데(빠른 반영 목적), 이때 하필 그 직전에 시작된 "예전 배치
+// 기준" 폴링 요청이 아직 응답을 안 받은 상태라면, 그 낡은 응답이 나중에
+// 도착하면서 방금 고른 새 배치 화면을 예전 배치로 덮어써버리는 경쟁상태가
+// 있었음(그래서 새 배치→예전 배치→다음 폴링에 다시 새 배치로 깜빡이는 것처럼
+// 보였음). 매 polling마다 세대(generation) 번호를 매겨서, 응답이 왔을 때
+// "그사이 더 최신 요청이 이미 시작됐으면" 그 낡은 응답은 화면에 반영하지
+// 않고 조용히 버리도록 함.
+let pollSeq = 0;
 async function pollOnce(){
+  const mySeq = ++pollSeq;
   try{
     if(!GAS_READY){
       document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
@@ -768,6 +778,7 @@ async function pollOnce(){
     //   있어도 매 폴링(8초)마다 계속 재확인함 — 매니저가 중간에 다른 배치로
     //   전환하면 TV도 곧바로 자동으로 따라가게 하기 위함.
     const activeRes = await gasQuery('getActiveBatch', {});
+    if(mySeq !== pollSeq) return; // ★ 신규: await 도중 더 최신 폴링이 시작됐으면 여기서 중단
     if(activeRes.ok && activeRes.batch && activeRes.batch.batchId !== currentBatchId){
       currentBatchId = activeRes.batch.batchId;
       document.getElementById('batchLabel').innerHTML =
@@ -775,6 +786,7 @@ async function pollOnce(){
     } else if(!currentBatchId){
       // 활성 배치 기록이 아직 없으면(아무도 안 정했으면) 예전처럼 오늘자 배치라도 확인
       const b = await gasQuery('getBatch', {});
+      if(mySeq !== pollSeq) return; // ★ 신규
       if(!b.ok || !b.batch){
         const dot0 = document.getElementById('liveDot');
         if(dot0) dot0.className = 'status-dot off';
@@ -788,6 +800,8 @@ async function pollOnce(){
     }
 
     const res = await gasQuery('getSlotProgress', { batchId: currentBatchId });
+    if(mySeq !== pollSeq) return; // ★ 신규 — 핵심 가드: 이 응답이 도착하기 전에 더 최신 폴링(예: 방금 고른 다른 배치)이
+                                  //   이미 시작됐다면, 이 낡은 응답은 절대 화면에 반영하지 않고 버림.
     if(!res.ok){
       const dot = document.getElementById('liveDot');
       if(dot) dot.className = 'status-dot off';
