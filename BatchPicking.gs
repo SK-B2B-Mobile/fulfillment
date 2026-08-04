@@ -1931,6 +1931,100 @@ function saveDimensions(data) {
 }
 
 /* ---------------------------------------------------------------------
+ * autoDeleteOldDimensions() — ★ 2026-08-04 신규
+ * 목적: 창고에서 디멘션(치수/무게)을 입력한 날로부터 "2일이 지나면" 자동으로
+ * 삭제. 영업팀이 디멘션·이슈를 전부 확인해서 최종 인보이스를 발행하기까지
+ * 시간이 필요해서(하루면 놓치는 경우가 생김), 검수완료 오더 자체는 메인
+ * 대시보드 기준으로 1일 뒤 삭제되지만 디멘션은 2일 뒤로 더 여유를 둠.
+ *
+ * 왜 서버(GAS) 트리거 방식인가: 메인 대시보드(index.html)의 자동삭제는
+ * 브라우저가 열려있어야만 작동하는 클라이언트 타이머 방식이라, 아무도 그
+ * 페이지를 안 열어둔 날엔 삭제가 안 일어날 수 있음. 디멘션은 이보다 더
+ * 안정적으로, 브라우저와 무관하게 매일 정확히 실행되는 GAS 자체 시간 기반
+ * 트리거로 구현함.
+ *
+ * 기준: EnteredAt(입력 시각)의 날짜 부분이 "오늘 - 2일" 이하인 행은 삭제.
+ *   예) 8/4에 입력 → 8/4, 8/5 동안 남아있고 → 8/6 새벽 1시경 삭제됨(2일 보관).
+ *
+ * ★ Apps Script 트리거 등록 방법 (직접 한번만 설정하면 매일 자동 실행됨):
+ *   1) Apps Script 에디터 왼쪽 시계 아이콘(트리거) 클릭
+ *   2) 함수 목록에서 setupDimensionsCleanupTrigger 선택 → ▶ 실행
+ *      (한 번만 실행하면 그 뒤로 매일 새벽 1시경 자동 실행됨)
+ * ------------------------------------------------------------------- */
+function autoDeleteOldDimensions() {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const RETENTION_DAYS = 2;
+    const tz = batchTz_();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
+    const cutoffStr = Utilities.formatDate(cutoffDate, tz, 'yyyy-MM-dd');
+
+    const sh = dimensionsSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) { Logger.log('Dimensions: 데이터 없음'); return { ok: true, deleted: 0 }; }
+
+    const lastCol = sh.getLastColumn();
+    const rows = sh.getRange(2, 1, last - 1, lastCol).getValues();
+    const keepRows = [];
+    let deletedCount = 0;
+    rows.forEach(r => {
+      const enteredAtRaw = r[7]; // H열: EnteredAt
+      let enteredDateStr = '';
+      if (enteredAtRaw instanceof Date && !isNaN(enteredAtRaw)) {
+        enteredDateStr = Utilities.formatDate(enteredAtRaw, tz, 'yyyy-MM-dd');
+      } else {
+        enteredDateStr = String(enteredAtRaw || '').slice(0, 10);
+      }
+      // 날짜를 못 읽으면(비어있거나 형식이상) 안전하게 보관 쪽으로 처리(삭제 안 함)
+      if (enteredDateStr && enteredDateStr <= cutoffStr) {
+        deletedCount++;
+      } else {
+        keepRows.push(r);
+      }
+    });
+
+    if (deletedCount > 0) {
+      sh.getRange(2, 1, last - 1, lastCol).clearContent();
+      if (keepRows.length > 0) sh.getRange(2, 1, keepRows.length, lastCol).setValues(keepRows);
+      Logger.log('autoDeleteOldDimensions: ' + deletedCount + '건 삭제 (기준일 ' + cutoffStr + ' 이하), ' + keepRows.length + '건 유지');
+    } else {
+      Logger.log('autoDeleteOldDimensions: 삭제 대상 없음');
+    }
+    return { ok: true, deleted: deletedCount };
+  } catch (e) {
+    Logger.log('autoDeleteOldDimensions 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function setupDimensionsCleanupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'autoDeleteOldDimensions') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  ScriptApp.newTrigger('autoDeleteOldDimensions')
+    .timeBased()
+    .atHour(1) // 새벽 1시~2시 사이 자동 실행
+    .everyDays(1)
+    .create();
+  Logger.log('✅ 트리거 설정 완료 — 매일 새벽 1시경, 입력한 지 2일 지난 디멘션을 자동 삭제합니다.');
+}
+
+function removeDimensionsCleanupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'autoDeleteOldDimensions') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+  Logger.log('디멘션 자동삭제 트리거 삭제됨');
+}
+
+/* ---------------------------------------------------------------------
  * getSalesInvoiceDetail(invoice) — 영업팀 상세조회 페이지 전용 API.
  * Jobs(검수결과) + BatchCustomers(패킹존이동) + IssueLog(빠진 상품 상세)
  * + Dimensions(치수)를 한 번에 묶어서 반환. 영업팀에게 필요 없는 정보
