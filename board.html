@@ -788,14 +788,34 @@ async function pollOnce(){
       const b = await gasQuery('getBatch', {});
       if(mySeq !== pollSeq) return; // ★ 신규
       if(!b.ok || !b.batch){
-        const dot0 = document.getElementById('liveDot');
-        if(dot0) dot0.className = 'status-dot off';
-        document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
-        return;
-      }
+        // ★ 2026-08-04 신규 — batch.html에서 어제 적용한 것과 동일한 안전장치.
+        //   활성 배치 기록도 없고 "오늘 생성된" 배치도 없으면(=날짜가 바뀐
+        //   다음날 아침 등), 완료 안 된 배치가 정확히 1개뿐일 때만 자동으로
+        //   그 배치를 TV에 띄움. 2개 이상이면 헷갈릴 수 있으니 절대 임의로
+        //   고르지 않고 "진행중인 배치 없음"으로 두어 매니저가 다른 배치 버튼으로
+        //   직접 고르게 함.
+        let resolved = null;
+        try{
+          const openRes = await gasQuery('getOpenBatches', {});
+          if(mySeq !== pollSeq) return;
+          if(openRes.ok && Array.isArray(openRes.batches) && openRes.batches.length === 1){
+            resolved = openRes.batches[0];
+          }
+        }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
+        if(!resolved){
+          const dot0 = document.getElementById('liveDot');
+          if(dot0) dot0.className = 'status-dot off';
+          document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
+          return;
+        }
+        currentBatchId = resolved.batchId;
+        document.getElementById('batchLabel').innerHTML =
+          `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${resolved.date}`;
+      } else {
       currentBatchId = b.batch.batchId;
       document.getElementById('batchLabel').innerHTML =
         `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
+      }
     }
     }
 
