@@ -1465,13 +1465,13 @@ function getOpenBatches() {
 
     const rows = bSh.getRange(2, 1, last - 1, 7).getValues();
     const open = [];
+    const openIds = {};
     rows.forEach(r => {
       const status = String(r[2] || '');
       if (status === 'completed') return;
-      open.push({
-        batchId: r[0], date: r[1], status: status,
-        totalSku: r[3], totalQty: r[4], createdAt: r[5]
-      });
+      const b = { batchId: String(r[0]), date: r[1], status: status, totalSku: r[3], totalQty: r[4], createdAt: r[5] };
+      open.push(b);
+      openIds[b.batchId] = true;
     });
     if (!open.length) return { ok: true, batches: [] };
 
@@ -1479,16 +1479,100 @@ function getOpenBatches() {
     const sl = scanlogSheet_();
     const slLast = sl.getLastRow();
     const passByBatch = {};
+    // ★ 2026-08-03 신규 — SKU 줄 단위 완료 계산용: "batchId|invoice|barcode|sku" 키로
+    //   스캔량 집계(오늘 다른 함수들과 동일한 원칙 — 초과분은 그 줄 자체 몫만 인정)
+    const scannedByKey = {};
     if (slLast >= 2) {
       sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+        const bid = String(r[0]);
+        if (!openIds[bid]) return;
         if (r[10] === 'undone') return;
         if (r[9] !== 'pass') return;
-        const bid = String(r[0]);
         const qty = Number(r[11]) || 1;
         passByBatch[bid] = (passByBatch[bid] || 0) + qty;
+        const key = bid + '|' + r[8] + '|' + String(r[4]) + '|' + String(r[5]);
+        scannedByKey[key] = (scannedByKey[key] || 0) + qty;
       });
     }
-    open.forEach(b => { b.scannedPass = passByBatch[String(b.batchId)] || 0; });
+    Object.keys(scannedByKey).forEach(k => { if (scannedByKey[k] < 0) scannedByKey[k] = 0; });
+    open.forEach(b => { b.scannedPass = passByBatch[b.batchId] || 0; });
+
+    // ★ 2026-08-03 신규 — 요청: "이어서 작업하기" 목록에서 고객사 몇 건 중 몇 건
+    //   완료, SKU 몇 건 중 몇 건 완료인지 한눈에 보이게. BatchItems(필요수량 줄)
+    //   + IssueLog(이슈 수량) + 위 scannedByKey로 계산.
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const issueByKey = {};
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        const bid = String(r[0]);
+        if (!openIds[bid]) return;
+        if (r[12] === 'undone') return;
+        const qty = Number(r[10]) || 0;
+        const key = bid + '|' + r[7] + '|' + String(r[4]) + '|' + String(r[5]);
+        issueByKey[key] = (issueByKey[key] || 0) + qty;
+      });
+    }
+
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    const skuLinesByKey = {}; // "batchId|invoice|barcode|sku" -> reqQty(합산)
+    const linesByInvoiceKey = {}; // "batchId|invoice" -> [key,...] (고객사별 완료판정용)
+    if (biLast >= 2) {
+      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+        const bid = String(r[0]);
+        if (!openIds[bid]) return;
+        const inv = r[1];
+        if (!inv) return; // 총량 행(Invoice 빈값) 제외 — 고객사 행만 집계
+        const key = bid + '|' + inv + '|' + String(r[4]) + '|' + String(r[2]);
+        if (!skuLinesByKey[key]) {
+          skuLinesByKey[key] = 0;
+          const ik = bid + '|' + inv;
+          if (!linesByInvoiceKey[ik]) linesByInvoiceKey[ik] = [];
+          linesByInvoiceKey[ik].push(key);
+        }
+        skuLinesByKey[key] += Number(r[5]) || 0;
+      });
+    }
+
+    // SKU 줄 완료 개수 (배치 전체 기준)
+    const doneSkuByBatch = {}, totalSkuByBatch = {};
+    Object.entries(skuLinesByKey).forEach(([key, reqQty]) => {
+      const bid = key.split('|')[0];
+      totalSkuByBatch[bid] = (totalSkuByBatch[bid] || 0) + 1;
+      const scanned = scannedByKey[key] || 0;
+      const issue = issueByKey[key] || 0;
+      if (scanned + issue >= reqQty) doneSkuByBatch[bid] = (doneSkuByBatch[bid] || 0) + 1;
+    });
+
+    // 고객사 단위 완료 개수 (그 고객사 소속 모든 SKU줄이 다 채워졌는지)
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    const doneCustByBatch = {}, totalCustByBatch = {};
+    if (bcLast >= 2) {
+      bc.getRange(2, 1, bcLast - 1, 6).getValues().forEach(r => {
+        const bid = String(r[0]);
+        if (!openIds[bid]) return;
+        const inv = String(r[1]);
+        totalCustByBatch[bid] = (totalCustByBatch[bid] || 0) + 1;
+        const ik = bid + '|' + inv;
+        const lines = linesByInvoiceKey[ik] || [];
+        const allLinesDone = lines.length > 0 && lines.every(key => {
+          const reqQty = skuLinesByKey[key] || 0;
+          const scanned = scannedByKey[key] || 0;
+          const issue = issueByKey[key] || 0;
+          return (scanned + issue) >= reqQty;
+        });
+        if (allLinesDone) doneCustByBatch[bid] = (doneCustByBatch[bid] || 0) + 1;
+      });
+    }
+
+    open.forEach(b => {
+      b.doneSku = doneSkuByBatch[b.batchId] || 0;
+      b.totalSkuActual = totalSkuByBatch[b.batchId] || b.totalSku;
+      b.totalCustomers = totalCustByBatch[b.batchId] || 0;
+      b.doneCustomers = doneCustByBatch[b.batchId] || 0;
+    });
 
     // 최신 생성순
     open.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
