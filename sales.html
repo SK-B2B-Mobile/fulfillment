@@ -77,6 +77,8 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .badge.issue{background:var(--red-bg); color:#FF7A7A;}
 .badge.gap{background:var(--blue-bg); color:#8FBBFF;}
 .badge.pending{background:var(--gray-bg); color:var(--text-dim);}
+.badge.na{background:var(--gray-bg); color:var(--text-dim2); opacity:0.7;}
+.plain-tag.na{color:var(--text-dim2); opacity:0.7;}
 .badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 .badge.method{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
 /* ★ 배송방법별 색상 구분 */
@@ -493,7 +495,9 @@ function classifyInsp(insp){
 
 function dimsBadge(o){
   const needs = (o.method==='TRUCKING'||o.method==='TK'||o.method==='UPS');
-  if (!needs) return '<span class="detail-dash">—</span>';
+  // ★ 2026-08-04 신규 — PU는 디멘션이 원래 필요 없는데 기존엔 대시(—)만 떠서
+  //   "아직 안 넣은 건지, 원래 필요 없는 건지" 구분이 애매했음. 명확하게 N/A로 표시.
+  if (!needs) return '<span class="badge na">N/A</span>';
   const n = o.dimsCount || 0;
   return n>0
     ? '<span class="badge pass">✓ Saved ('+n+')</span>'
@@ -586,7 +590,7 @@ async function loadToday(){
     const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Packing</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
     const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
-    const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">No Dims</span>') : '<span class="today-time">—</span>';
+    const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">No Dims</span>') : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
       <span class="today-inv">${j.invoice||''}</span>
       <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
