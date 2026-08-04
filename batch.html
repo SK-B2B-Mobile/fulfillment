@@ -1490,12 +1490,14 @@ async function restoreBatchFromServer(){
   let cached = null;
   try{ cached = JSON.parse(localStorage.getItem(BATCH_CACHE_KEY) || 'null'); }catch(e){ cached = null; }
   let prefetchScanState = null;
+  let navigatedFromCache = false; // ★ 2026-08-04 수정: 캐시로 이미 화면 이동을 했는지 기록 (아래 참고)
   if(cached && cached.batchId && cached.payload && cached.payload.batch){
     state.bootSyncPending = true;
     showBootSyncChip(true);
     try{
       applyBatchPayload(cached.payload, { fromCache: true });
       gotoView('v-slots');
+      navigatedFromCache = true;
     }catch(e){
       console.warn('캐시 복원 실패(무시하고 서버 복원 진행):', e);
       state.bootSyncPending = false; showBootSyncChip(false); clearBatchCache(); cached = null;
@@ -1564,7 +1566,14 @@ async function restoreBatchFromServer(){
   startScanPolling();
   startStructurePolling();
   toast(`진행 중이던 배치 ${state.batchId} 복원 완료`, 'success');
-  gotoView('v-slots');
+  // ★ 2026-08-04 수정 — 현장 버그: 캐시 부팅으로 이미 02(슬롯 배치도)를 보여준 뒤,
+  //   작업자가 그 사이 03(스캔)으로 이동했는데 2~3초 뒤 서버 확인이 끝나는 순간
+  //   여기서 또 gotoView를 호출해 02로 강제로 끌려갔다가 다시 03을 눌러야 했음.
+  //   같은 배치로 확인되면 화면 이동을 반복하지 않고 작업자가 보던 탭을 그대로 유지.
+  //   단, 서버가 "다른 배치"를 알려준 경우(그새 배치가 교체됨)는 화면 내용이
+  //   통째로 바뀐 것이므로 02로 이동시켜 변경 사실을 확실히 인지하게 함.
+  const batchChangedDuringSync = navigatedFromCache && cached && cached.batchId !== state.batchId;
+  if(!navigatedFromCache || batchChangedDuringSync) gotoView('v-slots');
 }
 document.addEventListener('DOMContentLoaded', restoreBatchFromServer);
 if(document.readyState !== 'loading') restoreBatchFromServer();
