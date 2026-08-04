@@ -2,7 +2,10 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, shrink-to-fit=yes, viewport-fit=cover">
+<!-- ★ 2026-08-04 수정 — 요청: 스캔 태블릿에서 화면을 손가락으로 확대해서 보고 싶은데
+     user-scalable=no + maximum-scale=1.0 때문에 핀치줌이 원천 차단돼 있었음.
+     제한을 풀어서 두 손가락으로 자유롭게 확대/축소(원래 크기로 복귀)할 수 있게 함. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <script>
 // ★ 2026-07-17 신규 — 기기별로 숫자를 일일이 맞춰주는 대신, 지금 화면의 실제
 // CSS 폭(window.innerWidth)을 그때그때 재서 비례적으로 축소 비율을 "계산"함.
@@ -456,6 +459,12 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
 .form-field{margin-bottom:14px;}
 .form-field label{display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px; font-weight:700;}
 .form-field input, .form-field select{width:100%; background:var(--surface2); border:1px solid var(--border2); color:var(--text); padding:10px 12px; border-radius:8px; font-size:13px; font-family:var(--sans);}
+/* ★ 2026-08-04 신규 — 작업자 선택 등 모든 드롭다운의 option 목록이 흰 배경에
+   밝은 회색 글자로 떠서 이름이 거의 안 보였음(option에 대한 스타일이 전혀 없어서
+   글자색만 select에서 상속). 페이지 전체 select의 option 목록을 다크 배경 +
+   밝은 글자로 통일. (iOS는 네이티브 휠 피커라 영향 없고, Android/PC 크롬에 적용됨) */
+select option{background:var(--surface2); color:var(--text);}
+select option:disabled{color:var(--text-dim2);}
 .form-field input:focus, .form-field select:focus{outline:none; border-color:var(--cyan);}
 .modal-actions{display:flex; gap:8px; justify-content:flex-end; margin-top:20px;}
 
@@ -2861,6 +2870,9 @@ async function startPickTimer(worker, pageRange, force){
   if(wsel){
     wsel.value = worker;
     state.currentWorker = worker;
+    // ★ 2026-08-04 수정 — 여기서 연동된 이름도 localStorage에 저장해야, 새로고침 후
+    //   populateWorkerSelect의 복원 로직과 어긋나지 않음(저장 안 하면 옛 이름으로 복원됨).
+    localStorage.setItem('sk_scan_worker', worker);
     const initEl = document.getElementById('workerInitial');
     if(initEl) initEl.textContent = worker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
   }
@@ -4032,7 +4044,13 @@ function populateWorkerSelect(){
     //   목록의 첫 번째"일 뿐이라, 완전히 다른 사람 이름으로 스캔이 기록되는
     //   사고로 이어졌음. 이제 새로고침해도 살아남도록 localStorage에 저장/복원함.
     const savedWorker = localStorage.getItem('sk_scan_worker');
-    const prev = state.currentWorker || savedWorker;
+    // ★ 2026-08-04 수정 — 버그: 작업자가 직접 "— 선택 안 함 —"을 골라도(빈 문자열),
+    //   빈 문자열이 falsy라서 `state.currentWorker || savedWorker`가 localStorage에
+    //   남아있는 옛 이름으로 되돌려버렸음 → 몇 초 뒤 폴링이 돌면 이름이 저절로
+    //   복귀하는 현상. "아직 아무것도 안 정해짐(null)"과 "명시적으로 선택 안 함('')"을
+    //   구분해서, null일 때만(첫 로딩/새로고침 직후) 저장된 이름으로 복원함.
+    const prev = (state.currentWorker === null || state.currentWorker === undefined)
+      ? savedWorker : state.currentWorker;
     sel.innerHTML = optsHtml;
     // ★ 2026-08-04 수정 — 예전엔 저장된 이름이 없으면 "첫 번째 활성 작업자"로
     //   자동 대체했는데, 이것도 결국 실제 사용자와 무관한 이름이 임의로 선택되는
@@ -4040,12 +4058,17 @@ function populateWorkerSelect(){
     //   "선택 안 함"으로 둬서 반드시 직접 고르게 함.
     sel.value = all.some(w => w.name === prev) ? prev : '';
     state.currentWorker = sel.value;
+    // ★ 2026-08-04 수정 — "선택 안 함"이면 저장된 이름도 같이 지워야 함.
+    //   안 지우면 다음 폴링/새로고침 때 옛 이름이 또 살아 돌아옴.
     if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
+    else localStorage.removeItem('sk_scan_worker');
     document.getElementById('workerInitial').textContent = state.currentWorker
       ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
     sel.onchange = () => {
       state.currentWorker = sel.value;
+      // ★ 2026-08-04 수정 — 위와 동일: "선택 안 함" 선택 시 localStorage도 삭제
       if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
+      else localStorage.removeItem('sk_scan_worker');
       document.getElementById('workerInitial').textContent = state.currentWorker
         ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
     };
