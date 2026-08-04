@@ -818,6 +818,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             <tr>
               <th style="width:56px">#</th>
               <th style="width:90px">Time</th>
+              <th style="width:100px">Worker</th>
               <th style="width:140px">Barcode</th>
               <th>SKU</th>
               <th>Customer</th>
@@ -828,7 +829,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
             </tr>
           </thead>
           <tbody id="fullLogBody">
-            <tr><td colspan="9" class="empty-log" style="border:none">기록 없음</td></tr>
+            <tr><td colspan="10" class="empty-log" style="border:none">기록 없음</td></tr>
           </tbody>
         </table>
         </div>
@@ -2998,6 +2999,19 @@ function doScan(){
   scanInput.value = '';
   scanInput.focus();
   const el = document.getElementById('scanResult');
+
+  // ★ 2026-08-04 신규 — 요청: 작업자를 직접 선택 안 한 상태(선택 안 함)로
+  //   스캔이 진행되면, 엉뚱한 사람 이름으로(또는 이름 없이) 기록될 위험이
+  //   있음. 이 경우 스캔 자체를 진행하지 않고 먼저 이름을 고르게 함.
+  if(!state.currentWorker){
+    el.innerHTML = `<div class="scan-result err">
+      <div class="product-name" style="color:var(--red)">⚠ 작업자를 먼저 선택하세요</div>
+      <div class="product-meta">화면 위쪽 이름 옆 <b>"— 선택 안 함 —"</b> 드롭다운에서 본인 이름을 고른 뒤 다시 스캔해주세요.</div>
+    </div>`;
+    scanFeedback('err');
+    return;
+  }
+
   const sku = state.scanIndex[code];
 
   if(!sku){
@@ -3752,6 +3766,7 @@ function renderRecentScans(){
       <span class="log-time">${fmtClock(s.time)}</span>
       <span class="log-msg">${scanCustomerLabel(s)} <small>${s.barcode||''}</small></span>
       <span class="log-badges">
+        <span class="log-slot" title="작업자" style="color:var(--cyan)">${s.worker||'-'}</span>
         <span class="log-slot">${s.slot ? String(s.slot).padStart(2,'0') : '-'}</span>
         ${s.status==='pass' ? `<span class="log-slot" style="color:var(--green)">+${s.qty||1}</span>` : ''}
         <span class="log-status ${s.status==='pass'?'ok':s.status==='over'?'warn':'err'}">${s.status.toUpperCase()}</span>
@@ -3902,7 +3917,7 @@ function renderFullLog(){
   }
 
   if(filtered.length === 0){
-    el.innerHTML = `<tr><td colspan="9" class="empty-log" style="border:none">${q ? '검색 결과가 없습니다' : '기록 없음'}</td></tr>`;
+    el.innerHTML = `<tr><td colspan="10" class="empty-log" style="border:none">${q ? '검색 결과가 없습니다' : '기록 없음'}</td></tr>`;
     pagerEl.innerHTML = '';
     return;
   }
@@ -3929,6 +3944,7 @@ function renderFullLog(){
     <tr>
       <td style="font-family:var(--mono); font-size:11px; color:var(--text-dim2);">${seqMap.get(s.scanId) || '-'}</td>
       <td><span class="log-time">${fmtClock(s.time)}</span></td>
+      <td style="color:var(--cyan); font-weight:600;">${s.worker||'-'}</td>
       <td style="font-family:var(--mono); font-size:11px">${s.barcode||'-'}</td>
       <td>${s.sku||'-'}</td>
       <td>${s.customer || (s.status==='unknown'?'<span style="color:var(--red)">미등록 바코드</span>':s.status==='over'?'<span style="color:var(--amber)">전량완료(재스캔)</span>':s.status==='error'?'<span style="color:var(--red)">미배정 SKU</span>':'-')}</td>
@@ -3990,9 +4006,14 @@ function populateWorkerSelect(){
   //   드롭다운이 통째로 비어서 "피킹 시작"조차 못 누르는 막다른 상황이 생겼음.
   //   Active/Off와 무관하게 전체 작업자를 보여주되, Active인 사람을 위로 정렬.
   const all = [...state.workers].sort((a,b) => (b.status==='active')-(a.status==='active'));
-  const optsHtml = all.length
+  // ★ 2026-08-04 신규 — 요청: 02번(피킹 타이머)엔 "선택 안 함" 기본값이 있는데
+  //   03번(스캔) 작업자 선택엔 없어서, 아무도 직접 안 골라도 자동으로 첫 번째
+  //   사람으로 선택돼 있었음. 실제 스캔하는 사람이 다른 사람인데 이름을 안
+  //   바꾸면 엉뚱한 사람 이름으로 스캔이 기록될 위험이 있어서, 여기도 동일하게
+  //   "선택 안 함"을 기본값으로 두고 반드시 직접 골라야만 스캔 작업자가 정해지게 함.
+  const optsHtml = '<option value="">— 선택 안 함 —</option>' + (all.length
     ? all.map(w => `<option value="${w.name}">${w.name}${w.status!=='active' ? ' (Off)' : ''}</option>`).join('')
-    : '<option value="">작업자 없음</option>';
+    : '');
 
   const sel = document.getElementById('workerSelect');
   // ★ 2026-07-22 신규: 작업자가 지금 이 드롭다운을 탭해서 열어놓은 상태(포커스 중)에
@@ -4013,7 +4034,11 @@ function populateWorkerSelect(){
     const savedWorker = localStorage.getItem('sk_scan_worker');
     const prev = state.currentWorker || savedWorker;
     sel.innerHTML = optsHtml;
-    sel.value = all.some(w => w.name === prev) ? prev : (all[0]?.name || '');
+    // ★ 2026-08-04 수정 — 예전엔 저장된 이름이 없으면 "첫 번째 활성 작업자"로
+    //   자동 대체했는데, 이것도 결국 실제 사용자와 무관한 이름이 임의로 선택되는
+    //   문제였음. 이제 저장된 이름이 여전히 유효할 때만 유지하고, 그 외엔 항상
+    //   "선택 안 함"으로 둬서 반드시 직접 고르게 함.
+    sel.value = all.some(w => w.name === prev) ? prev : '';
     state.currentWorker = sel.value;
     if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
     document.getElementById('workerInitial').textContent = state.currentWorker
