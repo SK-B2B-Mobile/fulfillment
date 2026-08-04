@@ -1308,15 +1308,11 @@ function renderOpenBatchesPanel(batches){
         </div>
         <div class="openb-meta">${statsLine}</div>
         <div class="openb-actions">
-          <button class="btn btn-primary btn-sm" data-continue="${b.batchId}">▶ 이어서 작업하기</button>
           <button class="btn btn-ghost btn-sm" data-complete="${b.batchId}">완료 처리</button>
         </div>
       </div>`;
     }).join('')}
   `;
-  panel.querySelectorAll('[data-continue]').forEach(btn => {
-    btn.onclick = () => continueOpenBatch(btn.dataset.continue);
-  });
   panel.querySelectorAll('[data-complete]').forEach(btn => {
     btn.onclick = () => completeOpenBatch(btn.dataset.complete);
   });
