@@ -329,7 +329,11 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .tgrid-1{grid-template-columns:1fr;}
 .tgrid-2{grid-template-columns:1fr 1fr;}
 
-.target-card{display:flex; align-items:center; gap:10px; background:var(--surface2); border:1px solid var(--border2); border-radius:10px; overflow:hidden;}
+.target-card{display:flex; align-items:center; gap:10px; background:var(--surface2); border:1px solid var(--border2); border-radius:10px; overflow:hidden; transition:opacity 0.15s, border-color 0.15s;}
+/* ★ 2026-08-04 신규 — 탭해서 "물리적으로 넣었음" 체크 표시 */
+.target-placed-check{display:none; position:absolute; top:6px; right:6px; width:22px; height:22px; border-radius:50%; background:var(--green); color:#04140D; font-weight:900; font-size:13px; align-items:center; justify-content:center; z-index:2;}
+.target-card.placed{opacity:0.45; border-color:var(--green);}
+.target-card.placed .target-placed-check{display:flex;}
 .target-slot{font-family:var(--mono); font-weight:800; text-align:center; background:var(--amber); color:#291800; flex-shrink:0;}
 .target-info{flex:1; min-width:0;}
 .target-co{font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
@@ -2248,7 +2252,11 @@ function autoAssignSlots(){
   Object.values(state.scanIndex).forEach(entry => {
     [entry, ...(entry.altVariants||[])].forEach(sku => {
       sku.queue.forEach(q => { q.slot = slotByInvoice[q.invoice]; });
-      sku.queue.sort((a,b) => (a.ship_date||'9999').localeCompare(b.ship_date||'9999'));
+      // ★ 2026-08-04 신규 — 요청: 한 상품이 여러 슬롯으로 나뉘어 들어갈 때
+      //   배송일자 순서로 뒤죽박죽 뜨던 걸, 슬롯 번호 오름차순으로 정렬해서
+      //   작업자가 물리적으로 가까운 순서대로(04 → 08 → 17 → 21) 차례로
+      //   분류할 수 있게 함 — 왔다갔다 안 해도 되니 훨씬 빠르고 헷갈림도 줄어듦.
+      sku.queue.sort((a,b) => (Number(a.slot)||9999) - (Number(b.slot)||9999));
     });
   });
 
@@ -2761,6 +2769,9 @@ function updateSlotQueueNumbers(){
   state.slots.forEach(s => { if(s.assignedTo) slotByInv[s.assignedTo] = s.num; });
   Object.values(state.scanIndex).flatMap(entry => [entry, ...(entry.altVariants||[])]).forEach(sku => {
     sku.queue.forEach(q => { q.slot = slotByInv[q.invoice] || null; });
+    // ★ 2026-08-04 신규 — 드래그 재배치·구조 재동기화 등으로 슬롯 번호가
+    //   바뀔 때마다, 스캔 결과 화면이 항상 슬롯번호 오름차순으로 뜨도록 재정렬.
+    sku.queue.sort((a,b) => (Number(a.slot)||9999) - (Number(b.slot)||9999));
   });
 }
 
@@ -3158,7 +3169,8 @@ function renderAllTargets(sku, pending, code){
 
   const cardsHtml = results.map((r, idx) => `
     <div class="target-item" id="targetItem-${idx}">
-      <div class="target-card ${sizeClass}">
+      <div class="target-card ${sizeClass}" id="targetCard-${idx}" onclick="togglePlaced(${idx})" style="cursor:pointer; position:relative;">
+        <div class="target-placed-check" id="targetPlacedCheck-${idx}">✓</div>
         <div class="target-slot">${String(r.slot).padStart(2,'0')}</div>
         <div class="target-info">
           <div class="target-co">${r.customer}</div>
@@ -3167,7 +3179,7 @@ function renderAllTargets(sku, pending, code){
         <div class="target-qty" id="targetQty-${idx}">${r.qty}<small>pcs</small></div>
       </div>
       <div class="target-issue-bar">
-        <button class="target-issue-btn" id="targetIssueBtn-${idx}" onclick="toggleIssueForm(${idx})">⚠ 이슈로 정정</button>
+        <button class="target-issue-btn" id="targetIssueBtn-${idx}" onclick="event.stopPropagation(); toggleIssueForm(${idx})">⚠ 이슈로 정정</button>
       </div>
       <div class="issue-form" id="issueForm-${idx}" style="display:none">
         <select id="issueReason-${idx}">
@@ -3179,11 +3191,15 @@ function renderAllTargets(sku, pending, code){
         </div>
         <input type="text" id="issueNote-${idx}" placeholder="메모(선택) — 예: 박스 3개 파손 확인">
         <div class="issue-form-actions">
-          <button class="issue-btn-cancel" onclick="toggleIssueForm(${idx})">취소</button>
-          <button class="issue-btn-save" onclick="submitIssue(${idx})">이슈 저장</button>
+          <button class="issue-btn-cancel" onclick="event.stopPropagation(); toggleIssueForm(${idx})">취소</button>
+          <button class="issue-btn-save" onclick="event.stopPropagation(); submitIssue(${idx})">이슈 저장</button>
         </div>
       </div>
     </div>`).join('');
+
+  // ★ 2026-08-04 신규 — 여러 슬롯으로 나뉘어 들어갈 때 "어디까지 실제로
+  //   넣었는지" 헷갈리는 문제 방지. 스캔 한 번마다 체크 상태를 새로 시작함.
+  window.__placedSet = new Set();
 
   el.innerHTML = `<div class="scan-result ok">
     <div class="product-name">${sku.name}</div>
@@ -3192,6 +3208,10 @@ function renderAllTargets(sku, pending, code){
     <div style="text-align:center; margin:10px 0; padding:10px; background:var(--green-bg); border:1px solid var(--green); border-radius:8px; color:var(--green); font-weight:800; font-family:var(--mono); font-size:13px; letter-spacing:0.03em;">
       ✓ ${n}개 고객사 · 총 ${totalQty}pcs 동시 분류완료
     </div>
+    ${n > 1 ? `<div style="text-align:center; margin:0 0 10px; font-family:var(--mono); font-size:12px; color:var(--text-dim); letter-spacing:0.02em;">
+      👆 아래 슬롯 카드를 <b style="color:var(--cyan)">실제로 물건을 넣을 때마다 탭</b>해서 체크하세요 —
+      <span id="placedCounter">0</span>/${n} 넣음
+    </div>` : ''}
     <div class="sku-issue-bar">
       <button class="sku-issue-btn" onclick="toggleSkuIssueForm()">⚠ 이 스캔에 이슈 있음 (부족분 자동분배)</button>
     </div>
@@ -3354,6 +3374,28 @@ async function retryIssueSave(idx, barcode, reason, qty, note){
 }
 
 // ★ 2026-07-16 신규 — 카드별 "⚠ 이슈로 정정" 폼 열기/닫기
+// ★ 2026-08-04 신규 — 스캔 한 번에 여러 슬롯으로 나뉘는 경우, 작업자가
+//   "이 슬롯엔 이미 넣었나?"를 헷갈리지 않도록, 카드를 탭할 때마다 체크
+//   표시가 켜지고 카드가 흐려지게 함. 순수 화면 표시용 체크리스트라
+//   실제 분류·완료 처리(스캔 즉시 전부 처리됨)와는 무관하고, 실물 배치
+//   실수(빠뜨림·중복)를 줄이기 위한 보조 도구임.
+function togglePlaced(idx){
+  if(!window.__placedSet) window.__placedSet = new Set();
+  const card = document.getElementById(`targetCard-${idx}`);
+  if(!card) return;
+  const isPlaced = window.__placedSet.has(idx);
+  if(isPlaced){
+    window.__placedSet.delete(idx);
+    card.classList.remove('placed');
+  } else {
+    window.__placedSet.add(idx);
+    card.classList.add('placed');
+    try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
+  }
+  const counterEl = document.getElementById('placedCounter');
+  if(counterEl) counterEl.textContent = window.__placedSet.size;
+}
+
 function toggleIssueForm(idx){
   const form = document.getElementById(`issueForm-${idx}`);
   if(!form) return;
