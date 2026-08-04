@@ -465,6 +465,26 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
    밝은 글자로 통일. (iOS는 네이티브 휠 피커라 영향 없고, Android/PC 크롬에 적용됨) */
 select option{background:var(--surface2); color:var(--text);}
 select option:disabled{color:var(--text-dim2);}
+/* ★ 2026-08-04 신규 — 동일 바코드 상품 선택 화면 CSS.
+   7/28에 기능(renderVariantPicker)만 추가되고 CSS가 누락돼서, 흰 바탕의 기본
+   <button>으로 뜨고 있었음(현장 사진으로 확인). 다크 테마에 맞추고, 작업자가
+   "어느 랙에서 피킹했는지"와 "어느 슬롯에 들어가는지"를 한눈에 보게 재설계. */
+.variant-picker-banner{background:rgba(245,158,11,0.08); border:1.5px solid rgba(245,158,11,0.45); border-radius:10px; padding:12px 14px; margin-bottom:12px;}
+.variant-picker-title{font-size:13.5px; font-weight:800; color:var(--amber); margin-bottom:4px;}
+.variant-picker-sub{font-size:11.5px; color:var(--text-dim); line-height:1.6;}
+.variant-pick-grid{display:flex; flex-direction:column; gap:10px;}
+.variant-pick-card{display:block; width:100%; text-align:left; background:var(--surface2); border:1.5px solid var(--border2); border-radius:12px; padding:14px 16px; cursor:pointer; font-family:var(--sans); color:var(--text); -webkit-tap-highlight-color:rgba(34,211,238,0.15);}
+.variant-pick-card.pending{border-color:rgba(34,211,238,0.55); background:rgba(34,211,238,0.06);}
+.variant-pick-card.pending:active{background:rgba(34,211,238,0.14);}
+.variant-pick-card.muted{opacity:0.55;}
+.variant-pick-name{font-size:13px; font-weight:700; margin-bottom:6px; line-height:1.4;}
+.variant-pick-meta{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-bottom:10px;}
+.variant-pick-meta b{color:var(--text); font-size:13px;}
+.variant-pick-rack{display:inline-block; margin-left:6px; padding:2px 8px; background:rgba(255,255,255,0.07); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-weight:700;}
+.variant-pick-slots{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.variant-pick-slotnum{font-family:var(--mono); font-size:22px; font-weight:800; color:var(--cyan); letter-spacing:0.02em;}
+.variant-pick-remain{font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
+.variant-pick-donetag{font-family:var(--mono); font-size:12px; font-weight:700; color:var(--text-dim2);}
 .form-field input:focus, .form-field select:focus{outline:none; border-color:var(--cyan);}
 .modal-actions{display:flex; gap:8px; justify-content:flex-end; margin-top:20px;}
 
@@ -1084,6 +1104,7 @@ const state = {
     {id:5, name:'Kevin Kim',  status:'off'},
   ],
   currentWorker: null,
+  bootSyncPending: false, // ★ 2026-08-04 신규: 캐시로 화면만 먼저 그려지고 서버 확인 전인 상태 (이 동안 스캔 차단)
   userHasUploaded: false, // ★ 2026-07-14 신규: 실제 파일 드롭 여부 — 임시저장 복원 경합 방지용
   batchFormIsFreshDraft: false, // ★ 2026-07-23 신규: state.sumFile/custFiles가 "이 세션에서 사용자가 직접 새로 올린 것"인지
                                  // (true) 아니면 "다른 배치를 복원/이어받기로 불러온 것"인지(false) 구분.
@@ -1343,6 +1364,7 @@ async function continueOpenBatch(batchId){
 
   const res = await gasQuery('getBatch', { batchId });
   if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
+  saveBatchCache(res); // ★ 2026-08-04 신규: 다음 새로고침 때 이 배치가 즉시 뜨도록 캐시 갱신
 
   state.batchId = res.batch.batchId;
   state.sumFile = { meta:{}, items: res.sumItems || [] };
@@ -1388,13 +1410,99 @@ async function completeOpenBatch(batchId){
   // ★ 2026-07-23 신규: 완료된 배치가 활성 배치로 남아서 다른 기기들이 계속
   //   자동으로 불러오는 일이 없도록, 이 배치가 활성 배치였다면 같이 정리
   if(GAS_READY && state.batchId === batchId) gasCall('clearActiveBatch', {});
+  if(state.batchId === batchId) clearBatchCache(); // ★ 2026-08-04 신규: 완료된 배치가 다음 새로고침 때 캐시로 되살아나지 않게
   toast(`배치 ${batchId} 완료 처리됨`, 'success');
   checkOpenBatches();
+}
+
+// ★ 2026-08-04 신규 — 부팅(새로고침) 속도 개선 3종 세트.
+//   문제: 새로고침하면 getActiveBatch(무거움) → getScanState(무거움)를 순차로
+//   기다려야 화면이 떠서, GAS 왕복 지연(호출당 수 초)이 그대로 합산돼 체감이 길었음.
+//   개선:
+//   (1) 마지막으로 성공한 배치 데이터를 localStorage에 저장해두고, 부팅 즉시
+//       그 캐시로 화면부터 그림(구조/슬롯/SKU 인덱스) → 체감상 거의 즉시 뜸.
+//   (2) 캐시에 배치ID가 있으면 getScanState를 getActiveBatch와 "동시에" 미리
+//       요청 → 순차 대기 시간이 두 호출 중 긴 쪽 하나로 줄어듦(약 절반).
+//   (3) 서버가 진짜 상태를 확인해줄 때까지는 스캔만 잠깐 막음(bootSyncPending) —
+//       완료된 옛 배치에 스캔이 기록되는 사고 방지. 서버 응답이 오면 서버 값으로
+//       전부 덮어쓰므로(기존과 동일), 서버가 항상 최종 기준인 원칙은 그대로 유지됨.
+const BATCH_CACHE_KEY = 'sk_batch_cache_v1';
+function saveBatchCache(res){
+  try{
+    localStorage.setItem(BATCH_CACHE_KEY, JSON.stringify({ batchId: res.batch.batchId, savedAt: Date.now(), payload: res }));
+  }catch(e){ /* 용량 초과 등 — 캐시는 편의 기능이므로 조용히 무시 */ }
+}
+function clearBatchCache(){ try{ localStorage.removeItem(BATCH_CACHE_KEY); }catch(e){} }
+function showBootSyncChip(on){
+  let chip = document.getElementById('bootSyncChip');
+  if(on){
+    if(chip) return;
+    chip = document.createElement('div');
+    chip.id = 'bootSyncChip';
+    chip.style.cssText = 'position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:9999; background:rgba(34,211,238,0.12); border:1px solid rgba(34,211,238,0.5); color:var(--cyan); font-family:var(--mono); font-size:11.5px; font-weight:700; padding:6px 14px; border-radius:20px;';
+    chip.textContent = '🔄 서버와 동기화 중…';
+    document.body.appendChild(chip);
+  } else if(chip){ chip.remove(); }
+}
+// 서버 응답(getActiveBatch/getBatch)의 payload를 화면 상태로 반영 — restoreBatchFromServer의
+// 기존 복원 코드를 그대로 함수화한 것(캐시 부팅과 서버 확정, 두 곳에서 재사용).
+function applyBatchPayload(res, opts){
+  opts = opts || {};
+  state.batchId = res.batch.batchId;
+  state.sumFile = { meta:{}, items: res.sumItems || [] };
+  state.custFiles = (res.customers || []).map(c => ({
+    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+    items: c.items || [],
+    totalQty: c.totalQty, totalSkus: c.totalSku,
+    _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
+  }));
+  state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존(활성) 배치를 복원한 것
+  state.slots.forEach(s => { s.assignedTo = null; });
+  state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
+  (res.customers || []).forEach(c => {
+    if(!c.slotNum) return;
+    const slot = state.slots.find(s => s.num === Number(c.slotNum));
+    if(slot) slot.assignedTo = c.invoice;
+    if(c.cleared) state.clearedInvoices.add(c.invoice);
+    if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
+  });
+
+  document.getElementById('dropSum').className = 'drop filled';
+  document.querySelector('#dropSum .drop-title').textContent = opts.fromCache ? '✓ 총량 리스트 (동기화 중…)' : '✓ 총량 리스트 (복원됨)';
+  document.querySelector('#dropSum .drop-hint').textContent = state.sumFile.items.length + ' unique SKUs';
+  document.getElementById('dropCust').className = 'drop filled';
+  document.querySelector('#dropCust .drop-title').textContent = '✓ ' + state.custFiles.length + '개 고객사';
+  updateCustDropZoneSummary(); // ★ 2026-08-03 신규 — 복원 시에도 총량 리스트처럼 SKU/PCS 합계 표시
+
+  buildScanIndex();
+  updateSlotQueueNumbers();
+  document.getElementById('batchChip').textContent = state.batchId;
+  document.getElementById('batchChip').classList.add('active');
+  document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
+  renderFileTags();
 }
 
 async function restoreBatchFromServer(){
   if(!GAS_READY) { tryRestoreDraftFromLocalStorage(); return; } // 데모 모드: 임시저장만 시도
   checkOpenBatches(); // ★ 2026-07-10: 오늘 배치 여부와 무관하게, 완료 처리 안 된 배치는 항상 매니저에게 보여줌
+
+  // ★ 2026-08-04 신규 — (1) 캐시가 있으면 서버 응답을 기다리지 않고 즉시 화면부터 그림
+  let cached = null;
+  try{ cached = JSON.parse(localStorage.getItem(BATCH_CACHE_KEY) || 'null'); }catch(e){ cached = null; }
+  let prefetchScanState = null;
+  if(cached && cached.batchId && cached.payload && cached.payload.batch){
+    state.bootSyncPending = true;
+    showBootSyncChip(true);
+    try{
+      applyBatchPayload(cached.payload, { fromCache: true });
+      gotoView('v-slots');
+    }catch(e){
+      console.warn('캐시 복원 실패(무시하고 서버 복원 진행):', e);
+      state.bootSyncPending = false; showBootSyncChip(false); clearBatchCache(); cached = null;
+    }
+    // (2) 스캔 진행상황도 서버 확인과 "동시에" 미리 요청 (배치가 바뀌었으면 결과는 버림)
+    if(cached) prefetchScanState = gasQuery('getScanState', { batchId: cached.batchId }).catch(() => null);
+  }
 
   // ★ 2026-07-23 신규: "오늘 배치"만 자동으로 찾던 것을, 매니저가 서버에
   //   기록해둔 "활성 배치"부터 우선 확인하도록 변경. 이러면 매니저가 PC에서
@@ -1421,42 +1529,38 @@ async function restoreBatchFromServer(){
       }
     }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
   }
-  if(!res.ok || !res.batch) { tryRestoreDraftFromLocalStorage(); return; } // 진행중 배치 없음 → 임시저장 확인
+  if(!res.ok || !res.batch) {
+    // ★ 2026-08-04 신규 — 캐시로 화면을 이미 그려놨는데 서버엔 진행중 배치가 없는
+    //   경우(=그 배치가 그새 완료 처리된 것). 옛 화면을 남겨두면 완료된 배치에
+    //   스캔하는 사고로 이어질 수 있으므로, 캐시를 지우고 깨끗하게 다시 시작함.
+    if(state.bootSyncPending){
+      clearBatchCache();
+      state.bootSyncPending = false; showBootSyncChip(false);
+      alert('이전에 작업하던 배치가 완료 처리되어, 화면을 초기 상태로 다시 시작합니다.');
+      location.reload(); // 캐시가 지워졌으므로 재부팅 후엔 이 경로로 다시 안 들어옴
+      return;
+    }
+    tryRestoreDraftFromLocalStorage(); return; // 진행중 배치 없음 → 임시저장 확인
+  }
 
-  state.batchId = res.batch.batchId;
-  state.sumFile = { meta:{}, items: res.sumItems || [] };
-  state.custFiles = (res.customers || []).map(c => ({
-    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
-    items: c.items || [],
-    totalQty: c.totalQty, totalSkus: c.totalSku,
-    _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
-  }));
-  state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존(활성) 배치를 복원한 것
-  state.slots.forEach(s => { s.assignedTo = null; });
-  state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
-  (res.customers || []).forEach(c => {
-    if(!c.slotNum) return;
-    const slot = state.slots.find(s => s.num === Number(c.slotNum));
-    if(slot) slot.assignedTo = c.invoice;
-    if(c.cleared) state.clearedInvoices.add(c.invoice);
-    if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
-  });
+  // 서버가 알려준 진짜 배치로 전부 덮어씀 (캐시와 같아도 최신 구조로 갱신됨)
+  applyBatchPayload(res, { fromCache: false });
+  saveBatchCache(res);
 
-  document.getElementById('dropSum').className = 'drop filled';
+  // (3) 스캔 진행상황 반영 — 미리 요청해둔 응답이 같은 배치 것이면 재사용(추가 대기 거의 0),
+  //     아니면(배치가 바뀌었거나 캐시가 없었으면) 기존처럼 새로 요청
+  let scanStateApplied = false;
+  if(prefetchScanState && cached && cached.batchId === state.batchId){
+    try{
+      const ss = await prefetchScanState;
+      if(ss && ss.ok){ applyScanStateRes(ss); scanStateApplied = true; }
+    }catch(e){ /* 아래에서 일반 경로로 재시도 */ }
+  }
+  if(!scanStateApplied) await pollScanState();
+
+  state.bootSyncPending = false;
+  showBootSyncChip(false);
   document.querySelector('#dropSum .drop-title').textContent = '✓ 총량 리스트 (복원됨)';
-  document.querySelector('#dropSum .drop-hint').textContent = state.sumFile.items.length + ' unique SKUs';
-  document.getElementById('dropCust').className = 'drop filled';
-  document.querySelector('#dropCust .drop-title').textContent = '✓ ' + state.custFiles.length + '개 고객사';
-  updateCustDropZoneSummary(); // ★ 2026-08-03 신규 — 복원 시에도 총량 리스트처럼 SKU/PCS 합계 표시
-
-  buildScanIndex();
-  updateSlotQueueNumbers();
-  document.getElementById('batchChip').textContent = state.batchId;
-  document.getElementById('batchChip').classList.add('active');
-  document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
-  renderFileTags();
-  // ★ 2026-07-09: 다른 기기가 이미 스캔해둔 진행상황을 서버에서 가져와 반영 + 실시간 동기화 시작
-  await pollScanState();
   startScanPolling();
   startStructurePolling();
   toast(`진행 중이던 배치 ${state.batchId} 복원 완료`, 'success');
@@ -2359,17 +2463,23 @@ function applyScanState(doneMap, scans, issueMap, issues){
   }));
 }
 
+// ★ 2026-08-04 분리 — getScanState 응답을 화면에 반영하는 부분을 함수로 분리.
+//   부팅 속도 개선(restoreBatchFromServer의 병렬 선요청)에서 같은 응답 처리를
+//   재사용하기 위함. 동작은 기존 pollScanState와 완전히 동일.
+function applyScanStateRes(res){
+  applyScanState(res.doneMap || {}, res.scans || [], res.issueMap || {}, res.issues || []);
+  updateScanStats();
+  if(document.getElementById('v-scan') && document.getElementById('v-scan').classList.contains('active')) renderRecentScans();
+  if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+  if(document.getElementById('v-log') && document.getElementById('v-log').classList.contains('active')) renderFullLog();
+  checkBatchComplete();
+}
 async function pollScanState(){
   if(!GAS_READY || !state.batchId) return;
   try{
     const res = await gasQuery('getScanState', { batchId: state.batchId });
     if(!res.ok) return;
-    applyScanState(res.doneMap || {}, res.scans || [], res.issueMap || {}, res.issues || []);
-    updateScanStats();
-    if(document.getElementById('v-scan') && document.getElementById('v-scan').classList.contains('active')) renderRecentScans();
-    if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
-    if(document.getElementById('v-log') && document.getElementById('v-log').classList.contains('active')) renderFullLog();
-    checkBatchComplete();
+    applyScanStateRes(res);
   }catch(e){
     console.error('pollScanState failed:', e);
   }
@@ -2426,6 +2536,7 @@ async function refreshBatchStructure(silent){
   try{
     const res = await gasQuery('getBatch', { batchId: state.batchId });
     if(!res.ok || !res.batch) return false;
+    saveBatchCache(res); // ★ 2026-08-04 신규: 30초마다 최신 구조를 캐시에도 반영 → 새로고침 시 최신 화면이 즉시 뜸
 
     const newSumItems = res.sumItems || [];
     const newCustomers = res.customers || [];
@@ -3012,6 +3123,18 @@ function doScan(){
   scanInput.focus();
   const el = document.getElementById('scanResult');
 
+  // ★ 2026-08-04 신규 — 부팅 캐시로 화면만 먼저 그려진 상태(서버 확인 전)에는
+  //   스캔을 잠깐 막음. 그새 배치가 완료/교체됐을 수 있는데 옛 배치에 스캔이
+  //   기록되면 안 되기 때문. 보통 2~3초 안에 서버 확인이 끝나고 자동 해제됨.
+  if(state.bootSyncPending){
+    el.innerHTML = `<div class="scan-result err">
+      <div class="product-name" style="color:var(--amber)">🔄 서버와 동기화 중입니다</div>
+      <div class="product-meta" style="display:block; line-height:1.7; font-size:12px;">잠시(2~3초) 후 다시 스캔해주세요. 화면 위 파란 칩이 사라지면 준비 완료입니다.</div>
+    </div>`;
+    scanFeedback('err');
+    return;
+  }
+
   // ★ 2026-08-04 신규 — 요청: 작업자를 직접 선택 안 한 상태(선택 안 함)로
   //   스캔이 진행되면, 엉뚱한 사람 이름으로(또는 이름 없이) 기록될 위험이
   //   있음. 이 경우 스캔 자체를 진행하지 않고 먼저 이름을 고르게 함.
@@ -3060,21 +3183,46 @@ function doScan(){
 // ★ 2026-07-28 신규 — 바코드 하나에 SKU가 여러 개 걸려있을 때, 실제로 어느 상품을
 // 피킹했는지 작업자가 눈으로 보고 고르는 화면. 종이 피킹리스트의 SKU코드/상품명/
 // 랙 위치와 비교해서 맞는 걸 누르면 그 상품 기준으로 정확히 배분됨.
+// ★ 2026-08-04 재설계 — 현장 피드백: "대기 N곳"이라는 표현이 무슨 뜻인지 몰라
+//   작업자들이 헷갈림. 이제 각 선택지에 (1) 어느 슬롯에 들어가게 되는지 슬롯
+//   번호를 바로 크게 표시하고, (2) 이미 전량 배분이 끝난 상품은 "✓ 전량 배분
+//   완료"로 흐리게 표시해서 남은 슬롯이 있는 쪽이 한눈에 구분되게 함.
+//   ※ 자동 선택/자동 숨김은 일부러 안 함 — 이 화면은 수량 오배분 방지뿐 아니라
+//   "엉뚱한 랙에서 잘못 피킹해온 것"을 잡아내는 최종 관문이기도 해서(핵심 설계
+//   원칙 4번), 작업자가 자기가 집어온 랙 위치를 눈으로 확인하고 직접 골라야 함.
 function renderVariantPicker(code, primarySku, altVariants){
   const el = document.getElementById('scanResult');
-  const all = [primarySku, ...altVariants];
+  // 남은 슬롯이 있는 상품을 위로 정렬 (선택지 배열 자체를 정렬해서 idx 매핑도 함께 유지)
+  const all = [primarySku, ...altVariants].slice().sort((a,b) => {
+    const ap = a.queue.filter(q => q.done < q.need).length;
+    const bp = b.queue.filter(q => q.done < q.need).length;
+    return (bp>0) - (ap>0);
+  });
   const cardsHtml = all.map((v, idx) => {
-    const pending = v.queue.filter(q => q.done < q.need).length;
-    return `<button class="variant-pick-card" onclick="pickScanVariant('${code}', ${idx})">
+    const pend = v.queue.filter(q => q.done < q.need)
+      .slice().sort((a,b) => (Number(a.slot)||9999) - (Number(b.slot)||9999));
+    const remain = pend.reduce((a,q) => a + (q.need - q.done), 0);
+    const nums = pend.map(q => String(q.slot).padStart(2,'0'));
+    const slotLabel = nums.length === 0 ? ''
+      : nums.length <= 3 ? nums.join(' · ')
+      : `${nums.slice(0,3).join(' · ')} 외 ${nums.length-3}곳`;
+    const bottomHtml = pend.length > 0
+      ? `<div class="variant-pick-slots">
+           <span style="font-size:11px; color:var(--text-dim); font-weight:700;">→ 슬롯</span>
+           <span class="variant-pick-slotnum">${slotLabel}</span>
+           <span class="variant-pick-remain">남은 ${remain.toLocaleString()}pcs · ${pend.length}곳</span>
+         </div>`
+      : `<div class="variant-pick-donetag">✓ 전량 배분 완료 — 넣을 슬롯 없음</div>`;
+    return `<button class="variant-pick-card ${pend.length>0 ? 'pending' : 'muted'}" onclick="pickScanVariant('${code}', ${idx})">
       <div class="variant-pick-name">${v.name}</div>
-      <div class="variant-pick-meta"><b>${v.sku}</b><span>· 랙 ${v.rack}</span></div>
-      <div class="variant-pick-qty">${v.total}<small>pcs · 대기 ${pending}곳</small></div>
+      <div class="variant-pick-meta"><b>${v.sku}</b><span class="variant-pick-rack">랙 ${v.rack}</span></div>
+      ${bottomHtml}
     </button>`;
   }).join('');
   el.innerHTML = `<div class="scan-result">
     <div class="variant-picker-banner">
       <div class="variant-picker-title">⚠️ 이 바코드는 서로 다른 상품 ${all.length}개에 쓰이고 있습니다</div>
-      <div class="variant-picker-sub">바코드: ${code} · 지금 피킹하신 상품을 정확히 골라주세요</div>
+      <div class="variant-picker-sub">바코드: ${code}<br>피킹리스트의 <b>SKU 코드·랙 위치</b>와 비교해서, 지금 실제로 가져오신 상품을 눌러주세요.</div>
     </div>
     <div class="variant-pick-grid">${cardsHtml}</div>
   </div>`;
