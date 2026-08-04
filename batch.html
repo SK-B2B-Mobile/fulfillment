@@ -1008,6 +1008,27 @@ async function gasCall(op, data){
     return { ok:false, error:String(e) };
   }
 }
+// ★ 2026-08-04 긴급 신규 — 심각한 사고 발견: 작업자가 분명히 스캔했는데
+//   나중에 확인해보니 서버에 저장이 안 되어 있던 사고가 실제로 발생했음.
+//   원인: 스캔은 화면에 즉시 "완료"로 표시되는데(서버 응답 기다리지 않고
+//   먼저 화면부터 바꾸는 게 원래 의도된 속도 최적화), 그 뒤 서버 저장
+//   요청이 네트워크 문제로 실패해도 아무 처리가 없었음 — 화면엔 이미
+//   성공으로 떠 있어서 작업자는 전혀 눈치챌 수 없었고, 몇 초 뒤 정기
+//   동기화가 돌면서 "서버엔 그 기록이 없다"는 진짜 상태로 조용히
+//   되돌아갔음. 이제 실패하면 최대 3번까지 자동으로 다시 시도하고,
+//   그래도 다 실패하면 절대 조용히 넘어가지 않고 호출부에서 눈에 띄게
+//   경고하도록 결과를 그대로 반환함(showScanSaveFailure 등에서 사용).
+async function gasCallWithRetry(op, data, maxAttempts){
+  maxAttempts = maxAttempts || 3;
+  let lastErr = null;
+  for(let i = 0; i < maxAttempts; i++){
+    const res = await gasCall(op, data);
+    if(res && res.ok) return res;
+    lastErr = (res && res.error) || '알 수 없는 오류';
+    if(i < maxAttempts - 1) await new Promise(r => setTimeout(r, 700 * (i + 1))); // 점점 늘려가며 재시도
+  }
+  return { ok:false, error: lastErr + ` (${maxAttempts}번 재시도 실패)` };
+}
 async function gasQuery(op, params){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정 (데모 모드)' };
   try{
@@ -3267,12 +3288,12 @@ async function submitSkuIssueSequential(shortages, reason, note, sku, barcode){
 
     let res;
     try{
-      res = await gasCall('logIssue', {
+      res = await gasCallWithRetry('logIssue', {
         batchId: state.batchId, worker: state.currentWorker,
         barcode: barcode, sku: sku.sku, name: sku.name,
         invoice: r.invoice, customer: r.customer,
         reason: reason, qty: shortQty, note: note,
-      });
+      }, 3);
     }catch(e){
       res = { ok:false, error:String(e) };
     }
@@ -3373,14 +3394,19 @@ function submitIssue(idx){
     if(q.done > q.need) q.done = q.need;
   }
 
-  // 2) 서버 저장 (다른 기기/현황판이 폴링으로 곧 동일하게 반영됨)
-  gasCall('logIssue', {
+  // 2) 서버 저장 — ★ 2026-08-04 수정: 재시도 + 실패시 확실한 경고 (스캔과 동일한 원칙)
+  gasCallWithRetry('logIssue', {
     batchId: state.batchId, worker: state.currentWorker,
     barcode: barcode, sku: sku.sku, name: sku.name,
     invoice: r.invoice, customer: r.customer,
     reason: reason, qty: qty, note: note,
-  }).then(res => {
-    if(!res.ok) toast('⚠️ 이슈 저장 실패 — 다시 시도해주세요: ' + (res.error||''), 'error');
+  }, 3).then(res => {
+    if(!res.ok){
+      showSaveFailureBanner(
+        `⚠️ 이슈 저장 실패 — ${r.customer}`,
+        `${sku.sku} · ${qty}pcs · 서버에 저장되지 않았습니다. 다시 등록해주세요. (사유: ${res.error || '알 수 없음'})`
+      );
+    }
     pollScanState();
   });
 
@@ -3580,13 +3606,19 @@ async function submitRetroIssue(){
     if(q.done > q.need) q.done = q.need;
   }
 
-  const res = await gasCall('logIssue', {
+  const res = await gasCallWithRetry('logIssue', {
     batchId: state.batchId, worker: worker,
     barcode: selBarcode, sku: sku.sku, name: sku.name,
     invoice: invoice, customer: cf.meta.customer,
     reason: reason, qty: qty, note: note,
-  });
-  if(!res.ok){ toast('⚠️ 이슈 저장 실패 — 다시 시도해주세요: ' + (res.error||''), 'error'); return; }
+  }, 3);
+  if(!res.ok){
+    showSaveFailureBanner(
+      `⚠️ 이슈 저장 실패 — ${cf.meta.customer}`,
+      `${sku.sku} · ${qty}pcs · 서버에 저장되지 않았습니다. 다시 등록해주세요. (사유: ${res.error || '알 수 없음'})`
+    );
+    return;
+  }
 
   toast(`⚠ 이슈 등록됨 · ${cf.meta.customer} · ${qty}pcs`, 'success');
   await pollScanState(); // 서버 최신 상태로 다시 동기화 (state.issues 갱신됨)
@@ -3623,17 +3655,31 @@ function logScan(entry){
   // update slot progress
   if(document.getElementById('v-slots').classList.contains('active')) renderSlots();
 
-  // 서버 저장 (비동기, 실패해도 현장 작업은 막지 않음 — scanId만 나중에 채워짐)
+  // 서버 저장 — ★ 2026-08-04 수정: 실패하면 자동 재시도(최대 3번), 그래도
+  //   실패하면 절대 조용히 넘어가지 않고 화면에 확실하게 경고함. 화면은 이미
+  //   "완료"로 표시된 상태라(빠른 반응을 위한 낙관적 갱신), 실제로 서버에
+  //   저장이 안 됐는데 작업자가 모르고 넘어가면 그 스캔은 영영 유실됨.
   if(GAS_READY && state.batchId){
-    gasCall('logScan', {
+    gasCallWithRetry('logScan', {
       batchId: state.batchId, worker: entry.worker, barcode: entry.barcode,
       sku: entry.sku, slot: entry.slot, customer: entry.customer,
       invoice: entry.invoice, result: entry.status, qty: entry.qty || 1,
-    }).then(res => {
-      if(res.ok) entry.scanId = res.scanId;
-      // ★ 2026-07-09: 저장 성공 직후 곧바로 한 번 더 동기화 (5초 폴링을 기다리지 않고
-      //   이 기기 + 다른 기기들이 최대한 빨리 같은 진행률을 보게 함)
-      pollScanState();
+    }, 3).then(res => {
+      if(res.ok){
+        entry.scanId = res.scanId;
+        // ★ 2026-07-09: 저장 성공 직후 곧바로 한 번 더 동기화 (5초 폴링을 기다리지 않고
+        //   이 기기 + 다른 기기들이 최대한 빨리 같은 진행률을 보게 함)
+        pollScanState();
+      } else {
+        // ★ 2026-08-04 신규 — 3번 재시도해도 저장이 안 됨. 이 스캔은 서버에
+        //   없는 상태이므로, 다음 폴링 때 화면에서 완료가 취소된 것처럼
+        //   보일 수 있음. 작업자에게 명확히 알려서 다시 스캔하게 함.
+        entry.saveFailed = true;
+        showSaveFailureBanner(
+          `⚠️ 스캔 저장 실패 — ${entry.customer || entry.sku || '방금 스캔'}`,
+          `바코드 ${entry.barcode || '-'} · 서버에 저장되지 않았습니다. 다시 스캔해주세요. (사유: ${res.error || '알 수 없음'})`
+        );
+      }
     });
   }
 }
@@ -4104,6 +4150,30 @@ function toast(msg, type='info'){
   t.textContent = msg;
   root.appendChild(t);
   setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 200); }, 2500);
+}
+
+// ★ 2026-08-04 긴급 신규 — 재시도까지 다 실패해서 정말로 서버 저장이 안 된
+//   경우 쓰는 "절대 조용히 안 사라지는" 경고. 일반 toast는 2.5초면 사라져서
+//   작업자가 다른 걸 보고 있으면 놓칠 수 있음 — 이건 화면 맨 위에 고정되고,
+//   작업자가 직접 "확인" 버튼을 눌러야만 없어짐. 스캔/이슈 저장처럼 놓치면
+//   안 되는 데이터 유실 상황 전용.
+function showSaveFailureBanner(title, detail){
+  const id = 'saveFailBanner_' + Date.now();
+  const el = document.createElement('div');
+  el.id = id;
+  el.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9999; background:#7a0000; color:#fff; padding:16px 20px; box-shadow:0 4px 20px rgba(0,0,0,0.6); border-bottom:3px solid #ff4d4d;';
+  el.innerHTML = `
+    <div style="max-width:900px; margin:0 auto; display:flex; align-items:center; gap:16px;">
+      <div style="font-size:28px; flex-shrink:0;">⚠️</div>
+      <div style="flex:1;">
+        <div style="font-weight:900; font-size:15px; letter-spacing:0.02em;">${title}</div>
+        <div style="font-size:12.5px; opacity:0.9; margin-top:3px; font-family:var(--mono);">${detail}</div>
+      </div>
+      <button onclick="document.getElementById('${id}').remove()" style="flex-shrink:0; background:#fff; color:#7a0000; border:none; padding:10px 16px; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer;">확인함</button>
+    </div>`;
+  document.body.appendChild(el);
+  try{ if(navigator.vibrate) navigator.vibrate([120,80,120,80,120]); }catch(e){}
+  try{ scanFeedback('err'); }catch(e){}
 }
 
 // Init
