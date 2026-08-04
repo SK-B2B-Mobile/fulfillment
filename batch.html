@@ -1287,11 +1287,15 @@ function renderOpenBatchesPanel(batches){
         </div>
         <div class="openb-meta">${statsLine}</div>
         <div class="openb-actions">
+          <button class="btn btn-primary btn-sm" data-continue="${b.batchId}">▶ 이어서 작업하기</button>
           <button class="btn btn-ghost btn-sm" data-complete="${b.batchId}">완료 처리</button>
         </div>
       </div>`;
     }).join('')}
   `;
+  panel.querySelectorAll('[data-continue]').forEach(btn => {
+    btn.onclick = () => continueOpenBatch(btn.dataset.continue);
+  });
   panel.querySelectorAll('[data-complete]').forEach(btn => {
     btn.onclick = () => completeOpenBatch(btn.dataset.complete);
   });
@@ -1369,6 +1373,22 @@ async function restoreBatchFromServer(){
   let res = await gasQuery('getActiveBatch', {});
   if(!res.ok || !res.batch){
     res = await gasQuery('getBatch', {});
+  }
+  if(!res.ok || !res.batch){
+    // ★ 2026-08-04 신규 — 심각한 사고 방지: 활성 배치 기록도 없고 "오늘 생성된"
+    //   배치도 없으면(=날짜가 바뀐 다음날 아침 등), 예전엔 여기서 그냥 포기하고
+    //   "배치 없음" 상태로 멈췄음. 그런데 어제 만든 배치가 아직 완료 안 된 채로
+    //   남아있어도 아무도 명시적으로 "이어서 작업하기"를 누르기 전까진 2/3번 탭이
+    //   계속 잠겨서 작업자들이 스캔을 아예 못 하는 사고가 실제로 발생했음.
+    //   완료 안 된 배치가 "정확히 1개"뿐이면(=헷갈릴 여지가 없으면) 자동으로 그
+    //   배치를 이어서 열어줌. 2개 이상이면(=어느 걸 열지 사람이 판단해야 하면)
+    //   절대 임의로 고르지 않고, 화면 상단 경고 패널에서 사람이 직접 고르게 함.
+    try{
+      const openRes = await gasQuery('getOpenBatches', {});
+      if(openRes.ok && Array.isArray(openRes.batches) && openRes.batches.length === 1){
+        res = await gasQuery('getBatch', { batchId: openRes.batches[0].batchId });
+      }
+    }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
   }
   if(!res.ok || !res.batch) { tryRestoreDraftFromLocalStorage(); return; } // 진행중 배치 없음 → 임시저장 확인
 
