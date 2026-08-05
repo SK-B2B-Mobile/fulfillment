@@ -61,6 +61,26 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .manual-banner button{font-family:var(--sans); font-size:12px; font-weight:700; background:none; border:1px solid var(--amber); color:var(--amber); border-radius:6px; padding:4px 10px; cursor:pointer;}
 .manual-banner button:hover{background:var(--amber); color:#1a1300;}
 
+/* ═══════════════ 미배분 경보 배너 (★ 2026-08-05 신규) ═══════════════
+   "다른 고객사에겐 스캔됐는데 이 고객사는 완전히 0인" 패턴을 발견하면 뜸.
+   빨간 계열로 눈에 확 띄게 — 방치하면 며칠씩 안 채워진 채 숨어있던 문제라
+   조용한 배지가 아니라 확실히 알아차릴 수 있는 배너가 필요함. */
+.unfulfilled-banner{display:none; align-items:center; gap:10px; background:rgba(239,68,68,0.14); border:1px solid #FF4D6D; color:#FF4D6D; font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px; cursor:pointer;}
+.unfulfilled-banner.show{display:flex;}
+.unfulfilled-banner:hover{background:rgba(239,68,68,0.22);}
+.unfulfilled-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9000; align-items:center; justify-content:center;}
+.unfulfilled-modal-overlay.show{display:flex;}
+.unfulfilled-modal{background:var(--surface); border:1px solid #FF4D6D; border-radius:14px; width:min(720px, 92vw); max-height:80vh; display:flex; flex-direction:column; overflow:hidden;}
+.unfulfilled-modal-head{padding:18px 22px; border-bottom:1px solid var(--border2); display:flex; align-items:center; justify-content:space-between;}
+.unfulfilled-modal-head h3{margin:0; color:#FF4D6D; font-size:16px;}
+.unfulfilled-modal-head button{background:none; border:none; color:var(--text-dim); font-size:20px; cursor:pointer; line-height:1;}
+.unfulfilled-modal-body{padding:14px 22px; overflow-y:auto;}
+.unfulfilled-modal-note{font-size:12px; color:var(--text-dim); line-height:1.6; margin-bottom:14px; padding:10px 12px; background:var(--surface2); border-radius:8px;}
+.unfulfilled-row{padding:10px 0; border-bottom:1px solid var(--border2); font-size:13px;}
+.unfulfilled-row .ur-top{display:flex; justify-content:space-between; font-weight:700;}
+.unfulfilled-row .ur-slot{color:var(--amber); font-family:var(--mono);}
+.unfulfilled-row .ur-meta{color:var(--text-dim); font-size:12px; margin-top:3px; font-family:var(--mono);}
+
 /* ═══════════════ 슬롯 그리드 ═══════════════ */
 .board{padding:26px 36px; height:calc(100vh - 108px); overflow-y:auto;}
 .zone-label{font-family:var(--mono); font-size:15px; color:var(--text-dim); letter-spacing:0.1em; margin:18px 0 12px; text-transform:uppercase;}
@@ -209,6 +229,11 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <div class="manual-banner" id="manualBanner">
         🔍 다른 배치 조회 중 (실시간 아님) <button id="btnBackToLive">실시간으로 돌아가기</button>
       </div>
+      <!-- ★ 2026-08-05 신규 — 미배분 경보: 다른 고객사에겐 스캔됐는데 이 고객사만
+           완전히 빠진 상품이 있으면 뜸. 클릭하면 상세 목록 모달. -->
+      <div class="unfulfilled-banner" id="unfulfilledBanner">
+        ⚠️ <span id="unfulfilledBannerText">미배분 상품 확인 필요</span>
+      </div>
     </div>
     <div class="tb-switch-wrap">
       <button class="tb-switch-btn" id="btnSwitchBatchTV">⇄ 다른 배치</button>
@@ -222,6 +247,17 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <div class="tb-progress-outer"><div class="tb-progress-bar"><div id="doneBar" style="width:0%"></div></div></div>
     </div>
     <div class="tb-clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<!-- ★ 2026-08-05 신규 — 미배분 경보 상세 모달 -->
+<div class="unfulfilled-modal-overlay" id="unfulfilledModalOverlay">
+  <div class="unfulfilled-modal">
+    <div class="unfulfilled-modal-head">
+      <h3>⚠️ 미배분 상품 목록</h3>
+      <button id="btnCloseUnfulfilledModal">✕</button>
+    </div>
+    <div class="unfulfilled-modal-body" id="unfulfilledModalBody"></div>
   </div>
 </div>
 
@@ -876,6 +912,67 @@ async function pollOnce(){
 
 pollOnce();
 setInterval(pollOnce, POLL_MS);
+
+/* ═══════════════ ★ 2026-08-05 신규 — 미배분 경보 폴링 ═══════════════
+ * "다른 고객사에겐 스캔됐는데 이 고객사만 완전히 0인" 패턴을 30초마다 확인.
+ * 슬롯 진행률(pollOnce, 8초)보다 느리게 도는 이유: 이 조회는 배치 전체
+ * BatchItems/ScanLog/IssueLog를 다 훑는 무거운 계산이라, 8초마다 돌리면
+ * 서버 부담이 커짐 — 경보 성격상 30초 지연은 문제 없음.
+ * ═══════════════════════════════════════════════════════════════ */
+let _unfulfilledAlerts = [];
+async function pollUnfulfilledAlerts(){
+  if(!GAS_READY || !currentBatchId) return;
+  try{
+    const res = await gasQuery('getUnfulfilledSkuAlerts', { batchId: currentBatchId });
+    if(!res.ok) return;
+    _unfulfilledAlerts = res.alerts || [];
+    const banner = document.getElementById('unfulfilledBanner');
+    const text = document.getElementById('unfulfilledBannerText');
+    if(_unfulfilledAlerts.length > 0){
+      text.textContent = `미배분 상품 ${_unfulfilledAlerts.length}건 — 다른 고객사엔 이미 배분됐는데 이 상품만 빠짐 (클릭해서 확인)`;
+      banner.classList.add('show');
+    } else {
+      banner.classList.remove('show');
+    }
+  }catch(e){ console.error('pollUnfulfilledAlerts failed:', e); }
+}
+function renderUnfulfilledModal(){
+  const body = document.getElementById('unfulfilledModalBody');
+  if(_unfulfilledAlerts.length === 0){
+    body.innerHTML = '<div class="unfulfilled-modal-note">현재 미배분 경보가 없습니다.</div>';
+    return;
+  }
+  const rowsHtml = _unfulfilledAlerts.map(a => `
+    <div class="unfulfilled-row">
+      <div class="ur-top">
+        <span>${a.customer || a.invoice} <span class="ur-slot">${a.slotNum ? '· 슬롯 ' + String(a.slotNum).padStart(2,'0') : ''}</span></span>
+        <span>${a.reqQty}pcs 필요</span>
+      </div>
+      <div class="ur-meta">${a.sku} · ${a.name} · 바코드 ${a.barcode} · 인보이스 ${a.invoice}</div>
+    </div>`).join('');
+  body.innerHTML = `
+    <div class="unfulfilled-modal-note">
+      아래 상품들은 배치 안 <b>다른 고객사에게는 이미 정상적으로 스캔·배분됐지만</b>,
+      나열된 고객사에는 스캔·이슈 기록이 전혀 없습니다. 실물 창고에 해당 상품이
+      남아있는지 확인해 주세요.<br><br>
+      · 재고가 있다면 → 마저 피킹해서 슬롯에 넣고 다시 스캔하면 정상 반영됩니다.<br>
+      · 재고가 전혀 없다면(이미 다 나감) → 해당 슬롯 카드에서 "이슈 등록" →
+      사유 <b>MISS·스캔 누락(실제 출고됨)</b>으로 등록하면 정산됩니다.
+    </div>
+    ${rowsHtml}`;
+}
+document.getElementById('unfulfilledBanner').addEventListener('click', () => {
+  renderUnfulfilledModal();
+  document.getElementById('unfulfilledModalOverlay').classList.add('show');
+});
+document.getElementById('btnCloseUnfulfilledModal').addEventListener('click', () => {
+  document.getElementById('unfulfilledModalOverlay').classList.remove('show');
+});
+document.getElementById('unfulfilledModalOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'unfulfilledModalOverlay') document.getElementById('unfulfilledModalOverlay').classList.remove('show');
+});
+setTimeout(pollUnfulfilledAlerts, 2000); // 배치ID가 확정될 시간을 조금 준 뒤 첫 조회
+setInterval(pollUnfulfilledAlerts, 30000);
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-23 신규 — TV "다른 배치 조회" 드롭다운
