@@ -1862,6 +1862,100 @@ function getSlotProgress(batchId) {
   }
 }
 
+/* ===================== getUnfulfilledSkuAlerts (★ 2026-08-05 신규 — 재발 방지 핵심 기능) =====================
+ * ★★★ "한쪽 고객사엔 배분됐는데 다른 고객사는 완전히 0인" 패턴을 실시간 감지 ★★★
+ *
+ * 배경: 총량피킹은 "스캔 1번 = 그 순간 대기 중인 모든 고객사 동시 배분" 방식이라,
+ * 어떤 이유로든(정확한 원인 불명 — 조사 결과 클라이언트 화면 상태 문제로 추정)
+ * 일부 고객사가 그 스캔 순간에 빠지면, 그 이후로 아무도 다시 스캔하지 않는 한
+ * 영원히 "미완료"로 숨어있다가 TV 화면이 안 채워져야만 뒤늦게 발견됐음
+ * (2026-08-05 실제 사고: BODP04-M 등 여러 상품이 9곳 중 4곳에게만 배분되고
+ * 나머지 5곳은 스캔·이슈 기록이 전혀 없이 방치됨 — 지난주·이전에도 반복 발생).
+ *
+ * 이 함수는 그 패턴을 "TV가 안 채워지는 걸 사람이 알아챌 때까지" 기다리지 않고
+ * 매 폴링마다 서버가 직접 찾아서 경보를 띄우기 위한 것. 배치 안의 모든
+ * (인보이스, SKU) 줄 중, 같은 바코드+SKU가 배치 안 다른 고객사에게는 이미
+ * 정상적으로 스캔(pass)됐는데 이 줄만 스캔·이슈 기록이 전혀 없는(matchSum=0)
+ * 경우를 찾아서 반환한다. board.html이 이걸 주기적으로 조회해서 눈에 띄는
+ * 배너로 보여줌 — 매니저가 실물을 확인하고 재피킹하거나 MISS로 정산하면 됨.
+ * ================================================================================ */
+function getUnfulfilledSkuAlerts(batchId) {
+  try {
+    if (!batchId) return { ok: false, error: 'batchId required' };
+
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    const custLines = [];
+    if (biLast >= 2) {
+      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        const inv = String(r[1]);
+        if (!inv) return;
+        custLines.push({ invoice: inv, sku: String(r[2]), name: String(r[3]), barcode: r[4], reqQty: Number(r[5]) || 0 });
+      });
+    }
+    if (!custLines.length) return { ok: true, alerts: [] };
+
+    const sl = scanlogSheet_();
+    const slLast = sl.getLastRow();
+    const allScanRows = [];
+    if (slLast >= 2) {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[9] !== 'pass' || r[10] === 'undone') return;
+        allScanRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[8]), qty: Number(r[11]) || 0 });
+      });
+    }
+
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const allIssueRows = [];
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[12] === 'undone') return;
+        allIssueRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[7]), qty: Number(r[10]) || 0 });
+      });
+    }
+
+    // 슬롯 배정 정보(고객사명 표시용)
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    const custNameByInvoice = {}, slotByInvoice = {};
+    if (bcLast >= 2) {
+      bc.getRange(2, 1, bcLast - 1, 8).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        custNameByInvoice[String(r[1])] = r[2];
+        slotByInvoice[String(r[1])] = r[7];
+      });
+    }
+
+    const alerts = [];
+    custLines.forEach(line => {
+      const normKey = normBarcode_(line.barcode) + '|' + line.sku;
+      let matchSum = 0;
+      allScanRows.forEach(s => { if (s.invoice === line.invoice && normBarcode_(s.barcode) + '|' + s.sku === normKey) matchSum += s.qty; });
+      let issueQty = 0;
+      allIssueRows.forEach(iss => { if (iss.invoice === line.invoice && normBarcode_(iss.barcode) + '|' + iss.sku === normKey) issueQty += iss.qty; });
+      if (matchSum > 0 || issueQty > 0) return; // 조금이라도 처리된 흔적 있으면 경보 대상 아님
+      if (matchSum >= line.reqQty) return;
+
+      // 배치 안 다른 고객사에게는 이 바코드+SKU가 정상 스캔됐는지 확인
+      const scannedElsewhere = allScanRows.some(s => s.invoice !== line.invoice && normBarcode_(s.barcode) + '|' + s.sku === normKey);
+      if (!scannedElsewhere) return; // 배치 전체에 아무도 안 스캔했으면(진짜 미피킹 가능성) 이 경보 대상 아님 — 슬롯 카드의 기존 미완료 표시로 충분
+
+      alerts.push({
+        invoice: line.invoice, customer: custNameByInvoice[line.invoice] || '', slotNum: slotByInvoice[line.invoice] || '',
+        sku: line.sku, name: line.name, barcode: String(line.barcode), reqQty: line.reqQty,
+      });
+    });
+
+    return { ok: true, alerts: alerts, count: alerts.length };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 /* ===================== ⑩ getScanState (★ 2026-07-09 신규) =====================
  * 목적: 여러 기기(매니저 PC, 작업자 폰/태블릿)가 batch.html을 동시에 열어놓고
  *       스캔할 때, "다른 기기가 이미 스캔한 내용"을 이 op로 몇 초마다 다시
