@@ -57,17 +57,17 @@ a{color:inherit;}
    피킹 → 검수 → 패킹존 이동 → 디멘션, 실제 작업 순서대로 4단계 카드.
    각 카드: 단계명 + "N / Total" 큰 숫자 + 퍼센트 + 얇은 진행바.
    4단계 사이에 화살표를 둬서 "순서가 있는 흐름"임을 시각적으로 표현. */
-.progress-board{display:flex; align-items:stretch; gap:0; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:14px; overflow-x:auto;}
-.pb-stage{flex:1; min-width:140px; display:flex; flex-direction:column; gap:6px; padding:0 18px;}
+.progress-board{display:flex; align-items:stretch; gap:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 16px; margin-bottom:10px; overflow-x:auto;}
+.pb-stage{flex:1; min-width:130px; display:flex; flex-direction:column; gap:3px; padding:0 16px;}
 .pb-stage:first-child{padding-left:2px;}
-.pb-arrow{display:flex; align-items:center; color:var(--border); flex-shrink:0; font-size:18px;}
-.pb-label{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; gap:6px;}
-.pb-label .pb-dot{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
-.pb-num{font-family:var(--mono); font-size:24px; font-weight:800; line-height:1.1;}
-.pb-num small{font-size:14px; font-weight:700; color:var(--text-dim);}
-.pb-pct{font-family:var(--mono); font-size:11px; font-weight:700;}
-.pb-bar-outer{height:5px; border-radius:3px; background:var(--surface2); overflow:hidden; margin-top:2px;}
-.pb-bar-inner{height:100%; border-radius:3px; transition:width 0.4s ease;}
+.pb-arrow{display:flex; align-items:center; color:var(--border); flex-shrink:0; font-size:16px;}
+.pb-label{font-family:var(--mono); font-size:9.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; gap:5px;}
+.pb-label .pb-dot{width:6px; height:6px; border-radius:50%; flex-shrink:0;}
+.pb-num{font-family:var(--mono); font-size:18px; font-weight:800; line-height:1.15;}
+.pb-num small{font-size:12px; font-weight:700; color:var(--text-dim);}
+.pb-pct{font-family:var(--mono); font-size:10px; font-weight:700;}
+.pb-bar-outer{height:4px; border-radius:2px; background:var(--surface2); overflow:hidden; margin-top:1px;}
+.pb-bar-inner{height:100%; border-radius:2px; transition:width 0.4s ease;}
 
 .search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:10px; max-width:420px;}
 .search-row svg{color:var(--text-dim); flex-shrink:0;}
@@ -130,6 +130,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .pager{display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid var(--border); background:var(--surface2); flex-wrap:wrap; gap:12px;}
 .pager-left{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
 .pager-left select{background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:12px; padding:5px 8px; border-radius:6px; cursor:pointer;}
+.today-page-size-select{background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:12px; padding:5px 8px; border-radius:6px; cursor:pointer;}
 .pager-right{display:flex; align-items:center; gap:4px;}
 .pg-btn{background:var(--surface); border:1px solid var(--border); color:var(--text-dim); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 11px; border-radius:6px; cursor:pointer;}
 .pg-btn:hover:not(:disabled){color:var(--text); border-color:var(--border2);}
@@ -380,13 +381,25 @@ td.new-col{background:rgba(16,217,126,0.03);}
     <div class="today-panel">
       <div class="today-head">
         <h3>Completed Today</h3>
-        <span class="count" id="today-count">Loading...</span>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <select id="today-page-size" onchange="onTodayPageSizeChange()" class="today-page-size-select">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="30" selected>30</option>
+            <option value="40">40</option>
+          </select>
+          <span class="count" id="today-count">Loading...</span>
+        </div>
       </div>
       <div class="today-scroll">
         <div class="today-header">
           <span>Invoice#</span><span>Customer</span><span>Ship Out</span><span>Method</span><span>Status</span><span>Moved</span><span>Dims</span><span>Completed At</span>
         </div>
         <div id="today-list"><div class="today-empty"><span class="spinner"></span>Loading...</div></div>
+      </div>
+      <div class="pager" id="today-pager" style="display:none;">
+        <div class="pager-left"><span id="today-pager-summary">–</span></div>
+        <div class="pager-right" id="today-pager-buttons"></div>
       </div>
     </div>
 
@@ -650,20 +663,44 @@ function renderPager(totalPages){
 function gotoPage(p){ SHEET_PAGE = p; renderSheet(); }
 
 /* ===================== Screen 2: Lookup ===================== */
+let TODAY_JOBS = [];
+let TODAY_PAGE = 1;
+let TODAY_PAGE_SIZE = 30;
+
 async function loadToday(){
   const res = await gasGet({ op:'getSalesTodayList' });
   if (!res || !res.ok){
     document.getElementById('today-list').innerHTML = '<div class="today-empty">Could not load today\\u2019s list.</div>';
     document.getElementById('today-count').textContent = '';
+    document.getElementById('today-pager').style.display = 'none';
     return;
   }
-  const jobs = res.jobs || [];
-  document.getElementById('today-count').textContent = jobs.length + ' orders';
+  TODAY_JOBS = res.jobs || [];
+  TODAY_PAGE = 1;
+  document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
+  renderToday();
+}
+
+function onTodayPageSizeChange(){
+  TODAY_PAGE_SIZE = parseInt(document.getElementById('today-page-size').value, 10);
+  TODAY_PAGE = 1;
+  renderToday();
+}
+function gotoTodayPage(p){ TODAY_PAGE = p; renderToday(); }
+
+function renderToday(){
+  const jobs = TODAY_JOBS;
   if (!jobs.length){
     document.getElementById('today-list').innerHTML = '<div class="today-empty">No orders completed yet today.</div>';
+    document.getElementById('today-pager').style.display = 'none';
     return;
   }
-  document.getElementById('today-list').innerHTML = jobs.map(j=>{
+  const totalPages = Math.max(1, Math.ceil(jobs.length / TODAY_PAGE_SIZE));
+  if (TODAY_PAGE > totalPages) TODAY_PAGE = totalPages;
+  const start = (TODAY_PAGE - 1) * TODAY_PAGE_SIZE;
+  const pageJobs = jobs.slice(start, start + TODAY_PAGE_SIZE);
+
+  document.getElementById('today-list').innerHTML = pageJobs.map(j=>{
     const insp = String(j.inspection || '').trim();
     let badge;
     if (insp.indexOf('PASS') >= 0) badge = '<span class="plain-tag pass">✓ PASS</span>';
@@ -684,6 +721,32 @@ async function loadToday(){
       <span class="today-time">${j.inspEnd||''}</span>
     </div>`;
   }).join('');
+
+  document.getElementById('today-pager-summary').textContent =
+    `${start+1}–${Math.min(start+TODAY_PAGE_SIZE, jobs.length)} of ${jobs.length}`;
+  document.getElementById('today-pager').style.display = totalPages > 1 ? 'flex' : 'none';
+  renderTodayPager(totalPages);
+}
+
+function renderTodayPager(totalPages){
+  const cur = TODAY_PAGE;
+  const btns = [];
+  btns.push(`<button class="pg-btn" ${cur<=1?'disabled':''} onclick="gotoTodayPage(${cur-1})">‹ Prev</button>`);
+  const pages = [];
+  if (totalPages <= 7){ for (let i=1;i<=totalPages;i++) pages.push(i); }
+  else {
+    pages.push(1);
+    if (cur > 3) pages.push('...');
+    for (let i=Math.max(2,cur-1); i<=Math.min(totalPages-1,cur+1); i++) pages.push(i);
+    if (cur < totalPages-2) pages.push('...');
+    pages.push(totalPages);
+  }
+  pages.forEach(p=>{
+    if (p==='...') btns.push('<span class="pg-ellipsis">…</span>');
+    else btns.push(`<button class="pg-btn${p===cur?' active':''}" onclick="gotoTodayPage(${p})">${p}</button>`);
+  });
+  btns.push(`<button class="pg-btn" ${cur>=totalPages?'disabled':''} onclick="gotoTodayPage(${cur+1})">Next ›</button>`);
+  document.getElementById('today-pager-buttons').innerHTML = btns.join('');
 }
 
 function jumpToInvoice(inv){
