@@ -426,7 +426,7 @@ function cardHtml(slot){
       <div class="card-bar"><div style="width:${pct}%"></div></div>
       <div class="card-pack-check" data-pack-invoice="${slot.invoice}">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
-        <span class="label">${slot.takenOut ? '패킹존 이동 완료' : slot.movedToPacking ? '패킹존 이동 필요' : '완료 · 패킹존 이동'}</span>
+        <span class="label">${slot.takenOut ? '패킹존 이동 완료' : slot.movedToPacking ? '패킹존 이동 필요' : '검수 완료 패킹존 이동 준비'}</span>
       </div>
     </div>
   </div>`;
