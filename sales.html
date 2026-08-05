@@ -587,7 +587,7 @@ async function loadToday(){
     if (insp.indexOf('PASS') >= 0) badge = '<span class="plain-tag pass">✓ PASS</span>';
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="plain-tag issue">'+insp+' →</span>';
     else badge = '<span class="plain-tag pending">'+insp+'</span>';
-    const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Packing</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
+    const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Moved</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
     const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">No Dims</span>') : '<span class="plain-tag na">N/A</span>';
@@ -856,7 +856,9 @@ async function doSearch(){
         <div class="detail-cust">${res.customer||''}</div>
         <div class="detail-meta">
           <div class="meta-item"><div class="k">Ship Date</div><div class="v">${res.shipDate||'-'}</div></div>
+          <div class="meta-item"><div class="k">Picking</div><div class="v">${res.pickStart||'-'}</div></div>
           <div class="meta-item"><div class="k">Shipping Method</div><div class="v">${res.method||'-'}</div></div>
+          <div class="meta-item"><div class="k">Amount</div><div class="v">${fmtMoney(res.amount)}</div></div>
           <div class="meta-item"><div class="k">Inspector</div><div class="v">${res.inspector||'-'}</div></div>
           <div class="meta-item"><div class="k">Inspection Completed</div><div class="v">${res.inspEnd||'-'}</div></div>
         </div>
