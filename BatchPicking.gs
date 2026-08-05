@@ -2690,7 +2690,10 @@ function getSalesInvoiceDetail(invoice) {
       const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
       for (let i = bcInvVals.length - 1; i >= 0; i--) {
         if (String(bcInvVals[i][0]).trim() === invoice) {
-          movedToPacking = !!bc.getRange(i + 2, 11).getValue();
+          // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
+          //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
+          //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
+          movedToPacking = !!bc.getRange(i + 2, 12).getValue();
           break;
         }
       }
