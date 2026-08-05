@@ -866,8 +866,11 @@ async function pollOnce(){
         try{
           const openRes = await gasQuery('getOpenBatches', {});
           if(mySeq !== pollSeq) return;
-          if(openRes.ok && Array.isArray(openRes.batches) && openRes.batches.length === 1){
-            resolved = openRes.batches[0];
+          // ★ 2026-08-05 신규 — getOpenBatches가 "완료된 지 1시간 안 된 배치"도
+          //   같이 내려주므로, 이 자동표시 판단에서는 반드시 제외해야 함.
+          const trulyOpen = (openRes.batches || []).filter(b => !b.recentlyCompleted);
+          if(openRes.ok && trulyOpen.length === 1){
+            resolved = trulyOpen[0];
           }
         }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
         if(!resolved){
@@ -1000,8 +1003,14 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
   const today = new Date().toISOString().slice(0,10);
   dd.innerHTML = list.map(b => {
     const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+    // ★ 2026-08-05 신규 — 완료된 지 1시간 안 된 배치는 "완료됨" 태그를 최우선으로
+    //   보여줌(지금 보는 중이 아닌 한). 스캔 100% 끝난 직후 배치번호가 아무 표시
+    //   없이 갑자기 목록에서 사라지던 것과 달리, 1시간 동안은 상태가 명확히
+    //   보이다가 그 다음부터 목록에서 빠짐(서버 getOpenBatches가 그렇게 걸러줌).
     const tag = isCurrent
       ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+      : b.recentlyCompleted
+      ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">✅ 완료됨 · ${b.completedMinutesAgo}분 전</span>`
       : (b.date === today ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">오늘</span>` : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">다른 날짜</span>`);
     return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
       <div>
