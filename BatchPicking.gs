@@ -163,6 +163,106 @@ function diagnoseInvoice() {
   return { ok: true, totalLines: lines.length, okCount: okCount, problems: problems };
 }
 
+/* ===================== diagnoseBatchWide (★ 2026-08-05 신규 — 배치 전체 한 번에 진단) =====================
+ * ★★★ 슬롯 하나씩 diagnoseInvoice 돌리는 대신, 배치 전체를 한 번에 훑어서 어느
+ * 패턴이 얼마나 퍼져있는지 확인 ★★★
+ *
+ * 사용법: DIAG_BATCH_ID만 바꿔서 실행 → 실행 로그 확인 → 저에게 붙여넣기
+ *
+ * 배치 안의 모든 (인보이스, SKU) 줄 중 "필요수량을 못 채운" 줄을 전부 찾고,
+ * 각각을 두 패턴으로 분류합니다:
+ *  - 패턴A "다른 인보이스로는 배분됨" — 이 바코드는 배치 안 다른 고객사에게는
+ *    정상적으로 스캔·배분됐는데, 유독 이 인보이스만 빠짐. 여러 인보이스에서
+ *    반복되면 구조적 버그(특정 인보이스가 스캔 당시 대상 명단에서 누락되는 문제).
+ *  - 패턴B "배치 전체에 스캔 기록이 아예 없음" — 이 상품은 이 배치 안 그 누구도
+ *    스캔한 적이 없음. 실제로 아직 안 가져왔거나(진짜 미피킹), 스캔이 통째로
+ *    누락된 것.
+ * 요약에서 패턴A가 소수의 인보이스에 몰려있으면 그 인보이스(들)이 배치에
+ * "나중에 추가"됐을 가능성이 매우 높습니다.
+ * ================================================================================ */
+function diagnoseBatchWide() {
+  const DIAG_BATCH_ID = 'B20260803-534B0F'; // ← 확인하려는 배치ID로 교체
+  const batchId = DIAG_BATCH_ID;
+
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const custLines = []; // 고객사별 필요 줄만 (총량 행 제외)
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      const inv = String(r[1]);
+      if (!inv) return;
+      custLines.push({ invoice: inv, sku: String(r[2]), name: String(r[3]), barcode: r[4], reqQty: Number(r[5]) || 0 });
+    });
+  }
+
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  const allScanRows = [];
+  if (slLast >= 2) {
+    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      allScanRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[8]), result: r[9], status: r[10], qty: Number(r[11]) || 0 });
+    });
+  }
+
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const allIssueRows = [];
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      allIssueRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[7]), qty: Number(r[10]) || 0, status: r[12] });
+    });
+  }
+
+  const patternA = []; // 다른 인보이스로는 배분됨
+  const patternB = []; // 배치 전체 스캔기록 없음
+  let okCount = 0;
+  const invoiceCountInA = {}; // 패턴A에 몇 번 등장하는지 인보이스별 카운트 — 몰려있는 인보이스 찾기용
+
+  custLines.forEach(line => {
+    const normKey = normBarcode_(line.barcode) + '|' + line.sku;
+    let matchSum = 0;
+    allScanRows.forEach(s => {
+      if (s.invoice !== line.invoice) return;
+      if (s.result !== 'pass' || s.status === 'undone') return;
+      if (normBarcode_(s.barcode) + '|' + s.sku === normKey) matchSum += s.qty;
+    });
+    let issueQty = 0;
+    allIssueRows.forEach(iss => {
+      if (iss.invoice !== line.invoice) return;
+      if (iss.status === 'undone') return;
+      if (normBarcode_(iss.barcode) + '|' + iss.sku === normKey) issueQty += iss.qty;
+    });
+    const effectiveReq = Math.max(0, line.reqQty - issueQty);
+    if (matchSum >= effectiveReq) { okCount++; return; }
+
+    const elsewhere = allScanRows.filter(s => normBarcode_(s.barcode) + '|' + s.sku === normKey && s.result === 'pass' && s.status !== 'undone');
+    if (elsewhere.length > 0) {
+      patternA.push({ 인보이스: line.invoice, SKU: line.sku, 상품명: line.name, 필요수량: line.reqQty, 매칭합계: matchSum, 다른곳배분횟수: elsewhere.length, 다른인보이스목록: [...new Set(elsewhere.map(s => s.invoice))] });
+      invoiceCountInA[line.invoice] = (invoiceCountInA[line.invoice] || 0) + 1;
+    } else {
+      patternB.push({ 인보이스: line.invoice, SKU: line.sku, 상품명: line.name, 필요수량: line.reqQty });
+    }
+  });
+
+  const invoiceCountSorted = Object.entries(invoiceCountInA).sort((a, b) => b[1] - a[1]);
+
+  Logger.log('=== 배치 전체 진단: ' + batchId + ' ===');
+  Logger.log('전체 상품줄 ' + custLines.length + '개 / 정상 ' + okCount + '개');
+  Logger.log('패턴A(다른 곳엔 배분됐는데 이 인보이스만 빠짐) ' + patternA.length + '개');
+  Logger.log('패턴B(배치 전체에 스캔기록 자체가 없음) ' + patternB.length + '개');
+  Logger.log('--- 패턴A가 몰려있는 인보이스 순위(상위 10개) ---');
+  Logger.log(JSON.stringify(invoiceCountSorted.slice(0, 10), null, 2));
+  Logger.log('--- 패턴A 상세(최대 30개) ---');
+  Logger.log(JSON.stringify(patternA.slice(0, 30), null, 2));
+  Logger.log('--- 패턴B 상세(최대 30개) ---');
+  Logger.log(JSON.stringify(patternB.slice(0, 30), null, 2));
+
+  return { ok: true, total: custLines.length, okCount: okCount, patternACount: patternA.length, patternBCount: patternB.length, topInvoicesInA: invoiceCountSorted.slice(0, 10) };
+}
+
 function ensureBatchSheet_(name, headers) {
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
