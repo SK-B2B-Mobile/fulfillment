@@ -132,6 +132,19 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-pack-check .box svg{display:none; width:14px; height:14px;}
 .card.done.moved .card-pack-check .box svg{display:block;}
 .card.done.moved .card-pack-check .label{color:#04140D !important;}
+/* ★ 2026-08-04 신규 — 3단계째: 출고 작업자가 실제로 가져간 상태(taken).
+   핑크 카드를 한 번 더 누르면 이 상태가 됨. 초록/핑크와 같은 설계 언어
+   (밝은 배경 + 진한 글자)를 유지해서 글씨·숫자가 확실히 보이게 함.
+   요청대로 애니메이션 없음 — 가만히 있는 고정 파란색. */
+.card.done.taken{background:#3EB8F5; border-color:#3EB8F5; animation:none;}
+.card.done.taken .card-slot, .card.done.taken .card-cust, .card.done.taken .card-invoice,
+.card.done.taken .card-metarow, .card.done.taken .card-sku{color:#04140D !important;}
+.card.done.taken .card-bar{background:rgba(4,20,13,0.18);}
+.card.done.taken .card-bar > div{background:#04140D;}
+.card.done.taken .card-issue-badge{color:#04140D; background:rgba(4,20,13,0.18); border-color:rgba(4,20,13,0.4);}
+.card.done.taken .card-pack-check .box{border-color:#04140D; background:#04140D;}
+.card.done.taken .card-pack-check .box svg{display:block;}
+.card.done.taken .card-pack-check .label{color:#04140D !important;}
 .card-empty{display:flex; align-items:center; justify-content:center; height:100%; font-family:var(--mono); font-size:20px; color:var(--text-dim); opacity:0.4;}
 
 .empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
@@ -304,21 +317,36 @@ let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상
 // "아직 안 바뀐" 값으로 화면을 통째로 덮어써서 핑크가 다시 초록으로 되돌아갔음.
 // 저장 요청을 보낸 인보이스는 여기 기록해두고, renderBoard가 폴링 데이터로 화면을
 // 새로 그릴 때 "서버 값이 아직 이 값을 안 따라왔으면" 보류값을 그대로 유지하도록 함.
-let _pendingPackMoves = {}; // invoice -> boolean (서버 확인 대기중인 낙관적 값)
+let _pendingPackMoves = {}; // invoice -> 'moved'|'taken' (서버 확인 대기중인 낙관적 단계값) ★ 2026-08-04: boolean → stage 문자열로 변경
+
+// ★ 2026-08-04 신규 — 슬롯의 현재 패킹 단계: none(초록) / moved(핑크) / taken(파랑)
+function packStageOf(slot){
+  return slot.takenOut ? 'taken' : slot.movedToPacking ? 'moved' : 'none';
+}
 
 // ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
 // 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
+// ★ 2026-08-04 확장 — 2단계(초록↔핑크 토글)에서 3단계 순환으로 변경:
+//   초록(완료) →클릭→ 핑크("패킹존 이동 필요" = 출고팀이 가져가야 함)
+//   →클릭→ 파랑("패킹존 이동 완료" = 출고팀이 실제로 가져감)
+//   →클릭→ 핑크 복귀(실수로 눌렀을 때 되돌리기)
+//   서버에는 stage('moved'|'taken')로 전달 — 기존 setPackingMoved op를 확장한 것이라
+//   Code.gs 라우팅 수정 없이 동작. (moved 파라미터만 보내는 옛 클라이언트도 계속 호환됨)
 async function togglePackingMoved(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
-  const next = !slot.movedToPacking;
-  _pendingPackMoves[invoice] = next; // ★ 신규: 폴링이 이 값을 되돌리지 못하게 보류 등록
-  slot.movedToPacking = next; // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
-  renderBoard(Object.values(_slotsByInvoice));
-  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, moved: next });
+  const cur = packStageOf(slot);
+  const next = (cur === 'none') ? 'moved' : (cur === 'moved') ? 'taken' : 'moved';
+  const prevMoved = slot.movedToPacking, prevTaken = slot.takenOut;
+  _pendingPackMoves[invoice] = next; // ★ 폴링이 이 값을 되돌리지 못하게 보류 등록
+  slot.movedToPacking = true;               // moved/taken 둘 다 "이동 표시는 켜진" 상태
+  slot.takenOut = (next === 'taken');
+  renderBoard(Object.values(_slotsByInvoice)); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
+  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
   if(!res.ok){
     delete _pendingPackMoves[invoice]; // 실패 시 보류 해제하고 원상복구
-    slot.movedToPacking = !next; // 실패하면 원상복구
+    slot.movedToPacking = prevMoved;
+    slot.takenOut = prevTaken;
     renderBoard(Object.values(_slotsByInvoice));
   }
   // 성공 시엔 _pendingPackMoves를 여기서 지우지 않음 — 다음 폴링이 서버 값을 읽어와서
@@ -344,7 +372,7 @@ function cardHtml(slot){
   const issueBadge = slot.issueQty > 0
     ? `<span class="card-issue-badge" data-invoice="${slot.invoice}">⚠ ${slot.issueQty.toLocaleString()}</span>`
     : '';
-  return `<div class="card ${slot.status}${slot.movedToPacking?' moved':''}${flashClass}" data-invoice="${slot.invoice}">
+  return `<div class="card ${slot.status}${slot.takenOut?' taken':slot.movedToPacking?' moved':''}${flashClass}" data-invoice="${slot.invoice}">
     <div class="card-top">
       <span class="card-slot">${numLabel}</span>
       <div class="card-top-right">
@@ -362,7 +390,7 @@ function cardHtml(slot){
       <div class="card-bar"><div style="width:${pct}%"></div></div>
       <div class="card-pack-check" data-pack-invoice="${slot.invoice}">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
-        <span class="label">${slot.movedToPacking ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
+        <span class="label">${slot.takenOut ? '패킹존 이동 완료' : slot.movedToPacking ? '패킹존 이동 필요' : '완료 · 패킹존 이동'}</span>
       </div>
     </div>
   </div>`;
@@ -692,11 +720,15 @@ function renderBoard(slots, fromPoll){
     //   데이터(fromPoll=true)일 때만 비교해서 정리함. 클릭 직후 자체 낙관적
     //   재렌더링(fromPoll 없음)에서는 절대 여기서 지우지 않음 — 그 호출은 항상
     //   방금 세팅한 값 그대로라 비교하면 즉시(너무 이르게) 지워져버리기 때문.
+    // ★ 2026-08-04 확장 — boolean 대신 3단계(stage) 값으로 비교 (moved/taken)
     if(fromPoll && Object.prototype.hasOwnProperty.call(_pendingPackMoves, s.invoice)){
-      if(s.movedToPacking === _pendingPackMoves[s.invoice]){
+      const serverStage = s.takenOut ? 'taken' : s.movedToPacking ? 'moved' : 'none';
+      const pending = _pendingPackMoves[s.invoice];
+      if(serverStage === pending){
         delete _pendingPackMoves[s.invoice];
       } else {
-        s.movedToPacking = _pendingPackMoves[s.invoice];
+        s.movedToPacking = (pending !== 'none');
+        s.takenOut = (pending === 'taken');
       }
     }
     _slotsByInvoice[s.invoice] = s;
