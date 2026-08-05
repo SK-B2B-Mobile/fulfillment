@@ -193,11 +193,15 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .badge.picking-complete{background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.5);}
 .badge.picking-waiting .dot-static{width:7px; height:7px; border-radius:50%; background:var(--text-dim); display:inline-block; flex-shrink:0;}
 
-.detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
+.detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none; position:relative;}
 .detail-card.show{display:block;}
 .detail-head{display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:18px; border-bottom:1px solid var(--border); margin-bottom:18px; gap:16px; flex-wrap:wrap;}
 .detail-inv{font-family:var(--mono); font-size:24px; font-weight:800;}
 .detail-cust{font-size:14px; color:var(--text-dim); margin-top:4px;}
+/* ★ 2026-08-05 신규 — 상세 카드 닫기 버튼. 팝업이 아니라 페이지 안에 계속
+   떠 있는 카드라, 다른 검색을 하기 전까지 없앨 방법이 없었음. */
+.detail-close-btn{position:absolute; top:22px; right:22px; background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:32px; height:32px; border-radius:8px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background 0.12s, color 0.12s; z-index:2;}
+.detail-close-btn:hover{background:var(--surface2); color:var(--text); border-color:var(--red);}
 .detail-meta{display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;}
 .meta-item .k{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em;}
 .meta-item .v{font-size:13.5px; font-weight:700; margin-top:3px;}
@@ -1012,11 +1016,23 @@ async function doSearch(){
         ${statusHtml}
         ${status!=='pending' ? movedHtml : ''}
         ${status!=='pending' ? dimsSavedHtml : ''}
+        <button class="detail-close-btn" onclick="closeDetailCard()" title="Close">✕</button>
       </div>
     </div>
     ${itemsSectionHtml}
     ${dimsHtml}
   `;
+}
+
+// ★ 2026-08-05 신규 — 상세 카드 닫기. 검색창도 같이 비워서, 위쪽 "Completed
+// Today" 목록만 다시 깔끔하게 보이는 상태로 되돌림.
+function closeDetailCard(){
+  document.getElementById('detail-card').classList.remove('show');
+  document.getElementById('search-input').value = '';
+  const empty = document.getElementById('empty-state');
+  empty.style.display = 'block';
+  empty.innerHTML = '<div class="icon">🔍</div>Search an invoice number above, or click an order from today\\u2019s list below.';
+  CURRENT_ORDER = null;
 }
 
 function showScreen(name){
