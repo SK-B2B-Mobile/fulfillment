@@ -263,6 +263,103 @@ function diagnoseBatchWide() {
   return { ok: true, total: custLines.length, okCount: okCount, patternACount: patternA.length, patternBCount: patternB.length, topInvoicesInA: invoiceCountSorted.slice(0, 10) };
 }
 
+/* ===================== bulkMarkAsShippedMiss (★ 2026-08-05 신규 — 일괄 정산 도구) =====================
+ * ★★★ 실물 재고를 확인한 뒤에만 사용하세요 — 이 함수는 실제로 데이터를 씁니다 ★★★
+ *
+ * 목적: diagnoseBatchWide()로 찾은 "화면엔 미완료로 뜨지만 실제로는 이미 다
+ * 출고된" 줄들을, 슬롯마다 일일이 "이슈 등록" 버튼을 누르지 않고 한 번에
+ * MISS(스캔 누락, 실제 출고됨) 사유로 등록해서 정산. logIssue()를 그대로
+ * 재사용하므로 IssueLog에 정상적으로 감사기록이 남고, 화면(TV/웹)도 바로
+ * 완료로 바뀜.
+ *
+ * ⚠️ 반드시 실물(창고) 확인 후, "이 줄은 진짜로 이미 나갔다"고 확신하는 것만
+ * LINES_TO_RESOLVE 배열에 넣어서 실행하세요. qty는 자동으로 "남은 부족분"만
+ * 계산해서 등록하므로 직접 입력할 필요 없음(중복 이슈 방지 위해 이미 등록된
+ * 이슈가 있으면 그만큼 빼고 계산함).
+ *
+ * 사용법:
+ *   1) 아래 LINES_TO_RESOLVE 배열에 실물 확인 끝난 { invoice, sku } 쌍만 넣기
+ *      (diagnoseBatchWide 결과의 "인보이스"/"SKU" 값 그대로 복사)
+ *   2) 함수 목록에서 bulkMarkAsShippedMiss 선택 → ▶ 실행
+ *   3) 실행 로그에서 몇 건 처리됐는지 확인
+ *   4) TV 현황판 새로고침 → 해당 슬롯들이 초록으로 바뀌는지 확인
+ * ================================================================================ */
+function bulkMarkAsShippedMiss() {
+  const DIAG_BATCH_ID = 'B20260803-534B0F'; // ← 배치ID
+  const WORKER_NAME = '매니저(일괄정산)'; // ← 이슈 등록자로 표시될 이름, 원하면 실제 매니저 이름으로 교체
+
+  // 🔴 실물 확인이 끝난 것만 여기 넣으세요. 확인 안 된 줄은 절대 넣지 마세요.
+  const LINES_TO_RESOLVE = [
+    // { invoice: 'IN00462241', sku: 'BODP04-M' },
+    // { invoice: 'IN00462241', sku: 'JSMC02-FGUS' },
+    // 여기에 실물 확인된 줄들을 계속 추가...
+  ];
+
+  if (LINES_TO_RESOLVE.length === 0) {
+    Logger.log('⚠ LINES_TO_RESOLVE가 비어있습니다. 처리할 줄을 배열에 넣고 다시 실행하세요.');
+    return { ok: false, error: 'LINES_TO_RESOLVE가 비어있음' };
+  }
+
+  const batchId = DIAG_BATCH_ID;
+
+  // BatchItems에서 각 줄의 필요수량/상품정보 조회
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const biRows = [];
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      biRows.push({ invoice: String(r[1]), sku: String(r[2]), name: String(r[3]), barcode: r[4], reqQty: Number(r[5]) || 0 });
+    });
+  }
+
+  const results = [];
+  LINES_TO_RESOLVE.forEach(target => {
+    const line = biRows.find(r => r.invoice === String(target.invoice) && r.sku === String(target.sku));
+    if (!line) { results.push({ invoice: target.invoice, sku: target.sku, ok: false, error: 'BatchItems에서 해당 줄을 찾지 못함' }); return; }
+
+    // 이미 스캔/이슈로 얼마나 채워졌는지 다시 계산해서, 정확히 "남은 부족분"만 등록
+    const normKey = normBarcode_(line.barcode) + '|' + line.sku;
+    const sl = scanlogSheet_();
+    const slLast = sl.getLastRow();
+    let scanned = 0;
+    if (slLast >= 2) {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[8]) !== line.invoice) return;
+        if (r[9] !== 'pass' || r[10] === 'undone') return;
+        if (normBarcode_(r[4]) + '|' + String(r[5]) === normKey) scanned += Number(r[11]) || 0;
+      });
+    }
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    let existingIssueQty = 0;
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[7]) !== line.invoice) return;
+        if (r[12] === 'undone') return;
+        if (normBarcode_(r[4]) + '|' + String(r[5]) === normKey) existingIssueQty += Number(r[10]) || 0;
+      });
+    }
+    const remaining = Math.max(0, line.reqQty - Math.max(0, scanned) - existingIssueQty);
+    if (remaining <= 0) { results.push({ invoice: target.invoice, sku: target.sku, ok: true, skipped: true, reason: '이미 충분히 채워져 있어 등록 생략' }); return; }
+
+    const res = logIssue({
+      batchId: batchId, worker: WORKER_NAME, barcode: line.barcode, sku: line.sku, name: line.name,
+      invoice: line.invoice, customer: '', reason: 'MISS', qty: remaining,
+      note: '일괄 정산 도구로 등록됨 — 실물 확인 후 처리 (2026-08-05)',
+    });
+    results.push({ invoice: target.invoice, sku: target.sku, qty: remaining, ok: res.ok, issueId: res.issueId, error: res.error });
+  });
+
+  Logger.log('=== 일괄 MISS 정산 결과 ===');
+  Logger.log(JSON.stringify(results, null, 2));
+  const successCount = results.filter(r => r.ok && !r.skipped).length;
+  Logger.log('성공: ' + successCount + '건 / 생략: ' + results.filter(r => r.skipped).length + '건 / 실패: ' + results.filter(r => !r.ok).length + '건');
+  return { ok: true, results: results };
+}
+
 function ensureBatchSheet_(name, headers) {
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
