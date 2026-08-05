@@ -360,6 +360,90 @@ function bulkMarkAsShippedMiss() {
   return { ok: true, results: results };
 }
 
+/* ===================== diagnoseFullBarcodeHistory (★ 2026-08-05 신규 — 상태 무관 전체 이력) =====================
+ * ★★★ pass/over/error/undone 상태 전부 포함해서 이 바코드의 스캔 이력을 통째로 확인 ★★★
+ * 목적: "분명히 스캔했는데 화면엔 안 잡힌다"는 현장 판단을 검증. 이전 진단들은
+ * result==='pass'인 것만 "배분 기록"으로 쳤는데, 혹시 작업자가 재스캔했을 때
+ * 시스템이 "이미 배분 완료됨"(over)으로 튕겨내서 그 시도 자체가 'pass'가 아닌
+ * 다른 상태로 남아있을 수 있음 — 이 함수는 상태/결과 상관없이 이 바코드에 대한
+ * ScanLog 전체 이력을 시간순으로 그대로 보여줌. 특정 인보이스로 한정하지 않고
+ * "이 바코드"에 대해 이 배치 안에서 일어난 모든 일을 다 보여주는 것이 목적.
+ *
+ * 사용법: DIAG_BATCH_ID, DIAG_BARCODE만 바꿔서 실행 (SKU도 알면 정확도 위해 같이 입력)
+ * ================================================================================ */
+function diagnoseFullBarcodeHistory() {
+  const DIAG_BATCH_ID = 'B20260803-534B0F';
+  const DIAG_BARCODE = '8809937361060';  // ← 확인할 바코드
+  const DIAG_SKU = 'BODP04-M';           // ← 확인할 SKU (비워두면 이 바코드의 전체 SKU 다 봄: '')
+
+  const batchId = DIAG_BATCH_ID;
+  const normTargetBarcode = normBarcode_(DIAG_BARCODE);
+
+  // 1) BatchItems — 이 바코드(+SKU)를 필요로 하는 모든 고객사와 필요수량
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const needers = [];
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (normBarcode_(r[4]) !== normTargetBarcode) return;
+      if (DIAG_SKU && String(r[2]) !== DIAG_SKU) return;
+      const inv = String(r[1]);
+      if (!inv) return; // 총량 행 제외
+      needers.push({ invoice: inv, sku: String(r[2]), reqQty: Number(r[5]) || 0 });
+    });
+  }
+
+  // 2) ScanLog — 상태/결과 상관없이 이 바코드에 대한 모든 행 (시간순)
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  const allScans = [];
+  if (slLast >= 2) {
+    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (normBarcode_(r[4]) !== normTargetBarcode) return;
+      if (DIAG_SKU && String(r[5]) !== DIAG_SKU) return;
+      allScans.push({
+        scanId: r[1], 시각: String(r[2]), 작업자: r[3], SKU: String(r[5]),
+        슬롯: r[6], 고객사: r[7], 인보이스: String(r[8]) || '(없음)',
+        결과: r[9], 상태: r[10], 수량: Number(r[11]) || 0,
+      });
+    });
+  }
+  allScans.sort((a, b) => String(a.시각).localeCompare(String(b.시각)));
+
+  // 3) 이슈로그 — 이 바코드에 대한 이슈 등록 이력도 같이
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const allIssues = [];
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (normBarcode_(r[4]) !== normTargetBarcode) return;
+      if (DIAG_SKU && String(r[5]) !== DIAG_SKU) return;
+      allIssues.push({ 시각: String(r[2]), 작업자: r[3], SKU: String(r[5]), 인보이스: String(r[7]), 사유: r[9], 수량: Number(r[10]) || 0, 상태: r[12] });
+    });
+  }
+
+  // 4) 어느 인보이스가 scan이든 issue든 "전혀" 흔적이 없는지 최종 정리
+  const invoicesWithAnyTrace = new Set([
+    ...allScans.map(s => s.인보이스),
+    ...allIssues.map(i => i.인보이스),
+  ]);
+  const trulyUntouched = needers.filter(n => !invoicesWithAnyTrace.has(n.invoice));
+
+  Logger.log('=== 바코드 전체 이력: ' + DIAG_BARCODE + (DIAG_SKU ? ' / SKU ' + DIAG_SKU : '') + ' (배치 ' + batchId + ') ===');
+  Logger.log('이 바코드를 필요로 하는 고객사(BatchItems 기준) ' + needers.length + '곳: ' + JSON.stringify(needers.map(n => n.invoice + '(' + n.reqQty + ')')));
+  Logger.log('--- ScanLog 전체 이력(상태/결과 무관, 시간순) ' + allScans.length + '건 ---');
+  Logger.log(JSON.stringify(allScans, null, 2));
+  Logger.log('--- IssueLog 이력 ' + allIssues.length + '건 ---');
+  Logger.log(JSON.stringify(allIssues, null, 2));
+  Logger.log('--- ScanLog에도 IssueLog에도 이 바코드 관련 흔적이 "전혀" 없는 고객사 ---');
+  Logger.log(JSON.stringify(trulyUntouched, null, 2));
+
+  return { ok: true, needers: needers, allScans: allScans, allIssues: allIssues, trulyUntouched: trulyUntouched };
+}
+
 function ensureBatchSheet_(name, headers) {
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
