@@ -135,13 +135,13 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .today-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 /* ★ 고객명 길이에 따라 Ship 날짜 위치가 들쭉날쭉하던 것을 고쳐서, 모든 컬럼이
    표처럼 항상 같은 x 위치에서 시작하도록 grid로 전면 개편 */
-.today-row{display:grid; grid-template-columns:105px 200px 95px 65px 210px 90px 85px 150px; gap:12px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; white-space:nowrap;}
+.today-row{display:grid; grid-template-columns:105px 180px 125px 70px 195px 90px 85px 145px; gap:14px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; white-space:nowrap;}
 .today-row:last-child{border-bottom:none;}
 .today-row:hover{background:var(--surface2);}
 /* ★ Completed Today 목록 헤더 — 1번 시트 미리보기 테이블 헤더(thead th)와 같은
    글꼴/색/스타일을 쓰되, 아래 행들과 정확히 같은 grid-template-columns을 써서
    각 항목이 컬럼별로 줄이 맞게 함. */
-.today-header{display:grid; grid-template-columns:105px 200px 95px 65px 210px 90px 85px 150px; gap:12px; padding:9px 20px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1;}
+.today-header{display:grid; grid-template-columns:105px 180px 125px 70px 195px 90px 85px 145px; gap:14px; padding:9px 20px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1;}
 .today-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
 .today-cust{font-size:12.5px; color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
@@ -166,6 +166,10 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .badge.picking-active{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.5);}
 .badge.picking-active .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; animation:blink 1s infinite; flex-shrink:0;}
 .badge.picking-waiting{background:var(--gray-bg); color:var(--text-dim);}
+/* ★ 2026-08-05 신규 — Picking 완료 상태. Active(초록, 깜빡임)와 확실히 구분되는
+   파란색 + 정적 체크(깜빡임 없음)로, "지금 활발히 피킹 중"과 "피킹 자체는 끝났다"를
+   한눈에 구분할 수 있게 함. */
+.badge.picking-complete{background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.5);}
 .badge.picking-waiting .dot-static{width:7px; height:7px; border-radius:50%; background:var(--text-dim); display:inline-block; flex-shrink:0;}
 
 .detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none;}
@@ -454,11 +458,14 @@ function methodClass(m){
   return '';
 }
 
-// ★ 피킹 진행 상태 뱃지 — 검수 전(미완료) 오더에 한해서만 의미가 있음.
-//   이미 검수 완료된 건(PASS/ISSUES)은 Fulfillment Status가 이미 알려주므로 "—"로 비움.
+// ★ 피킹 진행 상태 뱃지 — Waiting(아직 시작 안 함) / Active(피킹 중, 초록 깜빡임) /
+//   Complete(검수까지 끝남, 파란색 정적 체크)로 3단계 표시.
+// ★ 2026-08-05 수정(영업팀 요청) — 예전엔 검수 완료 건은 이 컬럼을 "—"로 비워두고
+//   Fulfillment Status 컬럼만 봤어야 했음. Picking 컬럼 하나만 보고도 진행상태
+//   전체(대기→피킹중→완료)를 한눈에 알 수 있도록 Complete 상태를 추가함.
 function pickingBadge(o){
   const insp = String(o.inspection||'').trim();
-  if (insp) return '<span class="detail-dash">—</span>';
+  if (insp) return '<span class="badge picking-complete">✓ Complete</span>';
   if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>Active</span>';
   return '<span class="badge picking-waiting"><span class="dot-static"></span>Waiting</span>';
 }
@@ -514,7 +521,7 @@ function dimsBadge(o){
   const n = o.dimsCount || 0;
   return n>0
     ? '<span class="badge pass">✓ Saved ('+n+')</span>'
-    : '<span class="badge pending">Pending</span>';
+    : '<span class="badge pending">Not Entered</span>';
 }
 
 function renderSheet(){
@@ -603,7 +610,7 @@ async function loadToday(){
     const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Moved</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
     const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
-    const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">No Dims</span>') : '<span class="plain-tag na">N/A</span>';
+    const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>') : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
       <span class="today-inv">${j.invoice||''}</span>
       <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
