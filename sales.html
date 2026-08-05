@@ -64,6 +64,10 @@ table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed
 thead th{background:var(--surface2); text-align:left; padding:11px 12px; font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 thead th.new-col{color:var(--green); background:rgba(16,217,126,0.06);}
 tbody td{padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* ★ 2026-08-05 신규 — "✓ Complete" 뱃지가 Waiting/Active보다 길어서 열 폭에
+   딱 걸려 말줄임표(...) 일부가 점처럼 삐져나오던 문제. 이 칸만 말줄임을 꺼서
+   뱃지 전체가 항상 온전히 보이게 함. */
+td.badge-cell{overflow:visible; text-overflow:clip;}
 tbody tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:rgba(255,255,255,0.02);}
 td.new-col{background:rgba(16,217,126,0.03);}
@@ -549,7 +553,7 @@ function renderSheet(){
         <td class="mono" style="font-weight:800">${o.invoice}</td>
         <td><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
         <td class="mono dim">${o.shipDate||'-'}</td>
-        <td>${pickingBadge(o)}</td>
+        <td class="badge-cell">${pickingBadge(o)}</td>
         <td><span class="badge method ${methodClass(o.method)}">${o.method||'-'}</span></td>
         <td class="mono">${fmtMoney(o.amount)}</td>
         <td class="new-col">${badge}</td>
