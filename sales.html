@@ -53,6 +53,22 @@ a{color:inherit;}
 .section-head h2{font-size:16px; font-weight:800;}
 .section-head p{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px; line-height:1.4;}
 
+/* ═══════════════ 진행 현황판 (★ 2026-08-05 신규) ═══════════════
+   피킹 → 검수 → 패킹존 이동 → 디멘션, 실제 작업 순서대로 4단계 카드.
+   각 카드: 단계명 + "N / Total" 큰 숫자 + 퍼센트 + 얇은 진행바.
+   4단계 사이에 화살표를 둬서 "순서가 있는 흐름"임을 시각적으로 표현. */
+.progress-board{display:flex; align-items:stretch; gap:0; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:14px; overflow-x:auto;}
+.pb-stage{flex:1; min-width:140px; display:flex; flex-direction:column; gap:6px; padding:0 18px;}
+.pb-stage:first-child{padding-left:2px;}
+.pb-arrow{display:flex; align-items:center; color:var(--border); flex-shrink:0; font-size:18px;}
+.pb-label{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; gap:6px;}
+.pb-label .pb-dot{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+.pb-num{font-family:var(--mono); font-size:24px; font-weight:800; line-height:1.1;}
+.pb-num small{font-size:14px; font-weight:700; color:var(--text-dim);}
+.pb-pct{font-family:var(--mono); font-size:11px; font-weight:700;}
+.pb-bar-outer{height:5px; border-radius:3px; background:var(--surface2); overflow:hidden; margin-top:2px;}
+.pb-bar-inner{height:100%; border-radius:3px; transition:width 0.4s ease;}
+
 .search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:10px; max-width:420px;}
 .search-row svg{color:var(--text-dim); flex-shrink:0;}
 .search-row input{flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:13.5px;}
@@ -302,6 +318,12 @@ td.new-col{background:rgba(16,217,126,0.03);}
       <p>Live from the same Jobs data the warehouse uses. Fulfillment Status and Moved to Packing update automatically — no manual entry.</p>
     </div>
 
+    <!-- ★ 2026-08-05 신규 — 전체 진행 현황판. 검색/필터와 무관하게 항상 전체
+         오더 기준으로 계산되며, 실제 작업 흐름 순서(피킹→검수→패킹존 이동→
+         디멘션)대로 4단계를 보여줌. 영업팀이 표를 한 줄씩 안 읽어도 전체
+         진행률을 한눈에 파악할 수 있게 하기 위함. -->
+    <div class="progress-board" id="progressBoard"></div>
+
     <div class="search-row">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
       <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="onSheetSearch()">
@@ -499,7 +521,43 @@ async function loadSheetOverview(){
   }
   SHEET_JOBS = res.jobs || [];
   SHEET_PAGE = 1;
+  renderProgressBoard(SHEET_JOBS);
   renderSheet();
+}
+
+// ★ 2026-08-05 신규 — 진행 현황판. 검색창 필터와 무관하게 항상 전체 로드된
+// 오더 기준(SHEET_JOBS 전체)으로 계산 — "지금 화면에 몇 건 보이나"가 아니라
+// "전체 중 몇 건이 각 단계를 끝냈나"를 보여주는 게 목적이기 때문.
+function renderProgressBoard(jobs){
+  const board = document.getElementById('progressBoard');
+  if(!board) return;
+  if(!jobs.length){ board.innerHTML = ''; return; }
+
+  const total = jobs.length;
+  const pickDone = jobs.filter(o => o.pickComplete).length;
+  const inspected = jobs.filter(o => classifyInsp(o.inspection).status !== 'pending').length;
+  const moved = jobs.filter(o => o.movedToPacking).length;
+  const needsDims = jobs.filter(o => (o.method==='TRUCKING'||o.method==='TK'||o.method==='UPS'));
+  const dimsDone = needsDims.filter(o => (o.dimsCount||0) > 0).length;
+
+  const stages = [
+    { label:'Picking',        done:pickDone,  total:total,            color:'var(--blue)' },
+    { label:'Inspected',      done:inspected, total:total,            color:'var(--green)' },
+    { label:'Moved to Packing', done:moved,   total:total,            color:'var(--amber)' },
+    { label:'Dimensions',     done:dimsDone,  total:needsDims.length,  color:'var(--purple)' },
+  ];
+
+  const arrowSvg = '<span class="pb-arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg></span>';
+
+  board.innerHTML = stages.map((s, i) => {
+    const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
+    return `${i>0 ? arrowSvg : ''}<div class="pb-stage">
+      <div class="pb-label"><span class="pb-dot" style="background:${s.color}"></span>${s.label}</div>
+      <div class="pb-num">${s.done}<small> / ${s.total}</small></div>
+      <div class="pb-pct" style="color:${s.color}">${pct}%</div>
+      <div class="pb-bar-outer"><div class="pb-bar-inner" style="width:${pct}%; background:${s.color};"></div></div>
+    </div>`;
+  }).join('');
 }
 
 function onSheetSearch(){ SHEET_PAGE = 1; renderSheet(); }
