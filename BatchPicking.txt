@@ -2070,10 +2070,28 @@ function getOpenBatches() {
     const rows = bSh.getRange(2, 1, last - 1, 7).getValues();
     const open = [];
     const openIds = {};
+    // ★ 2026-08-05 신규(매니저 요청) — 예전엔 status==='completed'면 무조건
+    //   목록에서 제외했음. 그런데 batch.html이 스캔 100% 완료 시 자동으로
+    //   completeBatch를 호출하는 순간, 배치가 "미완료 목록"에서 바로 사라지면서
+    //   동시에 배지/TV의 다른배치 드롭다운에서도 그 배치번호가 안 보이던 게 아니라
+    //   (그건 그대로 남아있음) — 오히려 이 목록에서만 조용히 빠져서 "번호는
+    //   남아있는데 목록에서만 갑자기 사라진다"는 일관성 문제가 있었음.
+    //   이제 완료된 지 1시간이 안 된 배치는 "완료됨"으로 표시해서 그대로 보여주고,
+    //   1시간이 지나야 목록에서 완전히 빠짐 — 완료 트리거 자체(스캔 100%)는
+    //   그대로 유지하고, 화면 표시만 1시간 유예를 둠.
+    const RECENT_COMPLETE_GRACE_MS = 60 * 60 * 1000; // 1시간
+    const nowMs = Date.now();
     rows.forEach(r => {
       const status = String(r[2] || '');
-      if (status === 'completed') return;
-      const b = { batchId: String(r[0]), date: r[1], status: status, totalSku: r[3], totalQty: r[4], createdAt: r[5] };
+      let recentlyCompleted = false, completedMinutesAgo = null;
+      if (status === 'completed') {
+        const completedAtRaw = r[6];
+        const completedMs = completedAtRaw ? new Date(String(completedAtRaw).replace(' ', 'T')).getTime() : NaN;
+        if (isNaN(completedMs) || (nowMs - completedMs) > RECENT_COMPLETE_GRACE_MS) return; // 1시간 지났으면 완전히 제외
+        recentlyCompleted = true;
+        completedMinutesAgo = Math.max(0, Math.round((nowMs - completedMs) / 60000));
+      }
+      const b = { batchId: String(r[0]), date: r[1], status: status, totalSku: r[3], totalQty: r[4], createdAt: r[5], recentlyCompleted: recentlyCompleted, completedMinutesAgo: completedMinutesAgo };
       open.push(b);
       openIds[b.batchId] = true;
     });
