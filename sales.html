@@ -205,7 +205,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .detail-meta{display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;}
 .meta-item .k{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em;}
 .meta-item .v{font-size:13.5px; font-weight:700; margin-top:3px;}
-.status-stack{display:flex; flex-direction:column; align-items:flex-end; gap:8px;}
+.status-stack{display:flex; flex-direction:column; align-items:flex-end; gap:8px; margin-top:38px;}
 
 .status-big{display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:13.5px; font-weight:800; padding:7px 14px; border-radius:10px; text-align:right;}
 .status-big.pass{background:var(--green-bg); color:var(--green);}
@@ -387,9 +387,9 @@ td.new-col{background:rgba(16,217,126,0.03);}
         <h3>Completed Today</h3>
         <div style="display:flex; align-items:center; gap:10px;">
           <select id="today-page-size" onchange="onTodayPageSizeChange()" class="today-page-size-select">
-            <option value="10">10</option>
+            <option value="10" selected>10</option>
             <option value="20">20</option>
-            <option value="30" selected>30</option>
+            <option value="30">30</option>
             <option value="40">40</option>
           </select>
           <span class="count" id="today-count">Loading...</span>
@@ -397,7 +397,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
       </div>
       <div class="today-scroll">
         <div class="today-header">
-          <span>Invoice#</span><span>Customer</span><span>Ship Out</span><span>Method</span><span>Status</span><span>Moved</span><span>Dims</span><span>Completed At</span>
+          <span>Invoice#</span><span>Customer</span><span>Ship Out</span><span>Method</span><span>Status</span><span>Moved</span><span>Dims</span><span>Inspected At</span>
         </div>
         <div id="today-list"><div class="today-empty"><span class="spinner"></span>Loading...</div></div>
       </div>
@@ -669,7 +669,7 @@ function gotoPage(p){ SHEET_PAGE = p; renderSheet(); }
 /* ===================== Screen 2: Lookup ===================== */
 let TODAY_JOBS = [];
 let TODAY_PAGE = 1;
-let TODAY_PAGE_SIZE = 30;
+let TODAY_PAGE_SIZE = 10;
 
 async function loadToday(){
   const res = await gasGet({ op:'getSalesTodayList' });
