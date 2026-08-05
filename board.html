@@ -133,7 +133,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
    바뀌어서, 초록(=완료했지만 아직 패킹존으로 안 옮김, 신경 써야 함)과 한눈에 구분됨. */
 .card-pack-check{display:none; align-items:center; gap:8px; cursor:pointer; margin-top:10px;}
 .card.done .card-pack-check{display:flex;}
-.card.done .card-pack-check .label{font-family:var(--mono); font-size:18px; font-weight:800; color:#04140D;}
+.card.done .card-pack-check .label{font-family:var(--mono); font-size:18px; font-weight:800; color:#04140D; white-space:nowrap;}
 /* ★ 2026-07-24 수정 — 완료(초록) 카드와 똑같은 방식: 테두리만이 아니라
    카드 전체 배경을 진한 핑크로 꽉 채움(라인=배경 완전히 통일). 텍스트도
    초록카드처럼 어두운 색으로. 애니메이션도 훨씬 강하고 눈에 띄게(밝기+그림자
@@ -426,7 +426,7 @@ function cardHtml(slot){
       <div class="card-bar"><div style="width:${pct}%"></div></div>
       <div class="card-pack-check" data-pack-invoice="${slot.invoice}">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
-        <span class="label">${slot.takenOut ? '패킹존 이동 완료' : slot.movedToPacking ? '패킹존 이동 필요' : '검수 완료 패킹존 이동 준비'}</span>
+        <span class="label">${slot.takenOut ? '패킹존 이동 완료' : slot.movedToPacking ? '패킹존 이동 필요' : '검수완료 · 이동준비'}</span>
       </div>
     </div>
   </div>`;
