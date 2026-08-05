@@ -14,7 +14,7 @@
   --border2:#2A3555;
   --text:#EDF1F9; --text-dim:#8A93AC;
   --amber:#F59E0B; --amber-bg:rgba(245,158,11,0.12);
-  --green:#10D97E; --green-bg:rgba(16,217,126,0.12);
+  --green:#22C55E; --green-bg:rgba(34,197,94,0.12);
   --gray:#3A4560; --gray-bg:rgba(58,69,96,0.25);
   --sans:'Inter',-apple-system,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,monospace;
@@ -97,7 +97,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card.done{border-color:var(--green); background:var(--green);}
 .card.flash{animation:flashDone 1.8s ease-out 2;}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4);} 50%{box-shadow:0 0 0 10px rgba(245,158,11,0);}}
-@keyframes flashDone{0%{box-shadow:0 0 40px var(--green);} 100%{box-shadow:0 0 0 rgba(16,217,126,0);}}
+@keyframes flashDone{0%{box-shadow:0 0 40px var(--green);} 100%{box-shadow:0 0 0 rgba(34,197,94,0);}}
 
 .card-top{display:flex; justify-content:space-between; align-items:flex-start;}
 .card-slot{font-family:var(--mono); font-size:48px; font-weight:800; color:var(--text-dim);}
@@ -232,7 +232,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <!-- ★ 2026-08-05 신규 — 미배분 경보: 다른 고객사에겐 스캔됐는데 이 고객사만
            완전히 빠진 상품이 있으면 뜸. 클릭하면 상세 목록 모달. -->
       <div class="unfulfilled-banner" id="unfulfilledBanner">
-        ⚠️ <span id="unfulfilledBannerText">미배분 상품 확인 필요</span>
+        ⚠️ <span id="unfulfilledBannerText">미배분 제품 확인 필요</span>
       </div>
     </div>
     <div class="tb-switch-wrap">
@@ -254,7 +254,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 <div class="unfulfilled-modal-overlay" id="unfulfilledModalOverlay">
   <div class="unfulfilled-modal">
     <div class="unfulfilled-modal-head">
-      <h3>⚠️ 미배분 상품 목록</h3>
+      <h3>⚠️ 미배분 제품 목록</h3>
       <button id="btnCloseUnfulfilledModal">✕</button>
     </div>
     <div class="unfulfilled-modal-body" id="unfulfilledModalBody"></div>
@@ -929,7 +929,7 @@ async function pollUnfulfilledAlerts(){
     const banner = document.getElementById('unfulfilledBanner');
     const text = document.getElementById('unfulfilledBannerText');
     if(_unfulfilledAlerts.length > 0){
-      text.textContent = `미배분 상품 ${_unfulfilledAlerts.length}건 — 다른 고객사엔 이미 배분됐는데 이 상품만 빠짐 (클릭해서 확인)`;
+      text.textContent = `미배분 제품 ${_unfulfilledAlerts.length}건 — 다른 고객사엔 이미 배분됐는데 이 제품만 빠짐 (클릭해서 확인)`;
       banner.classList.add('show');
     } else {
       banner.classList.remove('show');
@@ -952,7 +952,7 @@ function renderUnfulfilledModal(){
     </div>`).join('');
   body.innerHTML = `
     <div class="unfulfilled-modal-note">
-      아래 상품들은 배치 안 <b>다른 고객사에게는 이미 정상적으로 스캔·배분됐지만</b>,
+      아래 제품들은 배치 안 <b>다른 고객사에게는 이미 정상적으로 스캔·배분됐지만</b>,
       나열된 고객사에는 스캔·이슈 기록이 전혀 없습니다. 실물 창고에 해당 상품이
       남아있는지 확인해 주세요.<br><br>
       · 재고가 있다면 → 마저 피킹해서 슬롯에 넣고 다시 스캔하면 정상 반영됩니다.<br>
