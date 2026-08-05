@@ -245,6 +245,12 @@ function doGet(e) {
   if (op === 'getActiveBatch') {
     return json_(getActiveBatch());
   }
+  // ★ 2026-08-05 신규 — 미배분 경보: 배치 안에서 "다른 고객사에겐 스캔됐는데
+  //   이 고객사만 완전히 빠진" 상품을 찾아 TV 현황판에 즉시 경보로 보여주기 위함.
+  //   (BatchPicking.gs의 getUnfulfilledSkuAlerts 함수를 그대로 연결)
+  if (op === 'getUnfulfilledSkuAlerts') {
+    return json_(getUnfulfilledSkuAlerts((e.parameter || {}).batchId || ''));
+  }
 
   // ★ 2026-07-28 신규 — 영업 공유: 오더 검수 상세 + 배송 디멘션 조회
   if (op === 'getSalesInvoiceDetail') {
@@ -2568,10 +2574,17 @@ function buildMovedToPackingMap_() {
     const bc = bcustSheetSafe_();
     const last = bc.getLastRow();
     if (last >= 2) {
-      bc.getRange(2, 1, last - 1, 11).getValues().forEach(r => {
+      // ★ 2026-08-05 수정(매니저 요청) — 예전엔 K컬럼(MovedToPacking, TV 카드가
+      //   핑크로 바뀌는 순간 = "패킹존 이동 필요"로 표시된 시각)을 기준으로 영업
+      //   공유 페이지의 "Moved" 상태를 판단했음. 그런데 실제로는 검수팀이 핑크로
+      //   바꿔서 "가지고 가라"고 표시해도, 출고팀이 실제로 가져가지 않으면 아직
+      //   이동한 게 아님 — 진짜 이동 완료 시점은 TV 카드가 파랑으로 바뀌는 순간
+      //   (L컬럼, TakenOut)임. 그래서 이제 L컬럼을 기준으로 판단하도록 변경.
+      //   12번째 컬럼(L)까지 읽어야 하므로 범위를 11→12로 확장.
+      bc.getRange(2, 1, last - 1, 12).getValues().forEach(r => {
         const inv = String(r[1] || '').trim();
         if (!inv) return;
-        map[inv] = !!r[10]; // 나중 행(더 최근 배치)이 앞선 값을 덮어씀 = 최신 상태 유지
+        map[inv] = !!r[11]; // r[11] = L컬럼(TakenOut) — 나중 행(더 최근 배치)이 앞선 값을 덮어씀 = 최신 상태 유지
       });
     }
   } catch (e) { /* best-effort */ }
