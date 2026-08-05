@@ -200,8 +200,8 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .detail-cust{font-size:14px; color:var(--text-dim); margin-top:4px;}
 /* ★ 2026-08-05 신규 — 상세 카드 닫기 버튼. 팝업이 아니라 페이지 안에 계속
    떠 있는 카드라, 다른 검색을 하기 전까지 없앨 방법이 없었음. */
-.detail-close-btn{position:absolute; top:22px; right:22px; background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:32px; height:32px; border-radius:8px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background 0.12s, color 0.12s; z-index:2;}
-.detail-close-btn:hover{background:var(--surface2); color:var(--text); border-color:var(--red);}
+.detail-close-btn{position:absolute; top:22px; right:22px; background:var(--surface3, #1C2438); border:1.5px solid var(--border2, #3A4560); color:var(--text); width:34px; height:34px; border-radius:8px; font-size:18px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:background 0.12s, color 0.12s, border-color 0.12s; z-index:2; box-shadow:0 2px 6px rgba(0,0,0,0.35);}
+.detail-close-btn:hover{background:var(--red-bg); color:var(--red); border-color:var(--red);}
 .detail-meta{display:flex; gap:24px; margin-top:14px; flex-wrap:wrap;}
 .meta-item .k{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em;}
 .meta-item .v{font-size:13.5px; font-weight:700; margin-top:3px;}
