@@ -2693,6 +2693,7 @@ function getSalesOverview() {
     const iArch      = hdr[norm('archived')];
     const iCreated   = hdr[norm('Created At')];
     const iStartISO  = hdr[norm('StartAtISO')];
+    const iEndISO    = hdr[norm('EndAtISO')]; // ★ 2026-08-05 신규 — 피킹 완료 여부 판단용
     if (!iInv) return { ok: true, jobs: [] };
 
     const tz = Session.getScriptTimeZone();
@@ -2712,6 +2713,7 @@ function getSalesOverview() {
     const archVals     = iArch     ? sh.getRange(2, iArch,     n, 1).getValues() : null;
     const createdVals  = iCreated  ? sh.getRange(2, iCreated,  n, 1).getValues() : null;
     const startISOVals = iStartISO ? sh.getRange(2, iStartISO, n, 1).getValues() : null;
+    const endISOVals   = iEndISO   ? sh.getRange(2, iEndISO,   n, 1).getValues() : null; // ★ 2026-08-05 신규
 
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
@@ -2734,11 +2736,18 @@ function getSalesOverview() {
         if (sv instanceof Date && !isNaN(sv)) pickStart = Utilities.formatDate(sv, tz, 'yyyy-MM-dd');
         else { const s = String(sv || '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10); }
       }
+      // ★ 2026-08-05 신규 — "피킹 완료" = 피킹 종료 시각(EndAtISO)이 기록됐는지로 판단.
+      //   총량피킹은 스캔 100% 완료 시 자동으로 이 값이 채워지고(syncInspectionFromPicking_
+      //   경로와 별개로 총량피킹 배치 완료 시 Jobs 시트 EndAtISO까지는 자동 반영 안 되는
+      //   경로도 있을 수 있어, 검수(Inspection)가 이미 찍혀 있으면 그것도 "피킹 완료"로 같이 인정함
+      //   — 검수가 됐다는 건 이미 피킹이 끝났다는 뜻이므로 안전한 보조 판단 기준).
+      const pickComplete = !!(endISOVals && endISOVals[i][0]) || !!(inspVals && String(inspVals[i][0]||'').trim());
       jobs.push({
         invoice: invoice,
         remarks: remarksVals ? remarksVals[i][0] : '',
         shipDate: shipDate,
         pickStart: pickStart,
+        pickComplete: pickComplete,
         method: truckVals ? truckVals[i][0] : '',
         amount: amountVals ? amountVals[i][0] : '',
         inspection: inspVals ? String(inspVals[i][0] || '').trim() : '',
