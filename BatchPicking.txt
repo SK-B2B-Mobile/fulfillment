@@ -31,6 +31,46 @@ const BWORKERS_SHEET = 'BatchWorkers'; // ★ 2026-07-16 신규 — 총량피킹
 function batchTz_() { return Session.getScriptTimeZone(); }
 function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
 
+/* ===================== normBarcode_ (★ 2026-08-05 긴급 신규) =====================
+ * ★★★ 매우 중요 — TV 현황판이 "스캔했는데 완료로 안 뜨는" 버그의 근본 원인 수정 ★★★
+ *
+ * 원인: BatchItems 시트는 Barcode 컬럼을 텍스트('@')로 고정해서 쓰기 때문에
+ * "0"으로 시작하는 바코드(EAN-13/UPC 계열에 매우 흔함, 예: "0123456789012")도
+ * 원본 그대로 보존됨. 그런데 ScanLog/IssueLog에 스캔·이슈를 appendRow로 쓸 때는
+ * 이 텍스트 고정이 빠져 있었음 — 그 결과 순수 숫자로만 된 바코드를 구글시트가
+ * 자동으로 "숫자" 타입으로 바꿔버리면서 앞자리 0이 통째로 사라짐
+ * (예: "0123456789012" → 123456789012 → 다시 읽으면 "123456789012").
+ *
+ * 이러면 BatchItems 기준으로 만든 키("0123456789012|SKU001")와 ScanLog 기준으로
+ * 만든 키("123456789012|SKU001")가 서로 달라져서, TV/웹의 진행률 계산이 그
+ * 스캔을 "없는 것"으로 취급함 — 스캔 직후엔 클라이언트가 낙관적으로 화면을
+ * 초록/완료로 보여주지만, 몇 초 뒤 서버 폴링이 이 어긋난 값(0)으로 덮어써서
+ * 다시 미완료로 되돌아감. (2026-08-04 setPackingMoved 작업 시 발견된 정확히
+ * 그 현상 — 여러 슬롯이 몇 개 SKU만 남기고 전부 진행중에 멈춰있던 이유)
+ *
+ * 수정 전략(이중 방어):
+ *  1) 쓰기 시점 — logScan/logIssue가 이제 새 행을 쓰기 전에 Barcode/SKU
+ *     컬럼을 텍스트로 먼저 고정함(BatchItems와 동일한 패턴). 이후로는 손상 자체가
+ *     발생하지 않음.
+ *  2) 읽기 시점(이 함수) — 이미 손상된 기존 데이터가 있어도 즉시 정상 작동하도록,
+ *     바코드로 키를 만드는 모든 곳(getSlotProgress/getScanState/
+ *     getInvoiceItemStatus/getOpenBatches 등)에서 이 함수로 정규화한 뒤 비교함.
+ *     순수 숫자 문자열이면 앞자리 0을 제거해서 "0123..."과 "123..."이 항상 같은
+ *     값으로 매칭되게 만듦. 문자가 섞인 바코드(알파벳 포함 등)는 원본 그대로 둠 —
+ *     구글시트의 자동 숫자변환은 순수 숫자 문자열에만 적용되기 때문에, 정규화도
+ *     그 경우에만 필요함. 배치.html(클라이언트)에도 동일한 로직의 normBarcode()
+ *     함수가 있어 서버와 항상 같은 기준으로 키를 만듦.
+ * ================================================================================ */
+function normBarcode_(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (s === '') return s;
+  if (/^\d+$/.test(s)) {
+    const stripped = s.replace(/^0+/, '');
+    return stripped === '' ? '0' : stripped;
+  }
+  return s;
+}
+
 function ensureBatchSheet_(name, headers) {
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
@@ -617,7 +657,7 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force) {
       if (String(r[8]) !== String(invoice)) return;
       if (r[10] === 'undone') return;
       if (r[9] !== 'pass') return;
-      const key = String(r[4]) + '|' + String(r[5]); // barcode|sku
+      const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_로 앞자리0 손실 방어
       scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[11]) || 0);
     });
   }
@@ -668,7 +708,15 @@ function logScan(data) {
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
     const scanId = Utilities.getUuid();
-    scanlogSheet_().appendRow([
+    const sl = scanlogSheet_();
+    // ★ 2026-08-05 긴급 수정 — appendRow로 그냥 쓰면 순수 숫자 바코드(0으로
+    //   시작하는 경우가 흔함)가 구글시트에 의해 자동으로 숫자로 변환되어 앞자리
+    //   0이 사라짐(BatchItems엔 이미 적용돼 있던 텍스트 고정이 여기 빠져있었음).
+    //   새로 추가될 행 번호를 먼저 계산해서, 그 행의 Barcode(E)/SKU(F) 컬럼을
+    //   텍스트로 고정한 뒤에 값을 씀 — appendRow 대신 getRange+setValues 사용.
+    const newRow = sl.getLastRow() + 1;
+    sl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+    sl.getRange(newRow, 1, 1, 12).setValues([[
       data.batchId, scanId, batchNow_(), data.worker || '', data.barcode || '',
       data.sku || '', data.slot || '', data.customer || '', data.invoice || '',
       data.result || 'pass', 'active', Number(data.qty) || 1
@@ -677,7 +725,7 @@ function logScan(data) {
       //   추가된 컬럼. 총량피킹에서 스캔의 목적은 개수 검수가 아니라 "이 상품을
       //   어느 고객사로 보낼지 분류"하는 것이므로, 스캔 1번에 여러 개가 한번에
       //   해당 고객사 몫으로 카운트되어야 함.
-    ]);
+    ]]);
     // ★ 2026-07-24 신규 — 원래 sk-worker 앱에서 하던 "검수"를 총량피킹 스캔이
     //   대신하고 있으므로, 이 스캔으로 그 고객사가 방금 완료됐다면 Jobs 시트
     //   Inspection에도 자동 반영. best-effort라 실패해도 스캔 자체는 성공 처리.
@@ -709,12 +757,18 @@ function logIssue(data) {
     const qty = Number(data.qty) || 0;
     if (qty <= 0) return { ok: false, error: 'qty must be > 0' };
     const issueId = Utilities.getUuid();
-    issuelogSheet_().appendRow([
+    // ★ 2026-08-05 긴급 수정 — logScan과 동일한 이유로, IssueLog의 Barcode(E)/
+    //   SKU(F) 컬럼도 appendRow 전에 텍스트로 먼저 고정해서 숫자 자동변환(앞자리
+    //   0 소실)을 막음.
+    const il = issuelogSheet_();
+    const ilNewRow = il.getLastRow() + 1;
+    il.getRange(ilNewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+    il.getRange(ilNewRow, 1, 1, 13).setValues([[
       data.batchId, issueId, batchNow_(), data.worker || '',
       data.barcode || '', data.sku || '', data.name || '',
       data.invoice, data.customer || '', data.reason || 'ETC',
       qty, data.note || '', 'active'
-    ]);
+    ]]);
     // ★ 2026-07-22 신규 — 매우 중요한 버그 수정:
     //   총량피킹은 "스캔 = 그 SKU를 필요로 하는 모든 고객사가 즉시 전량 pass
     //   처리"되는 구조라서, 이슈를 나중에 등록해도 그 전에 이미 서버에는
@@ -726,11 +780,15 @@ function logIssue(data) {
     //   취소해도 그대로 유지됨 — "이슈 취소"는 "필요수량에 다시 포함시킨다"는
     //   뜻이지 "이미 스캔된 걸로 자동 확정한다"는 뜻이 아니기 때문
     //   (다시 필요하다고 표시된 이상, 실제로 다시 스캔해서 확인해야 정확함).
-    scanlogSheet_().appendRow([
+    // ★ 2026-08-05 긴급 수정 — 이 ADJ 상쇄기록도 같은 이유로 텍스트 고정.
+    const sl2 = scanlogSheet_();
+    const sl2NewRow = sl2.getLastRow() + 1;
+    sl2.getRange(sl2NewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+    sl2.getRange(sl2NewRow, 1, 1, 12).setValues([[
       data.batchId, 'ADJ-' + issueId, batchNow_(), data.worker || '',
       data.barcode || '', data.sku || '', '', data.customer || '',
       data.invoice, 'pass', 'active', -qty
-    ]);
+    ]]);
     bumpVersion_();
     // ★ 2026-07-24 신규: 이슈 등록으로 필요수량이 줄어들어 방금 완료로 바뀌었을 수 있음
     try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
@@ -1147,7 +1205,7 @@ function getInvoiceItemStatus(batchId, invoice) {
         if (String(r[8]) !== String(invoice)) return;
         if (r[10] === 'undone') return;
         if (r[9] !== 'pass') return;
-        const key = String(r[4]) + '|' + String(r[5]); // barcode|sku
+        const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_ 적용
         scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[11]) || 1);
       });
       // ★ 2026-07-24 긴급 수정 — 같은 버그: 상쇄용 ADJ 기록 때문에 순 스캔량이
@@ -1163,7 +1221,7 @@ function getInvoiceItemStatus(batchId, invoice) {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[7]) !== String(invoice)) return;
         if (r[12] === 'undone') return;
-        const key = String(r[4]) + '|' + String(r[5]);
+        const key = normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
         issueByKey[key] = (issueByKey[key] || 0) + (Number(r[10]) || 0);
       });
     }
@@ -1177,8 +1235,8 @@ function getInvoiceItemStatus(batchId, invoice) {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[1]) !== String(invoice)) return;
         const skuCode = String(r[2]);
-        const bc = String(r[4]);
-        const key = bc + '|' + skuCode;
+        const bc = String(r[4]); // 원본 표시용(정규화 안 함 — 앞자리 0 그대로 화면에 보여줌)
+        const key = normBarcode_(r[4]) + '|' + skuCode; // ★ 2026-08-05: 키는 정규화, 표시는 원본
         reqByKey[key] = (reqByKey[key] || 0) + (Number(r[5]) || 0);
         infoByKey[key] = { sku: r[2], name: r[3], barcode: bc };
       });
@@ -1224,8 +1282,7 @@ function getSlotProgress(batchId) {
         //   12개와 "Flower Shop" 24개), 예전엔 키가 invoice+바코드뿐이라 두
         //   SKU의 스캔량이 하나로 합쳐져서(36개) 서로 다른 상품인데 진행률을
         //   나눠 갖는 사고가 있었음. 이제 SKU까지 포함해 완전히 분리 추적.
-        const key = inv + '|' + String(r[4]) + '|' + String(r[5]); // invoice|barcode|sku
-        // ★ 2026-07-24 긴급 수정 — 심각한 버그 발견(현장 피드백으로 확인됨):
+        const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // invoice|barcode|sku ★ 2026-08-05: normBarcode_ 적용
         //   이슈 등록 시 남기는 상쇄 기록(scanId가 'ADJ-'로 시작, 마이너스 수량)은
         //   "이 SKU를 스캔 안 했는데 총량 스캔 한 번에 모든 고객사가 자동으로
         //   pass 처리되는 phantom pass"를 되돌리기 위한 것이었음. 그런데 애초에
@@ -1262,7 +1319,7 @@ function getSlotProgress(batchId) {
         const qty = Number(r[10]) || 0;
         issueQtyByInvoice[inv] = (issueQtyByInvoice[inv] || 0) + qty;
         // ★ 2026-07-28 수정 — SKU까지 포함한 키로 변경 (scannedByKey와 동일 기준)
-        const key = inv + '|' + String(r[4]) + '|' + String(r[5]);
+        const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
         issueQtyByKey[key] = (issueQtyByKey[key] || 0) + qty;
         if (!issuesByInvoice[inv]) issuesByInvoice[inv] = [];
         issuesByInvoice[inv].push({
@@ -1290,7 +1347,7 @@ function getSlotProgress(batchId) {
         if (String(r[0]) !== String(batchId)) return;
         const inv = r[1];
         if (!inv) return; // 총량 행(Invoice 빈값)은 제외 — 고객사 행만 집계
-        const bcKey = inv + '|' + String(r[4]) + '|' + String(r[2]); // invoice|barcode|sku
+        const bcKey = inv + '|' + normBarcode_(r[4]) + '|' + String(r[2]); // invoice|barcode|sku ★ 2026-08-05: normBarcode_ 적용
         if (!skuLinesByKey[bcKey]) skuLinesByKey[bcKey] = { invoice: inv, reqQty: 0 };
         skuLinesByKey[bcKey].reqQty += Number(r[5]) || 0;
       });
@@ -1437,7 +1494,7 @@ function getScanState(batchId) {
           //   invoice+바코드뿐이라 두 SKU의 스캔량이 하나로 합쳐져서(36개)
           //   서로 다른 상품인데 같은 진행률을 나눠 갖는 사고가 있었음.
           //   이제 SKU까지 포함한 키로 완전히 분리 추적함.
-          const key = r[8] + '|' + r[4] + '|' + r[5]; // invoice|barcode|sku
+          const key = r[8] + '|' + normBarcode_(r[4]) + '|' + r[5]; // invoice|barcode|sku ★ 2026-08-05: normBarcode_ 적용 — TV/웹이 "스캔했는데 완료 안 됨" 버그의 근본 수정
           doneMap[key] = (doneMap[key] || 0) + qty;
         }
       });
@@ -1463,7 +1520,8 @@ function getScanState(batchId) {
         const inv = r[7], bc = String(r[4]), skuCode = String(r[5]);
         const qty = Number(r[10]) || 0;
         // ★ 2026-07-28 수정 — doneMap과 동일하게 SKU까지 포함한 키로 변경
-        const key = inv + '|' + bc + '|' + skuCode;
+        // ★ 2026-08-05 수정 — 키는 normBarcode_로 정규화, bc(표시용)는 원본 그대로 유지
+        const key = inv + '|' + normBarcode_(r[4]) + '|' + skuCode;
         issueMap[key] = (issueMap[key] || 0) + qty;
         const ts = r[2];
         const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
@@ -1524,7 +1582,7 @@ function getOpenBatches() {
         if (r[9] !== 'pass') return;
         const qty = Number(r[11]) || 1;
         passByBatch[bid] = (passByBatch[bid] || 0) + qty;
-        const key = bid + '|' + r[8] + '|' + String(r[4]) + '|' + String(r[5]);
+        const key = bid + '|' + r[8] + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
         scannedByKey[key] = (scannedByKey[key] || 0) + qty;
       });
     }
@@ -1543,7 +1601,7 @@ function getOpenBatches() {
         if (!openIds[bid]) return;
         if (r[12] === 'undone') return;
         const qty = Number(r[10]) || 0;
-        const key = bid + '|' + r[7] + '|' + String(r[4]) + '|' + String(r[5]);
+        const key = bid + '|' + r[7] + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
         issueByKey[key] = (issueByKey[key] || 0) + qty;
       });
     }
@@ -1558,7 +1616,7 @@ function getOpenBatches() {
         if (!openIds[bid]) return;
         const inv = r[1];
         if (!inv) return; // 총량 행(Invoice 빈값) 제외 — 고객사 행만 집계
-        const key = bid + '|' + inv + '|' + String(r[4]) + '|' + String(r[2]);
+        const key = bid + '|' + inv + '|' + normBarcode_(r[4]) + '|' + String(r[2]); // ★ 2026-08-05: normBarcode_ 적용
         if (!skuLinesByKey[key]) {
           skuLinesByKey[key] = 0;
           const ik = bid + '|' + inv;
