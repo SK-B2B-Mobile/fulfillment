@@ -11,7 +11,7 @@
 :root{
   --bg:#05070D; --surface:#0D1220; --surface2:#131B30;
   --border:#212B45; --border2:#2A3555;
-  --text:#EDF1F9; --text-dim:#8A93AC;
+  --text:#EDF1F9; --text-dim:#AAB3CC;
   --amber:#F59E0B; --amber-bg:rgba(245,158,11,0.12);
   --green:#10D97E; --green-bg:rgba(16,217,126,0.12);
   --red:#EF4444; --red-bg:rgba(239,68,68,0.12);
@@ -25,7 +25,7 @@
 html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; min-height:100%;}
 a{color:inherit;}
 
-.topbar{display:flex; align-items:center; justify-content:space-between; padding:16px 32px; border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; gap:14px;}
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:10px 32px; border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; gap:14px;}
 .tb-left{display:flex; align-items:center; gap:16px;}
 .tb-logo{width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:18px; flex-shrink:0;}
 .tb-title{font-size:19px; font-weight:800; letter-spacing:-0.01em;}
@@ -45,15 +45,15 @@ a{color:inherit;}
 .tab-btn:hover{color:var(--text); border-color:var(--border2);}
 .tab-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
 
-.wrap{padding:24px 32px; max-width:1320px; margin:0 auto;}
+.wrap{padding:14px 32px; max-width:1320px; margin:0 auto;}
 .screen{display:none;}
 .screen.active{display:block;}
 
-.section-head{margin-bottom:16px;}
-.section-head h2{font-size:19px; font-weight:800;}
-.section-head p{font-family:var(--mono); font-size:12.5px; color:var(--text-dim); margin-top:6px; line-height:1.6;}
+.section-head{margin-bottom:5px;}
+.section-head h2{font-size:16px; font-weight:800;}
+.section-head p{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px; line-height:1.4;}
 
-.search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 16px; margin-bottom:16px; max-width:420px;}
+.search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:10px; max-width:420px;}
 .search-row svg{color:var(--text-dim); flex-shrink:0;}
 .search-row input{flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:13.5px;}
 .search-row input::placeholder{color:var(--text-dim);}
@@ -78,7 +78,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .badge.gap{background:var(--blue-bg); color:#8FBBFF;}
 .badge.pending{background:var(--gray-bg); color:var(--text-dim);}
 .badge.na{background:var(--gray-bg); color:var(--text-dim2); opacity:0.7;}
-.plain-tag.na{color:var(--text-dim2); opacity:0.7;}
+.plain-tag.na{color:#8A93AC; opacity:1;}
 .badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 .badge.method{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
 /* ★ 배송방법별 색상 구분 */
@@ -120,16 +120,16 @@ td.new-col{background:rgba(16,217,126,0.03);}
 /* ── 고객명 팝오버 ── */
 .name-popover{position:fixed; z-index:500; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; padding:9px 13px; font-size:12.5px; color:var(--text); box-shadow:0 8px 24px rgba(0,0,0,0.5); max-width:280px; word-break:break-word;}
 
-.lookup-top{display:flex; gap:12px; margin-bottom:22px;}
-.search-box{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 18px;}
+.lookup-top{display:flex; gap:12px; margin-bottom:8px;}
+.search-box{flex:1; display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:7px 16px;}
 .search-box input{flex:1; background:none; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:14px; text-transform:uppercase;}
 .search-box input::placeholder{color:var(--text-dim); text-transform:none;}
 .search-box svg{color:var(--text-dim); flex-shrink:0;}
-.search-btn{background:var(--blue); border:none; border-radius:12px; padding:0 22px; color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; font-family:var(--sans);}
+.search-btn{background:var(--blue); border:none; border-radius:10px; padding:0 20px; color:#fff; font-weight:700; font-size:13.5px; cursor:pointer; font-family:var(--sans);}
 .search-btn:hover{background:#5B9BFF;}
 
 .today-panel{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; margin-bottom:22px;}
-.today-head{padding:15px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+.today-head{padding:9px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
 .today-head h3{font-size:14px; font-weight:800;}
 .today-head .count{font-family:var(--mono); font-size:12.5px; color:var(--text-dim);}
 .today-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
@@ -146,16 +146,19 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
 .today-cust{font-size:12.5px; color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-sep{color:var(--border2); font-size:12px; display:none;}
-.today-time{font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
+.today-time{font-family:var(--mono); font-size:11.5px; color:#B9C2DC;}
 .today-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
-/* ★ Completed Today 목록 전용 — 뱃지(박스) 대신 색상만 있는 순수 텍스트 */
+/* ★ Completed Today 목록 전용 — 뱃지(박스) 대신 색상만 있는 순수 텍스트
+   ★ 2026-08-05 수정 — pending/moved-no/method 값들이 --text-dim(연회색)이라
+   너무 흐릿해서 잘 안 보인다는 피드백 반영 — 더 밝은 톤(#B9C2DC)으로 교체.
+   (연한 느낌 자체는 유지하되 가독성 확보 — pass/moved-yes의 초록보다는 여전히 옅음) */
 .plain-tag{font-family:var(--mono); font-size:12.5px; font-weight:700;}
 .plain-tag.pass{color:var(--green);}
 .plain-tag.issue{color:#FF7A7A;}
-.plain-tag.pending{color:var(--text-dim); font-weight:500;}
+.plain-tag.pending{color:#B9C2DC; font-weight:600;}
 .plain-tag.moved-yes{color:var(--green);}
-.plain-tag.moved-no{color:var(--text-dim); font-weight:500;}
-.plain-tag.method{color:var(--text-dim); font-weight:500;}
+.plain-tag.moved-no{color:#B9C2DC; font-weight:600;}
+.plain-tag.method{color:#B9C2DC; font-weight:600;}
 .plain-tag.method-tk{color:var(--amber); font-weight:700;}
 .plain-tag.method-ups{color:#C4B0FF; font-weight:700;}
 .plain-tag.method-pu{color:#5EEAD4; font-weight:700;}
