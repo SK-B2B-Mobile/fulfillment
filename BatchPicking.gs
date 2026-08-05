@@ -71,6 +71,107 @@ function normBarcode_(v) {
   return s;
 }
 
+/* ===================== diagnoseInvoice (★ 2026-08-05 긴급 진단용 신규) =====================
+ * ★★★ 지금 이 함수를 Apps Script 에디터에서 직접 실행해서 원인을 정확히 확인하세요 ★★★
+ *
+ * 사용법:
+ *   1) 아래 DIAG_BATCH_ID, DIAG_INVOICE 값을 지금 막힌 슬롯의 배치ID/인보이스로 바꾸기
+ *      (예: 01번 슬롯 "Candy Doll Beauty, Inc" → invoice "IN00462241")
+ *   2) 함수 목록에서 diagnoseInvoice 선택 → ▶ 실행
+ *   3) 실행 후 "실행 로그 보기"(또는 왼쪽 시계 아이콘 옆 로그 아이콘) 클릭
+ *   4) 로그에 찍힌 표를 그대로 복사해서 저에게 붙여넣어 주세요
+ *
+ * 이 함수는 아무것도 바꾸지 않습니다(읽기 전용, 안전) — 그 인보이스에 필요한
+ * 상품 줄마다: (a) BatchItems 원본 필요수량, (b) ScanLog에서 원본 바코드 그대로
+ * 매칭했을 때 합계, (c) normBarcode_() 정규화 후 매칭했을 때 합계, (d) 그 바코드가
+ * 숫자로 저장됐는지 문자로 저장됐는지(typeof)를 한 줄씩 보여줍니다.
+ *
+ * 결과 해석:
+ *  - normMatchSum은 채워졌는데 rawMatchSum은 부족함 → 제 바코드 정규화 수정이
+ *    맞았고, 정상적으로 새 GAS가 반영된 것입니다 (배포 성공, 다음 폴링에 초록됨)
+ *  - normMatchSum도 rawMatchSum도 둘 다 reqQty에 한참 못 미침 → 바코드 타입
+ *    문제가 아니라, 그 스캔 자체가 서버에 아예 기록이 안 된 것(다른 원인 —
+ *    네트워크 실패로 로그가 안 남았거나, 다른 배치/인보이스로 잘못 기록됐거나 등)
+ *  - normMatchSum도 rawMatchSum도 정확히 원본 코드 실행 결과와 똑같다면 →
+ *    새 GAS 코드가 아직 배포 안 된 것(배포 관리에서 "새 버전"으로 업데이트했는지
+ *    다시 확인 필요)
+ * ================================================================================ */
+function diagnoseInvoice() {
+  const DIAG_BATCH_ID = 'B20260803-534B0F'; // ← 확인하려는 배치ID로 교체
+  const DIAG_INVOICE = 'IN00462241';        // ← 확인하려는 인보이스로 교체 (예: 01번 슬롯)
+
+  const batchId = DIAG_BATCH_ID, invoice = DIAG_INVOICE;
+
+  // 1) BatchItems에서 이 인보이스가 필요로 하는 상품 줄 전체
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const lines = [];
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[1]) !== String(invoice)) return;
+      lines.push({ sku: String(r[2]), name: String(r[3]), barcode: r[4], barcodeType: typeof r[4], reqQty: Number(r[5]) || 0 });
+    });
+  }
+
+  // 2) ScanLog에서 이 배치+인보이스의 모든 스캔(원본 그대로)
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  const scanRows = [];
+  if (slLast >= 2) {
+    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[8]) !== String(invoice)) return;
+      scanRows.push({ barcode: r[4], barcodeType: typeof r[4], sku: String(r[5]), result: r[9], status: r[10], qty: Number(r[11]) || 0, worker: r[3], time: String(r[2]) });
+    });
+  }
+
+  // 3) IssueLog에서 이 배치+인보이스의 활성 이슈
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const issueRows = [];
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[7]) !== String(invoice)) return;
+      issueRows.push({ barcode: r[4], sku: String(r[5]), reason: r[9], qty: Number(r[10]) || 0, status: r[12] });
+    });
+  }
+
+  // 4) 상품 줄마다 "원본 키로 매칭" vs "정규화 키로 매칭" 비교
+  const report = lines.map(line => {
+    const rawKey = String(line.barcode) + '|' + line.sku;
+    const normKey = normBarcode_(line.barcode) + '|' + line.sku;
+    let rawMatchSum = 0, normMatchSum = 0, matchedScanCount = 0;
+    scanRows.forEach(s => {
+      if (s.result !== 'pass' || s.status === 'undone') return;
+      const sRawKey = String(s.barcode) + '|' + s.sku;
+      const sNormKey = normBarcode_(s.barcode) + '|' + s.sku;
+      if (sRawKey === rawKey) rawMatchSum += s.qty;
+      if (sNormKey === normKey) { normMatchSum += s.qty; matchedScanCount++; }
+    });
+    let issueQty = 0;
+    issueRows.forEach(iss => {
+      if (iss.status === 'undone') return;
+      if (normBarcode_(iss.barcode) + '|' + iss.sku === normKey) issueQty += iss.qty;
+    });
+    const effectiveReq = Math.max(0, line.reqQty - issueQty);
+    let diagnosis;
+    if (normMatchSum >= effectiveReq) diagnosis = rawMatchSum >= effectiveReq ? 'OK(원본으로도 매칭됨 — 이 줄은 손상 아님)' : '★ 정규화로 매칭됨(바코드 타입 손상이 원인이었음, 새 GAS 정상 작동중)';
+    else diagnosis = '❌ 정규화해도 여전히 부족 — 스캔기록 자체가 없거나 다른 원인(matchedScanCount=' + matchedScanCount + ')';
+    return {
+      SKU: line.sku, 상품명: line.name, 바코드: line.barcode, 바코드타입: line.barcodeType,
+      필요수량: line.reqQty, 이슈차감후필요: effectiveReq,
+      원본키매칭합계: rawMatchSum, 정규화키매칭합계: normMatchSum, 진단: diagnosis,
+    };
+  });
+
+  Logger.log('=== 진단 결과: 배치 ' + batchId + ' / 인보이스 ' + invoice + ' ===');
+  Logger.log('BatchItems 상품줄 ' + lines.length + '개 / ScanLog 스캔기록 ' + scanRows.length + '개 / IssueLog 이슈 ' + issueRows.length + '개');
+  Logger.log(JSON.stringify(report, null, 2));
+  return { ok: true, report: report };
+}
+
 function ensureBatchSheet_(name, headers) {
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
