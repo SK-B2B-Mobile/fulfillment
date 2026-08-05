@@ -444,6 +444,51 @@ function diagnoseFullBarcodeHistory() {
   return { ok: true, needers: needers, allScans: allScans, allIssues: allIssues, trulyUntouched: trulyUntouched };
 }
 
+/* ===================== diagnoseJobsInspectionStatus (★ 2026-08-05 신규) =====================
+ * 목적: ScanLog에 흔적이 전혀 없는 인보이스들이, 혹시 총량피킹(batch.html)이
+ * 아니라 구형 개별검수 앱(sk-worker)으로 별도 처리된 건 아닌지 확인.
+ * sk-worker는 Jobs 시트의 Inspection/Inspector/Insp End 컬럼에 직접 기록하고
+ * ScanLog와는 전혀 무관하므로, 이 인보이스들이 Jobs 시트에서 이미 PASS로
+ * 검수완료 처리돼 있다면 "실제로는 다른 경로로 정상 처리됐다"는 뜻.
+ *
+ * 사용법: DIAG_INVOICES 배열에 확인할 인보이스 번호들 넣고 실행
+ * ================================================================================ */
+function diagnoseJobsInspectionStatus() {
+  const DIAG_INVOICES = ['IN00462228', 'IN00462241', 'IN00462257', 'IN00461868', 'IN00462226'];
+
+  const sh = SHEET_();
+  const hm = headerMapCached_();
+  const lastRow = sh.getLastRow();
+  const invCol = hm['invoice'];
+  if (!invCol) { Logger.log('❌ Jobs 시트에서 invoice 컬럼을 못 찾음'); return { ok: false }; }
+
+  const results = [];
+  if (lastRow >= 2) {
+    const invColVals = sh.getRange(2, invCol, lastRow - 1, 1).getValues();
+    DIAG_INVOICES.forEach(targetInv => {
+      let rowIdx = -1;
+      for (let i = 0; i < invColVals.length; i++) {
+        if (String(invColVals[i][0]).trim() === String(targetInv).trim()) { rowIdx = i + 2; break; }
+      }
+      if (rowIdx < 0) { results.push({ invoice: targetInv, found: false }); return; }
+      const row = sh.getRange(rowIdx, 1, 1, sh.getLastColumn()).getValues()[0];
+      function jv(name) { const c = hm[name]; return c ? row[c - 1] : ''; }
+      results.push({
+        invoice: targetInv, found: true,
+        검수결과: String(jv('inspection') || ''),
+        검수자: String(jv('inspector') || ''),
+        검수완료시각: String(jv('insp end') || ''),
+        고객사: String(jv('remarks') || ''),
+        트러킹: String(jv('trucking') || ''),
+      });
+    });
+  }
+
+  Logger.log('=== Jobs 시트(sk-worker 개별검수) 상태 확인 ===');
+  Logger.log(JSON.stringify(results, null, 2));
+  return { ok: true, results: results };
+}
+
 function ensureBatchSheet_(name, headers) {
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
