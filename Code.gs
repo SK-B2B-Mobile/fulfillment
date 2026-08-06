@@ -417,6 +417,10 @@ function doPost(e) {
   if (op === 'saveDimensions') return json_(saveDimensions(data));
   // ★ 2026-08-06 신규 — 단독 오더(총량피킹 배치 없음)의 패킹존 이동 수동 표시
   if (op === 'setManualPackingMoved') return json_(setManualPackingMoved(data));
+  // ★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더). BatchPicking.gs에 구현됨.
+  if (op === 'linkDimensions')   return json_(linkDimensions(data));
+  if (op === 'unlinkDimensions') return json_(unlinkDimensions(data));
+  if (op === 'setDimPrimary')    return json_(setDimPrimary(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -2922,7 +2926,9 @@ function getSalesTodayList() {
         // ★ 2026-08-06 신규(매니저 요청) — 디멘션이 저장돼 있으면 물리적으로
         //   이미 패킹존에서 측정된 것이므로 자동으로 이동완료로 인정.
         movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
-        dimsCount: (dimsMap[invoice] || {}).count || 0
+        dimsCount: (dimsMap[invoice] || {}).count || 0,
+        // ★ 2026-08-06 신규 — 이 오더의 디멘션이 다른(대표) 인보이스에 포함돼 있으면 그 번호
+        dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || ''
       });
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
@@ -3028,6 +3034,8 @@ function getSalesOverview() {
         //   이미 패킹존에서 측정된 것이므로 자동으로 이동완료로 인정.
         movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
         dimsCount: (dimsMap[invoice] || {}).count || 0,
+        // ★ 2026-08-06 신규 — 디멘션이 다른(대표) 인보이스에 포함돼 있으면 그 번호
+        dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || '',
         createdAt: createdRaw ? String(createdRaw) : ''
       });
     }
