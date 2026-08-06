@@ -966,7 +966,7 @@ select option:disabled{color:var(--text-dim2);}
     <div class="complete-check">✓</div>
     <div class="complete-eyebrow">Batch complete</div>
     <h1 class="complete-title">모든 분류 완료</h1>
-    <p class="complete-desc">이 배치의 모든 SKU가 슬롯에 배분되었습니다. 검수존으로 인계할 준비가 되었습니다.</p>
+    <p class="complete-desc">이 배치의 모든 SKU가 슬롯에 배분되었습니다.<br><span style="font-size:12px; color:var(--text-dim)">스캔 기록은 그대로 보관되며, 이 배치는 <b>1시간 동안</b> "다른 배치" 목록에 <b>✅ 완료됨</b>으로 남아 있습니다.</span></p>
     <div class="complete-stats">
       <div class="complete-stat"><div class="n" id="cmpSlots">-</div><div class="l">Slots filled</div></div>
       <div class="complete-stat"><div class="n" id="cmpQty">-</div><div class="l">Pieces sorted</div></div>
@@ -974,7 +974,7 @@ select option:disabled{color:var(--text-dim2);}
     </div>
     <div class="complete-actions">
       <button class="btn btn-ghost" onclick="closeComplete()">닫기</button>
-      <button class="btn btn-primary" onclick="handoffToInspection()">→ 검수존 인계</button>
+      <button class="btn btn-primary" onclick="handoffToInspection()">확인 · 스캔 로그 보기</button>
     </div>
   </div>
 </div>
@@ -4045,9 +4045,15 @@ function showBatchComplete(){
   }
 }
 function closeComplete(){ document.getElementById('completeOverlay').classList.remove('open'); }
+// ★ 2026-08-06 수정(매니저 지적) — 예전 이름은 "→ 검수존 인계"였는데, 이 버튼은
+//   실제로 서버에 아무것도 보내지 않고 팝업만 닫고 로그 화면으로 넘어가는 게 전부였음.
+//   그런데 이름 때문에 "이걸 눌러야 인계가 확정되고, 누르면 배치가 정리된다"고
+//   오해하기 쉬웠고, 실제로 배치가 목록에서 사라진 원인(1시간 유예 계산 버그)을
+//   이 버튼 탓으로 오인하게 만들었음. 실제 출고 인계는 TV 현황판에서 출고 작업자가
+//   오더별로 파랑(TakenOut)을 누르는 것으로 이미 처리되므로, 배치 단위의 별도
+//   인계 절차는 필요 없음. 이름을 실제 동작 그대로 바꿈.
 function handoffToInspection(){
   closeComplete();
-  toast('검수존에 인계 완료', 'success');
   gotoView('v-log');
 }
 
