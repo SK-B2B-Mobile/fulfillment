@@ -2481,12 +2481,18 @@ function buildDimsExistsMap_() {
     const sh = dimensionsSheet_();
     const last = sh.getLastRow();
     if (last >= 2) {
-      sh.getRange(2, 1, last - 1, 6).getValues().forEach(r => {
+      // ★ 2026-08-06 확장 — H컬럼(EnteredAt, 저장 시각)까지 읽어서 메인 대시보드
+      //   (index.html)의 자동보관 규칙이 "디멘션 저장 시각 기준 영업일 2일"을
+      //   판단할 수 있게 함. saveDimensions()는 한 인보이스의 모든 팔렛/박스 행에
+      //   똑같은 저장 시각(now)을 쓰므로, 아무 행에서나 값을 가져오면 됨(최신값 유지).
+      sh.getRange(2, 1, last - 1, 8).getValues().forEach(r => {
         const inv = String(r[0] || '').trim();
         if (!inv) return;
-        if (!map[inv]) map[inv] = { count: 0, totalWt: 0 };
+        if (!map[inv]) map[inv] = { count: 0, totalWt: 0, enteredAt: '' };
         map[inv].count++;
         map[inv].totalWt += Number(r[5]) || 0;
+        const ea = String(r[7] || '').trim();
+        if (ea && (!map[inv].enteredAt || ea > map[inv].enteredAt)) map[inv].enteredAt = ea;
       });
     }
   } catch (e) { /* best-effort */ }
