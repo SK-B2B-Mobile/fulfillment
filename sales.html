@@ -389,6 +389,17 @@ td.new-col{background:rgba(16,217,126,0.03);}
       <button class="search-btn" onclick="doSearch()">Search</button>
     </div>
 
+    <!-- ★ 2026-08-06 순서 변경(매니저 요청) — 검색 결과(상세 카드)가 예전엔
+         "Recently Completed" 목록 전체보다 아래(페이지 맨 밑)에 있어서, 검색을
+         해도 그 결과를 보려면 목록을 다 지나쳐서 스크롤해야 하는 산만한 구조였음.
+         이제 검색창 바로 아래에 결과가 뜨고, 참고용 목록은 그 아래로 내림 —
+         "검색하면 그 결과가 최우선으로 보인다"는 당연한 흐름으로 정리함. -->
+    <div class="detail-card" id="detail-card"></div>
+    <div class="empty-state" id="empty-state">
+      <div class="icon">🔍</div>
+      Search an invoice number above, or click an order from the list.
+    </div>
+
     <div class="today-panel">
       <div class="today-head">
         <h3>Recently Completed</h3>
@@ -414,11 +425,6 @@ td.new-col{background:rgba(16,217,126,0.03);}
       </div>
     </div>
 
-    <div class="detail-card" id="detail-card"></div>
-    <div class="empty-state" id="empty-state">
-      <div class="icon">🔍</div>
-      Search an invoice number above, or click an order from the list.
-    </div>
   </div>
 
 </div>
