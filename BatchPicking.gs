@@ -3398,11 +3398,25 @@ function getDimCandidates(invoice) {
       customer: (byInv[c] || {}).customer || '',
       shipDate: (byInv[c] || {}).shipDate || ''
     }));
+    // ★ 2026-08-06 추가(매니저 요청) — 같은 팔렛에 실린 오더 전체 명단.
+    //   추가 오더를 열었을 때도 대표가 누구인지, 함께 묶인 다른 오더가 무엇인지
+    //   한 화면에서 다 보이게 하기 위함(대표 오더로 이동하지 않아도 됨).
+    const groupPrimary = resolveDimPrimary_(invoice, links);
+    const memberInvs = [groupPrimary].concat(links.primaryToChildren[groupPrimary] || []);
+    const dimsGroupMembers = memberInvs.map(m => ({
+      invoice: m,
+      customer: (byInv[m] || {}).customer || '',
+      shipDate: (byInv[m] || {}).shipDate || '',
+      isPrimary: m === groupPrimary
+    }));
+
     const base = {
       ok: true, invoice: invoice,
       dimsLinkedTo: primary,
       dimsLinkedToCustomer: primary ? ((byInv[primary] || {}).customer || '') : '',
       dimsChildren: children,
+      dimsGroupPrimary: groupPrimary,
+      dimsGroupMembers: dimsGroupMembers,
       dimsJoinTargets: [], dimsAddCandidates: []
     };
 
@@ -3414,6 +3428,54 @@ function getDimCandidates(invoice) {
     base.dimsJoinTargets = cand.joinTargets;
     base.dimsAddCandidates = cand.addCandidates;
     return base;
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * getOrdersByItem(q) — ★ 2026-08-06 신규(매니저 요청)
+ * 바코드 또는 SKU로 "그 상품이 들어있는 오더"를 찾아줌.
+ * BatchItems 시트(BatchId·Invoice·SKU·Name·Barcode·ReqQty·Rack)에서
+ * Invoice~Barcode 4개 컬럼만 좁게 읽어서 매칭. 바코드는 normBarcode_로
+ * 정규화해서 비교하므로 앞자리 0이 있고 없고에 관계없이 찾아짐.
+ *
+ * [한계 — 매니저 안내 필요]
+ * 총량피킹 배치로 처리된 오더만 BatchItems에 상품 목록이 남습니다.
+ * 단독(개별) 검수만 거친 오더는 상품 단위 기록이 없어서 이 검색에
+ * 잡히지 않습니다(인보이스·고객사명 검색은 그대로 됩니다).
+ * ------------------------------------------------------------------- */
+function getOrdersByItem(q) {
+  try {
+    q = String(q || '').trim();
+    if (!q) return { ok: false, error: 'query required' };
+    const qUp = q.toUpperCase();
+    let qBar = qUp;
+    try { qBar = normBarcode_(q); } catch (e) { /* 정규화 실패 시 원문 비교 */ }
+
+    const sh = bitemsSheet_();
+    const last = sh.getLastRow();
+    const found = {};
+    let count = 0;
+    if (last >= 2) {
+      const vals = sh.getRange(2, 2, last - 1, 4).getValues(); // B~E: Invoice, SKU, Name, Barcode
+      for (let i = 0; i < vals.length; i++) {
+        const inv = String(vals[i][0] || '').trim();
+        if (!inv || found[inv]) continue;
+        const sku = String(vals[i][1] || '').trim();
+        const name = String(vals[i][2] || '').trim();
+        const bar = String(vals[i][3] || '').trim();
+        let barNorm = bar.toUpperCase();
+        try { barNorm = normBarcode_(bar); } catch (e) { /* 원문 비교로 대체 */ }
+        const hit = (bar && (barNorm === qBar || bar.toUpperCase().indexOf(qUp) >= 0)) ||
+                    (sku && sku.toUpperCase().indexOf(qUp) >= 0);
+        if (!hit) continue;
+        found[inv] = { invoice: inv, sku: sku, name: name, barcode: bar };
+        count++;
+        if (count >= 40) break;
+      }
+    }
+    return { ok: true, query: q, orders: Object.keys(found).map(k => found[k]) };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
