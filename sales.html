@@ -328,6 +328,8 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .sg-btn{background:var(--amber); border:none; color:#1A1204; font-family:var(--sans); font-size:11.5px; font-weight:800; padding:7px 13px; border-radius:7px; cursor:pointer; white-space:nowrap;}
 .sg-btn:hover{filter:brightness(1.12);}
 .linked-tag{display:inline-block; font-family:var(--mono); font-size:10px; font-weight:800; padding:2px 6px; border-radius:5px; background:var(--blue-bg); color:#8FBBFF;}
+.dim-extras-loading{margin-top:12px; padding:12px 16px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12px; color:var(--text-dim); display:flex; align-items:center; gap:9px;}
+.moved-hint{font-size:10px; color:var(--text-dim); margin-top:5px; text-align:right; max-width:230px;}
 
 .empty-state{text-align:center; padding:60px 20px; color:var(--text-dim);}
 .empty-state .icon{font-size:36px; margin-bottom:10px;}
@@ -901,9 +903,32 @@ function renderDimCandidates(order){
   return html;
 }
 
+/* ★ 2026-08-06 성능 재설계 — 후보 추천은 서버에서 계산이 무거워서, 상세조회
+ * 응답에 같이 넣었더니 카드가 뜨는 데 25초까지 걸리는 문제가 있었음.
+ * 이제 카드는 즉시 띄우고, 후보 영역만 따로 불러와서 채움. */
 function renderDimsExtras(order){
-  return renderDimChildren(order) + renderDimCandidates(order) +
-    `<div style="margin-top:10px;"><button class="link-btn" onclick="linkByTyping('${order.invoice}')">🔗 다른 인보이스 직접 입력해서 묶기</button></div>`;
+  const pending = (order.dimsJoinTargets === null || order.dimsJoinTargets === undefined);
+  const body = pending
+    ? `<div class="dim-extras-loading"><span class="spinner"></span>같은 고객사의 합칠 수 있는 오더를 확인하는 중…</div>`
+    : (renderDimChildren(order) + renderDimCandidates(order));
+  return `<div id="dim-extras">${body}</div>
+    <div style="margin-top:10px;"><button class="link-btn" onclick="linkByTyping('${order.invoice}')">🔗 다른 인보이스 직접 입력해서 묶기</button></div>`;
+}
+
+async function loadDimCandidates(invoice){
+  if (!invoice) return;
+  const res = await gasGet({ op:'getDimCandidates', invoice: invoice });
+  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return; // 그 사이 다른 오더를 열었으면 무시
+  const box = document.getElementById('dim-extras');
+  if (!res || !res.ok){
+    if (box) box.innerHTML = `<div class="dim-extras-loading">합칠 수 있는 오더를 불러오지 못했습니다. <button class="link-btn" onclick="loadDimCandidates('${invoice}')">다시 시도</button></div>`;
+    return;
+  }
+  CURRENT_ORDER.dimsJoinTargets = res.dimsJoinTargets || [];
+  CURRENT_ORDER.dimsAddCandidates = res.dimsAddCandidates || [];
+  CURRENT_ORDER.dimsChildren = res.dimsChildren || CURRENT_ORDER.dimsChildren || [];
+  CURRENT_ORDER.dimsLinkedToCustomer = res.dimsLinkedToCustomer || '';
+  if (box) box.innerHTML = renderDimChildren(CURRENT_ORDER) + renderDimCandidates(CURRENT_ORDER);
 }
 
 function renderDimsPanel(order, editing){
@@ -1121,11 +1146,19 @@ async function doSearch(){
   //   TV 현황판이 관리할 방법이 없어서 "Moved to Packing"이 영원히 No로 고정됨.
   //   출고 작업자가 직접 표시할 수 있는 버튼을 추가 — 실수 방지를 위해 클릭 시
   //   반드시 확인 팝업을 거침(markManualMoved 함수 참고).
+  // ★ 2026-08-06 수정(매니저 지적) — 예전엔 hasBatchRecord=false(총량피킹 스캔
+  //   기록이 없는 단독 오더)일 때만 버튼을 띄웠음. 그 결과 같은 화면에서 어떤
+  //   오더엔 버튼이 있고 어떤 오더엔 없어서 작업자가 "왜 이건 없지?" 하고
+  //   혼란스러워하는 일관성 문제가 있었음. 이제는 아직 이동 안 된 오더면
+  //   무조건 버튼을 보여주고, 배치 오더인 경우엔 "보통 TV 현황판에서 자동
+  //   처리된다"는 안내만 아래에 작게 덧붙임(누르는 것 자체는 언제나 허용 —
+  //   확인 팝업이 실수를 막아줌).
   let manualMoveHtml = '';
-  if (!res.hasBatchRecord) {
-    manualMoveHtml = res.movedToPacking
-      ? `<button class="manual-moved-undo" onclick="markManualMoved('${res.invoice}', false)">되돌리기(실수로 눌렀다면)</button>`
-      : `<button class="manual-moved-btn" onclick="markManualMoved('${res.invoice}', true)">📦 Mark as Moved to Packing</button>`;
+  if (res.movedToPacking){
+    manualMoveHtml = `<button class="manual-moved-undo" onclick="markManualMoved('${res.invoice}', false)">되돌리기(실수로 눌렀다면)</button>`;
+  } else {
+    manualMoveHtml = `<button class="manual-moved-btn" onclick="markManualMoved('${res.invoice}', true)">📦 Mark as Moved to Packing</button>`;
+    if (res.hasBatchRecord) manualMoveHtml += `<div class="moved-hint">총량피킹 배치 오더 — 보통 TV 현황판에서 자동 처리됩니다</div>`;
   }
   const needsDimsRes = (res.method==='TRUCKING'||res.method==='TK'||res.method==='UPS');
   const dimsSavedHtml = needsDimsRes
@@ -1207,6 +1240,9 @@ async function doSearch(){
     ${itemsSectionHtml}
     ${dimsHtml}
   `;
+
+  // ★ 2026-08-06 — 카드를 먼저 띄운 뒤에 합치기 후보를 따로 불러옴(화면 안 멈추게)
+  if (dimsHtml && needsDims(res) && !res.dimsLinkedTo) loadDimCandidates(res.invoice);
 }
 
 // ★ 2026-08-05 신규 — 상세 카드 닫기. 검색창도 같이 비워서, 위쪽 "Completed
