@@ -2876,6 +2876,7 @@ function getSalesTodayList() {
     const iTruck     = hdr[norm('Trucking')];
     const iInsp      = hdr[norm('Inspection')];
     const iInspEnd   = hdr[norm('Insp. End')];
+    const iArch      = hdr[norm('archived')]; // ★ 2026-08-06 신규
     if (!iInv || !iInsp || !iInspEnd) return { ok: true, jobs: [] };
 
     const tz = Session.getScriptTimeZone();
@@ -2887,16 +2888,27 @@ function getSalesTodayList() {
     const truckVals   = iTruck ? sh.getRange(2, iTruck, lastRow - 1, 1).getValues() : null;
     const inspVals    = sh.getRange(2, iInsp, lastRow - 1, 1).getValues();
     const inspEndVals = sh.getRange(2, iInspEnd, lastRow - 1, 1).getValues();
+    const archVals    = iArch ? sh.getRange(2, iArch, lastRow - 1, 1).getValues() : null; // ★ 2026-08-06 신규
 
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
 
+    // ★ 2026-08-06 재설계(매니저 요청) — 예전엔 "오늘 날짜에 검수완료된 것"만
+    //   보여줬음. 그런데 이제 자동보관 규칙이 "검수 다음날"이 아니라 "디멘션
+    //   저장 후 영업일 2일"로 늘어나서, 1번 표(Sales Sheet Preview)에는 여러
+    //   날짜에 걸친 주문이 계속 남아있는데 이 목록은 "오늘"만 보여줘서 1번과
+    //   전혀 안 맞아 보이는 문제가 있었음(1번엔 60건 검수완료인데 여기는 1건).
+    //   이제 "오늘"이 아니라 "아직 보관 처리 안 된 것 전부"(1번 표와 완전히
+    //   동일한 기준)로 바꿔서, 두 화면이 항상 정확히 같은 데이터를 보여주게 함.
     const jobs = [];
     for (let i = 0; i < invVals.length; i++) {
+      if (archVals) {
+        const a = String(archVals[i][0] || '').trim().toLowerCase();
+        if (a === 'true' || a === '1' || a === 'y' || a === 'yes') continue; // 보관된 건 제외
+      }
       const insp = String(inspVals[i][0] || '').trim();
-      if (!insp) continue;
+      if (!insp) continue; // 검수 안 된 건 이 목록 대상 아님(원래도 그랬음)
       const inspEnd = formatInspEnd_(inspEndVals[i][0]);
-      if (!inspEnd || inspEnd.indexOf(today) !== 0) continue;
       const invoice = String(invVals[i][0] || '');
       const shipRaw = shipVals ? shipVals[i][0] : '';
       const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
