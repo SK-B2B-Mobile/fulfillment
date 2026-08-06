@@ -2496,6 +2496,25 @@ function buildDimsExistsMap_() {
       });
     }
   } catch (e) { /* best-effort */ }
+
+  // ★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더).
+  //   DimLinks에 "추가오더 → 대표오더"로 묶여 있으면, 추가 오더도 대표의
+  //   디멘션 건수/저장시각을 그대로 물려받게 함. 이 함수 하나만 고치면
+  //   listJobs(메인 대시보드 자동보관) · getSalesTodayList · getSalesOverview가
+  //   전부 같이 적용되므로, 한 그룹이 항상 같은 날 같이 보관 처리됨.
+  try {
+    const links = buildDimLinksMap_();
+    Object.keys(links.childToPrimary).forEach(child => {
+      const p = links.childToPrimary[child];
+      const pd = map[p];
+      if (pd && pd.count > 0) {
+        map[child] = { count: pd.count, totalWt: pd.totalWt, enteredAt: pd.enteredAt, linkedTo: p, inherited: true };
+      } else if (!map[child]) {
+        map[child] = { count: 0, totalWt: 0, enteredAt: '', linkedTo: p, inherited: true };
+      }
+    });
+  } catch (e) { /* best-effort — DimLinks 시트가 아직 없어도 정상 동작 */ }
+
   return map;
 }
 
@@ -2533,6 +2552,17 @@ function saveDimensions(data) {
     if (!invoice) return { ok: false, error: 'invoice required' };
     const list = Array.isArray(data.dims) ? data.dims : [];
     const enteredBy = String((data && data.enteredBy) || '').trim();
+
+    // ★ 2026-08-06 신규 — 다른 오더에 디멘션이 포함된(child) 인보이스에는
+    //   직접 저장하지 못하게 막음. 안 막으면 대표 쪽과 추가 오더 쪽에 각각
+    //   따로 숫자가 생겨서 어느 쪽이 진짜인지 알 수 없게 됨.
+    try {
+      const linkCheck = buildDimLinksMap_();
+      const myPrimary = linkCheck.childToPrimary[invoice];
+      if (myPrimary) {
+        return { ok: false, error: '이 오더는 ' + myPrimary + ' 에 디멘션이 포함되어 있습니다. 대표 오더에서 수정하거나, 먼저 연결을 해제하세요.', linkedTo: myPrimary };
+      }
+    } catch (e) { /* DimLinks가 아직 없으면 예전과 동일하게 그냥 저장 */ }
 
     const sh = dimensionsSheet_();
     const last = sh.getLastRow();
@@ -2617,6 +2647,8 @@ function autoDeleteOldDimensions() {
       sh.getRange(2, 1, last - 1, lastCol).clearContent();
       if (keepRows.length > 0) sh.getRange(2, 1, keepRows.length, lastCol).setValues(keepRows);
       Logger.log('autoDeleteOldDimensions: ' + deletedCount + '건 삭제 (기준일 ' + cutoffStr + ' 이하), ' + keepRows.length + '건 유지');
+      // ★ 2026-08-06 신규 — 대표 쪽 디멘션이 사라졌는데 연결 정보만 남는 것 정리
+      cleanupOrphanDimLinks_();
     } else {
       Logger.log('autoDeleteOldDimensions: 삭제 대상 없음');
     }
@@ -2848,7 +2880,11 @@ function getSalesInvoiceDetail(invoice) {
     }
 
     // 4) 디멘션
-    const dimsResult = getDimensions_(invoice);
+    // ★ 2026-08-06 신규 — 디멘션 합산. 이 오더가 다른 오더에 "포함"되어 있으면
+    //   자기 디멘션이 아니라 대표 오더의 디멘션을 대신 보여줌(읽기 전용).
+    const dimGroup = getDimGroupDetail_(invoice, method, customer, shipDate);
+    const dimsOwner = dimGroup.dimsLinkedTo || invoice;
+    const dimsResult = getDimensions_(dimsOwner);
 
     // ★ 2026-08-06 신규(매니저 요청) — "디멘션이 저장됐는데 Moved는 No"인
     //   앞뒤 안 맞는 상태를 원천 차단. 디멘션(치수/무게)이 하나라도 저장돼
@@ -2874,9 +2910,481 @@ function getSalesInvoiceDetail(invoice) {
       dims: dimsResult.dims,
       dimsBy: dimsResult.enteredBy,
       dimsAt: dimsResult.enteredAt,
-      dimsCount: dimsResult.dims.length
+      dimsCount: dimsResult.dims.length,
+      // ★ 2026-08-06 신규 — 디멘션 합산 관련 필드
+      dimsOwner: dimsOwner,                                 // 실제로 디멘션이 저장된 인보이스(자기 자신이거나 대표)
+      dimsLinkedTo: dimGroup.dimsLinkedTo,                  // 내가 포함된 대표 인보이스('' 이면 단독/대표)
+      dimsLinkedToCustomer: dimGroup.dimsLinkedToCustomer,
+      dimsChildren: dimGroup.dimsChildren,                  // 내 디멘션에 포함된 추가 오더 목록
+      dimsJoinTargets: dimGroup.dimsJoinTargets,            // 내가 들어갈 수 있는 후보(같은 고객사·같은 검수일/출고일)
+      dimsAddCandidates: dimGroup.dimsAddCandidates         // 내 디멘션에 넣을 수 있는 후보
     };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* =====================================================================
+ * ★★★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더) ★★★
+ *
+ * [왜 필요한가]
+ * 같은 고객사가 하루에 오더를 나눠서 내는 경우(원 오더 + 추가 오더)가 잦은데,
+ * 실제 출고는 팔렛/박스에 같이 실려 나감. 그런데 예전 구조는 Dimensions 시트가
+ * "인보이스 1개 = 디멘션 1세트"로만 묶여 있어서, 작업자가 같은 팔렛 정보를
+ * 인보이스마다 중복 입력하거나 한쪽만 입력하고 빠뜨리는 문제가 있었음.
+ *
+ * [해결 방식]
+ * Dimensions 시트는 그대로 두고(기존 로직 영향 0), DimLinks 시트를 새로 만들어
+ * "추가 오더 → 대표 오더" 관계만 저장함. 디멘션 실물 데이터는 항상 대표
+ * 인보이스 한 곳에만 저장되고, 추가 오더는 조회 시점에 대표 것을 물려받음.
+ *
+ * [중요 — 자동보관 규칙과의 연결]
+ * buildDimsExistsMap_()에 상속 로직을 넣었기 때문에, listJobs(메인 대시보드
+ * 자동보관), getSalesTodayList, getSalesOverview 전부 자동으로 같이 적용됨.
+ * 즉 추가 오더도 대표 오더의 "디멘션 저장 시각"을 그대로 물려받아서, 한 그룹이
+ * 같은 날 같이 보관 처리됨(한쪽만 남거나 한쪽만 사라지는 사고 방지).
+ * ===================================================================== */
+
+const DIMLINKS_SHEET = 'DimLinks';
+function dimLinksSheet_() {
+  return ensureBatchSheet_(DIMLINKS_SHEET, ['Invoice', 'PrimaryInvoice', 'LinkedBy', 'LinkedAt']);
+}
+
+/* ---------------------------------------------------------------------
+ * dimMethodKey_(method) — 배송방법 정규화.
+ * 매니저 확인 사항: "배송방법이 다른 오더끼리는 묶을 수 없음".
+ * TRUCKING과 TK는 같은 것(팔렛)이므로 하나로 취급.
+ * ------------------------------------------------------------------- */
+function dimMethodKey_(method) {
+  const m = String(method || '').trim().toUpperCase();
+  if (m === 'TRUCKING' || m === 'TK') return 'TK';
+  return m;
+}
+
+/* ---------------------------------------------------------------------
+ * dimCustomerKey_(name) — 고객사명 비교용 정규화(대소문자/공백/쉼표·마침표 무시).
+ * "Blooming Cosmetics"와 "BLOOMING COSMETICS,"를 같은 곳으로 보기 위함.
+ * ------------------------------------------------------------------- */
+function dimCustomerKey_(name) {
+  return String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+/* ---------------------------------------------------------------------
+ * buildDimLinksMap_() — DimLinks 시트를 한 번 읽어서 양방향 맵으로.
+ * childToPrimary: { 추가오더: 대표오더 }
+ * primaryToChildren: { 대표오더: [추가오더, ...] }
+ * ------------------------------------------------------------------- */
+function buildDimLinksMap_() {
+  const childToPrimary = {};
+  const primaryToChildren = {};
+  try {
+    const sh = dimLinksSheet_();
+    const last = sh.getLastRow();
+    if (last >= 2) {
+      sh.getRange(2, 1, last - 1, 4).getValues().forEach(r => {
+        const child = String(r[0] || '').trim();
+        const primary = String(r[1] || '').trim();
+        if (!child || !primary || child === primary) return;
+        childToPrimary[child] = primary;
+        if (!primaryToChildren[primary]) primaryToChildren[primary] = [];
+        if (primaryToChildren[primary].indexOf(child) < 0) primaryToChildren[primary].push(child);
+      });
+    }
+  } catch (e) { /* best-effort */ }
+  return { childToPrimary: childToPrimary, primaryToChildren: primaryToChildren };
+}
+
+/* ---------------------------------------------------------------------
+ * resolveDimPrimary_(invoice, links) — 이 인보이스가 속한 그룹의 대표를 반환.
+ * 단독이면 자기 자신. 2단 체인은 애초에 만들지 않지만, 혹시 생겨도
+ * 무한루프 없이 끝까지 따라가도록 최대 5단계까지만 추적.
+ * ------------------------------------------------------------------- */
+function resolveDimPrimary_(invoice, links) {
+  let cur = String(invoice || '').trim();
+  for (let i = 0; i < 5; i++) {
+    const next = links.childToPrimary[cur];
+    if (!next || next === cur) break;
+    cur = next;
+  }
+  return cur;
+}
+
+/* ---------------------------------------------------------------------
+ * dimJobsSnapshot_() — Jobs 시트에서 후보 추천에 필요한 최소 필드만 읽음.
+ * 인보이스 상세조회를 열 때마다 매번 전체를 다시 읽으면 느려지므로 60초 캐시.
+ * ------------------------------------------------------------------- */
+function dimJobsSnapshot_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const cached = cache.get('dimJobsSnapshot_v1');
+    if (cached) { try { return JSON.parse(cached); } catch (e) { /* 파싱 실패 시 새로 조회 */ } }
+  } catch (e) { /* 캐시 없어도 계속 진행 */ }
+
+  const out = [];
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const last = sh.getLastRow();
+    if (last < 2) return out;
+    const n = last - 1;
+    const col = c => (c ? sh.getRange(2, c, n, 1).getValues() : null);
+
+    const inv   = col(hdr[norm('Invoice')]);
+    if (!inv) return out;
+    const rem   = col(hdr[norm('Remarks')]);
+    const ship  = col(hdr[norm('Ship Date')]);
+    const truck = col(hdr[norm('Trucking')]);
+    const insp  = col(hdr[norm('Inspection')]);
+    const end   = col(hdr[norm('Insp. End')]);
+    const arch  = col(hdr[norm('archived')]);
+    const tz = Session.getScriptTimeZone();
+
+    for (let i = 0; i < n; i++) {
+      const invoice = String(inv[i][0] || '').trim();
+      if (!invoice) continue;
+      let archived = false;
+      if (arch) {
+        const a = String(arch[i][0] || '').trim().toLowerCase();
+        archived = (a === 'true' || a === '1' || a === 'y' || a === 'yes');
+      }
+      const sRaw = ship ? ship[i][0] : '';
+      const shipDate = (sRaw instanceof Date && !isNaN(sRaw))
+        ? Utilities.formatDate(sRaw, tz, 'yyyy-MM-dd')
+        : String(sRaw || '').trim().slice(0, 10);
+      let inspDate = '';
+      const eRaw = end ? end[i][0] : '';
+      if (eRaw instanceof Date && !isNaN(eRaw)) {
+        inspDate = Utilities.formatDate(eRaw, tz, 'yyyy-MM-dd');
+      } else {
+        const m = String(eRaw || '').match(/\d{4}-\d{2}-\d{2}/);
+        if (m) inspDate = m[0];
+      }
+      out.push({
+        invoice: invoice,
+        customer: String(rem ? rem[i][0] : '').trim(),
+        shipDate: shipDate,
+        inspDate: inspDate,
+        method: dimMethodKey_(truck ? truck[i][0] : ''),
+        archived: archived,
+        inspected: !!String(insp ? insp[i][0] : '').trim()
+      });
+    }
+  } catch (e) { /* best-effort */ }
+
+  try { CacheService.getScriptCache().put('dimJobsSnapshot_v1', JSON.stringify(out), 60); } catch (e) { /* 무시 */ }
+  return out;
+}
+
+/* ---------------------------------------------------------------------
+ * findDimCandidates_(me, snapshot, dimsMap, links)
+ *
+ * 매니저 확인 사항 반영:
+ *  - 추천 기준 = 같은 고객사 + (같은 검수일 또는 같은 출고일)
+ *  - 둘 다 일치하면 최우선(score 2), 하나만 일치하면 그 다음(score 1)
+ *  - 배송방법이 다르면 아예 후보에서 제외
+ *
+ * 반환:
+ *  joinTargets   — "내가 저쪽에 들어갈 수 있는" 후보 (내가 디멘션 없을 때)
+ *  addCandidates — "저쪽을 내 디멘션에 넣을 수 있는" 후보 (내가 대표일 때)
+ * ------------------------------------------------------------------- */
+function findDimCandidates_(me, snapshot, dimsMap, links) {
+  const joinTargets = [];
+  const addCandidates = [];
+  if (!me || !me.invoice) return { joinTargets: joinTargets, addCandidates: addCandidates };
+
+  const myKey = dimCustomerKey_(me.customer);
+  const myMethod = dimMethodKey_(me.method);
+  if (!myKey || !myMethod || myMethod === 'PU') return { joinTargets: joinTargets, addCandidates: addCandidates };
+
+  const myOwnDims = ((dimsMap[me.invoice] || {}).inherited ? 0 : ((dimsMap[me.invoice] || {}).count || 0));
+  const iAmChild = !!links.childToPrimary[me.invoice];
+
+  snapshot.forEach(o => {
+    if (o.invoice === me.invoice) return;
+    if (o.archived) return;
+    if (dimCustomerKey_(o.customer) !== myKey) return;
+    if (dimMethodKey_(o.method) !== myMethod) return;
+
+    const sameShip = !!(me.shipDate && o.shipDate && me.shipDate === o.shipDate);
+    const sameInsp = !!(me.inspDate && o.inspDate && me.inspDate === o.inspDate);
+    if (!sameShip && !sameInsp) return;
+
+    const score = (sameShip ? 1 : 0) + (sameInsp ? 1 : 0);
+    const theirPrimary = resolveDimPrimary_(o.invoice, links);
+    const theirGroupDims = (dimsMap[theirPrimary] || {}).count || 0;
+    const theirOwnDims = ((dimsMap[o.invoice] || {}).inherited ? 0 : ((dimsMap[o.invoice] || {}).count || 0));
+
+    const base = {
+      invoice: o.invoice, customer: o.customer, shipDate: o.shipDate, inspDate: o.inspDate,
+      method: o.method, sameShip: sameShip, sameInsp: sameInsp, score: score,
+      dimsCount: theirOwnDims, groupPrimary: theirPrimary,
+      isChild: theirPrimary !== o.invoice, groupDimsCount: theirGroupDims
+    };
+
+    // 내가 아직 어디에도 안 묶였고 내 디멘션도 없을 때 → 저쪽에 들어갈 수 있음
+    if (!iAmChild && myOwnDims === 0) joinTargets.push(base);
+
+    // 내가 대표(내 디멘션이 있음)일 때 → 저쪽이 단독이고 디멘션이 없어야 넣을 수 있음
+    if (!iAmChild && myOwnDims > 0 && !base.isChild && theirGroupDims === 0) addCandidates.push(base);
+  });
+
+  const sorter = (a, b) => (b.score - a.score) || String(a.invoice).localeCompare(String(b.invoice));
+  joinTargets.sort((a, b) => (b.groupDimsCount > 0 ? 1 : 0) - (a.groupDimsCount > 0 ? 1 : 0) || sorter(a, b));
+  addCandidates.sort(sorter);
+  return { joinTargets: joinTargets.slice(0, 8), addCandidates: addCandidates.slice(0, 8) };
+}
+
+/* ---------------------------------------------------------------------
+ * linkDimensions(data) — 두 오더를 하나의 디멘션 그룹으로 묶음.
+ * data: { invoice, target, by }
+ *
+ * 대표(primary) 결정 규칙 — 매니저 확인 사항 반영:
+ *  1) 한쪽에만 디멘션이 있으면 → 디멘션이 있는 쪽이 대표
+ *  2) 양쪽 다 없으면 → 먼저 나온(인보이스 번호가 빠른) 쪽이 자동으로 대표
+ *  3) 양쪽 다 디멘션이 있으면 → 거부(어느 쪽을 버릴지 시스템이 판단하면 안 됨)
+ * 대표를 바꾸고 싶으면 setDimPrimary()를 쓰면 됨.
+ * ------------------------------------------------------------------- */
+function linkDimensions(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const targetRaw = String((data && data.target) || '').trim();
+    const by = String((data && data.by) || 'Packing').trim();
+    if (!invoice || !targetRaw) return { ok: false, error: 'invoice and target are required' };
+    if (invoice === targetRaw) return { ok: false, error: '같은 인보이스끼리는 묶을 수 없습니다.' };
+
+    const snapshot = dimJobsSnapshot_();
+    const byInv = {};
+    snapshot.forEach(o => { byInv[o.invoice] = o; });
+    const a = byInv[invoice];
+    const b = byInv[targetRaw];
+    if (!a) return { ok: false, error: '오더를 찾을 수 없습니다: ' + invoice };
+    if (!b) return { ok: false, error: '오더를 찾을 수 없습니다: ' + targetRaw };
+
+    // 배송방법이 다르면 거부 (팔렛과 박스는 단위가 달라 합산이 성립하지 않음)
+    if (dimMethodKey_(a.method) !== dimMethodKey_(b.method)) {
+      return { ok: false, error: '배송방법이 다릅니다 (' + a.method + ' vs ' + b.method + '). 같은 방법끼리만 묶을 수 있습니다.' };
+    }
+    if (dimMethodKey_(a.method) === 'PU') {
+      return { ok: false, error: 'Pick Up(PU) 오더는 디멘션이 필요 없어 묶을 수 없습니다.' };
+    }
+
+    const links = buildDimLinksMap_();
+    const dimsMap = buildDimsExistsMap_();
+
+    const targetPrimary = resolveDimPrimary_(targetRaw, links);
+    const myPrimary = resolveDimPrimary_(invoice, links);
+    if (targetPrimary === myPrimary) return { ok: false, error: '이미 같은 그룹으로 묶여 있습니다.' };
+
+    const ownDims = (inv) => {
+      const d = dimsMap[inv] || {};
+      return d.inherited ? 0 : (d.count || 0);
+    };
+    const myDims = ownDims(myPrimary);
+    const targetDims = ownDims(targetPrimary);
+
+    if (myDims > 0 && targetDims > 0) {
+      return { ok: false, error: '양쪽 모두 디멘션이 입력되어 있습니다. 남길 쪽을 정하고 다른 쪽 디멘션을 먼저 삭제해 주세요.' };
+    }
+
+    let primary, child;
+    if (targetDims > 0) { primary = targetPrimary; child = myPrimary; }
+    else if (myDims > 0) { primary = myPrimary; child = targetPrimary; }
+    else {
+      // 둘 다 디멘션 없음 → 먼저 나온(번호가 빠른) 인보이스를 대표로
+      const pair = [myPrimary, targetPrimary].sort((x, y) => String(x).localeCompare(String(y)));
+      primary = pair[0]; child = pair[1];
+    }
+
+    // child 쪽에 딸린 기존 포함오더들도 통째로 새 대표에게 넘김
+    const moving = [child].concat(links.primaryToChildren[child] || []);
+    const sh = dimLinksSheet_();
+    const last = sh.getLastRow();
+    if (last >= 2) {
+      const rows = sh.getRange(2, 1, last - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const c = String(rows[i][0] || '').trim();
+        if (moving.indexOf(c) >= 0) sh.deleteRow(i + 2);
+      }
+    }
+    const now = batchNow_();
+    const newRows = moving.map(c => [c, primary, by, now]);
+    if (newRows.length) {
+      sh.getRange(sh.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
+    }
+    bumpVersion_();
+    try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    return { ok: true, primary: primary, linked: moving };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * unlinkDimensions(data) — 포함되어 있던 추가 오더를 다시 단독으로 되돌림.
+ * 매니저 요청: "고객이 마음이 바뀌어서 별도로 보내달라는 경우가 있다."
+ * data: { invoice, by }
+ * 디멘션 실물은 대표 쪽에 그대로 남고, 이 오더만 그룹에서 빠짐
+ * (= 디멘션 미입력 상태로 돌아감).
+ * ------------------------------------------------------------------- */
+function unlinkDimensions(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    const sh = dimLinksSheet_();
+    const last = sh.getLastRow();
+    let removed = 0;
+    if (last >= 2) {
+      const rows = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0] || '').trim() === invoice) { sh.deleteRow(i + 2); removed++; }
+      }
+    }
+    if (!removed) return { ok: false, error: '이 오더는 어디에도 포함되어 있지 않습니다.' };
+    bumpVersion_();
+    try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    return { ok: true, removed: removed };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * setDimPrimary(data) — 그룹의 대표 인보이스를 바꿈.
+ * 매니저 요청: "먼저 나온 인보이스 자동 지정이고, 그 다음에 작업자가
+ * 선택할 수 있는 기능도 있으면 좋겠다."
+ * data: { invoice, by }  ← invoice가 새 대표가 됨
+ * 디멘션 실물 행(Dimensions 시트)의 Invoice 값을 새 대표로 옮기고,
+ * DimLinks를 새 대표 기준으로 다시 씀. 그룹 구성원은 그대로 유지됨.
+ * ------------------------------------------------------------------- */
+function setDimPrimary(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const by = String((data && data.by) || 'Packing').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    const links = buildDimLinksMap_();
+    const oldPrimary = resolveDimPrimary_(invoice, links);
+    if (oldPrimary === invoice) return { ok: false, error: '이미 대표 인보이스입니다.' };
+
+    const members = [oldPrimary].concat(links.primaryToChildren[oldPrimary] || []);
+    if (members.indexOf(invoice) < 0) return { ok: false, error: '같은 그룹이 아닙니다.' };
+
+    // 1) 디멘션 실물 행을 새 대표 이름으로 옮김
+    const dsh = dimensionsSheet_();
+    const dLast = dsh.getLastRow();
+    if (dLast >= 2) {
+      const invCol = dsh.getRange(2, 1, dLast - 1, 1).getValues();
+      for (let i = 0; i < invCol.length; i++) {
+        if (String(invCol[i][0] || '').trim() === oldPrimary) dsh.getRange(i + 2, 1).setValue(invoice);
+      }
+    }
+
+    // 2) DimLinks를 새 대표 기준으로 다시 씀
+    const sh = dimLinksSheet_();
+    const last = sh.getLastRow();
+    if (last >= 2) {
+      const rows = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (members.indexOf(String(rows[i][0] || '').trim()) >= 0) sh.deleteRow(i + 2);
+      }
+    }
+    const now = batchNow_();
+    const newRows = members.filter(m => m !== invoice).map(m => [m, invoice, by, now]);
+    if (newRows.length) {
+      sh.getRange(sh.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
+    }
+    bumpVersion_();
+    try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    return { ok: true, primary: invoice, members: members };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * cleanupOrphanDimLinks_() — 대표 쪽 디멘션이 자동삭제(2일 경과)로 사라졌는데
+ * 연결 정보만 남는 경우를 정리. autoDeleteOldDimensions() 끝에서 호출됨.
+ * ------------------------------------------------------------------- */
+function cleanupOrphanDimLinks_() {
+  try {
+    const sh = dimLinksSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return 0;
+    const alive = {};
+    const dsh = dimensionsSheet_();
+    const dLast = dsh.getLastRow();
+    if (dLast >= 2) {
+      dsh.getRange(2, 1, dLast - 1, 1).getValues().forEach(r => {
+        const v = String(r[0] || '').trim();
+        if (v) alive[v] = true;
+      });
+    }
+    const rows = sh.getRange(2, 1, last - 1, 2).getValues();
+    let removed = 0;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const primary = String(rows[i][1] || '').trim();
+      if (!alive[primary]) { sh.deleteRow(i + 2); removed++; }
+    }
+    if (removed) Logger.log('cleanupOrphanDimLinks_: ' + removed + '건 정리됨');
+    return removed;
+  } catch (e) {
+    Logger.log('cleanupOrphanDimLinks_ 오류: ' + String(e && e.message || e));
+    return 0;
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * getDimGroupDetail_(invoice, method, customer) — 상세조회 응답에 붙일
+ * 그룹 정보 한 덩어리를 만들어 반환. getSalesInvoiceDetail()에서 호출.
+ * ------------------------------------------------------------------- */
+function getDimGroupDetail_(invoice, method, customer, shipDate) {
+  const empty = {
+    dimsLinkedTo: '', dimsLinkedToCustomer: '', dimsChildren: [],
+    dimsJoinTargets: [], dimsAddCandidates: []
+  };
+  try {
+    if (dimMethodKey_(method) === 'PU' || !dimMethodKey_(method)) return empty;
+
+    const links = buildDimLinksMap_();
+    const dimsMap = buildDimsExistsMap_();
+    const snapshot = dimJobsSnapshot_();
+    const byInv = {};
+    snapshot.forEach(o => { byInv[o.invoice] = o; });
+
+    const me = byInv[invoice] || {
+      invoice: invoice, customer: customer, method: method,
+      shipDate: shipDate || '', inspDate: '', archived: false, inspected: true
+    };
+
+    const primary = links.childToPrimary[invoice] || '';
+    const children = (links.primaryToChildren[invoice] || []).map(c => ({
+      invoice: c,
+      customer: (byInv[c] || {}).customer || '',
+      shipDate: (byInv[c] || {}).shipDate || ''
+    }));
+
+    const cand = findDimCandidates_(me, snapshot, dimsMap, links);
+    return {
+      dimsLinkedTo: primary,
+      dimsLinkedToCustomer: primary ? ((byInv[primary] || {}).customer || '') : '',
+      dimsChildren: children,
+      dimsJoinTargets: primary ? [] : cand.joinTargets,
+      dimsAddCandidates: primary ? [] : cand.addCandidates
+    };
+  } catch (e) {
+    return empty;
   }
 }
