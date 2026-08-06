@@ -415,6 +415,8 @@ function doPost(e) {
 
   // ★ 2026-07-28 신규 — 영업 공유: 패킹 작업자가 배송 디멘션(치수/무게) 저장
   if (op === 'saveDimensions') return json_(saveDimensions(data));
+  // ★ 2026-08-06 신규 — 단독 오더(총량피킹 배치 없음)의 패킹존 이동 수동 표시
+  if (op === 'setManualPackingMoved') return json_(setManualPackingMoved(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -480,6 +482,7 @@ function ensureJobsHeader_(sh) {
     ]);
   }
   ensureISOColumns_(sh);
+  ensureManualPackingCol_(sh); // ★ 2026-08-06 신규
 }
 
 function ensureISOColumns_(sh) {
@@ -497,6 +500,29 @@ function ensureISOColumns_(sh) {
   if (add.length) {
     sh.insertColumnsAfter(lastCol, add.length);
     sh.getRange(1, lastCol + 1, 1, add.length).setValues([add]);
+    __HDR_CACHE = null;
+  }
+}
+
+/* ★ 2026-08-06 신규 — 단독(총량피킹을 거치지 않는) 오더용 "패킹존 이동" 수동 표시.
+ * 총량피킹 오더는 TV 현황판에서 파랑으로 바뀌면 BatchCustomers 시트의 TakenOut
+ * 컬럼에 자동 기록되지만, 단독 오더는 애초에 그 시트에 아예 기록이 안 남아서
+ * "Moved to Packing"이 영원히 No로 고정되는 문제가 있었음. 출고 작업자가 직접
+ * 표시할 수 있도록 Jobs 시트에 별도 컬럼(PackingMovedManual: 시각,
+ * PackingMovedManualBy: 누가)을 추가함. */
+function ensureManualPackingCol_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return;
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const hasFlag = headers.some(h => String(h).trim().toLowerCase() === 'packingmovedmanual');
+  const hasBy = headers.some(h => String(h).trim().toLowerCase() === 'packingmovedmanualby');
+  const add = [];
+  if (!hasFlag) add.push('PackingMovedManual');
+  if (!hasBy) add.push('PackingMovedManualBy');
+  if (add.length) {
+    const curLastCol = sh.getLastColumn();
+    sh.insertColumnsAfter(curLastCol, add.length);
+    sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
     __HDR_CACHE = null;
   }
 }
@@ -860,7 +886,131 @@ function setArchived_(invoice, archived) {
   }
 }
 
-/* =============== Maintenance ============== */
+/* ★ 2026-08-06 신규 — 단독 오더(총량피킹 배치에 없는 오더)의 "패킹존 이동"을
+ * 출고 작업자가 직접 표시. sales.html 2번 화면의 수동 버튼이 이걸 호출함.
+ * 안전장치: 확인 팝업(confirm)을 거쳐야만 호출되도록 클라이언트에서 강제하고,
+ * "실수로 눌렀을 때 되돌리기"도 이 함수로 그대로 처리(moved:false로 다시 호출).
+ * 입력: { invoice, moved: true|false, by }
+ * ============================================================ */
+function setManualPackingMoved(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    const moved = !!(data && data.moved);
+    const by = String((data && data.by) || '').trim();
+
+    const sh = SHEET_(); // ensureJobsHeader_를 통해 컬럼 자동 보장됨
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const row = findRowByKey_('invoice', invoice);
+    if (!row) return { ok: false, error: 'invoice not found' };
+
+    const cFlag = hdr[norm('PackingMovedManual')];
+    const cBy = hdr[norm('PackingMovedManualBy')];
+    if (cFlag) sh.getRange(row, cFlag).setValue(moved ? nowLocal_() : '');
+    if (cBy) sh.getRange(row, cBy).setValue(moved ? by : '');
+
+    bumpVersion_();
+    return { ok: true, moved: moved };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ★ 2026-08-06 긴급 신규 — 일회성 복구 함수. 자동보관 규칙이 "검수 다음날
+ * 무조건 삭제"였던 예전 버그 때문에, 규칙을 고치기 전에 이미 잘못 archived=TRUE
+ * 처리된 주문들이 있음(디멘션 저장 전이거나 영업일 2일이 아직 안 지났는데도
+ * 삭제된 것들). 지금 archived=TRUE인 행 전부를 "새 규칙"으로 다시 판정해서,
+ * 새 규칙으로는 아직 보관 대상이 아닌 것들을 원상복구(archived 비움)함.
+ * Apps Script 에디터에서 딱 한 번 실행하면 됨 — 실행 후 다시 실행해도 안전함
+ * (이미 정상인 것들은 그대로 둠, 새 규칙으로 정말 보관 대상인 것만 그대로 유지).
+ * ============================================================ */
+function repairPrematurelyArchivedJobs() {
+  const sh = SHEET_();
+  const hdr = headerMapCached_();
+  const norm = normalizeHeaderName_;
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) { Logger.log('Jobs 시트에 데이터 없음'); return { ok: true, restored: 0 }; }
+
+  const iInv = hdr[norm('Invoice')];
+  const iArch = hdr[norm('archived')];
+  const iArchAt = hdr[norm('archivedAt')];
+  const iTruck = hdr[norm('Trucking')];
+  const iInsp = hdr[norm('Inspection')];
+  const iInspEnd = hdr[norm('Insp. End')];
+  const iEndISO = hdr[norm('EndAtISO')];
+
+  const dimsMap = buildDimsExistsMap_(); // BatchPicking.gs에 정의된 함수 재사용
+
+  function needsDims(trucking) { const t = String(trucking || '').toUpperCase(); return t === 'TRUCKING' || t === 'TK' || t === 'UPS'; }
+  function businessDaysSince(dateStr) {
+    if (!dateStr) return -1;
+    const s = String(dateStr).slice(0, 10);
+    const trigger = new Date(s + 'T00:00:00');
+    if (isNaN(trigger.getTime())) return -1;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let count = 0;
+    const d = new Date(trigger.getTime());
+    while (d.getTime() < today.getTime()) {
+      d.setDate(d.getDate() + 1);
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) count++;
+    }
+    return count;
+  }
+  function isInspected(insp) { const v = String(insp || '').trim(); return v.indexOf('PASS') >= 0 || v.indexOf('ISSUES') >= 0; }
+  function toDateStr(v) {
+    if (!v) return '';
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return String(v).slice(0, 10);
+  }
+
+  const lastCol = sh.getLastColumn();
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let restored = 0;
+  const restoredInvoices = [];
+
+  rows.forEach((r, i) => {
+    const archVal = String(r[iArch - 1] || '').trim().toLowerCase();
+    const isArchived = archVal === 'true' || archVal === '1' || archVal === 'y' || archVal === 'yes';
+    if (!isArchived) return;
+
+    const invoice = String(r[iInv - 1] || '').trim();
+    if (!invoice) return;
+    const trucking = r[iTruck - 1];
+    const insp = r[iInsp - 1];
+    if (!isInspected(insp)) return; // 검수 안 된 게 archived면 애초에 이상 케이스라 손대지 않음
+
+    let eligible;
+    if (needsDims(trucking)) {
+      const dims = dimsMap[invoice];
+      if (!dims || !dims.count) eligible = false; // 디멘션 저장 전 — 절대 보관 대상 아님
+      else eligible = businessDaysSince(dims.enteredAt) >= 2;
+    } else {
+      const trigger = toDateStr(r[iInspEnd - 1]) || toDateStr(r[iEndISO - 1]);
+      eligible = businessDaysSince(trigger) >= 2;
+    }
+
+    if (!eligible) {
+      sh.getRange(i + 2, iArch).setValue('');
+      if (iArchAt) sh.getRange(i + 2, iArchAt).setValue('');
+      restored++;
+      restoredInvoices.push(invoice);
+    }
+  });
+
+  if (restored > 0) bumpVersion_();
+  Logger.log('=== 복구 결과 ===');
+  Logger.log('복구된(보관 해제된) 주문: ' + restored + '건');
+  Logger.log(JSON.stringify(restoredInvoices, null, 2));
+  return { ok: true, restored: restored, invoices: restoredInvoices };
+}
+
+
 function applyInvoiceTextFormat_(sh, lastRow) { if (lastRow < 2) return; sh.getRange(2, 1, lastRow - 1, 1).setNumberFormat('@'); }
 
 function nowLocal_() {
@@ -2595,6 +2745,28 @@ function buildMovedToPackingMap_() {
       });
     }
   } catch (e) { /* best-effort */ }
+
+  // ★ 2026-08-06 신규 — 단독 오더(총량피킹 배치가 아예 없는 오더)는 위 BatchCustomers
+  //   경로로는 절대 true가 될 수 없어서, Jobs 시트의 수동 표시(PackingMovedManual)도
+  //   같이 OR로 합쳐줌. 이미 배치 기반으로 true인 건 안 건드림(덮어쓰지 않음).
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    const iManual = hdr[norm('PackingMovedManual')];
+    const lastRow = sh.getLastRow();
+    if (iInv && iManual && lastRow >= 2) {
+      const invVals = sh.getRange(2, iInv, lastRow - 1, 1).getValues();
+      const manualVals = sh.getRange(2, iManual, lastRow - 1, 1).getValues();
+      for (let i = 0; i < invVals.length; i++) {
+        const inv = String(invVals[i][0] || '').trim();
+        if (!inv) continue;
+        if (manualVals[i][0]) map[inv] = true; // 이미 true였으면 그대로, false/미기록이었으면 true로 승격
+      }
+    }
+  } catch (e) { /* best-effort */ }
+
   return map;
 }
 
