@@ -2086,10 +2086,26 @@ function getOpenBatches() {
       let recentlyCompleted = false, completedMinutesAgo = null;
       if (status === 'completed') {
         const completedAtRaw = r[6];
-        const completedMs = completedAtRaw ? new Date(String(completedAtRaw).replace(' ', 'T')).getTime() : NaN;
-        if (isNaN(completedMs) || (nowMs - completedMs) > RECENT_COMPLETE_GRACE_MS) return; // 1시간 지났으면 완전히 제외
-        recentlyCompleted = true;
-        completedMinutesAgo = Math.max(0, Math.round((nowMs - completedMs) / 60000));
+        if (!completedAtRaw) return; // 완료시각 기록 자체가 없는 오래된 배치는 제외
+        const completedMs = parseBatchTs_(completedAtRaw);
+        // ★ 2026-08-06 긴급 수정 — 1시간 유예가 처음부터 한 번도 작동하지 않던 버그.
+        //   완료시각을 batchNow_()가 'yyyy-MM-dd HH:mm:ss' 문자열로 저장하지만,
+        //   구글시트가 이를 날짜 값으로 자동 변환해서 getValues()는 Date 객체를 돌려줌.
+        //   그런데 예전 코드는 문자열이라고 가정하고 String(raw).replace(' ','T')를 했고,
+        //   Date 객체의 문자열은 "Thu Aug 06 2026 13:01:48 ..." 형태라 첫 공백이 바뀌어
+        //   "ThuTAug 06 ..."라는 깨진 값이 되어 파싱이 항상 실패(NaN)했음.
+        //   그리고 NaN이면 곧바로 return으로 목록에서 제외해버려서, 완료 즉시
+        //   배치가 사라지는(=매니저가 "자동 삭제됐다"고 느낀) 현상이 생겼음.
+        //   이제 Date 객체·문자열 양쪽을 모두 제대로 읽고, 혹시 못 읽더라도
+        //   조용히 숨기지 않고 "완료됨"으로 계속 보여줌(숨기는 쪽이 훨씬 위험).
+        if (isNaN(completedMs)) {
+          recentlyCompleted = true;
+          completedMinutesAgo = null;
+        } else {
+          if ((nowMs - completedMs) > RECENT_COMPLETE_GRACE_MS) return; // 1시간 지나면 목록에서 제외
+          recentlyCompleted = true;
+          completedMinutesAgo = Math.max(0, Math.round((nowMs - completedMs) / 60000));
+        }
       }
       const b = { batchId: String(r[0]), date: r[1], status: status, totalSku: r[3], totalQty: r[4], createdAt: r[5], recentlyCompleted: recentlyCompleted, completedMinutesAgo: completedMinutesAgo };
       open.push(b);
@@ -3479,4 +3495,29 @@ function getOrdersByItem(q) {
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
+}
+
+/* ---------------------------------------------------------------------
+ * parseBatchTs_(raw) — ★ 2026-08-06 신규
+ * 시트에서 읽은 시각 값을 밀리초로 바꿔줌. 구글시트는 같은 컬럼이라도
+ * 상황에 따라 Date 객체를 주기도 하고 문자열을 주기도 하기 때문에
+ * 양쪽을 모두 처리해야 함. (이걸 안 해서 1시간 유예가 통째로 고장났었음)
+ * ------------------------------------------------------------------- */
+function parseBatchTs_(raw) {
+  if (!raw) return NaN;
+  // 1) 이미 Date 객체인 경우 — 가장 흔함(시트가 날짜로 자동 변환해서 저장)
+  if (Object.prototype.toString.call(raw) === '[object Date]') {
+    return isNaN(raw.getTime()) ? NaN : raw.getTime();
+  }
+  const str = String(raw).trim();
+  if (!str) return NaN;
+  // 2) 'yyyy-MM-dd HH:mm:ss' 형태 — 가운데 공백만 T로 바꿔 ISO로 해석
+  let m = str.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(:\d{2})?)/);
+  if (m) {
+    const t = new Date(m[1] + 'T' + m[2]).getTime();
+    if (!isNaN(t)) return t;
+  }
+  // 3) 그 밖의 형태는 브라우저/GAS 기본 해석에 맡김
+  const t2 = new Date(str).getTime();
+  return isNaN(t2) ? NaN : t2;
 }
