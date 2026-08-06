@@ -253,6 +253,11 @@ function doGet(e) {
   }
 
   // ★ 2026-07-28 신규 — 영업 공유: 오더 검수 상세 + 배송 디멘션 조회
+  // ★ 2026-08-06 신규 — 디멘션 합치기 후보(같은 고객사 오더) 조회. 상세조회를
+  //   느리게 만들지 않도록 무거운 계산을 이 별도 호출로 분리함.
+  if (op === 'getDimCandidates') {
+    return json_(getDimCandidates((e.parameter || {}).invoice || ''));
+  }
   if (op === 'getSalesInvoiceDetail') {
     return json_(getSalesInvoiceDetail((e.parameter || {}).invoice || ''));
   }
