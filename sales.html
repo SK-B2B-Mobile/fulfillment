@@ -195,6 +195,24 @@ td.new-col{background:rgba(16,217,126,0.03);}
 
 .detail-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:26px; display:none; position:relative;}
 .detail-card.show{display:block;}
+
+/* ★ 2026-08-06 신규 — 상세 팝업(모달) */
+.modal-overlay{position:fixed; inset:0; background:rgba(2,4,10,0.80); z-index:400; display:none; overflow-y:auto; padding:26px 18px 60px;}
+.modal-overlay.show{display:block;}
+.modal-shell{max-width:1180px; margin:0 auto;}
+.modal-overlay .detail-card{box-shadow:0 24px 70px rgba(0,0,0,0.6);}
+.modal-loading{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:60px 20px; text-align:center; color:var(--text-dim); font-size:13.5px; display:flex; align-items:center; justify-content:center; gap:10px;}
+.search-status{min-height:18px; font-size:12px; color:var(--text-dim); margin:2px 2px 10px;}
+.search-clear{background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:0 2px;}
+.search-clear:hover{color:var(--red);}
+.item-results{background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:12px 16px; margin-bottom:12px;}
+.item-results-title{font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;}
+.item-result-row{display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); cursor:pointer;}
+.item-result-row:last-child{border-bottom:none;}
+.item-result-row:hover .ir-inv{color:#8FBBFF;}
+.ir-inv{font-family:var(--mono); font-size:13px; font-weight:800;}
+.ir-name{flex:1; font-size:12px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.ir-code{font-family:var(--mono); font-size:11px; color:var(--amber);}
 .detail-head{display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:18px; border-bottom:1px solid var(--border); margin-bottom:18px; gap:16px; flex-wrap:wrap;}
 .detail-inv{font-family:var(--mono); font-size:24px; font-weight:800;}
 .detail-cust{font-size:14px; color:var(--text-dim); margin-top:4px;}
@@ -420,21 +438,19 @@ td.new-col{background:rgba(16,217,126,0.03);}
     <div class="lookup-top">
       <div class="search-box">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-        <input id="search-input" placeholder="Enter invoice number (e.g. IN00460209)" onkeydown="if(event.key==='Enter')doSearch()">
+        <input id="search-input" placeholder="인보이스 일부 · 고객사명 · 바코드 · SKU 아무거나 (예: 3069, glowiss, 8809...)" oninput="onSearchInput()" onkeydown="if(event.key==='Enter')doSearch()">
+        <button class="search-clear" id="search-clear" onclick="clearSearch()" title="지우기" style="display:none;">✕</button>
       </div>
       <button class="search-btn" onclick="doSearch()">Search</button>
     </div>
+    <div class="search-status" id="search-status"></div>
+    <div class="item-results" id="item-results" style="display:none;"></div>
 
     <!-- ★ 2026-08-06 순서 변경(매니저 요청) — 검색 결과(상세 카드)가 예전엔
          "Recently Completed" 목록 전체보다 아래(페이지 맨 밑)에 있어서, 검색을
          해도 그 결과를 보려면 목록을 다 지나쳐서 스크롤해야 하는 산만한 구조였음.
          이제 검색창 바로 아래에 결과가 뜨고, 참고용 목록은 그 아래로 내림 —
          "검색하면 그 결과가 최우선으로 보인다"는 당연한 흐름으로 정리함. -->
-    <div class="detail-card" id="detail-card"></div>
-    <div class="empty-state" id="empty-state">
-      <div class="icon">🔍</div>
-      Search an invoice number above, or click an order from the list.
-    </div>
 
     <div class="today-panel">
       <div class="today-head">
@@ -458,6 +474,17 @@ td.new-col{background:rgba(16,217,126,0.03);}
       <div class="pager" id="today-pager" style="display:none;">
         <div class="pager-left"><span id="today-pager-summary">–</span></div>
         <div class="pager-right" id="today-pager-buttons"></div>
+      </div>
+    </div>
+
+    <!-- ★ 2026-08-06 재설계(매니저 요청) — 예전엔 상세 카드가 검색창과 목록
+         사이에 끼어 있어서, 검색 전에는 큰 빈 공간이 생기고 검색하면 목록이
+         저 아래로 밀려나 화면이 계속 출렁였음. 이제 상세는 화면 가운데 팝업으로
+         띄우고, 목록은 자리를 그대로 지킴 — 여러 건 연속 처리할 때 스크롤
+         위치를 잃지 않음. 목록 클릭·검색 양쪽 모두 이 팝업으로 열림. -->
+    <div class="modal-overlay" id="detail-overlay" onclick="onOverlayClick(event)">
+      <div class="modal-shell">
+        <div class="detail-card" id="detail-card"></div>
       </div>
     </div>
 
@@ -749,9 +776,11 @@ function onTodayPageSizeChange(){
 function gotoTodayPage(p){ TODAY_PAGE = p; renderToday(); }
 
 function renderToday(){
-  const jobs = TODAY_JOBS;
+  const jobs = filteredJobs();  // ★ 2026-08-06 — 검색어가 있으면 걸러진 목록을 보여줌
+  const cnt = document.getElementById('today-count');
+  if (cnt) cnt.textContent = SEARCH_Q ? (jobs.length + ' / ' + TODAY_JOBS.length + ' orders') : (TODAY_JOBS.length + ' orders');
   if (!jobs.length){
-    document.getElementById('today-list').innerHTML = '<div class="today-empty">No orders completed yet today.</div>';
+    document.getElementById('today-list').innerHTML = '<div class="today-empty">' + (SEARCH_Q ? '검색과 일치하는 오더가 없습니다.' : 'No orders completed yet today.') + '</div>';
     document.getElementById('today-pager').style.display = 'none';
     return;
   }
@@ -810,11 +839,92 @@ function renderTodayPager(totalPages){
 }
 
 function jumpToInvoice(inv){
-  document.getElementById('search-input').value = inv;
   showScreen('lookup');
-  doSearch();
-  window.scrollTo({top:0, behavior:'smooth'});
+  openInvoice(inv);
 }
+
+/* ---- 통합 검색 (★ 2026-08-06 신규, 매니저 요청) ----
+ * 인보이스 전체를 다 쳐야만 찾히던 문제를 해결.
+ *  1) 타자를 치는 즉시 아래 목록이 걸러짐 — 인보이스 뒷자리, 고객사명 모두 됨
+ *     (이미 화면에 받아둔 데이터라 서버를 안 거치므로 즉각 반응)
+ *  2) Enter/Search — 결과가 1건이면 바로 팝업으로 열림
+ *  3) 목록에 없으면 그때만 서버에 물어봄 — 보관된 오더까지 인보이스로 조회하고,
+ *     그래도 없으면 바코드·SKU로 "그 상품이 든 오더"를 찾아줌 */
+let SEARCH_Q = '';
+
+function filteredJobs(){
+  if (!SEARCH_Q) return TODAY_JOBS;
+  return TODAY_JOBS.filter(j =>
+    String(j.invoice||'').toUpperCase().includes(SEARCH_Q) ||
+    String(j.remarks||'').toUpperCase().includes(SEARCH_Q));
+}
+
+function onSearchInput(){
+  const el = document.getElementById('search-input');
+  SEARCH_Q = el.value.trim().toUpperCase();
+  document.getElementById('search-clear').style.display = SEARCH_Q ? 'block' : 'none';
+  document.getElementById('item-results').style.display = 'none';
+  TODAY_PAGE = 1;
+  renderToday();
+  const st = document.getElementById('search-status');
+  if (!SEARCH_Q){ st.textContent = ''; return; }
+  const n = filteredJobs().length;
+  st.textContent = n === 0
+    ? '목록에 일치하는 오더가 없습니다 — Enter를 누르면 전체(보관분·바코드 포함)에서 찾아봅니다.'
+    : (n === 1 ? '1건 — Enter를 누르면 바로 열립니다.' : n + '건 일치 — 아래 목록에서 선택하세요.');
+}
+
+function clearSearch(){
+  document.getElementById('search-input').value = '';
+  onSearchInput();
+}
+
+async function doSearch(){
+  const q = document.getElementById('search-input').value.trim().toUpperCase();
+  if (!q) return;
+  SEARCH_Q = q;
+  const st = document.getElementById('search-status');
+  const f = filteredJobs();
+  if (f.length === 1) return openInvoice(f[0].invoice);
+  if (f.length > 1){ st.textContent = f.length + '건 일치 — 아래 목록에서 선택하세요.'; return; }
+
+  // 목록에 없음 → 서버 조회
+  st.innerHTML = '<span class="spinner"></span> 전체에서 찾는 중…';
+  const direct = await gasGet({ op:'getSalesInvoiceDetail', invoice:q });
+  if (direct && direct.ok){ st.textContent = ''; CURRENT_ORDER = direct; 
+    document.getElementById('detail-overlay').classList.add('show');
+    document.body.style.overflow = 'hidden';
+    renderDetail(direct);  // 합치기 후보는 renderDetail 끝에서 자동으로 불러옴
+    return; }
+
+  st.innerHTML = '<span class="spinner"></span> 바코드·SKU로 찾는 중…';
+  const byItem = await gasGet({ op:'getOrdersByItem', q:q });
+  const box = document.getElementById('item-results');
+  if (byItem && byItem.ok && (byItem.orders||[]).length){
+    st.textContent = '';
+    box.style.display = 'block';
+    box.innerHTML = `<div class="item-results-title">이 상품이 들어있는 오더 ${byItem.orders.length}건</div>` +
+      byItem.orders.map(o=>`<div class="item-result-row" onclick="openInvoice('${o.invoice}')">
+        <span class="ir-inv">${o.invoice}</span>
+        <span class="ir-name">${(o.name||'').replace(/</g,'&lt;')}</span>
+        <span class="ir-code">${o.sku||o.barcode||''}</span>
+      </div>`).join('');
+  } else {
+    box.style.display = 'none';
+    st.textContent = '"' + q + '" 로는 아무것도 찾지 못했습니다. 인보이스 번호 일부, 고객사명, 바코드, SKU로 다시 시도해 보세요.';
+  }
+}
+
+/* ---- 팝업 제어 ---- */
+function onOverlayClick(e){
+  if (e.target && e.target.id === 'detail-overlay') closeDetailCard();
+}
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') {
+    const ov = document.getElementById('detail-overlay');
+    if (ov && ov.classList.contains('show')) closeDetailCard();
+  }
+});
 
 function renderDimsSection(order){
   if (!needsDims(order)){
@@ -985,7 +1095,7 @@ async function dimGroupCall(op, payload, confirmMsg){
   const res = await gasPost(op, payload);
   if (res && res.ok){
     const inv = (CURRENT_ORDER && CURRENT_ORDER.invoice) || '';
-    if (inv) { document.getElementById('search-input').value = inv; await doSearch(); }
+    if (inv) await openInvoice(inv);
     loadToday();
     loadSheetOverview();
   } else {
@@ -1095,30 +1205,35 @@ async function saveDimsReal(){
   }
 }
 
-async function doSearch(){
-  const q = document.getElementById('search-input').value.trim().toUpperCase();
+/* ★ 2026-08-06 재설계 — 상세는 팝업으로. 목록 클릭·검색 둘 다 여기로 들어옴.
+ * 예전 doSearch()는 "검색 + 조회 + 그리기"가 한 덩어리였는데, 이제
+ *   openInvoice(inv)  = 팝업 띄우고 서버에서 상세 가져오기
+ *   renderDetail(res) = 가져온 내용을 카드에 그리기
+ * 로 나눠서, 목록 클릭·검색·저장 후 새로고침이 모두 같은 길을 쓰게 함. */
+async function openInvoice(inv){
+  inv = String(inv||'').trim().toUpperCase();
+  if (!inv) return;
+  const overlay = document.getElementById('detail-overlay');
   const card = document.getElementById('detail-card');
-  const empty = document.getElementById('empty-state');
-  if (!q) return;
+  overlay.classList.add('show');
+  document.body.style.overflow = 'hidden';
+  card.classList.add('show');
+  card.innerHTML = `<div class="modal-loading"><span class="spinner"></span>${inv} 불러오는 중…</div>`;
 
-  empty.style.display = 'block';
-  empty.innerHTML = '<div class="icon"><span class="spinner"></span></div>Looking up '+q+'...';
-  card.classList.remove('show');
-
-  const res = await gasGet({ op:'getSalesInvoiceDetail', invoice:q });
-
+  const res = await gasGet({ op:'getSalesInvoiceDetail', invoice: inv });
   if (!res || !res.ok){
     CURRENT_ORDER = null;
-    card.classList.remove('show');
-    empty.style.display='block';
-    empty.innerHTML = '<div class="icon">❌</div>'+ (res && res.error ? res.error : 'No order found for: '+q);
+    card.innerHTML = `<div class="modal-loading">❌ ${(res && res.error) ? res.error : ('오더를 찾을 수 없습니다: '+inv)}
+      <button class="link-btn" style="margin-left:10px;" onclick="closeDetailCard()">닫기</button></div>`;
     return;
   }
-
   CURRENT_ORDER = res;
-  empty.style.display='none';
-  card.classList.add('show');
+  renderDetail(res);
+}
 
+function renderDetail(res){
+  const card = document.getElementById('detail-card');
+  card.classList.add('show');
   const items = res.items || [];
   const insp = String(res.inspectionRaw || '').trim();
   let status, real=[], gap=[];
@@ -1248,11 +1363,11 @@ async function doSearch(){
 // ★ 2026-08-05 신규 — 상세 카드 닫기. 검색창도 같이 비워서, 위쪽 "Completed
 // Today" 목록만 다시 깔끔하게 보이는 상태로 되돌림.
 function closeDetailCard(){
+  // ★ 2026-08-06 — 팝업만 닫음. 검색어와 목록 위치는 그대로 두어서,
+  //   여러 건을 연속으로 처리할 때 매번 다시 찾지 않아도 되게 함.
+  document.getElementById('detail-overlay').classList.remove('show');
   document.getElementById('detail-card').classList.remove('show');
-  document.getElementById('search-input').value = '';
-  const empty = document.getElementById('empty-state');
-  empty.style.display = 'block';
-  empty.innerHTML = '<div class="icon">🔍</div>Search an invoice number above, or click an order from the list below.';
+  document.body.style.overflow = '';
   CURRENT_ORDER = null;
 }
 
@@ -1272,7 +1387,9 @@ async function markManualMoved(invoice, moved){
     return;
   }
   // 성공 — 화면을 최신 상태로 다시 불러옴
-  await doSearch();
+  const inv = (CURRENT_ORDER && CURRENT_ORDER.invoice) || '';
+  if (inv) await openInvoice(inv);
+  loadToday();
 }
 
 function showScreen(name){
