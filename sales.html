@@ -295,6 +295,40 @@ td.new-col{background:rgba(16,217,126,0.03);}
 
 .no-dims-note{padding:14px 18px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12.5px; color:var(--text-dim);}
 
+/* ★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더) UI */
+.dims-panel.linked{border-color:var(--blue); background:rgba(59,130,246,0.07);}
+.linked-head{font-size:15px; font-weight:800; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.linked-head b{font-family:var(--mono); color:#8FBBFF; cursor:pointer; text-decoration:underline;}
+.linked-sub{font-size:12px; color:var(--text-dim); margin-top:5px;}
+.linked-figure{margin-top:12px; font-family:var(--mono); font-size:14px; font-weight:800; color:var(--amber);}
+.linked-note{font-family:var(--sans); font-size:11px; font-weight:600; color:var(--text-dim);}
+.linked-actions{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;}
+.link-btn{background:var(--surface); border:1px solid var(--border2); color:var(--text); font-family:var(--sans); font-size:12px; font-weight:700; padding:8px 13px; border-radius:8px; cursor:pointer; white-space:nowrap;}
+.link-btn:hover{border-color:var(--blue); color:#8FBBFF;}
+.link-btn.danger:hover{border-color:var(--red); color:#FF7A7A;}
+.link-btn.accent{background:var(--purple-bg); border-color:var(--purple); color:#C4B0FF;}
+.link-btn.accent:hover{background:var(--purple); color:#fff;}
+
+.dim-group-box{margin-top:12px; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px;}
+.dim-group-title{font-size:11px; font-weight:800; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:10px;}
+.dim-group-row{display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--border);}
+.dim-group-row:last-of-type{border-bottom:none;}
+.gr-inv{font-family:var(--mono); font-size:13px; font-weight:800; color:#8FBBFF; cursor:pointer; text-decoration:underline;}
+.gr-cust{flex:1; font-size:12.5px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.gr-x{background:none; border:1px solid var(--border2); color:var(--text-dim); border-radius:6px; width:26px; height:26px; cursor:pointer; font-size:12px; flex-shrink:0;}
+.gr-x:hover{border-color:var(--red); color:var(--red);}
+
+.dim-suggest{margin-top:12px; background:var(--amber-bg); border:1px solid var(--amber); border-radius:12px; padding:14px 16px;}
+.dim-suggest-title{font-size:12.5px; font-weight:800; color:var(--amber); margin-bottom:10px;}
+.dim-suggest-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid rgba(245,158,11,0.2); flex-wrap:wrap;}
+.dim-suggest-row:last-of-type{border-bottom:none;}
+.sg-inv{font-family:var(--mono); font-size:13px; font-weight:800;}
+.sg-tag{display:inline-block; font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; background:var(--gray-bg); color:var(--text-dim); margin-left:6px;}
+.sg-dims{font-size:11.5px; color:var(--text-dim); margin-left:6px;}
+.sg-btn{background:var(--amber); border:none; color:#1A1204; font-family:var(--sans); font-size:11.5px; font-weight:800; padding:7px 13px; border-radius:7px; cursor:pointer; white-space:nowrap;}
+.sg-btn:hover{filter:brightness(1.12);}
+.linked-tag{display:inline-block; font-family:var(--mono); font-size:10px; font-weight:800; padding:2px 6px; border-radius:5px; background:var(--blue-bg); color:#8FBBFF;}
+
 .empty-state{text-align:center; padding:60px 20px; color:var(--text-dim);}
 .empty-state .icon{font-size:36px; margin-bottom:10px;}
 .spinner{display:inline-block; width:16px; height:16px; border:2px solid var(--border2); border-top-color:var(--purple); border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:-3px; margin-right:8px;}
@@ -616,6 +650,8 @@ function dimsBadge(o){
   //   "아직 안 넣은 건지, 원래 필요 없는 건지" 구분이 애매했음. 명확하게 N/A로 표시.
   if (!needs) return '<span class="badge na">N/A</span>';
   const n = o.dimsCount || 0;
+  // ★ 2026-08-06 — 다른(대표) 인보이스에 디멘션이 포함된 오더는 그 번호를 같이 보여줌
+  if (o.dimsLinkedTo) return '<span class="badge pass">🔗 '+o.dimsLinkedTo+'</span>';
   return n>0
     ? '<span class="badge pass">✓ Saved ('+n+')</span>'
     : '<span class="badge pending">Not Entered</span>';
@@ -731,7 +767,7 @@ function renderToday(){
     const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Moved</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
     const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
-    const dimsBadgeJ = needsDimsJ ? (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>') : '<span class="plain-tag na">N/A</span>';
+    const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>')) : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
       <span class="today-inv">${j.invoice||''}</span>
       <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
@@ -789,32 +825,117 @@ function renderDimsSection(order){
     <div id="dims-panel-container">${renderDimsPanel(order, false)}</div>`;
 }
 
+/* ★ 2026-08-06 신규 — 디멘션 합산
+ * [배경] 같은 고객사가 하루에 오더를 나눠서 내는 경우(원 오더 + 추가 오더)가
+ * 잦은데, 실제로는 같은 팔렛/박스에 같이 실려 나감. 예전엔 인보이스마다 따로
+ * 입력해야 해서 중복 입력하거나 한쪽을 빠뜨리는 문제가 있었음.
+ * [방식] 디멘션은 "대표 인보이스" 한 곳에만 저장하고, 추가 오더는 거기에
+ * 연결만 시킴. 화면 상태는 아래 3가지.
+ *   A) 대표/단독  — 평소처럼 입력. 아래에 포함된 오더 목록 + 추가 후보 표시
+ *   B) 포함된 오더 — 대표의 디멘션을 읽기 전용으로 보여주고, 해제/대표변경 가능
+ *   C) 미입력     — 같은 고객사(같은 검수일 또는 같은 출고일) 오더를 자동 추천
+ */
+function dimMatchTag(c){
+  const t=[];
+  if (c.sameInsp) t.push('같은 검수일');
+  if (c.sameShip) t.push('같은 출고일');
+  return t.length ? `<span class="sg-tag">${t.join(' · ')}</span>` : '';
+}
+
+function renderDimsLinkedCard(order){
+  const p = order.dimsLinkedTo;
+  const cnt = (order.dims||[]).length;
+  const totalWt = (order.dims||[]).reduce((s,d)=>s+(Number(d.wt)||0),0);
+  const unitPl = dimUnitLabelPlural(order);
+  const figure = cnt>0
+    ? `${cnt} ${unitPl} · Total ${totalWt} lbs <span class="linked-note">(대표 오더 ${p} 기준 합산)</span>`
+    : `<span class="linked-note">대표 오더에 아직 디멘션이 입력되지 않았습니다.</span>`;
+  return `<div class="dims-panel linked">
+    <div class="linked-head">🔗 <b onclick="jumpToInvoice('${p}')">${p}</b> 에 디멘션이 포함되어 있습니다</div>
+    <div class="linked-sub">${order.dimsLinkedToCustomer||order.customer||''} — 같은 고객사 오더로 합쳐서 출고됩니다.</div>
+    <div class="linked-figure">${figure}</div>
+    <div class="linked-actions">
+      <button class="link-btn" onclick="jumpToInvoice('${p}')">대표 오더 열기 ↗</button>
+      <button class="link-btn" onclick="makeDimPrimary('${order.invoice}')">이 오더를 대표로 변경</button>
+      <button class="link-btn danger" onclick="unlinkDim('${order.invoice}', true)">연결 해제 — 단독 출고로</button>
+    </div>
+  </div>`;
+}
+
+function renderDimChildren(order){
+  const kids = order.dimsChildren || [];
+  if (!kids.length) return '';
+  return `<div class="dim-group-box">
+    <div class="dim-group-title">📦 이 디멘션에 함께 포함된 오더 (${kids.length}건)</div>
+    ${kids.map(k=>`<div class="dim-group-row">
+      <span class="gr-inv" onclick="jumpToInvoice('${k.invoice}')">${k.invoice}</span>
+      <span class="gr-cust">${k.customer||''}</span>
+      <button class="gr-x" title="연결 해제 — 단독 출고로 되돌리기" onclick="unlinkDim('${k.invoice}', false)">✕</button>
+    </div>`).join('')}
+  </div>`;
+}
+
+function renderDimCandidates(order){
+  const join = order.dimsJoinTargets || [];
+  const add  = order.dimsAddCandidates || [];
+  const unitPl = dimUnitLabelPlural(order);
+  let html = '';
+  if (join.length){
+    html += `<div class="dim-suggest">
+      <div class="dim-suggest-title">💡 같은 고객사의 다른 오더가 있습니다 — 디멘션을 합쳐서 한 번만 입력하세요</div>
+      ${join.map(c=>`<div class="dim-suggest-row">
+        <div><span class="sg-inv">${c.invoice}</span>${dimMatchTag(c)}<span class="sg-dims">${c.groupDimsCount>0 ? '· '+c.groupDimsCount+' '+unitPl+' 입력됨' : '· 디멘션 미입력'}</span></div>
+        <button class="sg-btn" onclick="joinDimGroup('${order.invoice}','${c.invoice}')">함께 묶기</button>
+      </div>`).join('')}
+    </div>`;
+  }
+  if (add.length){
+    html += `<div class="dim-suggest">
+      <div class="dim-suggest-title">➕ 이 디멘션에 포함시킬 수 있는 같은 고객사 오더</div>
+      ${add.map(c=>`<div class="dim-suggest-row">
+        <div><span class="sg-inv">${c.invoice}</span>${dimMatchTag(c)}<span class="sg-dims">· 디멘션 미입력</span></div>
+        <button class="sg-btn" onclick="joinDimGroup('${c.invoice}','${order.invoice}')">여기에 포함</button>
+      </div>`).join('')}
+    </div>`;
+  }
+  return html;
+}
+
+function renderDimsExtras(order){
+  return renderDimChildren(order) + renderDimCandidates(order) +
+    `<div style="margin-top:10px;"><button class="link-btn" onclick="linkByTyping('${order.invoice}')">🔗 다른 인보이스 직접 입력해서 묶기</button></div>`;
+}
+
 function renderDimsPanel(order, editing){
   const unit = dimUnitLabel(order);
   const unitPl = dimUnitLabelPlural(order);
   const isUPS = order.method === 'UPS';
   const hasDims = order.dims && order.dims.length > 0;
 
+  // B) 이 오더가 다른 오더에 포함된 경우 — 여기서는 입력/수정 불가(대표에서만)
+  if (order.dimsLinkedTo) return renderDimsLinkedCard(order);
+
   if (!editing){
     if (!hasDims){
       return `<div class="dims-panel empty">
         <div class="empty-dims-label">No dimensions entered yet.</div>
         <button class="big-add-btn" onclick="startDimsEdit()">✏️ Enter ${unitPl} & Weight</button>
-      </div>`;
+      </div>` + renderDimsExtras(order);
     }
     const totalWt = order.dims.reduce((s,d)=>s+(Number(d.wt)||0),0);
+    const kidCount = (order.dimsChildren||[]).length;
     const rows = order.dims.map((d,i)=>{
       const spec = (d.l&&d.w&&d.h) ? `${d.l}" × ${d.w}" × ${d.h}"` : (isUPS ? '' : '(size not recorded)');
       return `<div class="dim-view-row"><span class="idx">#${i+1}</span><span class="spec">${spec}</span><span class="wt">${d.wt} lbs</span></div>`;
     }).join('');
     return `<div class="dims-panel">
       <div class="dims-head-row">
-        <span class="dims-unit-label">${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs</span>
+        <span class="dims-unit-label">${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs${kidCount?` <span class="linked-tag">${kidCount}건 포함</span>`:''}</span>
         <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
       </div>
       ${rows}
       <div class="dims-meta" style="margin-top:10px;">Entered by ${order.dimsBy||'-'} · ${order.dimsAt||'-'}</div>
-    </div>`;
+    </div>` + renderDimsExtras(order);
   }
 
   const rows = (order.dims && order.dims.length ? order.dims : [{l:'',w:'',h:'',wt:''}]).map((d,i)=>buildDimEditRow(i, d, isUPS)).join('');
@@ -831,6 +952,41 @@ function renderDimsPanel(order, editing){
     <div class="dims-saved-flash" id="dims-saved-flash">✓ Saved</div>
     <div class="dims-error-flash" id="dims-error-flash">Could not save — check connection and try again.</div>
   </div>`;
+}
+
+/* ---- 디멘션 그룹 조작 (서버 반영 후 현재 오더를 다시 불러옴) ---- */
+async function dimGroupCall(op, payload, confirmMsg){
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  const res = await gasPost(op, payload);
+  if (res && res.ok){
+    const inv = (CURRENT_ORDER && CURRENT_ORDER.invoice) || '';
+    if (inv) { document.getElementById('search-input').value = inv; await doSearch(); }
+    loadToday();
+    loadSheetOverview();
+  } else {
+    alert((res && res.error) ? res.error : '처리하지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.');
+  }
+}
+
+function joinDimGroup(invoice, target){
+  dimGroupCall('linkDimensions', { invoice: invoice, target: target, by: 'Packing (tablet)' },
+    `${invoice} 와 ${target} 의 디멘션을 하나로 합칩니다.\n\n실제로 같은 팔렛/박스에 함께 실려 나가는 오더가 맞습니까?`);
+}
+
+function unlinkDim(invoice, isSelf){
+  dimGroupCall('unlinkDimensions', { invoice: invoice, by: 'Packing (tablet)' },
+    `${invoice} 를 그룹에서 빼고 단독 출고로 되돌립니다.\n\n이 오더의 디멘션은 다시 "미입력" 상태가 됩니다. 계속할까요?`);
+}
+
+function makeDimPrimary(invoice){
+  dimGroupCall('setDimPrimary', { invoice: invoice, by: 'Packing (tablet)' },
+    `${invoice} 를 이 그룹의 대표 인보이스로 변경합니다.\n\n입력된 디멘션이 이 오더로 옮겨지고, 나머지 오더가 여기에 포함됩니다. 계속할까요?`);
+}
+
+function linkByTyping(invoice){
+  const t = prompt('함께 묶을 인보이스 번호를 입력하세요 (예: IN00462312)');
+  if (!t) return;
+  joinDimGroup(invoice, String(t).trim().toUpperCase());
 }
 
 // ★ UPS는 박스 번호 + 무게만 필요(사이즈 불필요), TK(팔렛)는 L×W×H+무게 전부 필요.
