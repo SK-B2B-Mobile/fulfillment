@@ -507,8 +507,13 @@ function methodClass(m){
 //   Fulfillment Status 컬럼만 봤어야 했음. Picking 컬럼 하나만 보고도 진행상태
 //   전체(대기→피킹중→완료)를 한눈에 알 수 있도록 Complete 상태를 추가함.
 function pickingBadge(o){
-  const insp = String(o.inspection||'').trim();
-  if (insp) return '<span class="badge picking-complete">✓ Complete</span>';
+  // ★ 2026-08-06 긴급 수정 — 예전엔 여기서 검수(Inspection) 여부만 보고
+  //   "Complete"를 판단했는데, 현황판 숫자(renderProgressBoard)는 o.pickComplete
+  //   (피킹 종료시각 EndAtISO 또는 검수 여부, 둘 중 하나)로 계산해서 서로
+  //   기준이 달랐음 — "피킹은 끝났지만 검수 전"인 주문이 있으면 현황판은
+  //   카운트하는데 표에는 Active로만 떠서 숫자가 안 맞아 보이는 문제가 있었음.
+  //   이제 둘 다 정확히 같은 필드(o.pickComplete)를 기준으로 삼아서 100% 일치시킴.
+  if (o.pickComplete) return '<span class="badge picking-complete">✓ Complete</span>';
   if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>Active</span>';
   return '<span class="badge picking-waiting"><span class="dot-static"></span>Waiting</span>';
 }
