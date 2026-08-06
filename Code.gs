@@ -2919,7 +2919,9 @@ function getSalesTodayList() {
         method: truckVals ? truckVals[i][0] : '',
         inspection: insp,
         inspEnd: inspEnd,
-        movedToPacking: !!movedMap[invoice],
+        // ★ 2026-08-06 신규(매니저 요청) — 디멘션이 저장돼 있으면 물리적으로
+        //   이미 패킹존에서 측정된 것이므로 자동으로 이동완료로 인정.
+        movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
         dimsCount: (dimsMap[invoice] || {}).count || 0
       });
     }
@@ -3022,7 +3024,9 @@ function getSalesOverview() {
         amount: amountVals ? amountVals[i][0] : '',
         inspection: inspVals ? String(inspVals[i][0] || '').trim() : '',
         inspEnd: inspEndVals ? formatInspEnd_(inspEndVals[i][0]) : '',
-        movedToPacking: !!movedMap[invoice],
+        // ★ 2026-08-06 신규(매니저 요청) — 디멘션이 저장돼 있으면 물리적으로
+        //   이미 패킹존에서 측정된 것이므로 자동으로 이동완료로 인정.
+        movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
         dimsCount: (dimsMap[invoice] || {}).count || 0,
         createdAt: createdRaw ? String(createdRaw) : ''
       });
