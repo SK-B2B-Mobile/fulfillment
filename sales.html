@@ -378,7 +378,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="screen" id="screen-lookup">
     <div class="section-head">
       <h2>Order Fulfillment Detail</h2>
-      <p>Search by invoice, or click an order from today's list below. Anyone can view; the Edit button next to Shipping Dimensions is open for Packing to fill in — no login needed.</p>
+      <p>Search by invoice, or click an order from the list below. Anyone can view; the Edit button next to Shipping Dimensions is open for Packing to fill in — no login needed.</p>
     </div>
 
     <div class="lookup-top">
@@ -391,7 +391,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
 
     <div class="today-panel">
       <div class="today-head">
-        <h3>Completed Today</h3>
+        <h3>Recently Completed</h3>
         <div style="display:flex; align-items:center; gap:10px;">
           <select id="today-page-size" onchange="onTodayPageSizeChange()" class="today-page-size-select">
             <option value="10" selected>10</option>
@@ -417,7 +417,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
     <div class="detail-card" id="detail-card"></div>
     <div class="empty-state" id="empty-state">
       <div class="icon">🔍</div>
-      Search an invoice number above, or click an order from today's list.
+      Search an invoice number above, or click an order from the list.
     </div>
   </div>
 
@@ -1054,7 +1054,7 @@ function closeDetailCard(){
   document.getElementById('search-input').value = '';
   const empty = document.getElementById('empty-state');
   empty.style.display = 'block';
-  empty.innerHTML = '<div class="icon">🔍</div>Search an invoice number above, or click an order from today\\u2019s list below.';
+  empty.innerHTML = '<div class="icon">🔍</div>Search an invoice number above, or click an order from the list below.';
   CURRENT_ORDER = null;
 }
 
