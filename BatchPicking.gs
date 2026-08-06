@@ -2710,10 +2710,12 @@ function getSalesInvoiceDetail(invoice) {
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     let movedToPacking = false;
+    let hasBatchRecord = false; // ★ 2026-08-06 신규 — 총량피킹 배치에 속한 오더인지(=TV로 관리되는지)
     if (bcLast >= 2) {
       const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
       for (let i = bcInvVals.length - 1; i >= 0; i--) {
         if (String(bcInvVals[i][0]).trim() === invoice) {
+          hasBatchRecord = true;
           // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
           //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
           //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
@@ -2722,6 +2724,19 @@ function getSalesInvoiceDetail(invoice) {
         }
       }
     }
+    // ★ 2026-08-06 신규 — 단독 오더(hasBatchRecord=false)는 위에서 절대 true가
+    //   될 수 없으므로, Jobs 시트의 수동 표시(PackingMovedManual)를 OR로 합침.
+    let manualMovedAt = '', manualMovedBy = '';
+    try {
+      const hmManual = headerMapCached_();
+      const iManualFlag = hmManual[normalizeHeaderName_('PackingMovedManual')];
+      const iManualBy = hmManual[normalizeHeaderName_('PackingMovedManualBy')];
+      if (iManualFlag) {
+        const v = jobRow[iManualFlag - 1];
+        if (v) { movedToPacking = true; manualMovedAt = String(v); }
+      }
+      if (iManualBy) manualMovedBy = String(jobRow[iManualBy - 1] || '');
+    } catch (e) { /* best-effort */ }
 
     // 3) IssueLog에서 이 인보이스의 활성 이슈 상세 (SKU/상품명/바코드/사유/수량)
     // ★ 2026-08-03 성능 개선 — 13개 컬럼 전체를 모든 행에서 읽던 것을, 인보이스
@@ -2818,6 +2833,9 @@ function getSalesInvoiceDetail(invoice) {
       inspector: inspector,
       inspEnd: inspEndRaw,
       movedToPacking: movedToPacking,
+      hasBatchRecord: hasBatchRecord, // ★ 2026-08-06 신규 — false면 단독 오더(수동 버튼 노출 대상)
+      manualMovedAt: manualMovedAt,
+      manualMovedBy: manualMovedBy,
       items: items,
       dims: dimsResult.dims,
       dimsBy: dimsResult.enteredBy,
