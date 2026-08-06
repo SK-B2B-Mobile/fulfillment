@@ -363,6 +363,10 @@ td.new-col{background:rgba(16,217,126,0.03);}
 .sg-btn{background:var(--amber); border:none; color:#1A1204; font-family:var(--sans); font-size:11.5px; font-weight:800; padding:7px 13px; border-radius:7px; cursor:pointer; white-space:nowrap;}
 .sg-btn:hover{filter:brightness(1.12);}
 .linked-tag{display:inline-block; font-family:var(--mono); font-size:10px; font-weight:800; padding:2px 6px; border-radius:5px; background:var(--blue-bg); color:#8FBBFF;}
+.role-badge{display:inline-block; font-family:var(--sans); font-size:10px; font-weight:800; padding:3px 8px; border-radius:5px; flex-shrink:0;}
+.role-badge.primary{background:var(--green-bg); color:var(--green); border:1px solid var(--green);}
+.role-badge.child{background:var(--blue-bg); color:#8FBBFF; border:1px solid var(--blue);}
+.dim-group-row.is-me{background:rgba(59,130,246,0.08); border-radius:7px; padding-left:8px; padding-right:8px;}
 .dim-extras-loading{margin-top:12px; padding:12px 16px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12px; color:var(--text-dim); display:flex; align-items:center; gap:9px;}
 .moved-hint{font-size:10px; color:var(--text-dim); margin-top:5px; text-align:right; max-width:230px;}
 
@@ -406,7 +410,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-06-f</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-06-g</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -999,36 +1003,68 @@ function dimMatchTag(c){
   return t.length ? `<span class="sg-tag">${t.join(' · ')}</span>` : '';
 }
 
+function dimRowsView(order){
+  const isUPS = order.method === 'UPS';
+  return (order.dims||[]).map((d,i)=>{
+    const spec = (d.l&&d.w&&d.h) ? `${d.l}" × ${d.w}" × ${d.h}"` : (isUPS ? '' : '(size not recorded)');
+    return `<div class="dim-view-row"><span class="idx">#${i+1}</span><span class="spec">${spec}</span><span class="wt">${d.wt} lbs</span></div>`;
+  }).join('');
+}
+
+/* ★ 2026-08-06 개선(매니저 요청) — 예전엔 추가(포함) 오더를 열면 "IN00462632에
+ * 포함되어 있습니다"라는 안내와 합계만 보이고, 실제 팔렛 내역을 보려면 반드시
+ * "대표 오더 열기"를 눌러 이동해야 했음. 같은 팔렛에 실린 오더인데 어디서 여느냐에
+ * 따라 보이는 정보가 달라지는 건 불필요한 불편이었음.
+ * → 이제 대표든 추가든 어느 쪽을 열어도 팔렛 내역·합계·그룹 명단이 모두 보임.
+ *   대신 "대표 오더"인지 "포함 오더"인지는 상단 배지로 분명히 구분해서 표시하고,
+ *   수정(Edit)은 대표 오더에서만 가능하도록 유지함(값이 두 곳에서 갈리는 것 방지). */
 function renderDimsLinkedCard(order){
   const p = order.dimsLinkedTo;
-  const cnt = (order.dims||[]).length;
-  const totalWt = (order.dims||[]).reduce((s,d)=>s+(Number(d.wt)||0),0);
   const unitPl = dimUnitLabelPlural(order);
-  const figure = cnt>0
-    ? `${cnt} ${unitPl} · Total ${totalWt} lbs <span class="linked-note">(대표 오더 ${p} 기준 합산)</span>`
-    : `<span class="linked-note">대표 오더에 아직 디멘션이 입력되지 않았습니다.</span>`;
+  const dims = order.dims || [];
+  const totalWt = dims.reduce((s,d)=>s+(Number(d.wt)||0),0);
+
+  const body = dims.length
+    ? `<div class="dims-head-row">
+         <span class="dims-unit-label">${dims.length} ${unitPl} · Total ${totalWt} lbs</span>
+         <span class="linked-tag">읽기 전용 · 대표 ${p}</span>
+       </div>
+       ${dimRowsView(order)}
+       <div class="dims-meta" style="margin-top:10px;">Entered by ${order.dimsBy||'-'} · ${order.dimsAt||'-'}</div>`
+    : `<div class="linked-note" style="padding:6px 0;">대표 오더(${p})에 아직 디멘션이 입력되지 않았습니다. 대표 오더에서 입력해 주세요.</div>`;
+
   return `<div class="dims-panel linked">
-    <div class="linked-head">🔗 <b onclick="jumpToInvoice('${p}')">${p}</b> 에 디멘션이 포함되어 있습니다</div>
-    <div class="linked-sub">${order.dimsLinkedToCustomer||order.customer||''} — 같은 고객사 오더로 합쳐서 출고됩니다.</div>
-    <div class="linked-figure">${figure}</div>
+    <div class="linked-head"><span class="role-badge child">🔗 포함 오더</span> 이 오더의 디멘션은 <b onclick="jumpToInvoice('${p}')">${p}</b> 에 함께 들어 있습니다</div>
+    <div class="linked-sub">${order.dimsLinkedToCustomer||order.customer||''} — 같은 고객사 오더로 합쳐서 출고됩니다. 수정은 대표 오더에서만 가능합니다.</div>
+    <div style="margin-top:14px;">${body}</div>
     <div class="linked-actions">
       <button class="link-btn" onclick="jumpToInvoice('${p}')">대표 오더 열기 ↗</button>
       <button class="link-btn" onclick="makeDimPrimary('${order.invoice}')">이 오더를 대표로 변경</button>
       <button class="link-btn danger" onclick="unlinkDim('${order.invoice}', true)">연결 해제 — 단독 출고로</button>
     </div>
-  </div>`;
+  </div>` + renderDimGroupMembers(order);
 }
 
-function renderDimChildren(order){
-  const kids = order.dimsChildren || [];
-  if (!kids.length) return '';
+/* 같은 팔렛에 실린 오더 전체 명단. 대표에서 열든 추가에서 열든 똑같이 보임 —
+ * 출고 때 함께 나가야 할 오더를 빠뜨리지 않도록. */
+function renderDimGroupMembers(order){
+  const mem = order.dimsGroupMembers || [];
+  if (mem.length < 2) return '';
   return `<div class="dim-group-box">
-    <div class="dim-group-title">📦 이 디멘션에 함께 포함된 오더 (${kids.length}건)</div>
-    ${kids.map(k=>`<div class="dim-group-row">
-      <span class="gr-inv" onclick="jumpToInvoice('${k.invoice}')">${k.invoice}</span>
-      <span class="gr-cust">${k.customer||''}</span>
-      <button class="gr-x" title="연결 해제 — 단독 출고로 되돌리기" onclick="unlinkDim('${k.invoice}', false)">✕</button>
-    </div>`).join('')}
+    <div class="dim-group-title">📦 이 팔렛에 함께 실린 오더 (${mem.length}건)</div>
+    ${mem.map(m=>{
+      const me = m.invoice === order.invoice;
+      const role = m.isPrimary
+        ? '<span class="role-badge primary">대표</span>'
+        : '<span class="role-badge child">포함</span>';
+      const x = m.isPrimary ? '' : `<button class="gr-x" title="연결 해제 — 단독 출고로" onclick="unlinkDim('${m.invoice}', ${me})">✕</button>`;
+      return `<div class="dim-group-row${me?' is-me':''}">
+        ${role}
+        <span class="gr-inv" onclick="jumpToInvoice('${m.invoice}')">${m.invoice}</span>
+        <span class="gr-cust">${m.customer||''}${me?' · 지금 보는 오더':''}</span>
+        ${x}
+      </div>`;
+    }).join('')}
   </div>`;
 }
 
@@ -1065,7 +1101,7 @@ function renderDimsExtras(order){
   const pending = (order.dimsJoinTargets === null || order.dimsJoinTargets === undefined);
   const body = pending
     ? `<div class="dim-extras-loading"><span class="spinner"></span>같은 고객사의 합칠 수 있는 오더를 확인하는 중…</div>`
-    : (renderDimChildren(order) + renderDimCandidates(order));
+    : (renderDimGroupMembers(order) + renderDimCandidates(order));
   return `<div id="dim-extras">${body}</div>
     <div style="margin-top:10px;"><button class="link-btn" onclick="linkByTyping('${order.invoice}')">🔗 다른 인보이스 직접 입력해서 묶기</button></div>`;
 }
@@ -1083,7 +1119,15 @@ async function loadDimCandidates(invoice){
   CURRENT_ORDER.dimsAddCandidates = res.dimsAddCandidates || [];
   CURRENT_ORDER.dimsChildren = res.dimsChildren || CURRENT_ORDER.dimsChildren || [];
   CURRENT_ORDER.dimsLinkedToCustomer = res.dimsLinkedToCustomer || '';
-  if (box) box.innerHTML = renderDimChildren(CURRENT_ORDER) + renderDimCandidates(CURRENT_ORDER);
+  CURRENT_ORDER.dimsGroupMembers = res.dimsGroupMembers || [];
+  // 포함(추가) 오더는 카드 전체를 다시 그려야 그룹 명단이 붙음.
+  // 단, 사용자가 이미 디멘션 입력 중이면 건드리지 않음.
+  if (CURRENT_ORDER.dimsLinkedTo && !document.getElementById('dims-rows-editor')){
+    const cont = document.getElementById('dims-panel-container');
+    if (cont) cont.innerHTML = renderDimsPanel(CURRENT_ORDER, false);
+    return;
+  }
+  if (box) box.innerHTML = renderDimGroupMembers(CURRENT_ORDER) + renderDimCandidates(CURRENT_ORDER);
 }
 
 function renderDimsPanel(order, editing){
@@ -1110,7 +1154,7 @@ function renderDimsPanel(order, editing){
     }).join('');
     return `<div class="dims-panel">
       <div class="dims-head-row">
-        <span class="dims-unit-label">${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs${kidCount?` <span class="linked-tag">${kidCount}건 포함</span>`:''}</span>
+        <span class="dims-unit-label">${kidCount?'<span class="role-badge primary">대표 오더</span> ':''}${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs${kidCount?` <span class="linked-tag">${kidCount}건 포함</span>`:''}</span>
         <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
       </div>
       ${rows}
@@ -1402,7 +1446,7 @@ function renderDetail(res){
   `;
 
   // ★ 2026-08-06 — 카드를 먼저 띄운 뒤에 합치기 후보를 따로 불러옴(화면 안 멈추게)
-  if (dimsHtml && needsDims(res) && !res.dimsLinkedTo) loadDimCandidates(res.invoice);
+  if (dimsHtml && needsDims(res)) loadDimCandidates(res.invoice);
 }
 
 // ★ 2026-08-05 신규 — 상세 카드 닫기. 검색창도 같이 비워서, 위쪽 "Completed
