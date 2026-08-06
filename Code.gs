@@ -723,6 +723,11 @@ function listJobs_textSafe_() {
   const lastCol = sh.getLastColumn();
   const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
 
+  // ★ 2026-08-06 신규(매니저 요청) — 메인 대시보드(index.html)의 자동보관 규칙을
+  //   "검수 다음날 무조건 삭제"에서 "디멘션 저장 시각 기준 영업일 2일 후"로
+  //   바꾸기 위해, 각 인보이스의 디멘션 저장 여부·시각을 같이 내려줌.
+  const dimsMap = buildDimsExistsMap_();
+
   const jobs = rows.map((r, i) => ({
     _rowIndex: i + 2, // ★ 2026-07-29 신규: 원본 시트 행 번호를 미리 저장해둠(아래 메모 읽기용)
     invoice: iInv ? r[iInv - 1] : '',
@@ -747,6 +752,8 @@ function listJobs_textSafe_() {
     inspector:   iInspector ? String(r[iInspector - 1] || '') : '',
     inspEnd:     iInspEnd   ? formatInspEnd_(r[iInspEnd - 1]) : '',
     inspectionNote: '',
+    dimsCount: (dimsMap[String(iInv ? r[iInv - 1] : '').trim()] || {}).count || 0,
+    dimsEnteredAt: (dimsMap[String(iInv ? r[iInv - 1] : '').trim()] || {}).enteredAt || '',
   }));
 
   // ★ 2026-07-29 성능 개선 — 예전엔 "이미 보관 처리(archived)돼서 화면에 안 보일
