@@ -985,6 +985,19 @@ function repairPrematurelyArchivedJobs() {
     const insp = r[iInsp - 1];
     if (!isInspected(insp)) return; // 검수 안 된 게 archived면 애초에 이상 케이스라 손대지 않음
 
+    // ★ 2026-08-06 긴급 수정 — Dimensions 시트는 입력 2일 후 자동삭제되는 별도
+    //   정리 기능이 있어서, 몇 주 전에 정상적으로 디멘션 입력하고 정상 보관된
+    //   "오래된" 주문은 지금 시점엔 Dimensions 시트에 기록이 이미 자연스럽게
+    //   없음 — 이걸 "디멘션 미입력"으로 오판해서 몇 달치 주문을 통째로 복구
+    //   시켜버리는 사고가 실제로 발생했음(1,905건). 그래서 이 복구 함수는
+    //   "검수완료일이 최근 N일 이내인 것"만 대상으로 하도록 안전장치를 추가함 —
+    //   그보다 오래된 건 애초에 디멘션 기록 유무를 신뢰할 수 없으므로 손대지 않음.
+    const RECENT_GUARD_DAYS = 4;
+    const inspTrigger = toDateStr(r[iInspEnd - 1]) || toDateStr(r[iEndISO - 1]);
+    if (!inspTrigger) return; // 검수완료일을 못 찾으면 안전하게 건드리지 않음
+    const inspAgeMs = new Date() - new Date(inspTrigger + 'T00:00:00');
+    if (inspAgeMs > RECENT_GUARD_DAYS * 86400000) return; // 최근이 아니면 절대 손대지 않음
+
     let eligible;
     if (needsDims(trucking)) {
       const dims = dimsMap[invoice];
@@ -1008,6 +1021,72 @@ function repairPrematurelyArchivedJobs() {
   Logger.log('복구된(보관 해제된) 주문: ' + restored + '건');
   Logger.log(JSON.stringify(restoredInvoices, null, 2));
   return { ok: true, restored: restored, invoices: restoredInvoices };
+}
+
+/* ★★★ 2026-08-06 긴급 신규 — 되돌리기(사고 수습) 함수 ★★★
+ * repairPrematurelyArchivedJobs()의 버그로 인해 몇 달치 오래된 주문
+ * 1,905건이 실수로 "보관 해제(복구)"되어버린 사고를 바로잡음.
+ * 지금 archived=FALSE(안 보관됨) 상태인 주문 중, 검수완료일이 오늘로부터
+ * RECENT_KEEP_DAYS(4일)보다 오래된 것들은 전부 다시 archived=TRUE로 되돌림.
+ * 최근 것(진짜 필요해서 복구해야 했던 것들)은 그대로 안 건드리고 남겨둠.
+ * Apps Script 에디터에서 지금 바로 한 번 실행하면 됨.
+ * ============================================================ */
+function undoOverRestoredJobs() {
+  const RECENT_KEEP_DAYS = 4; // 이 안쪽(최근)은 그대로 두고, 이보다 오래된 것만 다시 보관 처리
+
+  const sh = SHEET_();
+  const hdr = headerMapCached_();
+  const norm = normalizeHeaderName_;
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) { Logger.log('Jobs 시트에 데이터 없음'); return { ok: true, reArchived: 0 }; }
+
+  const iInv = hdr[norm('Invoice')];
+  const iArch = hdr[norm('archived')];
+  const iArchAt = hdr[norm('archivedAt')];
+  const iInsp = hdr[norm('Inspection')];
+  const iInspEnd = hdr[norm('Insp. End')];
+  const iEndISO = hdr[norm('EndAtISO')];
+
+  function isInspected(insp) { const v = String(insp || '').trim(); return v.indexOf('PASS') >= 0 || v.indexOf('ISSUES') >= 0; }
+  function toDateStr(v) {
+    if (!v) return '';
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return String(v).slice(0, 10);
+  }
+
+  const lastCol = sh.getLastColumn();
+  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let reArchived = 0;
+  const list = [];
+  const cutoffMs = RECENT_KEEP_DAYS * 86400000;
+  const nowMs = new Date().getTime();
+
+  rows.forEach((r, i) => {
+    const archVal = String(r[iArch - 1] || '').trim().toLowerCase();
+    const isArchived = archVal === 'true' || archVal === '1' || archVal === 'y' || archVal === 'yes';
+    if (isArchived) return; // 이미 보관중이면 손대지 않음(정상)
+
+    const insp = r[iInsp - 1];
+    if (!isInspected(insp)) return; // 검수 안 된 활성 주문은 원래 안 보관 대상이므로 안 건드림
+
+    const trigger = toDateStr(r[iInspEnd - 1]) || toDateStr(r[iEndISO - 1]);
+    if (!trigger) return; // 날짜를 못 찾으면 안전하게 건드리지 않음
+
+    const ageMs = nowMs - new Date(trigger + 'T00:00:00').getTime();
+    if (ageMs > cutoffMs) {
+      // 오래된 주문인데 지금 보관 안 된 상태 = 잘못 복구된 것 → 다시 보관 처리
+      sh.getRange(i + 2, iArch).setValue('TRUE');
+      if (iArchAt) sh.getRange(i + 2, iArchAt).setValue(nowLocal_());
+      reArchived++;
+      list.push(String(r[iInv - 1] || ''));
+    }
+  });
+
+  if (reArchived > 0) bumpVersion_();
+  Logger.log('=== 되돌리기 결과 ===');
+  Logger.log('다시 보관 처리된 주문(오래된 것들, 원상복구): ' + reArchived + '건');
+  Logger.log('최근 ' + RECENT_KEEP_DAYS + '일 이내 주문은 그대로 유지됨(정상)');
+  return { ok: true, reArchived: reArchived, sample: list.slice(0, 100) };
 }
 
 
