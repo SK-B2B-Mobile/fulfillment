@@ -2710,12 +2710,10 @@ function getSalesInvoiceDetail(invoice) {
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     let movedToPacking = false;
-    let hasBatchRecord = false; // ★ 2026-08-06 신규 — 총량피킹 배치에 속한 오더인지(=TV로 관리되는지)
     if (bcLast >= 2) {
       const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
       for (let i = bcInvVals.length - 1; i >= 0; i--) {
         if (String(bcInvVals[i][0]).trim() === invoice) {
-          hasBatchRecord = true;
           // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
           //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
           //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
@@ -2724,8 +2722,39 @@ function getSalesInvoiceDetail(invoice) {
         }
       }
     }
-    // ★ 2026-08-06 신규 — 단독 오더(hasBatchRecord=false)는 위에서 절대 true가
-    //   될 수 없으므로, Jobs 시트의 수동 표시(PackingMovedManual)를 OR로 합침.
+
+    // ★ 2026-08-06 긴급 수정 — 예전엔 "BatchCustomers 고객사 명단에 이름이
+    //   한 번이라도 올라간 적 있는가"로 hasBatchRecord를 판단했음. 그런데
+    //   배치를 만들 때 업로드한 고객사 PDF 목록에는 있었지만, 실제로는 총량
+    //   피킹으로 스캔되지 않고 나중에 개별로 처리된 오더도 많음(그런 오더는
+    //   TV가 절대 관리 못 하는데도 "배치 소속"으로 잘못 분류돼서 수동 버튼을
+    //   영원히 볼 수 없었음). 이제 "실제로 이 인보이스에 대한 스캔(pass) 기록이
+    //   ScanLog에 있는가"로 기준을 바꿈 — 진짜 총량피킹으로 처리된 것만
+    //   TV 전용으로 분류하고, 나머지는 전부 수동 버튼을 볼 수 있게 함.
+    let hasBatchRecord = false;
+    try {
+      const sl = scanlogSheet_();
+      const slLast = sl.getLastRow();
+      if (slLast >= 2) {
+        const slInvCol = sl.getRange(2, 9, slLast - 1, 1).getValues(); // I열: Invoice
+        for (let i = 0; i < slInvCol.length; i++) {
+          if (String(slInvCol[i][0]).trim() !== invoice) continue;
+          const rowFull = sl.getRange(i + 2, 1, 1, 11).getValues()[0]; // Result(J,10), Status(K,11)
+          if (rowFull[9] === 'pass' && rowFull[10] !== 'undone') { hasBatchRecord = true; break; }
+        }
+      }
+    } catch (e) { /* best-effort */ }
+
+    // ★ 2026-08-06 신규(매니저 요청) — 디멘션이 저장됐다는 건 물리적으로 이미
+    //   패킹존에서 박스를 재고 무게를 달았다는 뜻이므로, 논리적으로 "이동 완료"가
+    //   당연히 전제됨. 별도 클릭 없이 디멘션 저장 자체를 이동완료의 증거로 인정함
+    //   — "디멘션은 저장됐는데 Moved는 No"인 앞뒤 안 맞는 상태를 원천적으로 방지.
+    //   (아래 dimsResult 계산이 이 시점엔 아직 안 끝났으므로, 여기선 우선
+    //   BatchCustomers/수동표시만 반영하고 디멘션 반영은 함수 맨 끝에서 한 번 더 함)
+
+    // ★ 2026-08-06 신규 — 단독 오더(=실제 스캔 기록 없는 오더)는 위에서 절대
+    //   true가 될 수 없으므로, Jobs 시트의 수동 표시(PackingMovedManual)를
+    //   OR로 합침.
     let manualMovedAt = '', manualMovedBy = '';
     try {
       const hmManual = headerMapCached_();
@@ -2820,6 +2849,11 @@ function getSalesInvoiceDetail(invoice) {
 
     // 4) 디멘션
     const dimsResult = getDimensions_(invoice);
+
+    // ★ 2026-08-06 신규(매니저 요청) — "디멘션이 저장됐는데 Moved는 No"인
+    //   앞뒤 안 맞는 상태를 원천 차단. 디멘션(치수/무게)이 하나라도 저장돼
+    //   있다면, 물리적으로 이미 패킹존에서 측정된 것이므로 이동완료로 간주.
+    if (dimsResult.dims.length > 0) movedToPacking = true;
 
     return {
       ok: true,
