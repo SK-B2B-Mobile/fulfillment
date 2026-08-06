@@ -2882,7 +2882,7 @@ function getSalesInvoiceDetail(invoice) {
     // 4) 디멘션
     // ★ 2026-08-06 신규 — 디멘션 합산. 이 오더가 다른 오더에 "포함"되어 있으면
     //   자기 디멘션이 아니라 대표 오더의 디멘션을 대신 보여줌(읽기 전용).
-    const dimGroup = getDimGroupDetail_(invoice, method, customer, shipDate);
+    const dimGroup = getDimGroupDetail_(invoice);
     const dimsOwner = dimGroup.dimsLinkedTo || invoice;
     const dimsResult = getDimensions_(dimsOwner);
 
@@ -2914,10 +2914,10 @@ function getSalesInvoiceDetail(invoice) {
       // ★ 2026-08-06 신규 — 디멘션 합산 관련 필드
       dimsOwner: dimsOwner,                                 // 실제로 디멘션이 저장된 인보이스(자기 자신이거나 대표)
       dimsLinkedTo: dimGroup.dimsLinkedTo,                  // 내가 포함된 대표 인보이스('' 이면 단독/대표)
-      dimsLinkedToCustomer: dimGroup.dimsLinkedToCustomer,
+      dimsLinkedToCustomer: '',                             // 화면이 getDimCandidates로 따로 채움
       dimsChildren: dimGroup.dimsChildren,                  // 내 디멘션에 포함된 추가 오더 목록
-      dimsJoinTargets: dimGroup.dimsJoinTargets,            // 내가 들어갈 수 있는 후보(같은 고객사·같은 검수일/출고일)
-      dimsAddCandidates: dimGroup.dimsAddCandidates         // 내 디멘션에 넣을 수 있는 후보
+      dimsJoinTargets: null,                                // null = 아직 안 불러옴(화면이 비동기로 채움)
+      dimsAddCandidates: null
     };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -3016,7 +3016,7 @@ function resolveDimPrimary_(invoice, links) {
 function dimJobsSnapshot_() {
   try {
     const cache = CacheService.getScriptCache();
-    const cached = cache.get('dimJobsSnapshot_v1');
+    const cached = cache.get('dimJobsSnapshot_v2');
     if (cached) { try { return JSON.parse(cached); } catch (e) { /* 파싱 실패 시 새로 조회 */ } }
   } catch (e) { /* 캐시 없어도 계속 진행 */ }
 
@@ -3060,19 +3060,31 @@ function dimJobsSnapshot_() {
         const m = String(eRaw || '').match(/\d{4}-\d{2}-\d{2}/);
         if (m) inspDate = m[0];
       }
+      // ★ 2026-08-06 성능 수정 — 예전엔 Jobs 시트의 모든 행(보관된 오래된 건 포함)을
+      //   전부 담았음. 그 결과 배열이 수천 건으로 커지고, CacheService 1건당 100KB
+      //   제한을 넘겨 캐시 저장이 조용히 실패해서, 상세조회를 열 때마다 시트 전체를
+      //   처음부터 다시 읽는 상태가 됐음 → 25초 타임아웃의 직접 원인.
+      //   후보는 "아직 살아있는(보관 안 된) 디멘션 필요 오더"만 대상이므로 미리 거름.
+      if (archived) continue;
+      const methodKey = dimMethodKey_(truck ? truck[i][0] : '');
+      if (!methodKey || methodKey === 'PU') continue;
       out.push({
         invoice: invoice,
         customer: String(rem ? rem[i][0] : '').trim(),
         shipDate: shipDate,
         inspDate: inspDate,
-        method: dimMethodKey_(truck ? truck[i][0] : ''),
-        archived: archived,
+        method: methodKey,
+        archived: false,
         inspected: !!String(insp ? insp[i][0] : '').trim()
       });
     }
   } catch (e) { /* best-effort */ }
 
-  try { CacheService.getScriptCache().put('dimJobsSnapshot_v1', JSON.stringify(out), 60); } catch (e) { /* 무시 */ }
+  // 캐시는 1건당 100KB 제한이 있어서, 넘칠 것 같으면 저장을 시도하지 않음
+  try {
+    const payload = JSON.stringify(out);
+    if (payload.length < 90000) CacheService.getScriptCache().put('dimJobsSnapshot_v2', payload, 120);
+  } catch (e) { /* 무시 */ }
   return out;
 }
 
@@ -3347,27 +3359,38 @@ function cleanupOrphanDimLinks_() {
 }
 
 /* ---------------------------------------------------------------------
- * getDimGroupDetail_(invoice, method, customer) — 상세조회 응답에 붙일
- * 그룹 정보 한 덩어리를 만들어 반환. getSalesInvoiceDetail()에서 호출.
+ * getDimGroupDetail_(invoice) — ★ 2026-08-06 성능 재설계
+ * 상세조회(getSalesInvoiceDetail)는 작업자가 매번 기다리는 화면이므로,
+ * 여기서는 DimLinks 시트(아주 작음)만 읽어서 "묶여 있는가"만 즉시 판단함.
+ * 후보 추천처럼 무거운 계산은 getDimCandidates()로 분리해서, 카드가 먼저
+ * 뜬 다음에 화면이 따로 불러오게 함 (작업자 체감 대기시간 없음).
  * ------------------------------------------------------------------- */
-function getDimGroupDetail_(invoice, method, customer, shipDate) {
-  const empty = {
-    dimsLinkedTo: '', dimsLinkedToCustomer: '', dimsChildren: [],
-    dimsJoinTargets: [], dimsAddCandidates: []
-  };
+function getDimGroupDetail_(invoice) {
   try {
-    if (dimMethodKey_(method) === 'PU' || !dimMethodKey_(method)) return empty;
+    const links = buildDimLinksMap_();
+    return {
+      dimsLinkedTo: links.childToPrimary[invoice] || '',
+      dimsChildren: (links.primaryToChildren[invoice] || []).map(c => ({ invoice: c, customer: '' }))
+    };
+  } catch (e) {
+    return { dimsLinkedTo: '', dimsChildren: [] };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * getDimCandidates(invoice) — 화면이 카드를 띄운 뒤에 따로 호출하는 API.
+ * 같은 고객사 + (같은 검수일 또는 같은 출고일) 오더를 찾아 추천 목록으로 반환.
+ * 조금 느려도 화면이 멈추지 않음(그 영역만 "확인 중"으로 표시됨).
+ * ------------------------------------------------------------------- */
+function getDimCandidates(invoice) {
+  try {
+    invoice = String(invoice || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
 
     const links = buildDimLinksMap_();
-    const dimsMap = buildDimsExistsMap_();
     const snapshot = dimJobsSnapshot_();
     const byInv = {};
     snapshot.forEach(o => { byInv[o.invoice] = o; });
-
-    const me = byInv[invoice] || {
-      invoice: invoice, customer: customer, method: method,
-      shipDate: shipDate || '', inspDate: '', archived: false, inspected: true
-    };
 
     const primary = links.childToPrimary[invoice] || '';
     const children = (links.primaryToChildren[invoice] || []).map(c => ({
@@ -3375,16 +3398,23 @@ function getDimGroupDetail_(invoice, method, customer, shipDate) {
       customer: (byInv[c] || {}).customer || '',
       shipDate: (byInv[c] || {}).shipDate || ''
     }));
-
-    const cand = findDimCandidates_(me, snapshot, dimsMap, links);
-    return {
+    const base = {
+      ok: true, invoice: invoice,
       dimsLinkedTo: primary,
       dimsLinkedToCustomer: primary ? ((byInv[primary] || {}).customer || '') : '',
       dimsChildren: children,
-      dimsJoinTargets: primary ? [] : cand.joinTargets,
-      dimsAddCandidates: primary ? [] : cand.addCandidates
+      dimsJoinTargets: [], dimsAddCandidates: []
     };
+
+    const me = byInv[invoice];
+    if (!me || primary) return base; // PU/보관됨이거나 이미 묶여 있으면 후보 계산 불필요
+
+    const dimsMap = buildDimsExistsMap_();
+    const cand = findDimCandidates_(me, snapshot, dimsMap, links);
+    base.dimsJoinTargets = cand.joinTargets;
+    base.dimsAddCandidates = cand.addCandidates;
+    return base;
   } catch (e) {
-    return empty;
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
