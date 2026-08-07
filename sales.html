@@ -411,7 +411,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-06-j</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-07-a</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -673,7 +673,11 @@ async function loadSheetOverview(){
     return;
   }
   SHEET_JOBS = res.jobs || [];
-  SHEET_PAGE = 1;
+  // ★ 2026-08-07 수정(매니저 지적) — 예전엔 데이터를 새로 받을 때마다 무조건
+  //   1페이지로 되돌렸음. 30초 자동 동기화가 이걸 계속 실행하는 바람에,
+  //   3페이지를 보고 있으면 잠시 뒤 혼자 1페이지로 튀어버렸음.
+  //   보던 페이지는 그대로 두고, 목록이 줄어 페이지 수를 넘기면 renderSheet()가
+  //   마지막 페이지로 알아서 맞춰줌(아래 clamp 로직).
   renderProgressBoard(SHEET_JOBS);
   renderSheet();
 }
@@ -818,7 +822,7 @@ async function loadToday(){
     return;
   }
   TODAY_JOBS = res.jobs || [];
-  TODAY_PAGE = 1;
+  // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
   document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
   renderToday();
 }
