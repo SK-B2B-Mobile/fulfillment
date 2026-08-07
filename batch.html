@@ -1030,6 +1030,10 @@ select option:disabled{color:var(--text-dim2);}
     <div class="complete-check">✓</div>
     <div class="complete-eyebrow">Batch complete</div>
     <h1 class="complete-title">모든 분류 완료</h1>
+    <!-- ★ 2026-08-07 추가(매니저 요청) — 어떤 배치가 끝났는지 작업자가 헷갈리지 않도록
+         배치 번호와 생성 일시를 팝업에 명시 -->
+    <div style="font-family:var(--mono); font-size:15px; font-weight:800; color:var(--amber); margin-bottom:4px;" id="cmpBatchId">-</div>
+    <div style="font-size:12px; color:var(--text-dim); margin-bottom:14px;" id="cmpBatchWhen">-</div>
     <p class="complete-desc">이 배치의 모든 SKU가 슬롯에 배분되었습니다.<br><span style="font-size:12px; color:var(--text-dim)">스캔 기록은 그대로 보관되며, 이 배치는 <b>1시간 동안</b> "다른 배치" 목록에 <b>✅ 완료됨</b>으로 남아 있습니다.</span></p>
     <div class="complete-stats">
       <div class="complete-stat"><div class="n" id="cmpSlots">-</div><div class="l">Slots filled</div></div>
@@ -1037,8 +1041,7 @@ select option:disabled{color:var(--text-dim2);}
       <div class="complete-stat"><div class="n" id="cmpTime">-</div><div class="l">Duration</div></div>
     </div>
     <div class="complete-actions">
-      <button class="btn btn-ghost" onclick="closeComplete()">닫기</button>
-      <button class="btn btn-primary" onclick="handoffToInspection()">확인 · 스캔 로그 보기</button>
+      <button class="btn btn-primary" onclick="closeComplete()" style="padding:13px 34px; font-size:16px; font-weight:800;">닫기</button>
     </div>
   </div>
 </div>
@@ -1395,11 +1398,20 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   dd.innerHTML = list.map(b => `
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
       <div>
-        <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?'var(--green)':(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전':''}</div>
+        <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?(b.pendingTakeOut?'#F472B6':'var(--green)'):(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?(b.pendingTakeOut?' · 📦 출고 대기 '+b.pendingTakeOut+'건':' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전'):''}</div>
         <div style="font-size:10px; color:var(--text-dim);">${b.date} · ${b.totalSku} SKU · 스캔 ${b.scannedPass||0}건</div>
       </div>
-      <button class="btn btn-primary btn-sm" data-switch-to="${b.batchId}" style="white-space:nowrap;">전환</button>
+      <div style="display:flex; gap:6px; flex-shrink:0;">
+        <button class="btn btn-ghost btn-sm" data-view-only="${b.batchId}" style="white-space:nowrap;">👁 보기</button>
+        <button class="btn btn-primary btn-sm" data-switch-to="${b.batchId}" style="white-space:nowrap;">전환</button>
+      </div>
     </div>`).join('');
+  // ★ 2026-08-07 신규(매니저 요청) — "보기"는 내 화면에서만 열림(다른 기기 영향 없음),
+  //   "전환"은 예전처럼 전체 기기가 같이 옮겨감. 지난 배치를 잠깐 확인하려고
+  //   전체를 튕기게 만들 필요가 없어서 분리함.
+  dd.querySelectorAll('[data-view-only]').forEach(btn => {
+    btn.onclick = () => { dd.style.display = 'none'; continueOpenBatch(btn.dataset.viewOnly, true); };
+  });
   dd.querySelectorAll('[data-switch-to]').forEach(btn => {
     btn.onclick = () => { dd.style.display = 'none'; continueOpenBatch(btn.dataset.switchTo); };
   });
@@ -1475,18 +1487,27 @@ function renderOpenBatchesPanel(batches){
   //   볼 방법이 아예 없어졌음. 화면엔 "1시간 후 사라진다"고 안내하면서 정작
   //   열 수단이 없어 안내와 동작이 어긋났음. 이제 다시 열 수 있게 함.
   panel.querySelectorAll('[data-reopen]').forEach(btn => {
-    btn.onclick = () => continueOpenBatch(btn.dataset.reopen);
+    btn.onclick = () => continueOpenBatch(btn.dataset.reopen, true); // 조회 전용
   });
 }
 
 // "이어서 작업하기" — 그 배치를 통째로 불러와서 지금 화면에서 이어서 작업
-async function continueOpenBatch(batchId){
+async function continueOpenBatch(batchId, viewOnly){
   // ★ 2026-07-24 신규 — 심각한 사고 방지: 이 배치로 전환하면 이 기기뿐 아니라
   //   TV 현황판·다른 작업자 폰 등 "전체 기기"가 자동으로 같은 배치를 따라가도록
   //   서버에 방송됨(setActiveBatch). 여러 탭을 켜놓고 작업하다가 예전 탭에서
   //   무심코 이 버튼을 눌러서, 다른 기기들이 다시 옛날 배치로 튕겨나가는 사고가
   //   실제로 있었음. 조용히 방송하지 않고 명확히 확인받도록 함.
-  if(!confirm(`배치 ${batchId}(으)로 전환하면 TV 현황판·다른 작업자 폰 등\n다른 모든 기기도 자동으로 이 배치로 같이 전환됩니다.\n\n계속하시겠습니까?`)) return;
+  // ★ 2026-08-07 개선(매니저 요청) — 예전엔 배치를 열면 무조건 "전체 기기 전환"이라
+  //   확인 팝업이 떴고, 지난 배치를 잠깐 들여다보려는 사람 때문에 TV 현황판과
+  //   다른 작업자 폰까지 같이 튕기는 구조였음.
+  //   이제 두 가지를 분리함:
+  //     · 조회 전용(viewOnly) — 내 화면에서만 열림. 다른 기기에 영향 0. 확인창 없음.
+  //     · 이어서 작업        — 예전처럼 전체 기기가 같이 전환됨(확인창 유지).
+  //   TV 현황판(board.html)이 이미 쓰던 방식과 동일하게 맞춘 것.
+  if(!viewOnly){
+    if(!confirm(`배치 ${batchId}(으)로 전환하면 TV 현황판·다른 작업자 폰 등\n다른 모든 기기도 자동으로 이 배치로 같이 전환됩니다.\n\n계속하시겠습니까?`)) return;
+  }
 
   const res = await gasQuery('getBatch', { batchId });
   if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
@@ -1523,6 +1544,17 @@ async function continueOpenBatch(batchId){
   checkOpenBatches(); // 방금 고른 배치는 목록에서 빠지도록 다시 그림
   // ★ 2026-07-23 신규: 서버에 "지금 활성 배치는 이거다"라고 기록 →
   //   다른 기기들이 페이지를 열 때 클릭 없이 자동으로 같은 배치를 따라옴
+  if(viewOnly){
+    // 서버에 방송하지 않음 — 이 기기에서만 보는 상태
+    state.viewOnlyBatch = state.batchId;
+    const chip = document.getElementById('batchChip');
+    if(chip) chip.textContent = state.batchId + ' (조회전용)';
+    toast(`배치 ${state.batchId} 조회 전용으로 열었습니다 — 다른 기기에는 영향 없습니다`, 'success');
+    gotoView('v-log');
+    renderKPI();
+    return;
+  }
+  state.viewOnlyBatch = null;
   if(GAS_READY) gasCall('setActiveBatch', { batchId: state.batchId });
   toast(`배치 ${state.batchId} 이어서 작업 시작`, 'success');
   gotoView('v-slots');
@@ -4249,6 +4281,15 @@ function showBatchComplete(){
   document.getElementById('cmpSlots').textContent = filledSlots;
   document.getElementById('cmpQty').textContent = totalQty.toLocaleString();
   document.getElementById('cmpTime').textContent = dur + 'm';
+  // 배치 번호와 생성 일시 채우기
+  const idEl = document.getElementById('cmpBatchId');
+  const whenEl = document.getElementById('cmpBatchWhen');
+  if(idEl) idEl.textContent = state.batchId || '-';
+  if(whenEl){
+    const ts = state.batchStartTs ? new Date(state.batchStartTs) : new Date();
+    const p = n => String(n).padStart(2,'0');
+    whenEl.textContent = `배치 생성 ${ts.getFullYear()}-${p(ts.getMonth()+1)}-${p(ts.getDate())} ${p(ts.getHours())}:${p(ts.getMinutes())}`;
+  }
   document.getElementById('completeOverlay').classList.add('open');
   if(GAS_READY && state.batchId){
     gasCall('completeBatch', { batchId: state.batchId });
