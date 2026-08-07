@@ -2640,7 +2640,14 @@ function autoDeleteOldDimensions() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
-    const RETENTION_DAYS = 2;
+    // ★ 2026-08-07 수정 — 예전 2일은 위험했음.
+    //   오더 보관(index.html AutoDelete)은 "디멘션이 저장돼 있을 것"을 조건으로 하는데,
+    //   디멘션이 먼저 지워지면 그 조건이 영원히 충족되지 않아 TK/UPS 오더가 목록에
+    //   계속 쌓이게 됨. 실제로 금요일에 디멘션을 넣으면 일요일에 지워져서
+    //   월요일엔 이미 조건 불충족 상태가 됐음.
+    //   오더 보관 기준이 영업일 3일(주말·연휴 끼면 달력으로 5~6일)이므로,
+    //   디멘션은 그보다 넉넉히 오래 남겨야 함. 8일로 둠.
+    const RETENTION_DAYS = 8;
     const tz = batchTz_();
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
