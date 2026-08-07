@@ -2781,11 +2781,24 @@ async function refreshBatchStructure(silent){
       totalQty: c.totalQty, totalSkus: c.totalSku,
     }));
     state.slots.forEach(s => { s.assignedTo = null; });
+    // ★ 2026-08-07 수정(매니저 지적) — 주기적 갱신이 슬롯 배정만 다시 읽고
+    //   패킹존 이동(핑크)·출고 완료(파랑) 상태는 갱신하지 않았음. 그래서 TV 현황판에서
+    //   출고팀이 파랑으로 바꿔도 이 화면은 페이지를 처음 열었을 때의 색에서 멈춰 있었고,
+    //   새로고침해야만 반영됐음. 이제 갱신할 때마다 두 상태를 서버 기준으로 다시 맞춤.
+    const nextMoved = new Set();
+    const nextTaken = new Set();
     newCustomers.forEach(c => {
+      if(c.movedToPacking) nextMoved.add(c.invoice);
+      if(c.takenOut) nextTaken.add(c.invoice);
       if(!c.slotNum) return;
       const slot = state.slots.find(s => s.num === Number(c.slotNum));
       if(slot) slot.assignedTo = c.invoice;
     });
+    // 이 기기에서 방금 눌러 서버 응답을 기다리는 중인 건은 덮어쓰지 않음
+    //   (낙관적 갱신이 잠깐 되돌아가 보이는 깜빡임 방지)
+    state.movedToPackingInvoices.forEach(inv => { if(_pendingPackToggle[inv]) nextMoved.add(inv); });
+    state.movedToPackingInvoices = nextMoved;
+    state.takenOutInvoices = nextTaken;
 
     buildScanIndex();
     updateSlotQueueNumbers();
@@ -2800,6 +2813,7 @@ async function refreshBatchStructure(silent){
   }
 }
 
+const _pendingPackToggle = {}; // ★ 2026-08-07: 이 기기에서 방금 토글해 서버 응답 대기 중인 인보이스
 let __structPollTimer = null;
 function startStructurePolling(){
   if(__structPollTimer) return;
@@ -3019,8 +3033,11 @@ function renderSlots(){
     const wasMoved = state.movedToPackingInvoices.has(invoice);
     const next = !wasMoved;
     if(next) state.movedToPackingInvoices.add(invoice); else state.movedToPackingInvoices.delete(invoice);
+    // ★ 2026-08-07 — 서버 응답을 기다리는 동안 주기 갱신이 이 값을 되돌리지 않도록 표시
+    _pendingPackToggle[invoice] = true;
     renderSlots(); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
     const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice, moved: next });
+    delete _pendingPackToggle[invoice];
     if(!res.ok){
       // 실패하면 원상복구
       if(wasMoved) state.movedToPackingInvoices.add(invoice); else state.movedToPackingInvoices.delete(invoice);
