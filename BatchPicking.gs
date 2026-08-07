@@ -2154,29 +2154,27 @@ function getOpenBatches() {
     const nowMs = Date.now();
     rows.forEach(r => {
       const status = String(r[2] || '');
-      let recentlyCompleted = false, completedMinutesAgo = null;
+      let recentlyCompleted = false, completedMinutesAgo = null, pendingTakeOut = 0;
       if (status === 'completed') {
         const completedAtRaw = r[6];
         if (!completedAtRaw) return; // 완료시각 기록 자체가 없는 오래된 배치는 제외
-        // ★ 2026-08-07 — 출고팀이 아직 안 가져간 고객사가 남아 있으면 계속 보임.
+        // ★ 2026-08-07 재수정 — 앞서 넣은 조건이 지나치게 넓어서 7월 배치까지
+        //   모두 목록에 되살아나는 사고가 있었음. TakenOut 컴럼은 8/4에 생겼기
+        //   때문에 그 이전 배치는 값이 비어 있고, 그걸 "아직 안 가져감"으로
+        //   오판해버렸음. 그래서 최근 24시간 이내에 완료된 배치에만 이 규칙을 적용함.
+        const _cMs = parseBatchTs_(completedAtRaw);
         const _to = takenOutInfo[String(r[0] || '').trim()];
-        if (_to && _to.total > 0 && _to.taken < _to.total) {
+        const _fresh = !isNaN(_cMs) && (nowMs - _cMs) <= 24 * 60 * 60 * 1000;
+        if (_fresh && _to && _to.total > 0 && _to.taken < _to.total) {
+          // 출고팀이 아직 안 가져간 고객사가 남아 있으면 시간과 무관하게 계속 보임
           recentlyCompleted = true;
           completedMinutesAgo = null;
-          open.push({
-            batchId: r[0], createdAt: r[1], status: status,
-            totalSku: Number(r[3]) || 0, totalQty: Number(r[4]) || 0,
-            recentlyCompleted: true, completedMinutesAgo: null,
-            pendingTakeOut: _to.total - _to.taken,
-          });
-          openIds[String(r[0])] = true;
-          return;
+          pendingTakeOut = _to.total - _to.taken;
+          const b0 = { batchId: String(r[0]), date: r[1], status: status, totalSku: r[3], totalQty: r[4], createdAt: r[5], recentlyCompleted: true, completedMinutesAgo: null, pendingTakeOut: pendingTakeOut };
+          open.push(b0); openIds[b0.batchId] = true; return;
         }
-        // 전부 가져갔다면, 마지막으로 가져간 시각부터 1시간을 셀
-        //   (스캔 완료 시각보다 늦으므로 더 안전한 쪽을 선택)
-        const _toDone = takenOutInfo[String(r[0] || '').trim()];
-        const _lastTakeMs = (_toDone && _toDone.lastMs) ? _toDone.lastMs : 0;
-        const _cMs = parseBatchTs_(completedAtRaw);
+        // 전부 가져갔다면 마지막으로 가져간 시각부터 1시간을 셀
+        const _lastTakeMs = (_to && _to.lastMs) ? _to.lastMs : 0;
         const completedMs = (_lastTakeMs && !isNaN(_cMs)) ? Math.max(_lastTakeMs, _cMs) : (_lastTakeMs || _cMs);
         // ★ 2026-08-06 긴급 수정 — 1시간 유예가 처음부터 한 번도 작동하지 않던 버그.
         //   완료시각을 batchNow_()가 'yyyy-MM-dd HH:mm:ss' 문자열로 저장하지만,
