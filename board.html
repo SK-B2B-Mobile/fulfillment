@@ -1010,7 +1010,9 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
     const tag = isCurrent
       ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
       : b.recentlyCompleted
-      ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">✅ 완료됨 · ${b.completedMinutesAgo}분 전</span>`
+      ? (b.pendingTakeOut
+          ? `<span class="tb-sw-tag" style="background:var(--pink-bg,rgba(236,72,153,0.15)); color:#F472B6">📦 출고 대기 ${b.pendingTakeOut}건</span>`
+          : `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">✅ 완료됨 · ${b.completedMinutesAgo}분 전</span>`)
       : (b.date === today ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">오늘</span>` : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">다른 날짜</span>`);
     return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
       <div>
