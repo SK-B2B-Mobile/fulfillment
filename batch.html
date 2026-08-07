@@ -199,6 +199,14 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot.done.moved .slot-pack-check .label{color:#04140D !important;}
 .slot.done.moved .slot-pack-check .box{border-color:#04140D; background:#04140D;}
 .slot.done.moved .slot-pack-check .box svg{display:block;}
+/* ★ 2026-08-07 신규 — 출고팀이 가져간 상태(파랑). TV 현황판과 동일한 색 체계:
+   초록=분류완료 → 핑크=패킹존 이동 필요 → 파랑=출고팀이 가져감 */
+.slot.done.taken, .slot.done.moved.taken{background:#38BDF8 !important; border-color:#38BDF8 !important;}
+.slot.done.taken .slot-num, .slot.done.taken .slot-co, .slot.done.taken .slot-meta,
+.slot.done.taken .slot-invoice{color:#04140D !important;}
+.slot.done.taken .slot-pack-check .label{color:#04140D !important;}
+.slot.done.taken .slot-pack-check .box{border-color:#04140D; background:#04140D;}
+.slot.done.taken .slot-pack-check .box svg{display:block;}
 .slot-clear-btn{width:100%; margin-top:8px; padding:7px; border:1px solid #04140D; border-radius:6px; background:rgba(4,20,13,0.15); color:#04140D; font-weight:800; font-size:10.5px; cursor:pointer; font-family:var(--sans);}
 .slot-clear-btn:hover{background:rgba(4,20,13,0.28);}
 .slot-clear-btn:disabled{opacity:0.6; cursor:default;}
@@ -1216,6 +1224,7 @@ const state = {
   previewBatchId: null, // ★ 2026-07-14 신규: STEP01 화면 표시 전용 — 절대 폴링에 쓰면 안 됨(state.batchId와 분리)
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
   movedToPackingInvoices: new Set(), // ★ 2026-07-23 신규: "패킹존 이동" 체크된 고객사 (clearSlot과 무관한 순수 표시용)
+  takenOutInvoices: new Set(),      // ★ 2026-08-07 신규: 출고팀이 실제로 가져간(파랑) 고객사 — TV 현황판과 색을 맞추기 위함
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호 (더 이상 배정 차단엔 안 씀, 참고용)
   occupiedSlotDetail: {},     // ★ 2026-07-23 신규: num -> {batchId, batchDate, customer} — 경고 배지 표시 전용
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
@@ -1561,6 +1570,7 @@ async function continueOpenBatch(batchId, viewOnly){
     if(slot) slot.assignedTo = c.invoice;
     if(c.cleared) state.clearedInvoices.add(c.invoice);
     if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
+    if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
   });
 
   buildScanIndex();
@@ -1655,6 +1665,7 @@ function applyBatchPayload(res, opts){
     if(slot) slot.assignedTo = c.invoice;
     if(c.cleared) state.clearedInvoices.add(c.invoice);
     if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
+    if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
   });
 
   document.getElementById('dropSum').className = 'drop filled';
@@ -2171,6 +2182,7 @@ function resetBatchFormForNewBatch(){
   state.scanIndex = {};
   state.clearedInvoices = new Set();
   state.movedToPackingInvoices = new Set();
+  state.takenOutInvoices = new Set(); // ★ 2026-08-07
   state.batchCompleteShown = false; // ★ 2026-08-03 신규: 새 배치는 완료 팝업을 다시 정상적으로 띄울 수 있어야 함
   clearDraftFromLocalStorage();
 
@@ -2883,7 +2895,12 @@ function renderSlots(){
       </div>`;
     }
     const moved = state.movedToPackingInvoices.has(cf.meta.invoice_no);
-    return `<div class="slot ${status}${moved?' moved':''}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
+    // ★ 2026-08-07 수정(매니저 지적) — TV 현황판에서 출고팀이 파랑으로 바꿔도
+    //   이 화면은 계속 핑크로 남아 두 화면 색이 어긋났음. 원인은 batch.html이
+    //   takenOut(파랑) 값을 아예 받지 않고 movedToPacking(핑크)만 알고 있었던 것.
+    //   이제 서버에서 takenOut을 같이 받아 파랑까지 그대로 반영함.
+    const taken = state.takenOutInvoices.has(cf.meta.invoice_no);
+    return `<div class="slot ${status}${moved?' moved':''}${taken?' taken':''}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
       <div class="slot-head">
         <span class="slot-num">${numLabel}</span>
         <div class="slot-badges">
