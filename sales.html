@@ -410,7 +410,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-06-g</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-06-i</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -1489,6 +1489,54 @@ function showScreen(name){
   });
 }
 
+/* ★ 2026-08-06 신규(매니저 지적) — 자동 동기화.
+ * 예전엔 이 화면에만 자동 갱신이 없어서, 창고에서 검수가 끝나거나 디멘션이
+ * 입력돼도 영업팀이 직접 새로고침을 눌러야 최신 상태를 볼 수 있었음.
+ * (TV 현황판은 8초, 총량피킹 화면은 5초마다 이미 갱신되고 있었음)
+ *
+ * 설계 시 지킨 것들:
+ *  - 30초 주기. 이 화면은 갱신할 때마다 Jobs 시트를 두 번 읽으므로(1번 표 + 2번 목록)
+ *    TV 현황판(8초, 배치 하나만 조회)처럼 짧게 잡으면 안 됨. 여러 대가 동시에
+ *    띄워두는 화면이라 부하가 대수만큼 배가 됨. 30초가 체감 실시간성과
+ *    서버 부담의 절충점.
+ *  - 다른 탭을 보고 있으면(document.hidden) 갱신을 건너뜀. 창고 PC에 하루 종일
+ *    띄워두는 화면이라 불필요한 호출을 줄이기 위함.
+ *    대신 탭으로 돌아오면 즉시 한 번 갱신함.
+ *  - 상세 팝업이 열려 있거나 디멘션을 입력 중이면 건너뜀 — 작업 중인 화면이
+ *    갑자기 새로 그려져서 입력값이 날아가는 일을 막기 위함.
+ *  - 검색어와 목록 페이지는 그대로 유지됨(데이터만 새로 받고 다시 그림).
+ */
+const AUTO_SYNC_MS = 30000;
+let AUTO_SYNC_TIMER = null;
+
+function isBusyEditing(){
+  const overlay = document.getElementById('detail-overlay');
+  if (overlay && overlay.classList.contains('show')) return true;   // 상세 팝업 열림
+  if (document.getElementById('dims-rows-editor')) return true;      // 디멘션 입력 중
+  return false;
+}
+
+async function autoSync(silent){
+  if (!GAS_READY) return;
+  if (document.hidden) return;
+  if (isBusyEditing()) return;
+  try {
+    if (!silent) setSync('busy', 'Loading...');
+    await Promise.all([loadSheetOverview(), loadToday()]);
+    setSync('ok', 'Connected · ' + new Date().toLocaleTimeString('en-US', {hour12:false}));
+  } catch(e){
+    setSync('err', 'Sync failed');
+  }
+}
+
+function startAutoSync(){
+  if (AUTO_SYNC_TIMER) clearInterval(AUTO_SYNC_TIMER);
+  AUTO_SYNC_TIMER = setInterval(()=>autoSync(true), AUTO_SYNC_MS);
+}
+
+// 다른 탭에 갔다가 돌아오면 기다리지 않고 바로 최신으로
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) autoSync(true); });
+
 (async function init(){
   if (!GAS_READY){
     setSync('err', 'GAS_URL not set');
@@ -1496,7 +1544,8 @@ function showScreen(name){
   }
   setSync('busy', 'Loading...');
   await Promise.all([loadSheetOverview(), loadToday()]);
-  setSync('ok', 'Connected');
+  setSync('ok', 'Connected · ' + new Date().toLocaleTimeString('en-US', {hour12:false}));
+  startAutoSync();
 })();
 </script>
 
