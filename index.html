@@ -133,10 +133,10 @@
     .insp-pass .insp-dot{background:#10b981;box-shadow:0 0 5px #10b981;}
     .insp-issues .insp-dot{background:#ef4444;box-shadow:0 0 5px #ef4444;animation:pulse 1.5s infinite;}
     .insp-pending .insp-dot{background:var(--text-muted);}
-    .insp-tip{display:none;position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--bg-card);border:1px solid rgba(239,68,68,0.35);border-radius:var(--r-md);padding:10px 14px;min-width:190px;z-index:500;box-shadow:0 8px 28px rgba(0,0,0,0.6);text-align:left;}
+    /* ★ 2026-08-07 수정(매니저 지적) — 이슈 팝업이 화면 밖으로 잘리던 문제. 예전엔 left:50% + translateX(-50%)로 배지 '가운데' 기준으로 펼쳐졌는데, INSPECTION은 표의 맨 오른쪽 컬럼이라 팝업의 오른쪽 절반이 화면을 넘어갔음. 이제 배지의 오른쪽 끝에 맞춰 '왼쪽으로' 펼쳐지게 바꿔서 항상 화면 안에 들어옴. 바코드처럼 긴 글자는 줄바꿈되도록 했고, 좁은 화면에서도 넘치지 않게 폭을 제한함. */.insp-tip{display:none;position:absolute;top:calc(100% + 6px);right:0;left:auto;transform:none;background:var(--bg-card);border:1px solid rgba(239,68,68,0.35);border-radius:var(--r-md);padding:10px 14px;min-width:190px;max-width:min(340px,80vw);z-index:500;box-shadow:0 8px 28px rgba(0,0,0,0.6);text-align:left;}
     .insp-issues:hover .insp-tip{display:block;}
     .insp-tip-title{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#ef4444;margin-bottom:8px;}
-    .insp-tip-row{font-size:11px;color:var(--text-secondary);margin-bottom:4px;display:flex;gap:6px;align-items:center;}
+    .insp-tip-row{font-size:11px;color:var(--text-secondary);margin-bottom:4px;display:flex;gap:6px;align-items:flex-start;word-break:break-word;}
     .insp-tip-tag{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;flex-shrink:0;}
     .insp-tip-exp{background:rgba(239,68,68,0.2);color:#ef4444;}
     .insp-tip-oos{background:rgba(245,158,11,0.2);color:#f59e0b;}
