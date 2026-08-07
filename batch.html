@@ -1223,6 +1223,8 @@ const state = {
   logSearch: '', // ★ 2026-07-22 신규: 전체 스캔 로그 검색어
   logPage: 1,    // ★ 2026-07-22 신규: 전체 스캔 로그 현재 페이지 (검색 결과 기준으로 페이징)
   batchCompleteShown: false, // ★ 2026-08-03 신규: "모든 분류 완료" 팝업을 한 번만 띄우기 위한 플래그
+  batchCreatedAt: null,      // ★ 2026-08-07 신규: 배치 생성 일시(팝업·배지 표시용)
+  viewOnlyBatch: null,       // ★ 2026-08-07 신규: 조회 전용으로 열어본 배치
 };
 
 // Init slots (30개, 15+15)
@@ -1399,7 +1401,7 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
       <div>
         <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?(b.pendingTakeOut?'#F472B6':'var(--green)'):(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?(b.pendingTakeOut?' · 📦 출고 대기 '+b.pendingTakeOut+'건':' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전'):''}</div>
-        <div style="font-size:10px; color:var(--text-dim);">${b.date} · ${b.totalSku} SKU · 스캔 ${b.scannedPass||0}건</div>
+        <div style="font-size:10px; color:var(--text-dim);">🕐 ${fmtBatchWhen(b.createdAt) || b.date} 생성 · ${b.totalSku} SKU · 스캔 ${b.scannedPass||0}건</div>
       </div>
       <div style="display:flex; gap:6px; flex-shrink:0;">
         <button class="btn btn-ghost btn-sm" data-view-only="${b.batchId}" style="white-space:nowrap;">👁 보기</button>
@@ -1446,7 +1448,7 @@ function renderOpenBatchesPanel(batches){
       const pct = b.totalQty > 0 ? Math.round((b.scannedPass / b.totalQty) * 100) : 0;
       // ★ 2026-08-03 신규 — 요청: 하루에 배치를 2~3건 만들 수도 있어서 날짜만으론
       //   어떤 게 먼저 만들어졌는지 구분이 안 됨 → 생성 시각까지 그대로 표시.
-      const createdLabel = String(b.createdAt || '').replace('T', ' ').slice(0, 19) || b.date;
+      const createdLabel = fmtBatchWhen(b.createdAt) || b.date;
       // ★ 2026-08-03 신규 — 요청: 고객사/SKU/PCS 각각 몇 건 중 몇 건 완료됐는지
       //   한눈에 보이게. 서버(getOpenBatches)가 계산해서 내려주는 값 사용.
       const custTotal = b.totalCustomers != null ? b.totalCustomers : null;
@@ -1470,7 +1472,7 @@ function renderOpenBatchesPanel(batches){
     ${recentlyDone.map(b => `
       <div class="openb-card" style="border-color:var(--green);">
         <div class="openb-head">
-          <span class="openb-id">${b.batchId}</span>
+          <span class="openb-id">${b.batchId}<span style="font-family:var(--sans); font-size:12px; font-weight:700; color:var(--amber); margin-left:9px;">🕐 ${fmtBatchWhen(b.createdAt) || b.date} 생성</span></span>
           <span style="font-family:var(--mono); font-size:11px; font-weight:700; color:${b.pendingTakeOut ? '#F472B6' : 'var(--green)'};">${b.pendingTakeOut ? ('📦 출고 대기 ' + b.pendingTakeOut + '건') : ('✅ 완료됨 · ' + b.completedMinutesAgo + '분 전')}</span>
         </div>
         <div class="openb-meta">${b.pendingTakeOut ? ('모든 상품 스캔·분류 완료 — 출고팀이 아직 ' + b.pendingTakeOut + '건을 안 가져갔습니다') : '모든 상품 출고 완료 — 1시간 후 이 목록에서 자동으로 사라집니다'}</div>
@@ -1489,6 +1491,28 @@ function renderOpenBatchesPanel(batches){
   panel.querySelectorAll('[data-reopen]').forEach(btn => {
     btn.onclick = () => continueOpenBatch(btn.dataset.reopen, true); // 조회 전용
   });
+}
+
+/* ★ 2026-08-07 신규(매니저 요청) — 배치를 번호가 아니라 "언제 만든 배치인가"로
+ * 알아볼 수 있게 생성 일시를 표시. 하루에 배치를 여러 번 만들면 -9AF26B, -DEE7FD
+ * 같은 뒷자리는 사람이 기억할 수 없어서, 시간으로 구분하는 게 훨씬 직관적임.
+ * 시트에서 오는 값이 Date 객체일 수도 문자열일 수도 있어 양쪽 모두 처리함. */
+function fmtBatchWhen(v){
+  if(!v) return '';
+  let d = null;
+  if(v instanceof Date) d = v;
+  else {
+    const str = String(v).trim();
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if(m) d = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
+    else { const t = new Date(str); if(!isNaN(t.getTime())) d = t; }
+  }
+  if(!d || isNaN(d.getTime())) return String(v).slice(0,16);
+  const p = n => String(n).padStart(2,'0');
+  const today = new Date();
+  const sameDay = d.getFullYear()===today.getFullYear() && d.getMonth()===today.getMonth() && d.getDate()===today.getDate();
+  const hm = p(d.getHours())+':'+p(d.getMinutes());
+  return sameDay ? ('오늘 ' + hm) : (p(d.getMonth()+1)+'-'+p(d.getDate())+' '+hm);
 }
 
 // "이어서 작업하기" — 그 배치를 통째로 불러와서 지금 화면에서 이어서 작업
@@ -1522,6 +1546,13 @@ async function continueOpenBatch(batchId, viewOnly){
     _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
   }));
   state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이건 새로 만든 게 아니라 기존 배치를 불러온 것
+  // ★ 2026-08-07 수정(매니저 지적) — 이미 끝난 배치를 열어볼 때마다 "모든 분류 완료"
+  //   팝업이 다시 떠서 방해가 됐음. 이 팝업은 "작업하다가 방금 100%가 됐다"를
+  //   알리는 용도이므로, 이미 완료된 배치를 불러오는 경우엔 띄우지 않음.
+  //   (이 배치가 나중에 되돌려졌다가 다시 완료되면 그때는 정상적으로 뜸)
+  state.batchCompleteShown = true;
+  // 팝업·배지에 쓸 "배치 생성 일시" — 배치를 연 시각이 아니라 실제 생성 시각
+  state.batchCreatedAt = res.batch.createdAt || res.batch.date || null;
   state.slots.forEach(s => { s.assignedTo = null; });
   state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
@@ -1534,7 +1565,8 @@ async function continueOpenBatch(batchId, viewOnly){
 
   buildScanIndex();
   updateSlotQueueNumbers();
-  document.getElementById('batchChip').textContent = state.batchId;
+  const _when = fmtBatchWhen(res.batch.createdAt || res.batch.date);
+  document.getElementById('batchChip').textContent = state.batchId + (_when ? ' · ' + _when : '');
   document.getElementById('batchChip').classList.add('active');
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
   renderFileTags();
@@ -1548,7 +1580,7 @@ async function continueOpenBatch(batchId, viewOnly){
     // 서버에 방송하지 않음 — 이 기기에서만 보는 상태
     state.viewOnlyBatch = state.batchId;
     const chip = document.getElementById('batchChip');
-    if(chip) chip.textContent = state.batchId + ' (조회전용)';
+    if(chip) chip.textContent = state.batchId + (_when ? ' · ' + _when : '') + ' (조회전용)';
     toast(`배치 ${state.batchId} 조회 전용으로 열었습니다 — 다른 기기에는 영향 없습니다`, 'success');
     gotoView('v-log');
     renderKPI();
@@ -2370,6 +2402,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
       return;
     }
     state.batchId = created.batchId; // 서버가 발급한 정식 배치ID로 교체
+    state.batchCreatedAt = created.createdAt || new Date().toISOString(); // ★ 2026-08-07
     state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이제 "작성 중 초안"이 아니라 "실제 활성 배치"가 됨
     clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
     gasCall('setActiveBatch', { batchId: state.batchId }); // ★ 2026-07-23 신규: 다른 기기들이 자동으로 이 새 배치를 따라오게 함
@@ -4280,15 +4313,25 @@ function showBatchComplete(){
   const dur = state.batchStartTs ? Math.floor((Date.now() - state.batchStartTs)/60000) : 0;
   document.getElementById('cmpSlots').textContent = filledSlots;
   document.getElementById('cmpQty').textContent = totalQty.toLocaleString();
-  document.getElementById('cmpTime').textContent = dur + 'm';
+  document.getElementById('cmpTime').textContent = (state.batchStartTs && dur > 0) ? (dur + 'm') : '-';
   // 배치 번호와 생성 일시 채우기
   const idEl = document.getElementById('cmpBatchId');
   const whenEl = document.getElementById('cmpBatchWhen');
   if(idEl) idEl.textContent = state.batchId || '-';
   if(whenEl){
-    const ts = state.batchStartTs ? new Date(state.batchStartTs) : new Date();
+    // ★ 2026-08-07 수정 — 예전엔 "배치를 연 시각"을 생성 시각으로 잘못 표시했음
+    //   (8/5 배치를 열었는데 오늘 날짜가 찍히는 문제). 실제 생성 시각을 사용.
+    const raw = state.batchCreatedAt;
+    let ts = null;
+    if(raw){
+      const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+      if(m) ts = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
+      else { const t = new Date(String(raw)); if(!isNaN(t.getTime())) ts = t; }
+    }
     const p = n => String(n).padStart(2,'0');
-    whenEl.textContent = `배치 생성 ${ts.getFullYear()}-${p(ts.getMonth()+1)}-${p(ts.getDate())} ${p(ts.getHours())}:${p(ts.getMinutes())}`;
+    whenEl.textContent = ts
+      ? `배치 생성 ${ts.getFullYear()}-${p(ts.getMonth()+1)}-${p(ts.getDate())} ${p(ts.getHours())}:${p(ts.getMinutes())}`
+      : '';
   }
   document.getElementById('completeOverlay').classList.add('open');
   if(GAS_READY && state.batchId){
