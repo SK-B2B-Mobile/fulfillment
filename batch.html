@@ -3103,6 +3103,35 @@ function setPickBanner(mode, worker, pageLabel, extra){
   }
 }
 
+/* ★ 2026-08-07 신규 — 이름을 고르면 그 사람의 현재 상태에 맞게 버튼을 정리함.
+ * 이미 피킹 중(다른 기기에서 시작했거나 이 기기가 새로고침된 경우)이면
+ * "피킹 시작"은 막고 "피킹 종료"를 열어줌 — 예전엔 이 경우 아무것도 못 눌렀음.
+ * 소요시간은 서버가 저장된 시작시각으로 직접 계산하므로, 어느 기기에서
+ * 종료를 눌러도 결과가 정확함. */
+function onPickWorkerChange(){
+  updatePickWorkerDot();
+  if (state.pickTimerRunning) return;               // 이 기기에서 진행 중이면 그대로
+  const w = document.getElementById('pickWorkerSelect').value;
+  const since = w ? state.activePickers[w] : null;
+  const btnStart = document.getElementById('btnPickStart');
+  const btnEnd = document.getElementById('btnPickEnd');
+  if (since){
+    btnStart.disabled = true;
+    btnEnd.disabled = false;
+    // 서버에 기록된 시작시각(HH:mm)으로 경과시간을 대략 맞춰 보여줌
+    const m = String(since).match(/^(\d{1,2}):(\d{2})/);
+    if (m){
+      const d = new Date(); d.setHours(parseInt(m[1],10), parseInt(m[2],10), 0, 0);
+      state.pickTimerStart = d.getTime();
+    }
+    setPickBanner('running', w, since + '부터 피킹 중 · 여기서 종료할 수 있습니다');
+  } else {
+    btnStart.disabled = false;
+    btnEnd.disabled = true;
+    setPickBanner('off');
+  }
+}
+
 document.getElementById('btnPickStart').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
   // ★ 2026-07-16 수정: 담당 페이지를 숫자 두 칸(시작~끝)으로 입력받음.
@@ -3218,8 +3247,18 @@ document.getElementById('btnPickEnd').onclick = async () => {
   _ef.disabled = false; _et.disabled = false;
   setPickBanner('done', worker, _erange ? (_erange + '페이지 · ' + _ecnt + '장') : '', mins + '분');
   document.getElementById('pickTimerStat').textContent = '';
-  if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'end' });
-  toast(`피킹 완료 · ${mins}분 소요`, 'success');
+  let realMins = mins;
+  if(GAS_READY){
+    const endRes = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'end' });
+    // ★ 2026-08-07 — 서버가 저장된 시작시각으로 계산한 값을 우선 사용.
+    //   다른 기기에서 시작한 세션을 여기서 종료하는 경우, 이 기기의 타이머는
+    //   실제 시작시각을 모르므로 서버 값이 정확함.
+    if(endRes && endRes.ok && typeof endRes.durationMinutes === 'number') realMins = endRes.durationMinutes;
+    else if(endRes && !endRes.ok) toast('⚠ 종료 저장 실패: ' + (endRes.error||''), 'error');
+  }
+  document.getElementById('pickStateSub').textContent = '';
+  setPickBanner('done', worker, _erange ? (_erange + '페이지 · ' + _ecnt + '장') : '', realMins + '분');
+  toast(`피킹 완료 · ${realMins}분 소요`, 'success');
 
   // ★ 2026-07-17 신규: "피킹 시작 누른 사람만 Active" 원칙에 맞춰, 종료하면
   //   자동으로 다시 Off로 되돌림. 예전 테스트로 눌러본 사람이 실제로 일 안 하는데
@@ -4477,15 +4516,19 @@ function populateWorkerSelect(){
     pickSel.innerHTML = '<option value="">— 선택 안 함 —</option>' + all.map(w => {
       const activeSince = state.activePickers[w.name];
       const locked = !!activeSince;
+      // ★ 2026-08-07 긴급 수정(현장 장애) — 예전엔 피킹 중인 사람을 disabled로 잠갔음.
+      //   그런데 기기가 새로고침되거나 다른 기기에서 시작한 경우, 본인이 자기 이름을
+      //   고를 수 없어서 "피킹 종료"를 누를 방법이 아예 없어지는 교착이 생겼음
+      //   (Kevin Kim 사례). 이제 선택은 가능하게 두고, 고르면 종료 버튼이 열림.
       const label = locked ? `${w.name} — 🔴 ON · ${activeSince}부터 피킹중` : `${w.name}${w.status!=='active' ? ' (Off)' : ''}`;
-      return `<option value="${w.name}" ${locked?'disabled':''}>${label}</option>`;
+      return `<option value="${w.name}">${label}</option>`;
     }).join('');
     // ★ 2026-08-03 수정 — 예전엔 잠긴 이름이면 "잠기지 않은 첫 사람"으로 자동
     //   대체했는데, 이것도 결국 누군가의 이름이 임의로 선택되는 문제였음.
     //   이제 예전 선택이 여전히 유효할 때만 유지하고, 그 외엔 항상 "선택 안 함"으로.
-    const prevStillOk = prevPick && all.some(w => w.name === prevPick) && !state.activePickers[prevPick];
+    const prevStillOk = prevPick && all.some(w => w.name === prevPick);
     pickSel.value = prevStillOk ? prevPick : '';
-    pickSel.onchange = updatePickWorkerDot;
+    pickSel.onchange = onPickWorkerChange;
   }
   updatePickWorkerDot();
 }
