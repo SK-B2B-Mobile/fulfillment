@@ -255,6 +255,14 @@ function doGet(e) {
   // ★ 2026-07-28 신규 — 영업 공유: 오더 검수 상세 + 배송 디멘션 조회
   // ★ 2026-08-06 신규 — 디멘션 합치기 후보(같은 고객사 오더) 조회. 상세조회를
   //   느리게 만들지 않도록 무거운 계산을 이 별도 호출로 분리함.
+  // ★ 2026-08-06 신규 — 바코드/SKU로 오더 찾기 (2번 화면 통합검색)
+  // ★ 2026-08-06 신규 — 총량피킹 배치의 Jobs 상태를 수동으로 한 번에 맞춤
+  if (op === 'syncBatchJobs') {
+    return json_(syncBatchJobsAll((e.parameter || {}).batchId || ''));
+  }
+  if (op === 'getOrdersByItem') {
+    return json_(getOrdersByItem((e.parameter || {}).q || ''));
+  }
   if (op === 'getDimCandidates') {
     return json_(getDimCandidates((e.parameter || {}).invoice || ''));
   }
@@ -2977,6 +2985,7 @@ function getSalesOverview() {
     const iCreated   = hdr[norm('Created At')];
     const iStartISO  = hdr[norm('StartAtISO')];
     const iEndISO    = hdr[norm('EndAtISO')]; // ★ 2026-08-05 신규 — 피킹 완료 여부 판단용
+    const iStatus    = hdr[norm('Status')];   // ★ 2026-08-06 신규 — 메인 대시보드와 기준을 100% 맞추기 위해
     if (!iInv) return { ok: true, jobs: [] };
 
     const tz = Session.getScriptTimeZone();
@@ -2997,6 +3006,7 @@ function getSalesOverview() {
     const createdVals  = iCreated  ? sh.getRange(2, iCreated,  n, 1).getValues() : null;
     const startISOVals = iStartISO ? sh.getRange(2, iStartISO, n, 1).getValues() : null;
     const endISOVals   = iEndISO   ? sh.getRange(2, iEndISO,   n, 1).getValues() : null; // ★ 2026-08-05 신규
+    const statusVals   = iStatus   ? sh.getRange(2, iStatus,   n, 1).getValues() : null; // ★ 2026-08-06 신규
 
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
@@ -3019,18 +3029,31 @@ function getSalesOverview() {
         if (sv instanceof Date && !isNaN(sv)) pickStart = Utilities.formatDate(sv, tz, 'yyyy-MM-dd');
         else { const s = String(sv || '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10); }
       }
-      // ★ 2026-08-05 신규 — "피킹 완료" = 피킹 종료 시각(EndAtISO)이 기록됐는지로 판단.
-      //   총량피킹은 스캔 100% 완료 시 자동으로 이 값이 채워지고(syncInspectionFromPicking_
-      //   경로와 별개로 총량피킹 배치 완료 시 Jobs 시트 EndAtISO까지는 자동 반영 안 되는
-      //   경로도 있을 수 있어, 검수(Inspection)가 이미 찍혀 있으면 그것도 "피킹 완료"로 같이 인정함
-      //   — 검수가 됐다는 건 이미 피킹이 끝났다는 뜻이므로 안전한 보조 판단 기준).
-      const pickComplete = !!(endISOVals && endISOVals[i][0]) || !!(inspVals && String(inspVals[i][0]||'').trim());
+      // ★ 2026-08-06 긴급 수정 — 메인 대시보드와 영업 화면이 서로 다른 값을 보이던 문제.
+      //
+      //   [무엇이 문제였나]
+      //   예전 규칙: 피킹완료 = EndAtISO 있음 || 검수값 있음
+      //   여기서 뒷부분("검수가 됐으면 피킹도 끝난 것으로 인정")이 위험했음.
+      //   실제로 IN00463486은 검수는 PASS인데 피킹 기록(Status/Start/End)이 전혀 없었고,
+      //   그 결과 메인 대시보드는 READY, 영업 화면은 "✓ Complete"로 정반대를 표시했음.
+      //   영업팀은 영업 화면을 믿고 고객에게 답하므로 이런 불일치는 절대 있으면 안 됨.
+      //
+      //   [새 규칙] 메인 대시보드와 똑같이 Jobs 시트의 Status를 기준으로 삼음.
+      //   추측으로 메우지 않고, 기록된 사실만 그대로 보여줌.
+      const jobStatus = statusVals ? String(statusVals[i][0] || '').trim().toLowerCase() : '';
+      const pickComplete = (jobStatus === 'completed') || !!(endISOVals && endISOVals[i][0]);
+      // 검수는 끝났는데 피킹 기록이 없는 경우 — 데이터가 어긋난 상태이므로
+      // 조용히 "완료"로 덮지 않고 화면에 경고로 드러냄(원인 파악이 가능하도록).
+      const inspVal = inspVals ? String(inspVals[i][0] || '').trim() : '';
+      const pickAnomaly = !!inspVal && !pickComplete;
       jobs.push({
         invoice: invoice,
         remarks: remarksVals ? remarksVals[i][0] : '',
         shipDate: shipDate,
         pickStart: pickStart,
         pickComplete: pickComplete,
+        status: jobStatus,          // ★ 2026-08-06 신규 — 메인 대시보드와 동일 기준
+        pickAnomaly: pickAnomaly,   // ★ 2026-08-06 신규 — 검수됨인데 피킹 기록 없음
         method: truckVals ? truckVals[i][0] : '',
         amount: amountVals ? amountVals[i][0] : '',
         inspection: inspVals ? String(inspVals[i][0] || '').trim() : '',
