@@ -644,6 +644,9 @@ function getBatch(batchId) {
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
         totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || '',
         movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크 상태도 복원 시 같이 가져옴
+        takenOut: !!r[11], // ★ 2026-08-07 신규: 출고팀이 가져간 파란 상태.
+        //   TV 현황판은 이미 쓰고 있었지만 batch.html은 이 값을 받지 못해
+        //   핵크에서 멈췄음 — 두 화면 색이 서로 달랐던 직접 원인.
       }));
     }
 
