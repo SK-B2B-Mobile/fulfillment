@@ -687,19 +687,44 @@ select option:disabled{color:var(--text-dim2);}
 
       <div class="card" style="margin-bottom:16px; padding:14px 16px;">
         <div class="row" style="align-items:center; gap:10px;">
-          <span style="font-size:11px; color:var(--text-dim2); font-family:var(--mono); text-transform:uppercase; letter-spacing:0.05em;">피킹 타이머 (KPI)</span>
-          <span id="pickWorkerDot" title="Off/Active" style="width:9px; height:9px; border-radius:50%; background:var(--text-dim2); flex-shrink:0; transition:background 0.2s;"></span>
-          <select id="pickWorkerSelect" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 11px; font-size:14px;"></select>
-          <div style="display:flex; align-items:center; gap:4px;">
-            <input type="number" id="pickPageFrom" placeholder="시작페이지" min="1" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 9px; font-size:14px; width:84px;">
-            <span style="color:var(--text-dim2); font-size:13px;">~</span>
-            <input type="number" id="pickPageTo" placeholder="끝(선택)" min="1" style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 9px; font-size:14px; width:84px;">
-            <span style="color:var(--text-dim2); font-size:11px; font-family:var(--mono);">페이지</span>
+          <!-- ★ 2026-08-07 전면 개선(작업자 피드백) — 예전엔 입력칸이 작고 흐려서
+               태블릿에서 잘 안 보인다는 지적이 있었고, 시작/종료를 눌렀는지도
+               구분이 어려웠음. 칸을 키우고 라벨을 붙이고, 상태를 큰 띠로 표시함. -->
+          <div style="width:100%; display:flex; flex-direction:column; gap:12px;">
+
+            <div id="pickStateBanner" style="display:none; align-items:center; gap:12px; padding:14px 18px; border-radius:12px; border:2px solid var(--border); background:var(--surface3);">
+              <span id="pickStateIcon" style="font-size:22px;">⏸</span>
+              <div style="flex:1; min-width:0;">
+                <div id="pickStateTitle" style="font-size:17px; font-weight:800; color:var(--text);">대기 중</div>
+                <div id="pickStateSub" style="font-size:13px; color:var(--text-dim); margin-top:3px;"></div>
+              </div>
+              <div id="pickStateClock" style="font-family:var(--mono); font-size:26px; font-weight:800; color:var(--text); letter-spacing:0.02em;">00:00</div>
+            </div>
+
+            <div style="display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;">
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">
+                  <span id="pickWorkerDot" title="Off/Active" style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-dim2); margin-right:6px; transition:background 0.2s;"></span>작업자 이름
+                </label>
+                <select id="pickWorkerSelect" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 14px; font-size:17px; font-weight:700; min-width:190px;"></select>
+              </div>
+
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">담당 페이지 <span style="font-weight:500; color:var(--text-dim2);">(한 장이면 앞칸만)</span></label>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="number" id="pickPageFrom" placeholder="시작" min="1" inputmode="numeric" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
+                  <span style="color:var(--text-dim); font-size:18px; font-weight:800;">~</span>
+                  <input type="number" id="pickPageTo" placeholder="끝" min="1" inputmode="numeric" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
+                  <span id="pickPageCount" style="font-size:14px; font-weight:800; color:var(--text-dim); white-space:nowrap; min-width:96px;">— 장</span>
+                </div>
+              </div>
+
+              <button class="btn btn-primary" id="btnPickStart" style="font-size:17px; font-weight:800; padding:14px 26px; border-radius:10px;">▶ 피킹 시작</button>
+              <button class="btn btn-ghost" id="btnPickEnd" disabled style="font-size:17px; font-weight:800; padding:14px 26px; border-radius:10px;">■ 피킹 종료</button>
+            </div>
+
+            <span id="pickTimerStat" style="font-size:12px; color:var(--text-dim); font-family:var(--mono);"></span>
           </div>
-          <button class="btn btn-primary btn-sm" id="btnPickStart" style="font-size:13px; padding:7px 12px;">▶ 피킹 시작</button>
-          <button class="btn btn-ghost btn-sm" id="btnPickEnd" disabled style="font-size:13px; padding:7px 12px;">■ 피킹 종료</button>
-          <div class="spacer"></div>
-          <span id="pickTimerStat" style="font-size:11.5px; color:var(--text-dim); font-family:var(--mono);"></span>
         </div>
       </div>
 
@@ -2958,6 +2983,76 @@ function updateSlotQueueNumbers(){
 // ═══════════════════════════════════════════════════════════
 // 피킹 타이머 (KPI① — 작업자별 피킹 소요시간)
 // ═══════════════════════════════════════════════════════════
+/* ★ 2026-08-07 신규 — 담당 페이지 "장수" 계산 및 표시.
+ * 작업자 혼동 방지: 입력하는 숫자는 "몇 장"이 아니라 "몇 페이지짜리 종이인가"임.
+ *   예) 20만 입력 = 20페이지 한 장 = 1장
+ *       7 ~ 12 입력 = 7,8,9,10,11,12페이지 = 6장
+ * 30장을 5명이 나누면 1~6 / 7~12 / ... 식으로 각자 6장이 됨. */
+function pickPageCountOf(from, to){
+  const f = parseInt(from, 10);
+  if (!f || f < 1) return 0;
+  const t = parseInt(to, 10);
+  if (!t || t < f) return 1;          // 끝을 안 넣거나 잘못 넣으면 한 장
+  return (t - f + 1);
+}
+function updatePickPageCount(){
+  const f = document.getElementById('pickPageFrom').value.trim();
+  const t = document.getElementById('pickPageTo').value.trim();
+  const el = document.getElementById('pickPageCount');
+  const n = pickPageCountOf(f, t);
+  if (!n){ el.textContent = '— 장'; el.style.color = 'var(--text-dim2)'; return; }
+  el.textContent = n + '장';
+  el.style.color = 'var(--purple)';
+  if (t && parseInt(t,10) < parseInt(f,10)){
+    el.textContent = '끝이 더 작음';
+    el.style.color = 'var(--red)';
+  }
+}
+['pickPageFrom','pickPageTo'].forEach(id=>{
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', updatePickPageCount);
+});
+
+/* 상태 배너 — 시작/종료를 눌렀는지 한눈에 보이게. 예전엔 작은 회색 글씨뿐이라
+ * 종료가 됐는지 작업자가 확신하지 못한다는 지적이 있었음. */
+let PICK_CLOCK_TIMER = null;
+function setPickBanner(mode, worker, pageLabel, extra){
+  const wrap  = document.getElementById('pickStateBanner');
+  const icon  = document.getElementById('pickStateIcon');
+  const title = document.getElementById('pickStateTitle');
+  const sub   = document.getElementById('pickStateSub');
+  const clock = document.getElementById('pickStateClock');
+  if (!wrap) return;
+  wrap.style.display = 'flex';
+  if (PICK_CLOCK_TIMER){ clearInterval(PICK_CLOCK_TIMER); PICK_CLOCK_TIMER = null; }
+
+  if (mode === 'running'){
+    wrap.style.borderColor = 'var(--green)';
+    wrap.style.background  = 'var(--green-bg)';
+    icon.textContent = '🟢';
+    title.textContent = worker + '님 피킹 중';
+    sub.textContent = pageLabel || '담당 페이지 미입력';
+    const tick = () => {
+      const ms = Date.now() - (state.pickTimerStart || Date.now());
+      const m = Math.floor(ms/60000), sec = Math.floor(ms/1000)%60;
+      clock.textContent = String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    };
+    tick();
+    PICK_CLOCK_TIMER = setInterval(tick, 1000);
+    clock.style.color = 'var(--green)';
+  } else if (mode === 'done'){
+    wrap.style.borderColor = 'var(--purple)';
+    wrap.style.background  = 'var(--purple-bg)';
+    icon.textContent = '✅';
+    title.textContent = worker + '님 피킹 완료';
+    sub.textContent = (pageLabel ? pageLabel + ' · ' : '') + (extra || '');
+    clock.textContent = extra || '';
+    clock.style.color = 'var(--purple)';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
 document.getElementById('btnPickStart').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
   // ★ 2026-07-16 수정: 담당 페이지를 숫자 두 칸(시작~끝)으로 입력받음.
@@ -2992,7 +3087,15 @@ async function startPickTimer(worker, pageRange, force){
   document.getElementById('btnPickStart').disabled = true;
   document.getElementById('btnPickEnd').disabled = false;
   document.getElementById('pickWorkerSelect').disabled = true;
-  document.getElementById('pickTimerStat').textContent = worker + (pageRange ? ` · ${pageRange}페이지` : '') + ' 피킹 중...';
+  const _pf = document.getElementById('pickPageFrom').value.trim();
+  const _pt = document.getElementById('pickPageTo').value.trim();
+  const _cnt = pickPageCountOf(_pf, _pt);
+  // "7~12페이지 (6장)" 처럼 페이지 번호와 장수를 함께 보여줌 — 20을 20장으로 오해하지 않도록
+  const _label = pageRange ? (pageRange + '페이지 · ' + _cnt + '장') : '';
+  document.getElementById('pickPageFrom').disabled = true;
+  document.getElementById('pickPageTo').disabled = true;
+  setPickBanner('running', worker, _label);
+  document.getElementById('pickTimerStat').textContent = '';
   if(GAS_READY){
     const res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
     // ★ 2026-07-22 신규: 화면단 체크를 통과했어도, 정말 거의 동시에 다른 기기가
@@ -3002,6 +3105,9 @@ async function startPickTimer(worker, pageRange, force){
       document.getElementById('btnPickStart').disabled = false;
       document.getElementById('btnPickEnd').disabled = true;
       document.getElementById('pickWorkerSelect').disabled = false;
+      document.getElementById('pickPageFrom').disabled = false;
+      document.getElementById('pickPageTo').disabled = false;
+      setPickBanner('off');
       document.getElementById('pickTimerStat').textContent = '';
       if(res.error === 'already_picking' && !force){
         // 서버 쪽에서도 막힌 경우 — 강제 재시도 여부를 다시 물어봄
@@ -3055,7 +3161,13 @@ document.getElementById('btnPickEnd').onclick = async () => {
   document.getElementById('btnPickStart').disabled = false;
   document.getElementById('btnPickEnd').disabled = true;
   document.getElementById('pickWorkerSelect').disabled = false;
-  document.getElementById('pickTimerStat').textContent = `${worker} 완료 · ${mins}분`;
+  const _ef = document.getElementById('pickPageFrom');
+  const _et = document.getElementById('pickPageTo');
+  const _ecnt = pickPageCountOf(_ef.value.trim(), _et.value.trim());
+  const _erange = _ef.value.trim() ? (_et.value.trim() ? _ef.value.trim()+'-'+_et.value.trim() : _ef.value.trim()) : '';
+  _ef.disabled = false; _et.disabled = false;
+  setPickBanner('done', worker, _erange ? (_erange + '페이지 · ' + _ecnt + '장') : '', mins + '분');
+  document.getElementById('pickTimerStat').textContent = '';
   if(GAS_READY) await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'end' });
   toast(`피킹 완료 · ${mins}분 소요`, 'success');
 
@@ -4078,8 +4190,12 @@ async function renderKPI(){
   //   (글자 크기가 아니라 "선명도"가 문제였던 것이라 폰트 크기는 그대로 두고
   //   색상 대비만 확실히 높임)
   const pickRows = (res.pickSessions||[]).map(p =>
-    `<tr><td>${p.worker}</td><td style="color:var(--text-dim)">${p.pageRange||'-'}</td><td>${p.start}</td><td>${p.end}</td><td>${p.durationMinutes}분</td><td>${p.totalSku}</td><td>${p.totalQty.toLocaleString()}</td></tr>`).join('')
-    || '<tr><td colspan="7" style="color:var(--text-dim)">피킹 기록 없음</td></tr>';
+    // ★ 2026-08-07 — "담당페이지"만 보면 20이 20장인지 20페이지 한 장인지 헷갈림.
+    //   장수를 따로 계산해서 별도 칸으로 보여줌.
+    (() => { const pr=String(p.pageRange||'').trim(); const m=pr.match(/^(\d+)\s*-\s*(\d+)$/);
+      const cnt = m ? (parseInt(m[2],10)-parseInt(m[1],10)+1) : (pr ? 1 : 0);
+      return `<tr><td>${p.worker}</td><td style="color:var(--text-dim)">${pr||'-'}</td><td style="font-weight:700">${cnt?cnt+'장':'-'}</td><td>${p.start}</td><td>${p.end}</td><td>${p.durationMinutes}분</td><td>${p.totalSku}</td><td>${p.totalQty.toLocaleString()}</td></tr>`; })()).join('')
+    || '<tr><td colspan="8" style="color:var(--text-dim)">피킹 기록 없음</td></tr>';
 
   // ② 작업자별 Pass / 이슈(EXP·NF·Damaged·OOS) 건수·수량
   const scanRows = (res.scanStats||[]).map(s =>
@@ -4097,7 +4213,7 @@ async function renderKPI(){
       <div style="font-weight:700; color:var(--text); margin-bottom:6px;">① 작업자별 피킹 세션 (시작~종료 · 실제 처리 SKU/PCS)</div>
       <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
       <table style="width:100%; min-width:520px; font-size:11.5px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
-        <th style="text-align:left">작업자</th><th style="text-align:left">담당페이지</th><th style="text-align:left">시작</th><th style="text-align:left">종료</th><th style="text-align:left">소요</th><th style="text-align:left">SKU</th><th style="text-align:left">PCS</th>
+        <th style="text-align:left">작업자</th><th style="text-align:left">담당페이지</th><th style="text-align:left">장수</th><th style="text-align:left">시작</th><th style="text-align:left">종료</th><th style="text-align:left">소요</th><th style="text-align:left">SKU</th><th style="text-align:left">PCS</th>
       </tr></thead>
       <tbody>${pickRows}</tbody></table>
       </div>
