@@ -1517,7 +1517,14 @@ function getBatchKPI(batchId) {
     // ① 피킹 세션 목록
     const pt = picktimeSheet_();
     const ptLast = pt.getLastRow();
-    const sessions = [];
+    // ★ 2026-08-07 재설계 — SKU/PCS 집계 구간을 바꿈.
+    //   예전: 피킹 시작 ~ 피킹 종료 사이만 집계.
+    //   문제: 총량피킹은 "집기 → 분류 → 집기 → 분류"를 반복하고, 작업자는
+        //   담당 페이지를 다 집은 순간 종료를 누른 뒤에도 분류 스캔을 계속함.
+    //   그래서 JAMES PARK처럼 140분 일했는데 SKU/PCS가 0으로 나왔음.
+    //   새 기준: 이 세션 시작 ~ 같은 사람의 다음 세션 시작 직전까지.
+    //   다음 세션이 없으면 지금까지. 구간이 겹치지 않아 중복 집계도 없음.
+    const rawSessions = [];
     if (ptLast >= 2) {
       pt.getRange(2, 1, ptLast - 1, 6).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
@@ -1527,35 +1534,46 @@ function getBatchKPI(batchId) {
         const startMs = (Object.prototype.toString.call(startTs) === '[object Date]' && !isNaN(startTs)) ? startTs.getTime() : NaN;
         const endMs = (Object.prototype.toString.call(endTs) === '[object Date]' && !isNaN(endTs)) ? endTs.getTime() : NaN;
 
-        // ★ 2026-08-07 개선 두 가지
-        //  (1) 작업자 이름을 대소문자·앞뒤공백 무시하고 맞춤. 스캔 기록과 세션에
-        //      "Kevin Kim"과 "KEVIN KIM"처럼 다르게 들어가면 실적이 0으로 나왔음.
-        //  (2) 아직 "진행중"인 세션도 시작~지금까지의 스캔을 집계함. 예전엔 종료
-        //      시각이 없으면 무조건 0이라 한창 일하는 작업자 실적이 안 보였음.
-        let totalSku = 0, totalQty = 0;
-        if (!isNaN(startMs)) {
-          const until = !isNaN(endMs) ? endMs : Date.now();
-          const skuSet = {};
-          passScans.forEach(sc => {
-            if (sc.workerKey !== workerKey) return;
-            if (isNaN(sc.timeMs) || sc.timeMs < startMs || sc.timeMs > until) return;
-            skuSet[String(sc.sku)] = true;
-            totalQty += sc.qty;
-          });
-          totalSku = Object.keys(skuSet).length;
-        }
-
-        sessions.push({
+        rawSessions.push({
           worker: worker,
+          workerKey: workerKey,
           pageRange: fixPageRange_(r[2]),
           start: !isNaN(startMs) ? Utilities.formatDate(startTs, batchTz_(), 'HH:mm') : '-',
           end: !isNaN(endMs) ? Utilities.formatDate(endTs, batchTz_(), 'HH:mm') : '진행중',
           durationMinutes: Number(r[5]) || 0,
-          totalSku: totalSku, totalQty: totalQty,
+          totalSku: 0, totalQty: 0,
+          _startMs: startMs,
           _sortMs: isNaN(startMs) ? 0 : startMs,
         });
       });
     }
+    // 같은 작업자의 세션을 시간순으로 줄 세워, 각 세션의 집계 끝을
+    // "다음 세션 시작 직전"으로 잡음. 마지막 세션은 지금까지.
+    const byWorker = {};
+    rawSessions.forEach(s2 => {
+      if (isNaN(s2._startMs)) return;
+      if (!byWorker[s2.workerKey]) byWorker[s2.workerKey] = [];
+      byWorker[s2.workerKey].push(s2);
+    });
+    const nowMs2 = Date.now();
+    Object.keys(byWorker).forEach(k => {
+      const list = byWorker[k].sort((a, b) => a._startMs - b._startMs);
+      list.forEach((s2, i) => {
+        const from = s2._startMs;
+        const to = (i + 1 < list.length) ? list[i + 1]._startMs : nowMs2;
+        const skuSet = {};
+        let qty = 0;
+        passScans.forEach(sc => {
+          if (sc.workerKey !== k) return;
+          if (isNaN(sc.timeMs) || sc.timeMs < from || sc.timeMs >= to) return;
+          skuSet[String(sc.sku)] = true;
+          qty += sc.qty;
+        });
+        s2.totalSku = Object.keys(skuSet).length;
+        s2.totalQty = qty;
+      });
+    });
+    const sessions = rawSessions;
     sessions.sort((a, b) => b._sortMs - a._sortMs); // 최신순
     sessions.forEach(s => delete s._sortMs);
 
