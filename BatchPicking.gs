@@ -2113,6 +2113,34 @@ function getOpenBatches() {
     const rows = bSh.getRange(2, 1, last - 1, 7).getValues();
     const open = [];
     const openIds = {};
+
+    // ★ 2026-08-07 수정(매니저 지적) — 배치가 목록에서 사라지는 기준을 바꿈.
+    //   예전: 모든 상품 스캔이 끝난 시점(completeBatch)부터 1시간.
+    //   문제: 그 시점엔 물건이 아직 분류존에 그대로 있음(TV 현황판 전부 핵크).
+    //   실제로 18/18이 전부 핵크인데 목록에서 사라져 당황하는 일이 생겼음.
+    //   새 기준: 출고팀이 전부 가져가서 파랑(TakenOut)이 된 뒤부터 1시간.
+    //   하나라도 안 가져갔으면 시간과 관계없이 계속 보임.
+    const takenOutInfo = {}; // batchId -> { total, taken, lastMs }
+    try {
+      const bc = bcustSheetSafe_();
+      const bcLast = bc.getLastRow();
+      if (bcLast >= 2) {
+        const bcRows = bc.getRange(2, 1, bcLast - 1, 12).getValues();
+        bcRows.forEach(r2 => {
+          const bid = String(r2[0] || '').trim();
+          if (!bid) return;
+          if (!takenOutInfo[bid]) takenOutInfo[bid] = { total: 0, taken: 0, lastMs: 0 };
+          const info = takenOutInfo[bid];
+          info.total++;
+          const t = r2[11];
+          if (t) {
+            info.taken++;
+            const ms = parseBatchTs_(t);
+            if (!isNaN(ms) && ms > info.lastMs) info.lastMs = ms;
+          }
+        });
+      }
+    } catch (e) { /* 집계 실패해도 목록 조회는 계속 */ }
     // ★ 2026-08-05 신규(매니저 요청) — 예전엔 status==='completed'면 무조건
     //   목록에서 제외했음. 그런데 batch.html이 스캔 100% 완료 시 자동으로
     //   completeBatch를 호출하는 순간, 배치가 "미완료 목록"에서 바로 사라지면서
@@ -2130,7 +2158,26 @@ function getOpenBatches() {
       if (status === 'completed') {
         const completedAtRaw = r[6];
         if (!completedAtRaw) return; // 완료시각 기록 자체가 없는 오래된 배치는 제외
-        const completedMs = parseBatchTs_(completedAtRaw);
+        // ★ 2026-08-07 — 출고팀이 아직 안 가져간 고객사가 남아 있으면 계속 보임.
+        const _to = takenOutInfo[String(r[0] || '').trim()];
+        if (_to && _to.total > 0 && _to.taken < _to.total) {
+          recentlyCompleted = true;
+          completedMinutesAgo = null;
+          open.push({
+            batchId: r[0], createdAt: r[1], status: status,
+            totalSku: Number(r[3]) || 0, totalQty: Number(r[4]) || 0,
+            recentlyCompleted: true, completedMinutesAgo: null,
+            pendingTakeOut: _to.total - _to.taken,
+          });
+          openIds[String(r[0])] = true;
+          return;
+        }
+        // 전부 가져갔다면, 마지막으로 가져간 시각부터 1시간을 셀
+        //   (스캔 완료 시각보다 늦으므로 더 안전한 쪽을 선택)
+        const _toDone = takenOutInfo[String(r[0] || '').trim()];
+        const _lastTakeMs = (_toDone && _toDone.lastMs) ? _toDone.lastMs : 0;
+        const _cMs = parseBatchTs_(completedAtRaw);
+        const completedMs = (_lastTakeMs && !isNaN(_cMs)) ? Math.max(_lastTakeMs, _cMs) : (_lastTakeMs || _cMs);
         // ★ 2026-08-06 긴급 수정 — 1시간 유예가 처음부터 한 번도 작동하지 않던 버그.
         //   완료시각을 batchNow_()가 'yyyy-MM-dd HH:mm:ss' 문자열로 저장하지만,
         //   구글시트가 이를 날짜 값으로 자동 변환해서 getValues()는 Date 객체를 돌려줌.
