@@ -1395,6 +1395,12 @@ function logPickTiming(data) {
         }
       }
       sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '']);
+      // ★ 2026-08-06 신규 — 작업자가 "▶ 피킹 시작"을 누른 이 순간이 실제 피킹 시작.
+      //   스캔은 분류 단계일 뿐이라 스캔 유무로 판단하면 안 됨(매니저 확인 사항).
+      //   배치에 속한 모든 오더를 한꺼번에 Started로 만들어, 메인 대시보드·영업
+      //   화면이 창고 실제 상황과 같은 값을 보이게 함. 이미 시작/완료된 건과
+      //   사람이 직접 배정한 건은 건드리지 않음.
+      try { syncBatchJobsStart(data.batchId); } catch (e) { Logger.log('syncBatchJobsStart 실패: ' + e); }
       return { ok: true };
     }
     if (data.action === 'end') {
@@ -1856,6 +1862,11 @@ function getSlotProgress(batchId) {
     });
 
     const doneCount = slots.filter(s => s.status === 'done').length;
+    // ★ 2026-08-06 신규 — 슬롯이 100% 찬 오더를 Jobs에 자동으로 완료 처리.
+    //   여기 얹은 이유: 완료 판정에 필요한 계산이 바로 위에서 이미 끝났으므로
+    //   따로 다시 계산할 필요가 없음. 다만 이 API는 TV가 8초, batch.html이 5초마다
+    //   부르므로, "완료된 슬롯 목록이 지난번과 같으면 즉시 빠져나가기"로 막아둠.
+    maybeSyncBatchJobsDone_(batchId, slots);
     return { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -3520,4 +3531,231 @@ function parseBatchTs_(raw) {
   // 3) 그 밖의 형태는 브라우저/GAS 기본 해석에 맡김
   const t2 = new Date(str).getTime();
   return isNaN(t2) ? NaN : t2;
+}
+
+/* =====================================================================
+ * ★★★ 2026-08-06 신규 — 총량피킹 → Jobs 상태 자동 반영 ★★★
+ *
+ * [왜 필요한가]
+ * 총량피킹은 "그날 나온 오더 전부를 전 인원이 한꺼번에 집는" 방식이라,
+ * 고객사별로 누가 작업했는지가 존재하지 않음. 그런데 메인 대시보드는
+ * "오더 1건 = 작업자 1명 + Start/Complete 버튼"을 전제로 만들어져 있어서,
+ * 매니저가 배치 오더마다 수동으로 눌러줘야 했음. 빠뜨리면 IN00463486처럼
+ * "검수는 PASS인데 피킹은 시작도 안 된" 어긋난 데이터가 생김.
+ *
+ * [시작 시점 — 매니저 확인 사항]
+ * 스캔은 피킹이 아니라 "분류"임. 작업자는 이미 창고를 돌며 집고 있는데
+ * 스캔이 아직 안 들어온 것뿐이므로, 스캔 유무로 시작을 판단하면 안 됨.
+ * → 작업자가 batch.html에서 이름 선택하고 "▶ 피킹 시작"을 누르는 순간,
+ *   그 배치에 속한 모든 오더를 한꺼번에 Started로 만든다.
+ *
+ * [종료 시점 — 매니저 확인 사항]
+ * 작업자마다 끝나는 시점이 다르므로 일괄 종료로 묶지 않음.
+ * → 고객사 슬롯이 100%(getSlotProgress의 status==='done')가 된 그 시각을
+ *   그 오더의 종료로 기록한다. 이미 스캔 기록에 있는 값이라 추가 입력 없음.
+ *
+ * [작업자 이름]
+ * 개인 이름을 알 수 없으므로 '총량 피킹'으로 고정. 모르는 것을 아는 척하지 않음.
+ *
+ * [절대 지키는 안전장치]
+ *  1) 사람이 직접 한 작업은 덮지 않음 — 이미 실제 작업자 이름이 들어 있거나
+ *     이미 completed면 건너뜀 (배치에 포함됐어도 개별로 처리한 오더가 있을 수 있음)
+ *  2) 슬롯이 100%가 아니면 절대 완료로 만들지 않음 — 안 나간 물건을
+ *     나갔다고 영업팀에 보여주는 것이 가장 위험함
+ *  3) 이미 같은 값이면 시트에 다시 쓰지 않음 — 스캔은 초 단위로 들어오므로
+ *     매번 쓰면 시트가 느려짐
+ * ===================================================================== */
+
+const BATCH_PICKER_NAME = '총량 피킹';
+
+/* 배치에 속한 인보이스 목록 */
+function batchInvoices_(batchId) {
+  const out = [];
+  try {
+    const sh = bcustSheetSafe_();
+    const last = sh.getLastRow();
+    if (last < 2) return out;
+    const rows = sh.getRange(2, 1, last - 1, 2).getValues();
+    rows.forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      const inv = String(r[1] || '').trim();
+      if (inv && out.indexOf(inv) < 0) out.push(inv);
+    });
+  } catch (e) { /* best-effort */ }
+  return out;
+}
+
+/* Jobs 시트에서 필요한 컬럼 번호를 한 번에 확보 */
+function jobsCols_() {
+  const hdr = headerMapCached_();
+  const norm = normalizeHeaderName_;
+  return {
+    inv:    hdr[norm('Invoice')],
+    status: hdr[norm('Status')],
+    picker: hdr[norm('Picker')],
+    stTime: hdr[norm('Start Time')],
+    enTime: hdr[norm('End Time')],
+    stISO:  hdr[norm('StartAtISO')],
+    enISO:  hdr[norm('EndAtISO')]
+  };
+}
+
+function fmtHHmm_(d)   { return Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm'); }
+function fmtLocalISO_(d) { return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss"); }
+
+/* ---------------------------------------------------------------------
+ * syncBatchJobsStart(batchId) — "▶ 피킹 시작"을 누른 순간 호출됨.
+ * 배치에 속한 모든 오더를 Started로. 스캔 유무와 무관 (스캔은 분류 단계이므로).
+ * ------------------------------------------------------------------- */
+function syncBatchJobsStart(batchId) {
+  try {
+    const invoices = batchInvoices_(batchId);
+    if (!invoices.length) return { ok: true, started: 0 };
+
+    const sh = SHEET_();
+    const c = jobsCols_();
+    if (!c.inv || !c.status) return { ok: false, error: 'Jobs 시트 컬럼을 찾을 수 없습니다' };
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: true, started: 0 };
+
+    const n = last - 1;
+    const invCol    = sh.getRange(2, c.inv, n, 1).getValues();
+    const statusCol = sh.getRange(2, c.status, n, 1).getValues();
+    const pickerCol = c.picker ? sh.getRange(2, c.picker, n, 1).getValues() : null;
+
+    const now = new Date();
+    const hhmm = fmtHHmm_(now), iso = fmtLocalISO_(now);
+    const want = {};
+    invoices.forEach(v => { want[v] = true; });
+
+    let started = 0;
+    for (let i = 0; i < n; i++) {
+      const inv = String(invCol[i][0] || '').trim();
+      if (!inv || !want[inv]) continue;
+
+      const st = String(statusCol[i][0] || '').trim().toLowerCase();
+      // 안전장치 ①: 이미 진행중이거나 끝난 건 건드리지 않음
+      if (st === 'started' || st === 'completed') continue;
+      // 안전장치 ①: 사람이 직접 배정한 작업자가 있으면 건드리지 않음
+      const pk = pickerCol ? String(pickerCol[i][0] || '').trim() : '';
+      if (pk && pk !== BATCH_PICKER_NAME) continue;
+
+      const row = i + 2;
+      sh.getRange(row, c.status).setValue('started');
+      if (c.picker) sh.getRange(row, c.picker).setValue(BATCH_PICKER_NAME);
+      if (c.stTime) sh.getRange(row, c.stTime).setValue(hhmm);
+      if (c.stISO)  sh.getRange(row, c.stISO).setValue(iso);
+      started++;
+    }
+    if (started) { bumpVersion_(); Logger.log('syncBatchJobsStart: ' + started + '건 시작 처리 (' + batchId + ')'); }
+    return { ok: true, started: started };
+  } catch (e) {
+    Logger.log('syncBatchJobsStart 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * syncBatchJobsDone(batchId, slots) — 슬롯이 100% 찬 오더를 완료 처리.
+ * slots를 넘기면 그걸 쓰고, 안 넘기면 getSlotProgress로 직접 구함.
+ * ------------------------------------------------------------------- */
+function syncBatchJobsDone(batchId, slots) {
+  try {
+    if (!slots) {
+      const prog = getSlotProgress(batchId);
+      if (!prog || !prog.ok) return { ok: false, error: 'slot progress unavailable' };
+      slots = prog.slots || [];
+    }
+    // 안전장치 ②: status가 'done'인 슬롯만 대상
+    const doneInv = {};
+    let doneCount = 0;
+    slots.forEach(s => {
+      if (s && s.status === 'done' && s.invoice) { doneInv[String(s.invoice).trim()] = true; doneCount++; }
+    });
+    if (!doneCount) return { ok: true, completed: 0 };
+
+    const sh = SHEET_();
+    const c = jobsCols_();
+    if (!c.inv || !c.status) return { ok: false, error: 'Jobs 시트 컬럼을 찾을 수 없습니다' };
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: true, completed: 0 };
+
+    const n = last - 1;
+    const invCol    = sh.getRange(2, c.inv, n, 1).getValues();
+    const statusCol = sh.getRange(2, c.status, n, 1).getValues();
+    const pickerCol = c.picker ? sh.getRange(2, c.picker, n, 1).getValues() : null;
+    const stISOCol  = c.stISO  ? sh.getRange(2, c.stISO,  n, 1).getValues() : null;
+
+    const now = new Date();
+    const hhmm = fmtHHmm_(now), iso = fmtLocalISO_(now);
+
+    let completed = 0;
+    for (let i = 0; i < n; i++) {
+      const inv = String(invCol[i][0] || '').trim();
+      if (!inv || !doneInv[inv]) continue;
+
+      const st = String(statusCol[i][0] || '').trim().toLowerCase();
+      // 안전장치 ③: 이미 완료면 다시 쓰지 않음
+      if (st === 'completed') continue;
+      // 안전장치 ①: 사람이 직접 배정한 작업자가 있으면 건드리지 않음
+      const pk = pickerCol ? String(pickerCol[i][0] || '').trim() : '';
+      if (pk && pk !== BATCH_PICKER_NAME) continue;
+
+      const row = i + 2;
+      // 시작 기록이 없으면(피킹 시작을 안 누른 배치 등) 지금 시각으로 같이 채움 —
+      // 종료만 있고 시작이 빈 어중간한 데이터를 남기지 않기 위함
+      if (c.picker && !pk) sh.getRange(row, c.picker).setValue(BATCH_PICKER_NAME);
+      const hasStart = stISOCol ? !!String(stISOCol[i][0] || '').trim() : false;
+      if (!hasStart) {
+        if (c.stTime) sh.getRange(row, c.stTime).setValue(hhmm);
+        if (c.stISO)  sh.getRange(row, c.stISO).setValue(iso);
+      }
+      sh.getRange(row, c.status).setValue('completed');
+      if (c.enTime) sh.getRange(row, c.enTime).setValue(hhmm);
+      if (c.enISO)  sh.getRange(row, c.enISO).setValue(iso);
+      completed++;
+    }
+    if (completed) { bumpVersion_(); Logger.log('syncBatchJobsDone: ' + completed + '건 완료 처리 (' + batchId + ')'); }
+    return { ok: true, completed: completed };
+  } catch (e) {
+    Logger.log('syncBatchJobsDone 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * maybeSyncBatchJobsDone_(batchId, slots) — getSlotProgress가 호출될 때마다
+ * 얹혀서 돌아가는 가벼운 자동 처리.
+ *
+ * getSlotProgress는 TV 현황판이 8초, batch.html이 5초마다 부르는 API라
+ * 매번 Jobs 시트를 읽고 쓰면 감당이 안 됨. 그래서 "완료된 슬롯 목록"이
+ * 지난번과 똑같으면 아무것도 하지 않고 즉시 빠져나옴(시트 접근 0회).
+ * 새로 완료된 슬롯이 생겼을 때만 실제 동기화를 수행함.
+ * ------------------------------------------------------------------- */
+function maybeSyncBatchJobsDone_(batchId, slots) {
+  try {
+    const doneList = (slots || [])
+      .filter(s => s && s.status === 'done' && s.invoice)
+      .map(s => String(s.invoice).trim())
+      .sort();
+    const sig = doneList.join(',');
+    const key = 'jobsync_' + String(batchId);
+    const cache = CacheService.getScriptCache();
+    if (cache.get(key) === sig) return;      // 변화 없음 → 아무것도 안 함
+    cache.put(key, sig, 900);                 // 15분 유지
+    if (!doneList.length) return;
+    syncBatchJobsDone(batchId, slots);
+  } catch (e) { /* 자동 처리 실패가 화면 조회를 막으면 안 되므로 조용히 무시 */ }
+}
+
+/* ---------------------------------------------------------------------
+ * syncBatchJobsAll(batchId) — 매니저가 수동으로 한 번에 맞추고 싶을 때.
+ * GAS 에디터에서 직접 실행하거나 ...exec?op=syncBatchJobs&batchId=... 로 호출.
+ * ------------------------------------------------------------------- */
+function syncBatchJobsAll(batchId) {
+  batchId = String(batchId || '').trim();
+  if (!batchId) return { ok: false, error: 'batchId required' };
+  const a = syncBatchJobsStart(batchId);
+  const b = syncBatchJobsDone(batchId, null);
+  return { ok: true, started: (a && a.started) || 0, completed: (b && b.completed) || 0 };
 }
