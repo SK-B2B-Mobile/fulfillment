@@ -1456,16 +1456,26 @@ function renderOpenBatchesPanel(batches){
       </div>`;
     }).join('')}
     ${recentlyDone.map(b => `
-      <div class="openb-card" style="border-color:var(--green); opacity:0.85;">
+      <div class="openb-card" style="border-color:var(--green);">
         <div class="openb-head">
           <span class="openb-id">${b.batchId}</span>
           <span style="font-family:var(--mono); font-size:11px; font-weight:700; color:var(--green);">✅ 완료됨 · ${b.completedMinutesAgo}분 전</span>
         </div>
         <div class="openb-meta">모든 상품 스캔·분류 완료 — 1시간 후 이 목록에서 자동으로 사라집니다</div>
+        <div class="openb-actions">
+          <button class="btn btn-ghost btn-sm" data-reopen="${b.batchId}">📄 스캔 로그·KPI 열기</button>
+        </div>
       </div>`).join('')}
   `;
   panel.querySelectorAll('[data-complete]').forEach(btn => {
     btn.onclick = () => completeOpenBatch(btn.dataset.complete);
+  });
+  // ★ 2026-08-07 신규(현장 지적) — 배치가 완료되면 서버의 "현재 배치" 표시가
+  //   지워져서 화면이 "배치 없음"이 되고, 방금 끝낸 배치의 스캔 로그·KPI를
+  //   볼 방법이 아예 없어졌음. 화면엔 "1시간 후 사라진다"고 안내하면서 정작
+  //   열 수단이 없어 안내와 동작이 어긋났음. 이제 다시 열 수 있게 함.
+  panel.querySelectorAll('[data-reopen]').forEach(btn => {
+    btn.onclick = () => continueOpenBatch(btn.dataset.reopen);
   });
 }
 
