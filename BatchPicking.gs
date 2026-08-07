@@ -1394,6 +1394,13 @@ function logPickTiming(data) {
           }
         }
       }
+      // ★ 2026-08-07 수정(현장 발견) — 담당페이지가 KPI에 날짜로 표시되던 문제.
+      //   구글시트는 "1-3", "4-6", "7-9" 같은 값을 날짜로 자동 변환함(1-3 → 1월 3일).
+      //   그래서 담당페이지가 2026-01-03T07:00:00.000Z 처럼 저장됐음.
+      //   Kevin Kim의 "13-17"만 멀쥰했던 건 13월이 없어 변환이 안 됐기 때문.
+      //   → 저장할 칸의 서식을 '텍스트'로 고정해서 입력값이 그대로 남게 함.
+      const _ptRow = sh.getLastRow() + 1;
+      try { sh.getRange(_ptRow, 3).setNumberFormat('@'); } catch (e) { /* 서식 실패해도 저장은 진행 */ }
       sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '']);
       // ★ 2026-08-06 신규 — 작업자가 "▶ 피킹 시작"을 누른 이 순간이 실제 피킹 시작.
       //   스캔은 분류 단계일 뿐이라 스캔 유무로 판단하면 안 됨(매니저 확인 사항).
@@ -1500,7 +1507,7 @@ function getBatchKPI(batchId) {
         const qty = Number(r[11]) || 1;
         const ts = r[2];
         const timeMs = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts)) ? ts.getTime() : NaN;
-        passScans.push({ worker: w, sku: r[5], qty: qty, timeMs: timeMs });
+        passScans.push({ worker: w, workerKey: String(w || '').trim().toUpperCase(), sku: r[5], qty: qty, timeMs: timeMs });
         if (!scanByWorker[w]) scanByWorker[w] = { worker: w, pass: 0 };
         scanByWorker[w].pass++;
         totalPass++;
@@ -1515,25 +1522,32 @@ function getBatchKPI(batchId) {
       pt.getRange(2, 1, ptLast - 1, 6).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const worker = r[1];
+        const workerKey = String(worker || '').trim().toUpperCase();
         const startTs = r[3], endTs = r[4];
         const startMs = (Object.prototype.toString.call(startTs) === '[object Date]' && !isNaN(startTs)) ? startTs.getTime() : NaN;
         const endMs = (Object.prototype.toString.call(endTs) === '[object Date]' && !isNaN(endTs)) ? endTs.getTime() : NaN;
 
+        // ★ 2026-08-07 개선 두 가지
+        //  (1) 작업자 이름을 대소문자·앞뒤공백 무시하고 맞춤. 스캔 기록과 세션에
+        //      "Kevin Kim"과 "KEVIN KIM"처럼 다르게 들어가면 실적이 0으로 나왔음.
+        //  (2) 아직 "진행중"인 세션도 시작~지금까지의 스캔을 집계함. 예전엔 종료
+        //      시각이 없으면 무조건 0이라 한창 일하는 작업자 실적이 안 보였음.
         let totalSku = 0, totalQty = 0;
-        if (!isNaN(startMs) && !isNaN(endMs)) {
-          const skuSet = new Set();
+        if (!isNaN(startMs)) {
+          const until = !isNaN(endMs) ? endMs : Date.now();
+          const skuSet = {};
           passScans.forEach(sc => {
-            if (sc.worker !== worker) return;
-            if (isNaN(sc.timeMs) || sc.timeMs < startMs || sc.timeMs > endMs) return;
-            skuSet.add(sc.sku);
+            if (sc.workerKey !== workerKey) return;
+            if (isNaN(sc.timeMs) || sc.timeMs < startMs || sc.timeMs > until) return;
+            skuSet[String(sc.sku)] = true;
             totalQty += sc.qty;
           });
-          totalSku = skuSet.size;
+          totalSku = Object.keys(skuSet).length;
         }
 
         sessions.push({
           worker: worker,
-          pageRange: r[2] || '',
+          pageRange: fixPageRange_(r[2]),
           start: !isNaN(startMs) ? Utilities.formatDate(startTs, batchTz_(), 'HH:mm') : '-',
           end: !isNaN(endMs) ? Utilities.formatDate(endTs, batchTz_(), 'HH:mm') : '진행중',
           durationMinutes: Number(r[5]) || 0,
@@ -3765,4 +3779,21 @@ function syncBatchJobsAll(batchId) {
   const a = syncBatchJobsStart(batchId);
   const b = syncBatchJobsDone(batchId, null);
   return { ok: true, started: (a && a.started) || 0, completed: (b && b.completed) || 0 };
+}
+
+/* ---------------------------------------------------------------------
+ * fixPageRange_(raw) — ★ 2026-08-07 신규
+ * 담당페이지가 구글시트에 의해 날짜로 변환돼 저장된 과거 기록을 원래대로 표시.
+ *   "1-3" → 2026-01-03 (Date) → 다시 "1-3"
+ * 앞으로 저장되는 값은 텍스트 서식으로 고정했으므로 변환되지 않음.
+ * ------------------------------------------------------------------- */
+function fixPageRange_(raw) {
+  if (raw === null || raw === undefined || raw === '') return '';
+  if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
+    return (raw.getMonth() + 1) + '-' + raw.getDate();
+  }
+  const str = String(raw).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (m) return parseInt(m[2], 10) + '-' + parseInt(m[3], 10);
+  return str;
 }
