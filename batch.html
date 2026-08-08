@@ -1455,7 +1455,9 @@ function renderOpenBatchesPanel(batches){
   //   "방금 끝났다는 걸 명확히 알려주기 위한 안내"이므로, 색상/문구/버튼을 완전히
   //   분리해서 렌더링 — 경고 카운트(⚠ N건)에도 포함하지 않음.
   const needsAttention = list.filter(b => !b.recentlyCompleted);
-  const recentlyDone = list.filter(b => b.recentlyCompleted);
+  // ★ 2026-08-07 — 매니저가 "목록에서 숨기기"로 치운 배치는 카드에서 제외
+  const _hidden = getHiddenBatches();
+  const recentlyDone = list.filter(b => b.recentlyCompleted && !_hidden[b.batchId]);
 
   panel.style.display = 'block';
   panel.innerHTML = `
@@ -1493,9 +1495,12 @@ function renderOpenBatchesPanel(batches){
           <span class="openb-id">${b.batchId}<span style="font-family:var(--sans); font-size:12px; font-weight:700; color:var(--amber); margin-left:9px;">🕐 ${fmtBatchWhen(b.createdAt) || b.date} 생성</span></span>
           <span style="font-family:var(--mono); font-size:11px; font-weight:700; color:${b.pendingTakeOut ? '#F472B6' : 'var(--green)'};">${b.pendingTakeOut ? ('📦 출고 대기 ' + b.pendingTakeOut + '건') : ('✅ 완료됨 · ' + b.completedMinutesAgo + '분 전')}</span>
         </div>
-        <div class="openb-meta">${b.pendingTakeOut ? ('모든 상품 스캔·분류 완료 — 출고팀이 아직 ' + b.pendingTakeOut + '건을 안 가져갔습니다') : '모든 상품 출고 완료 — 1시간 후 이 목록에서 자동으로 사라집니다'}</div>
+        <div class="openb-meta">${b.pendingTakeOut
+          ? ('모든 상품 스캔·분류 완료 — 출고팀이 아직 ' + b.pendingTakeOut + '건을 안 가져갔습니다')
+          : ('모든 상품 출고 완료 — <b>마지막 출고 시점(' + b.completedMinutesAgo + '분 전)</b>부터 1시간이 지나면 이 목록에서 자동으로 사라집니다')}</div>
         <div class="openb-actions">
           <button class="btn btn-ghost btn-sm" data-reopen="${b.batchId}">📄 스캔 로그·KPI 열기</button>
+          <button class="btn btn-ghost btn-sm" data-hide="${b.batchId}">✕ 목록에서 숨기기</button>
         </div>
       </div>`).join('')}
   `;
@@ -1509,6 +1514,39 @@ function renderOpenBatchesPanel(batches){
   panel.querySelectorAll('[data-reopen]').forEach(btn => {
     btn.onclick = () => continueOpenBatch(btn.dataset.reopen, true); // 조회 전용
   });
+  // ★ 2026-08-07 신규(매니저 요청) — 완료된 배치를 목록에서 바로 치우는 버튼.
+  //   자동으로도 사라지지만(마지막 출고 시점부터 1시간), 그 전에 화면을 깔끔하게
+  //   정리하고 싶을 때 쓰라는 용도.
+  //   ⚠️ 데이터는 전혀 지우지 않습니다. 이 기기 화면에서만 감춥니다.
+  //      스캔 기록·KPI는 그대로 남고, 시트에서도 삭제되지 않습니다.
+  //      (다른 기기나 다시 열었을 때 또 보이는 걸 막기 위해 이 브라우저에 기억시킴)
+  panel.querySelectorAll('[data-hide]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.dataset.hide;
+      if(!confirm(`배치 ${id}를 목록에서 숨깁니다.\n\n스캔 기록과 KPI는 그대로 보관되며, 데이터는 삭제되지 않습니다.\n(이 기기 화면에서만 감춰집니다)`)) return;
+      hideCompletedBatch(id);
+      toast('목록에서 숨겼습니다 — 데이터는 그대로 보관됩니다', 'success');
+      checkOpenBatches();
+    };
+  });
+}
+
+/* ★ 2026-08-07 신규 — 완료 배치 "목록에서 숨기기". 데이터는 건드리지 않고
+ * 이 브라우저에만 기억시킴. 하루가 지나면 기억도 자동으로 비워짐. */
+const HIDDEN_BATCH_KEY = 'hiddenCompletedBatches';
+function getHiddenBatches(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_BATCH_KEY) || '{}');
+    const cutoff = Date.now() - 24*60*60*1000;
+    const out = {};
+    Object.keys(raw).forEach(k => { if(raw[k] > cutoff) out[k] = raw[k]; });
+    return out;
+  }catch(e){ return {}; }
+}
+function hideCompletedBatch(batchId){
+  const cur = getHiddenBatches();
+  cur[batchId] = Date.now();
+  try{ localStorage.setItem(HIDDEN_BATCH_KEY, JSON.stringify(cur)); }catch(e){}
 }
 
 /* ★ 2026-08-07 신규(매니저 요청) — 배치를 번호가 아니라 "언제 만든 배치인가"로
