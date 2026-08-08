@@ -201,7 +201,15 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot.done.moved .slot-pack-check .box svg{display:block;}
 /* ★ 2026-08-07 신규 — 출고팀이 가져간 상태(파랑). TV 현황판과 동일한 색 체계:
    초록=분류완료 → 핑크=패킹존 이동 필요 → 파랑=출고팀이 가져감 */
-.slot.done.taken, .slot.done.moved.taken{background:#38BDF8 !important; border-color:#38BDF8 !important;}
+.slot.done.taken, .slot.done.moved.taken{
+  background:#38BDF8 !important; border-color:#38BDF8 !important;
+  /* ★ 2026-08-07 수정 — 핑크(.moved)에 걸린 깜빡임 애니메이션이 매 프레임마다
+     배경색을 !important로 다시 칠하기 때문에, 파랑 배경만 지정하면 애니메이션이
+     계속 덮어써서 핑크가 비쳐 보였음. 출고 완료(파랑)는 더 이상 주의를 끌 필요가
+     없는 상태이므로 애니메이션을 완전히 끄고 단색으로 고정함. */
+  animation: none !important;
+  box-shadow: none !important;
+}
 .slot.done.taken .slot-num, .slot.done.taken .slot-co, .slot.done.taken .slot-meta,
 .slot.done.taken .slot-invoice{color:#04140D !important;}
 .slot.done.taken .slot-pack-check .label{color:#04140D !important;}
