@@ -639,7 +639,10 @@ function getBatch(batchId) {
     const bcLast = bc.getLastRow();
     let customers = [];
     if (bcLast >= 2) {
-      const rows = bc.getRange(2, 1, bcLast - 1, 11).getValues();
+      // ★ 2026-08-07 수정 — 11개 컬럼만 읽어서 12번째인 TakenOut(파란)이
+      //   배열에 아예 안 들어왔음. 그래서 batch.html은 항상 false를 받았고,
+      //   TV 현황판에서 파란으로 바꿔도 계속 핵크로 보였음 — 색 불일치의 진짜 원인.
+      const rows = bc.getRange(2, 1, bcLast - 1, 12).getValues();
       customers = rows.filter(r => String(r[0]) === String(resolvedId)).map(r => ({
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
         totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || '',
@@ -1033,7 +1036,7 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force) {
   const bc = bcustSheetSafe_();
   const bcLast = bc.getLastRow();
   if (bcLast < 2) return;
-  const bcRows = bc.getRange(2, 1, bcLast - 1, 11).getValues();
+  const bcRows = bc.getRange(2, 1, bcLast - 1, 12).getValues(); // ★ 2026-08-07: TakenOut(12번째) 포함
   let totalQty = null;
   for (let i = 0; i < bcRows.length; i++) {
     if (String(bcRows[i][0]) === String(batchId) && String(bcRows[i][1]) === String(invoice)) {
