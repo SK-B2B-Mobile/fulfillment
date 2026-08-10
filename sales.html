@@ -415,7 +415,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-a</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-b</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -647,7 +647,7 @@ function pickingBadge(o){
   //   서버가 이제 Jobs 시트의 Status를 그대로 내려주므로 두 화면 기준이 같아짐.
   //   그리고 "검수는 됐는데 피킹 기록이 없는" 어긋난 데이터는 Complete로 덮지 않고
   //   경고로 드러냄 — 영업팀이 잘못된 상태를 믿고 고객에게 답하는 일을 막기 위함.
-  if (o.pickAnomaly) return '<span class="badge picking-anomaly" title="검수는 완료됐는데 피킹 기록(작업자·시작·종료)이 없습니다. 메인 대시보드에서 확인이 필요합니다.">⚠ 확인 필요</span>';
+  if (o.pickAnomaly) return '<span class="badge picking-anomaly" title="Inspected, but no picking record (picker / start / end). Please check the main dashboard.">⚠ Check</span>';
   if (o.pickComplete) return '<span class="badge picking-complete">✓ Complete</span>';
   if (o.pickStart) return '<span class="badge picking-active"><span class="dot"></span>Active</span>';
   return '<span class="badge picking-waiting"><span class="dot-static"></span>Waiting</span>';
@@ -772,7 +772,7 @@ function renderSheet(){
       let badge;
       const isIssue = (c.status !== 'pending' && c.status !== 'pass');
       const linkCls = isIssue ? 'detail-link issue-link' : 'detail-link';
-      const linkTxt = isIssue ? ('이슈 보기 →') : ('상세 →');
+      const linkTxt = isIssue ? ('Issues →') : ('View →');
       const link = '<a class="'+linkCls+'" onclick="jumpToInvoice(\''+o.invoice+'\')">'+linkTxt+'</a>';
       if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
       else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
