@@ -121,8 +121,28 @@ function doGet(e) {
   // GET 방식 deleteJob (file:// CORS 우회용)
   if (op === 'deleteJob') {
     const invoice = (e.parameter || {}).invoice || '';
-    if (invoice) deleteJob_(invoice);
+    // ★ 2026-08-10 신규 — 서버측 보관 규칙 검증.
+    //   자동보관은 브라우저가 판단해서 지시하는 구조라, 몇일 지난 index.html을
+    //   캐시로 물고 있는 PC가 자정에 예전 규칙으로 실행해버리는 사고가 실제로
+    //   발생했음(8/7 검수분이 8/8 새벽에 전부 보관됨).
+    //   이제 서버가 직접 규칙을 확인하고, 미달이면 거부한다.
+    //   매니저 수동 삭제만 force=1로 예외 허용.
+    const force = String((e.parameter || {}).force || '') === '1';
+    if (!invoice) return json_({ ok: false, error: 'invoice required' });
+    if (!force) {
+      const chk = jobArchiveCheck_(invoice);
+      if (!chk.eligible) {
+        Logger.log('deleteJob 거부: ' + invoice + ' — ' + chk.reason);
+        return json_({ ok: false, blocked: true, error: '보관 기준 미달: ' + chk.reason });
+      }
+    }
+    deleteJob_(invoice);
     return json_({ ok: true });
+  }
+  // ★ 2026-08-10 신규 — 규칙을 어기고 보관된 오더 복구
+  if (op === 'restoreWronglyArchived') {
+    const q = e.parameter || {};
+    return json_(restoreWronglyArchived(q.from || '', q.to || ''));
   }
 
   if (op === 'pullFromSales') {
@@ -330,6 +350,11 @@ function doPost(e) {
   if (op === 'deleteJob') {
     const invoice = data.invoice;
     if (!invoice) return json_({ ok: false, error: 'invoice required' });
+    // ★ 2026-08-10 — GET 경로와 동일한 서버측 검증
+    if (String(data.force || '') !== '1') {
+      const chk = jobArchiveCheck_(invoice);
+      if (!chk.eligible) return json_({ ok: false, blocked: true, error: '보관 기준 미달: ' + chk.reason });
+    }
     setArchived_(invoice, true);
     return json_({ ok: true, softDeleted: true });
   }
@@ -3089,4 +3114,207 @@ function testWorkerKPI() {
       + ' | insp ' + w.inspPass + '✓ ' + w.inspIssues + '⚠ ' + w.inspPending + ' pending');
   });
   Logger.log('TOTALS: ' + JSON.stringify(r.totals));
+}
+
+/* =====================================================================
+ * ★★★ 2026-08-10 신규 — 서버측 보관 규칙 검증 (안전장치) ★★★
+ *
+ * [왜 필요한가 — 2026-08-08 실제 사고]
+ * 자동보관은 브라우저(index.html)가 판단하고, 서버는 그 지시를 무조건 따랐음.
+ * 그래서 어느 PC가 며칠 지난 index.html을 캐시로 물고 있다가 자정에 실행하면,
+ * 그 옛날 규칙("검수 다음날 무조건 삭제")대로 멀쩡한 오더가 통째로 보관돼버림.
+ * 실제로 8/7(금) 검수분이 8/8(토) 새벽 00:01~00:03에 전부 보관 처리됐음.
+ *
+ * [해결]
+ * 서버가 직접 규칙을 검증한다. 클라이언트가 아무리 지우라고 해도, 규칙을
+ * 만족하지 않으면 서버가 거부한다. 오래된 브라우저가 남아 있어도 안전함.
+ * 매니저가 수동으로 지우는 경우에만 force=1을 붙여서 예외를 허용한다.
+ *
+ * [규칙 — index.html과 동일]
+ *  - 검수 완료된 건만 대상
+ *  - TK/UPS: 디멘션이 저장돼 있어야 하고, 저장일부터 영업일 3일 경과
+ *  - 그 외(PU 등): 검수완료일부터 영업일 3일 경과
+ *  - 토·일 및 미국 공휴일은 카운트에서 제외
+ * ===================================================================== */
+
+const KEEP_BUSINESS_DAYS_SERVER = 3;
+
+function nthDow_(y, m, dow, n) {
+  const d = new Date(y, m, 1);
+  const shift = (dow - d.getDay() + 7) % 7;
+  return new Date(y, m, 1 + shift + (n - 1) * 7);
+}
+function lastDow_(y, m, dow) {
+  const d = new Date(y, m + 1, 0);
+  const shift = (d.getDay() - dow + 7) % 7;
+  return new Date(y, m + 1, 0 - shift);
+}
+function usHolidaySet_(y) {
+  const pad = n => String(n).padStart(2, '0');
+  const k = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const list = [
+    k(new Date(y, 0, 1)),        // New Year's Day
+    k(nthDow_(y, 0, 1, 3)),      // MLK (1월 셋째 월)
+    k(lastDow_(y, 4, 1)),        // Memorial Day (5월 마지막 월)
+    k(new Date(y, 5, 19)),       // Juneteenth
+    k(new Date(y, 6, 4)),        // Independence Day
+    k(nthDow_(y, 8, 1, 1)),      // Labor Day (9월 첫째 월)
+    k(nthDow_(y, 10, 4, 4)),     // Thanksgiving (11월 넷째 목)
+    k(new Date(y, 11, 25))       // Christmas
+  ];
+  const set = {};
+  list.forEach(d => { set[d] = true; });
+  return set;
+}
+function isHoliday_(d) {
+  const pad = n => String(n).padStart(2, '0');
+  const key = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  return !!usHolidaySet_(d.getFullYear())[key];
+}
+
+/* 시트에서 온 값(Date 객체일 수도, 문자열일 수도)에서 yyyy-MM-dd만 뽑음 */
+function ymdOf_(raw) {
+  if (!raw) return '';
+  if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
+    return Utilities.formatDate(raw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  const m = String(raw).match(/\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : '';
+}
+
+/* 기준일로부터 오늘까지 경과한 영업일 수 (토·일·미국 공휴일 제외) */
+function businessDaysSince_(ymd) {
+  if (!ymd) return -1;
+  const parts = ymd.split('-');
+  if (parts.length !== 3) return -1;
+  const trigger = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  if (isNaN(trigger.getTime())) return -1;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let count = 0;
+  const d = new Date(trigger.getTime());
+  while (d.getTime() < today.getTime()) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6 && !isHoliday_(d)) count++;
+  }
+  return count;
+}
+
+/* ---------------------------------------------------------------------
+ * jobArchiveCheck_(invoice) — 이 오더가 보관 가능한 상태인지 서버가 직접 판단.
+ * 반환: { eligible: true|false, reason: '...' }
+ * ------------------------------------------------------------------- */
+function jobArchiveCheck_(invoice) {
+  try {
+    invoice = String(invoice || '').trim();
+    if (!invoice) return { eligible: false, reason: 'invoice 없음' };
+
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const last = sh.getLastRow();
+    if (last < 2) return { eligible: false, reason: '데이터 없음' };
+
+    const iInv = hdr[norm('Invoice')];
+    if (!iInv) return { eligible: false, reason: 'Invoice 컬럼 없음' };
+    const n = last - 1;
+    const invCol = sh.getRange(2, iInv, n, 1).getValues();
+    let row = -1;
+    for (let i = 0; i < n; i++) {
+      if (String(invCol[i][0] || '').trim() === invoice) { row = i + 2; break; }
+    }
+    if (row < 0) return { eligible: false, reason: '해당 오더를 찾을 수 없음' };
+
+    const get = name => {
+      const c = hdr[norm(name)];
+      return c ? sh.getRange(row, c).getValue() : '';
+    };
+    const insp    = String(get('Inspection') || '').trim();
+    const inspEnd = get('Insp. End');
+    const endISO  = get('EndAtISO');
+    const method  = String(get('Trucking') || '').trim().toUpperCase();
+
+    // 검수가 안 끝난 건 절대 보관 대상 아님
+    if (!insp) return { eligible: false, reason: '아직 검수되지 않음' };
+
+    const needsDims = (method === 'TK' || method === 'TRUCKING' || method === 'UPS');
+    if (needsDims) {
+      const dimsMap = buildDimsExistsMap_();
+      const d = dimsMap[invoice] || {};
+      if (!d.count || d.count <= 0) return { eligible: false, reason: '디멘션 미입력 (TK/UPS는 필수)' };
+      const days = businessDaysSince_(ymdOf_(d.enteredAt));
+      if (days < KEEP_BUSINESS_DAYS_SERVER) {
+        return { eligible: false, reason: '디멘션 저장 후 영업일 ' + days + '일 경과 (' + KEEP_BUSINESS_DAYS_SERVER + '일 필요)' };
+      }
+      return { eligible: true, reason: 'ok' };
+    }
+
+    const trigger = ymdOf_(inspEnd) || ymdOf_(endISO);
+    const days = businessDaysSince_(trigger);
+    if (days < KEEP_BUSINESS_DAYS_SERVER) {
+      return { eligible: false, reason: '검수완료 후 영업일 ' + days + '일 경과 (' + KEEP_BUSINESS_DAYS_SERVER + '일 필요)' };
+    }
+    return { eligible: true, reason: 'ok' };
+  } catch (e) {
+    // 판단에 실패하면 "보관하지 않음"으로 — 지우는 쪽이 훨씬 위험하므로
+    return { eligible: false, reason: '검증 중 오류: ' + String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * restoreWronglyArchived(fromYmd, toYmd) — 규칙을 어기고 보관된 오더를 되살림.
+ *
+ * archivedAt이 지정 기간 안에 있는 보관 건만 검사해서, 지금 규칙으로도
+ * 보관 대상이 아닌 것만 되돌립니다. 규칙상 정당하게 보관된 건은 건드리지 않음.
+ * (2026-08-06에 있었던 "과도 복구 사고"를 되풀이하지 않기 위해 기간을 반드시 지정)
+ *
+ * 사용: ...exec?op=restoreWronglyArchived&from=2026-08-08&to=2026-08-08
+ * ------------------------------------------------------------------- */
+function restoreWronglyArchived(fromYmd, toYmd) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  try {
+    fromYmd = ymdOf_(fromYmd) || String(fromYmd || '').trim();
+    toYmd   = ymdOf_(toYmd)   || String(toYmd || '').trim();
+    if (!fromYmd || !toYmd) return { ok: false, error: 'from, to (yyyy-MM-dd) 가 모두 필요합니다' };
+
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: true, restored: 0, kept: 0 };
+
+    const iInv = hdr[norm('Invoice')], iArch = hdr[norm('archived')], iArchAt = hdr[norm('archivedAt')];
+    if (!iInv || !iArch) return { ok: false, error: 'Invoice/archived 컬럼을 찾을 수 없습니다' };
+
+    const n = last - 1;
+    const invCol  = sh.getRange(2, iInv, n, 1).getValues();
+    const archCol = sh.getRange(2, iArch, n, 1).getValues();
+    const atCol   = iArchAt ? sh.getRange(2, iArchAt, n, 1).getValues() : null;
+
+    const restored = [], kept = [];
+    for (let i = 0; i < n; i++) {
+      const a = String(archCol[i][0] || '').trim().toLowerCase();
+      if (!(a === 'true' || a === '1' || a === 'y' || a === 'yes')) continue;
+      const at = atCol ? ymdOf_(atCol[i][0]) : '';
+      if (!at || at < fromYmd || at > toYmd) continue;
+
+      const invoice = String(invCol[i][0] || '').trim();
+      if (!invoice) continue;
+      const chk = jobArchiveCheck_(invoice);
+      if (chk.eligible) { kept.push(invoice); continue; } // 규칙상 정당한 보관은 그대로 둠
+
+      sh.getRange(i + 2, iArch).setValue('');
+      if (iArchAt) sh.getRange(i + 2, iArchAt).setValue('');
+      restored.push(invoice);
+    }
+    if (restored.length) bumpVersion_();
+    Logger.log('restoreWronglyArchived: ' + restored.length + '건 복구, ' + kept.length + '건 유지');
+    return { ok: true, restored: restored.length, kept: kept.length, restoredList: restored.slice(0, 50) };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
 }
