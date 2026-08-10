@@ -128,6 +128,10 @@ td.new-col{background:rgba(16,217,126,0.03);}
 
 .detail-link{font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--blue); text-decoration:none; cursor:pointer; border-bottom:1px dashed var(--blue);}
 .detail-link:hover{color:#93C1FF;}
+/* ★ 2026-08-10 — 이슈가 있는 오더는 링크도 빨갛게. 모든 행에 링크가 생겨도
+   문제 있는 건이 묻히지 않도록 함. */
+.detail-link.issue-link{color:var(--red); border-bottom-color:var(--red);}
+.detail-link.issue-link:hover{color:#FF7A7A;}
 .detail-dash{color:var(--gray); font-family:var(--mono);}
 
 /* ── 페이지네이션 ── */
@@ -411,7 +415,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-07-a</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-a</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -760,10 +764,19 @@ function renderSheet(){
   } else {
     tbody.innerHTML = pageRows.map(o=>{
       const c = classifyInsp(o.inspection);
-      let badge, link='<span class="detail-dash">—</span>';
+      // ★ 2026-08-10 개선(매니저 요청) — 예전엔 이슈가 있는 오더에만 Details 링크가
+      //   떴음. 그런데 2번 화면에서는 어떤 오더든 상세를 볼 수 있어서, 같은 시스템인데
+      //   화면마다 "상세를 볼 수 있는 조건"이 달라 헷갈렸음. 영업팀이 고객 문의를
+      //   받으면 PASS 건도 열어봐야 함.
+      //   → 모든 행에 링크를 넣되, 이슈 건은 빨간색 + 건수로 계속 눈에 띄게 유지.
+      let badge;
+      const isIssue = (c.status !== 'pending' && c.status !== 'pass');
+      const linkCls = isIssue ? 'detail-link issue-link' : 'detail-link';
+      const linkTxt = isIssue ? ('이슈 보기 →') : ('상세 →');
+      const link = '<a class="'+linkCls+'" onclick="jumpToInvoice(\''+o.invoice+'\')">'+linkTxt+'</a>';
       if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
       else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
-      else { badge = '<span class="badge issue">'+o.inspection+'</span>'; link = '<a class="detail-link" onclick="jumpToInvoice(\''+o.invoice+'\')">Details →</a>'; }
+      else { badge = '<span class="badge issue">'+o.inspection+'</span>'; }
       const movedBadge = o.movedToPacking ? '<span class="badge moved-yes">✓ Yes</span>' : '<span class="badge moved-no">No</span>';
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
       return `<tr>
