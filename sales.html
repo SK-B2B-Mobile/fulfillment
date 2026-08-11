@@ -81,8 +81,8 @@ a{color:inherit;}
 .table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
 .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed;}
-thead th{background:var(--surface2); text-align:left; padding:11px 12px; font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-thead th.new-col{color:var(--green); background:rgba(16,217,126,0.06);}
+/* ★ 2026-08-10 — 헤더가 너무 흐려서 잘 안 보인다는 지적 반영. 밝기를 올리고 자간을 조금 넓혀 가독성 확보. 모든 컬럼 같은 색으로 통일. */thead th{background:var(--surface2); text-align:left; padding:11px 12px; font-family:var(--mono); font-size:10px; color:#C3CBDE; text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* ★ 2026-08-10 개선(매니저 지적) — 뒤쪽 4개 컬럼에 깔려 있던 초록 배경을 없앨. AMOUNT와 STATUS 사이가 벽처럼 보여 표가 둘로 나뉘어 보였음. 원래 'WMS 시트에 새로 추가된 컬럼'을 표시하려던 것인데, 이제는 그냥 표의 일부임. 헤더는 조용히 물러나고 본문 배지가 주인공이 되도록 함. */thead th.new-col{color:var(--text-dim);}
 tbody td{padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-05 신규 — "✓ Complete" 뱃지가 Waiting/Active보다 길어서 열 폭에
    딱 걸려 말줄임표(...) 일부가 점처럼 삐져나오던 문제. 이 칸만 말줄임을 꺼서
@@ -90,7 +90,7 @@ tbody td{padding:11px 12px; border-bottom:1px solid var(--border); vertical-alig
 td.badge-cell{overflow:visible; text-overflow:clip;}
 tbody tr:last-child td{border-bottom:none;}
 tbody tr:hover{background:rgba(255,255,255,0.02);}
-td.new-col{background:rgba(16,217,126,0.03);}
+td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .mono{font-family:var(--mono);}
 .dim{color:var(--text-dim);}
 .cust-name{cursor:pointer; border-bottom:1px dotted var(--border2);}
@@ -415,7 +415,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-e</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-f</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
