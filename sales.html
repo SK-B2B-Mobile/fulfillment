@@ -415,7 +415,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-f</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-g</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -471,8 +471,8 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
           <span id="pager-summary">–</span>
           <span>· Rows per page</span>
           <select id="rows-per-page" onchange="onRowsPerPageChange()">
-            <option value="10">10</option>
-            <option value="20" selected>20</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
             <option value="30">30</option>
             <option value="50">50</option>
           </select>
@@ -565,7 +565,7 @@ function idLineHtml(i){
 let CURRENT_ORDER = null;
 let SHEET_JOBS = [];
 let SHEET_PAGE = 1;
-let SHEET_PAGE_SIZE = 20;
+let SHEET_PAGE_SIZE = 10; // ★ 2026-08-10 — 처음 열었을 때 스크롤 없이 한 화면에 들어오도록 10개. 2번 화면과 동일하게 맞춤.
 
 function setSync(state, text){
   const dot = document.getElementById('syncDot');
@@ -672,8 +672,18 @@ function showNamePopover(evt, fullName){
 /* ===================== Screen 1: Sheet Preview ===================== */
 async function loadSheetOverview(){
   const res = await gasGet({ op:'getSalesOverview' });
+  // ★ 2026-08-10 수정(매니저 지적) — "데이터가 사라졌다가 다시 살아나는" 현상의 원인.
+  //   30초마다 도는 자동 갱신이 한 번이라도 실패하면(창고 와이파이 순간 끊김,
+  //   구글 앱스스크립트 지연 등) 표를 통째로 "Could not load data."로 갈아엎었고,
+  //   다음 주기에 성공하면 다시 채워졌음. 실패는 잠깐인데 화면만 요란하게 흔들렸음.
+  //   → 이미 받아둔 데이터가 있으면 화면은 그대로 두고, 우측 상단 연결 표시만
+  //     잠깐 바뀌게 함. 다음 주기에 조용히 복구됨.
   if (!res || !res.ok){
-    document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
+    if (!SHEET_JOBS.length){
+      document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
+    } else {
+      setSync('err', 'Reconnecting…');
+    }
     return;
   }
   SHEET_JOBS = res.jobs || [];
@@ -829,9 +839,14 @@ let TODAY_PAGE_SIZE = 10;
 async function loadToday(){
   const res = await gasGet({ op:'getSalesTodayList' });
   if (!res || !res.ok){
-    document.getElementById('today-list').innerHTML = '<div class="today-empty">Could not load today\\u2019s list.</div>';
-    document.getElementById('today-count').textContent = '';
-    document.getElementById('today-pager').style.display = 'none';
+    // ★ 2026-08-10 — 위와 같은 이유로, 이미 받아둔 목록이 있으면 지우지 않음
+    if (!TODAY_JOBS.length){
+      document.getElementById('today-list').innerHTML = '<div class="today-empty">Could not load the list.</div>';
+      document.getElementById('today-count').textContent = '';
+      document.getElementById('today-pager').style.display = 'none';
+    } else {
+      setSync('err', 'Reconnecting…');
+    }
     return;
   }
   TODAY_JOBS = res.jobs || [];
