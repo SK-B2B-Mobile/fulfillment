@@ -28,12 +28,12 @@ a{color:inherit;}
 .topbar{display:flex; align-items:center; justify-content:space-between; padding:10px 32px; border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; gap:14px;}
 .tb-left{display:flex; align-items:center; gap:16px;}
 .tb-logo{width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:18px; flex-shrink:0;}
-.tb-title{font-size:19px; font-weight:800; letter-spacing:-0.01em;}
+.tb-title{font-size:clamp(17px,1.25vw,30px); font-weight:800; letter-spacing:-0.01em;}
 /* ★ 2026-08-06 신규 — 화면에 보이는 버전 표시. 파일을 올렸는데 배포가 안 돼서
    "왜 안 바뀌지?"를 추측으로 판단하던 문제를 없애기 위함. 이 글자가 바뀌면
    새 파일이 실제로 서비스되고 있다는 뜻이고, 그대로면 배포가 안 된 것. */
 .ui-ver{font-family:var(--mono); font-size:10px; font-weight:600; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:5px; padding:2px 6px; margin-left:8px; vertical-align:middle;}
-.tb-sub{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-top:2px;}
+.tb-sub{font-family:var(--mono); font-size:clamp(11px,0.72vw,17px); color:var(--text-dim); margin-top:2px;}
 .tb-clock{font-family:var(--mono); text-align:right; line-height:1.3;}
 .tb-clock .time{font-size:19px; font-weight:800; color:var(--text);}
 .tb-clock .date{font-size:11.5px; color:var(--text-dim); letter-spacing:0.03em;}
@@ -49,7 +49,7 @@ a{color:inherit;}
 .tab-btn:hover{color:var(--text); border-color:var(--border2);}
 .tab-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
 
-.wrap{padding:14px 32px; max-width:1560px; margin:0 auto;}
+/* ★ 2026-08-11 개선(매니저 지적) — 창고 TV에서 이 화면만 작게 보이던 문제. 메인 대시보드는 폭 제한 없이 화면 비율(vw)로 여백과 글자가 같이 커지는데, 이 화면은 1560px에서 멈췄고 글자도 고정이라 4K TV에서 가운데 작게 모였음. → 메인과 동일하게 화면 전체를 쓰고 글자도 비례해서 커지도록 바꿈. */.wrap{padding:clamp(10px,0.9vw,22px) clamp(14px,1.6vw,40px); width:100%; margin:0 auto;}
 .screen{display:none;}
 .screen.active{display:block;}
 
@@ -67,7 +67,7 @@ a{color:inherit;}
 .pb-arrow{display:flex; align-items:center; color:var(--border); flex-shrink:0; font-size:16px;}
 .pb-label{font-family:var(--mono); font-size:9.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; gap:5px;}
 .pb-label .pb-dot{width:6px; height:6px; border-radius:50%; flex-shrink:0;}
-.pb-num{font-family:var(--mono); font-size:18px; font-weight:800; line-height:1.15;}
+.pb-num{font-family:var(--mono); font-size:clamp(18px,1.3vw,32px); font-weight:800; line-height:1.15;}
 .pb-num small{font-size:12px; font-weight:700; color:var(--text-dim);}
 .pb-pct{font-family:var(--mono); font-size:10px; font-weight:700;}
 .pb-bar-outer{height:4px; border-radius:2px; background:var(--surface2); overflow:hidden; margin-top:1px;}
@@ -81,9 +81,9 @@ a{color:inherit;}
 .table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
 .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed;}
-/* ★ 2026-08-10 — 헤더가 너무 흐려서 잘 안 보인다는 지적 반영. 밝기를 올리고 자간을 조금 넓혀 가독성 확보. 모든 컬럼 같은 색으로 통일. */thead th{background:var(--surface2); text-align:left; padding:11px 12px; font-family:var(--mono); font-size:10px; color:#C3CBDE; text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* ★ 2026-08-10 — 헤더가 너무 흐려서 잘 안 보인다는 지적 반영. 밝기를 올리고 자간을 조금 넓혀 가독성 확보. 모든 컬럼 같은 색으로 통일. */thead th{background:var(--surface2); text-align:left; padding:clamp(9px,0.7vw,16px) clamp(10px,0.8vw,18px); font-family:var(--mono); font-size:clamp(10px,0.62vw,15px); color:#C3CBDE; text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-10 개선(매니저 지적) — 뒤쪽 4개 컬럼에 깔려 있던 초록 배경을 없앨. AMOUNT와 STATUS 사이가 벽처럼 보여 표가 둘로 나뉘어 보였음. 원래 'WMS 시트에 새로 추가된 컬럼'을 표시하려던 것인데, 이제는 그냥 표의 일부임. 헤더는 조용히 물러나고 본문 배지가 주인공이 되도록 함. */thead th.new-col{color:var(--text-dim);}
-tbody td{padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+tbody td{padding:clamp(10px,0.75vw,18px) clamp(10px,0.8vw,18px); font-size:clamp(12px,0.78vw,18px); border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-05 신규 — "✓ Complete" 뱃지가 Waiting/Active보다 길어서 열 폭에
    딱 걸려 말줄임표(...) 일부가 점처럼 삐져나오던 문제. 이 칸만 말줄임을 꺼서
    뱃지 전체가 항상 온전히 보이게 함. */
@@ -96,7 +96,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .cust-name{cursor:pointer; border-bottom:1px dotted var(--border2);}
 .cust-name:hover{color:var(--text); border-bottom-color:var(--text-dim);}
 
-.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:11px; font-weight:800; padding:4px 8px; border-radius:6px; white-space:nowrap;}
+.badge{display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:clamp(11px,0.7vw,17px); font-weight:800; padding:4px 8px; border-radius:6px; white-space:nowrap;}
 .badge.pass{background:var(--green-bg); color:var(--green);}
 .badge.issue{background:var(--red-bg); color:#FF7A7A;}
 .badge.gap{background:var(--blue-bg); color:#8FBBFF;}
@@ -140,7 +140,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .pager-left select{background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:12px; padding:5px 8px; border-radius:6px; cursor:pointer;}
 .today-page-size-select{background:var(--surface); border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:12px; padding:5px 8px; border-radius:6px; cursor:pointer;}
 .pager-right{display:flex; align-items:center; gap:4px;}
-.pg-btn{background:var(--surface); border:1px solid var(--border); color:var(--text-dim); font-family:var(--mono); font-size:12px; font-weight:700; padding:6px 11px; border-radius:6px; cursor:pointer;}
+.pg-btn{background:var(--surface); border:1px solid var(--border); color:var(--text-dim); font-family:var(--mono); font-size:clamp(12px,0.75vw,17px); font-weight:700; padding:6px 11px; border-radius:6px; cursor:pointer;}
 .pg-btn:hover:not(:disabled){color:var(--text); border-color:var(--border2);}
 .pg-btn:disabled{opacity:0.35; cursor:default;}
 .pg-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
@@ -265,7 +265,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 
 .section-title-row{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;}
 .section-title-row:first-of-type{margin-top:0;}
-.section-title{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim);}
+.section-title{font-size:clamp(12px,0.8vw,18px); font-weight:800; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim);}
 
 .legend{display:flex; gap:18px; margin-bottom:12px; flex-wrap:wrap;}
 .legend-item{display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--text-dim);}
@@ -415,7 +415,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-g</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-11-a</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
