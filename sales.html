@@ -415,7 +415,7 @@ td.new-col{background:rgba(16,217,126,0.03);}
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-d</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-08-10-e</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Shipping Dimensions</div>
     </div>
   </div>
@@ -1145,6 +1145,11 @@ function dimCandidatesWorthLoading(o){
 
 async function loadDimCandidates(invoice){
   if (!invoice) return;
+  // ★ 2026-08-10 수정(매니저 지적) — 버튼으로 직접 부를 때 아무 표시가 없어서
+  //   "눌렸는지" 알 수 없었음. 로딩 문구는 화면을 처음 그릴 때만 나왔기 때문.
+  //   이제 호출하는 순간 항상 진행 중임을 보여줌.
+  const box0 = document.getElementById('dim-extras');
+  if (box0) box0.innerHTML = '<div class="dim-extras-loading"><span class="spinner"></span>Checking for orders that can be merged…</div>';
   const res = await gasGet({ op:'getDimCandidates', invoice: invoice });
   if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return; // 그 사이 다른 오더를 열었으면 무시
   const box = document.getElementById('dim-extras');
@@ -1164,7 +1169,10 @@ async function loadDimCandidates(invoice){
     if (cont) cont.innerHTML = renderDimsPanel(CURRENT_ORDER, false);
     return;
   }
-  if (box) box.innerHTML = renderDimGroupMembers(CURRENT_ORDER) + renderDimCandidates(CURRENT_ORDER);
+  // ★ 2026-08-10 — 결과가 하나도 없을 때 빈 칸으로 두면 "찾은 것"과 "안 찾은 것"이
+  //   구분되지 않음. 찾았지만 없다는 사실을 분명히 알려줌.
+  const html = renderDimGroupMembers(CURRENT_ORDER) + renderDimCandidates(CURRENT_ORDER);
+  if (box) box.innerHTML = html || '<div class="dim-extras-loading">✓ No mergeable orders found — same customer, same method, same inspection or ship date.</div>';
 }
 
 function renderDimsPanel(order, editing){
