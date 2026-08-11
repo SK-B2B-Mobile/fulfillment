@@ -698,40 +698,48 @@ select option:disabled{color:var(--text-dim2);}
       <!-- ★ 2026-07-10 신규: 매니저가 완료 처리 안 한 배치는 날짜가 바뀌어도 여기 계속 뜸 -->
       <div id="openBatchesPanel" style="display:none; margin-bottom:18px;"></div>
 
-      <div class="drop-row">
-        <label class="drop" id="dropSum">
-          <div class="drop-icon">DROP · TOTAL PICK LIST (최대 2개)</div>
-          <div class="drop-title">총량 피킹 리스트</div>
-          <div class="drop-hint">GROUP PICKING CHECK LIST.pdf · 1차+2차 가능</div>
-          <input type="file" accept="application/pdf" id="sumFile" multiple>
-        </label>
-        <label class="drop" id="dropCust">
-          <div class="drop-icon">DROP · CUSTOMER LISTS</div>
-          <div class="drop-title">고객사별 피킹 리스트</div>
-          <div class="drop-hint">여러 개 동시 선택 가능</div>
-          <input type="file" accept="application/pdf" id="custFile" multiple>
-        </label>
+      <!-- ★ 2026-08-11 신규(매니저 요청) — 이미 진행중인 배치가 로드돼 있으면 업로드 폼 대신
+           이 안내 카드를 보여줌. "배치 시작" 버튼이 다시 활성화된 것처럼 보여 혼란을 주던
+           문제(8/11 실사고) 해결 — 아래 batchCreateForm 전체를 안내 카드와 서로 배타적으로 표시.
+           새 배치가 정말 필요하면(하루 2개 이상) "새 배치 만들기" 버튼을 눌러야만 폼이 나타남. -->
+      <div id="activeBatchNotice" style="display:none; margin-bottom:18px;"></div>
+
+      <div id="batchCreateForm">
+        <div class="drop-row">
+          <label class="drop" id="dropSum">
+            <div class="drop-icon">DROP · TOTAL PICK LIST (최대 2개)</div>
+            <div class="drop-title">총량 피킹 리스트</div>
+            <div class="drop-hint">GROUP PICKING CHECK LIST.pdf · 1차+2차 가능</div>
+            <input type="file" accept="application/pdf" id="sumFile" multiple>
+          </label>
+          <label class="drop" id="dropCust">
+            <div class="drop-icon">DROP · CUSTOMER LISTS</div>
+            <div class="drop-title">고객사별 피킹 리스트</div>
+            <div class="drop-hint">여러 개 동시 선택 가능</div>
+            <input type="file" accept="application/pdf" id="custFile" multiple>
+          </label>
+        </div>
+
+        <div class="row" style="margin-bottom:14px;">
+          <button class="btn btn-ghost btn-sm" id="btnLoadDemo">▶ 데모 데이터 불러오기 (파싱 없이 시연)</button>
+          <div class="spacer"></div>
+          <span style="font-size:11px; color:var(--text-dim2); font-family:var(--mono)">실제 PDF 파싱은 서버측 파서 필요</span>
+        </div>
+
+        <div id="fileTags" class="tag-row"></div>
+
+        <div class="grid grid-4" id="statRow" style="display:none; margin-bottom:16px;">
+          <div class="metric"><div class="lbl">Batch ID</div><div class="val" id="stBatchId">-</div><div class="sub2" id="stBatchDate">-</div></div>
+          <div class="metric cyan"><div class="lbl">Customers</div><div class="val" id="stCust">0</div><div class="sub2">= 슬롯 수</div></div>
+          <div class="metric amber"><div class="lbl">Total SKU</div><div class="val" id="stSku">0</div><div class="sub2" id="stSkuSub">-</div></div>
+          <div class="metric green"><div class="lbl">Total QTY (총량 기준)</div><div class="val" id="stQty">0</div><div class="sub2" id="stQtySub">Request Q'ty 합계</div></div>
+        </div>
+
+        <!-- 데이터 정합성 검증 패널 -->
+        <div id="reconcilePanel" style="display:none; margin-bottom:18px;"></div>
+
+        <button class="btn btn-primary" id="startBatchBtn" disabled>배치 시작 · Ship Date 순 슬롯 배정 →</button>
       </div>
-
-      <div class="row" style="margin-bottom:14px;">
-        <button class="btn btn-ghost btn-sm" id="btnLoadDemo">▶ 데모 데이터 불러오기 (파싱 없이 시연)</button>
-        <div class="spacer"></div>
-        <span style="font-size:11px; color:var(--text-dim2); font-family:var(--mono)">실제 PDF 파싱은 서버측 파서 필요</span>
-      </div>
-
-      <div id="fileTags" class="tag-row"></div>
-
-      <div class="grid grid-4" id="statRow" style="display:none; margin-bottom:16px;">
-        <div class="metric"><div class="lbl">Batch ID</div><div class="val" id="stBatchId">-</div><div class="sub2" id="stBatchDate">-</div></div>
-        <div class="metric cyan"><div class="lbl">Customers</div><div class="val" id="stCust">0</div><div class="sub2">= 슬롯 수</div></div>
-        <div class="metric amber"><div class="lbl">Total SKU</div><div class="val" id="stSku">0</div><div class="sub2" id="stSkuSub">-</div></div>
-        <div class="metric green"><div class="lbl">Total QTY (총량 기준)</div><div class="val" id="stQty">0</div><div class="sub2" id="stQtySub">Request Q'ty 합계</div></div>
-      </div>
-
-      <!-- 데이터 정합성 검증 패널 -->
-      <div id="reconcilePanel" style="display:none; margin-bottom:18px;"></div>
-
-      <button class="btn btn-primary" id="startBatchBtn" disabled>배치 시작 · Ship Date 순 슬롯 배정 →</button>
     </div>
 
     <!-- ─── VIEW 2: Slot Layout ─── -->
@@ -1230,6 +1238,9 @@ const state = {
                                  // (true) 아니면 "다른 배치를 복원/이어받기로 불러온 것"인지(false) 구분.
                                  // false인 채로 01 Batch 탭에 들어가면 handleBatchTabEntry()가 확인 후 리셋함.
   previewBatchId: null, // ★ 2026-07-14 신규: STEP01 화면 표시 전용 — 절대 폴링에 쓰면 안 됨(state.batchId와 분리)
+  batchCreatedAt: null,  // ★ 2026-08-11 신규: "01 Batch" 진행중 안내 카드에 생성 시각 표시용
+  batchTotalSku: null,   // ★ 2026-08-11 신규: 〃 총 SKU (서버 값, 클라이언트 재계산 없이 그대로 사용)
+  batchTotalQty: null,   // ★ 2026-08-11 신규: 〃 총 QTY
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
   movedToPackingInvoices: new Set(), // ★ 2026-07-23 신규: "패킹존 이동" 체크된 고객사 (clearSlot과 무관한 순수 표시용)
   takenOutInvoices: new Set(),      // ★ 2026-08-07 신규: 출고팀이 실제로 가져간(파랑) 고객사 — TV 현황판과 색을 맞추기 위함
@@ -1610,6 +1621,8 @@ async function continueOpenBatch(batchId, viewOnly){
   state.batchCompleteBaselineSet = true; // 이미 있는 배치를 연 것이므로 완료 알림 대상 아님
   // 팝업·배지에 쓸 "배치 생성 일시" — 배치를 연 시각이 아니라 실제 생성 시각
   state.batchCreatedAt = res.batch.createdAt || res.batch.date || null;
+  state.batchTotalSku = res.batch.totalSku != null ? res.batch.totalSku : null; // ★ 2026-08-11
+  state.batchTotalQty = res.batch.totalQty != null ? res.batch.totalQty : null; // ★ 2026-08-11
   state.slots.forEach(s => { s.assignedTo = null; });
   state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
@@ -1628,6 +1641,7 @@ async function continueOpenBatch(batchId, viewOnly){
   document.getElementById('batchChip').classList.add('active');
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
   renderFileTags();
+  renderBatchTabMode(); // ★ 2026-08-11: "01 Batch" 탭도 안내 카드로 갱신해둠 (나중에 그 탭을 열 때 대비)
   await pollScanState();
   startScanPolling();
   startStructurePolling();
@@ -1698,6 +1712,9 @@ function applyBatchPayload(res, opts){
   state.batchCompleteBaselineSet = false; // ★ 2026-08-07: 배치를 새로 불러왔으니 기준선 다시 잡음
   opts = opts || {};
   state.batchId = res.batch.batchId;
+  state.batchCreatedAt = res.batch.createdAt || res.batch.date || null; // ★ 2026-08-11: 안내 카드 표시용
+  state.batchTotalSku = res.batch.totalSku != null ? res.batch.totalSku : null; // ★ 2026-08-11
+  state.batchTotalQty = res.batch.totalQty != null ? res.batch.totalQty : null; // ★ 2026-08-11
   state.sumFile = { meta:{}, items: res.sumItems || [] };
   state.custFiles = (res.customers || []).map(c => ({
     meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
@@ -1730,6 +1747,7 @@ function applyBatchPayload(res, opts){
   document.getElementById('batchChip').classList.add('active');
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
   renderFileTags();
+  renderBatchTabMode(); // ★ 2026-08-11: 복원된 배치는 "진행 중" 안내 카드로 표시 (업로드 폼 숨김)
 }
 
 async function restoreBatchFromServer(){
@@ -2223,6 +2241,56 @@ function renderFileTags(){
 //   "01 Batch" 탭에 들어갈 때 이미 로드된 배치가 있으면, 서버 데이터는 전혀
 //   건드리지 않고 화면(로컬 state)만 완전히 빈 새 배치 작성 폼으로 리셋한다.
 //   (기존 "전체 초기화" 버튼과 동일한 방식 + batchId/슬롯/폴링까지 같이 정리)
+// ★ 2026-08-11 신규(매니저 요청) — "01 Batch" 탭에 이미 진행중인 배치가 로드돼
+//   있으면(state.batchId 있고, 사용자가 지금 직접 새로 올리는 중이 아니면) 업로드
+//   폼 대신 안내 카드를 보여줌. 판단 기준은 기존에 dropSum/dropCust 핸들러가 쓰던
+//   것과 동일한 조건(state.batchFormIsFreshDraft)이라 새로운 상태를 만들지 않음.
+function renderBatchTabMode(){
+  const notice = document.getElementById('activeBatchNotice');
+  const formWrap = document.getElementById('batchCreateForm');
+  if(!notice || !formWrap) return;
+  const hasLoadedBatch = !!state.batchId && !state.batchFormIsFreshDraft;
+  if(hasLoadedBatch){
+    formWrap.style.display = 'none';
+    notice.style.display = 'block';
+    renderActiveBatchNotice();
+  } else {
+    notice.style.display = 'none';
+    notice.innerHTML = '';
+    formWrap.style.display = '';
+  }
+}
+
+function renderActiveBatchNotice(){
+  const notice = document.getElementById('activeBatchNotice');
+  if(!notice) return;
+  const custCount = state.custFiles.length;
+  const skuCount = state.batchTotalSku != null ? state.batchTotalSku : (state.sumFile ? state.sumFile.items.length : 0);
+  const qty = state.batchTotalQty != null ? state.batchTotalQty : 0;
+  const createdLabel = fmtBatchWhen(state.batchCreatedAt);
+  notice.innerHTML = `
+    <div class="openb-card" style="border-color:var(--cyan);">
+      <div class="openb-head">
+        <span class="openb-id" style="color:var(--cyan)">✅ 배치 ${state.batchId} 진행 중</span>
+        ${createdLabel ? `<span class="openb-date">🕐 ${createdLabel} 생성</span>` : ''}
+      </div>
+      <div class="openb-meta">${custCount}개 고객사 · ${Number(skuCount).toLocaleString()} SKU · ${Number(qty).toLocaleString()} pcs</div>
+      <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">이미 배치가 만들어져 있어 새로 만들 필요가 없습니다. 이어서 작업하시려면 아래에서 이동하세요.</div>
+      <div class="openb-actions">
+        <button class="btn btn-primary btn-sm" id="btnGotoSlotsFromNotice">→ Slot Layout으로 이동</button>
+        <button class="btn btn-ghost btn-sm" id="btnMakeNewBatchFromNotice">＋ 새 배치 만들기</button>
+      </div>
+    </div>`;
+  const gotoBtn = document.getElementById('btnGotoSlotsFromNotice');
+  if(gotoBtn) gotoBtn.onclick = () => gotoView('v-slots');
+  const newBtn = document.getElementById('btnMakeNewBatchFromNotice');
+  if(newBtn) newBtn.onclick = () => {
+    if(!confirm(`오늘 이미 진행 중인 배치(${state.batchId})가 있습니다.\n\n그래도 새 배치를 또 만드시겠습니까?\n(기존 배치는 그대로 유지되며 삭제되지 않습니다 — 나중에 "⇄ 다른 배치"에서 다시 열 수 있습니다)`)) return;
+    resetBatchFormForNewBatch();
+    toast('새 배치 작성을 시작합니다 — 기존 배치는 그대로 보존됩니다', 'success');
+  };
+}
+
 function resetBatchFormForNewBatch(){
   state.sumFile = null;
   state.custFiles = [];
@@ -2236,6 +2304,7 @@ function resetBatchFormForNewBatch(){
   state.takenOutInvoices = new Set(); // ★ 2026-08-07
   state.batchCompleteShown = false; // ★ 2026-08-03 신규: 새 배치는 완료 팝업을 다시 정상적으로 띄울 수 있어야 함
   state.batchCompleteBaselineSet = false; // ★ 2026-08-07
+  state.batchCreatedAt = null; state.batchTotalSku = null; state.batchTotalQty = null; // ★ 2026-08-11
   clearDraftFromLocalStorage();
 
   const zs = document.getElementById('dropSum');
@@ -2255,6 +2324,7 @@ function resetBatchFormForNewBatch(){
 
   renderFileTags();
   updateBatchStats();
+  renderBatchTabMode(); // ★ 2026-08-11: 안내 카드 숨기고 업로드 폼 다시 노출
 }
 
 // "01 Batch" 탭 진입 시, 이미 로드된 배치(어제 이월분 등)가 있으면 확인 후 리셋.
@@ -2467,6 +2537,8 @@ document.getElementById('startBatchBtn').onclick = async () => {
     }
     state.batchId = created.batchId; // 서버가 발급한 정식 배치ID로 교체
     state.batchCreatedAt = created.createdAt || new Date().toISOString(); // ★ 2026-08-07
+    state.batchTotalSku = created.totalSku != null ? created.totalSku : null; // ★ 2026-08-11
+    state.batchTotalQty = created.totalQty != null ? created.totalQty : null; // ★ 2026-08-11
     state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이제 "작성 중 초안"이 아니라 "실제 활성 배치"가 됨
     clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
     gasCall('setActiveBatch', { batchId: state.batchId }); // ★ 2026-07-23 신규: 다른 기기들이 자동으로 이 새 배치를 따라오게 함
@@ -2494,6 +2566,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
   document.getElementById('batchChip').textContent = state.batchId;
   document.getElementById('batchChip').classList.add('active');
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
+  renderBatchTabMode(); // ★ 2026-08-11: "01 Batch" 탭을 다시 열어도 업로드 폼 대신 진행중 안내 카드가 보이도록
   gotoView('v-slots');
   btn.disabled = false; btn.textContent = '배치 시작';
   toast(`배치 ${state.batchId} 시작 · 슬롯 자동 배정 완료` + (GAS_READY?' · 저장됨':' · 데모모드(저장안됨)'), 'success');
@@ -2886,6 +2959,9 @@ document.querySelectorAll('nav button[data-view]').forEach(b => {
 function gotoView(vid){
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view===vid));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id===vid));
+  // ★ 2026-08-11 신규 — "01 Batch" 탭에 들어갈 때마다 최신 state 기준으로 안내 카드/업로드 폼 중
+  //   어느 걸 보여줄지 다시 판단 (여러 경로로 batchId가 바뀔 수 있어 탭 진입 시점에 한 번 더 확인)
+  if(vid==='v-batch') renderBatchTabMode();
   if(vid==='v-slots') { renderSlots(); pollActivePickers(); }
   // ★ 2026-07-23 수정: 예전엔 이 탭에 들어올 때 작업자 드롭다운을 안 건드리고 그대로
   //   뒀는데, 그러면 마지막 폴링(최대 6.5초 전) 이후 다른 기기에서 작업자 명단이
