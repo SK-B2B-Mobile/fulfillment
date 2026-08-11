@@ -1570,9 +1570,23 @@ function fmtBatchWhen(v){
   if(v instanceof Date) d = v;
   else {
     const str = String(v).trim();
-    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
-    if(m) d = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
-    else { const t = new Date(str); if(!isNaN(t.getTime())) d = t; }
+    // ★ 2026-08-11 긴급 수정 — 구글시트가 batchNow_()의 문자열을 Date로 자동 변환해버리면,
+    //   JSON 응답 시 "...T18:28:00.000Z"처럼 UTC ISO 문자열로 내려옴. 이걸 예전 로직처럼
+    //   숫자만 그대로 읽으면(로컬시각으로 착각) 실제보다 7~8시간(PT 기준) 밀려 표시됨.
+    //   ("배치 B20260811-A1CA35 진행 중" 카드가 오전 11:28 생성을 18:28로 잘못 보여준 원인)
+    //   Z나 시간대 오프셋(+HH:MM/-HH:MM)이 붙어있으면 절대시각이므로 new Date(str)로 맡겨서
+    //   브라우저가 로컬시간으로 정확히 변환하게 하고, 없으면(순수 로컬시각 문자열) 예전처럼
+    //   숫자를 그대로 읽는다.
+    const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(str);
+    if(hasTz){
+      const t = new Date(str);
+      if(!isNaN(t.getTime())) d = t;
+    }
+    if(!d){
+      const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+      if(m) d = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
+      else { const t = new Date(str); if(!isNaN(t.getTime())) d = t; }
+    }
   }
   if(!d || isNaN(d.getTime())) return String(v).slice(0,16);
   const p = n => String(n).padStart(2,'0');
@@ -4510,12 +4524,19 @@ function showBatchComplete(){
   if(whenEl){
     // ★ 2026-08-07 수정 — 예전엔 "배치를 연 시각"을 생성 시각으로 잘못 표시했음
     //   (8/5 배치를 열었는데 오늘 날짜가 찍히는 문제). 실제 생성 시각을 사용.
+    // ★ 2026-08-11 수정 — 자체 파싱 로직이 UTC(Z)/오프셋 문자열을 처리 못해 시각이
+    //   7~8시간 밀려 표시되던 버그. 이미 이 문제를 고친 fmtBatchWhen()으로 통일.
     const raw = state.batchCreatedAt;
     let ts = null;
     if(raw){
-      const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
-      if(m) ts = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
-      else { const t = new Date(String(raw)); if(!isNaN(t.getTime())) ts = t; }
+      const str = String(raw).trim();
+      const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(str);
+      if(hasTz){ const t = new Date(str); if(!isNaN(t.getTime())) ts = t; }
+      if(!ts){
+        const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+        if(m) ts = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
+        else { const t = new Date(str); if(!isNaN(t.getTime())) ts = t; }
+      }
     }
     const p = n => String(n).padStart(2,'0');
     whenEl.textContent = ts
