@@ -1834,6 +1834,41 @@ async function restoreBatchFromServer(){
     tryRestoreDraftFromLocalStorage(); return; // 진행중 배치 없음 → 임시저장 확인
   }
 
+  // ★ 2026-08-12 긴급 수정(매니저 발견) — 심각한 사고: 매니저가 새 배치를 만들면
+  //   setActiveBatch로 "전체 기기가 자동으로 새 배치를 따라오게" 방송되는데,
+  //   이때 다른 작업자가 아직 완료 안 된 "예전" 배치에서 스캔 작업 중이었다면,
+  //   그 사람 화면도 새로고침 한 번에 조용히 새 배치로 끌려가버림 — 본인은
+  //   여전히 예전 배치를 스캔하는 줄 알고 계속 스캔했는데 실제로는 엉뚱한(새)
+  //   배치에 기록됨(8/12 오후 Jien Lee 사례: MEGA MART 등 3건이 새 배치에
+  //   잘못 기록됐다가 1분 뒤 재스캔으로 원래 배치에 다시 기록된 흔적이
+  //   ScanLog에서 확인됨). 서버의 "활성 배치"가 편의상 전체 공용 값 하나뿐이라
+  //   생기는 구조적 문제.
+  //   해결: 이 기기가 마지막으로 캐시해둔 배치와 서버의 활성 배치가 다르면,
+  //   캐시된(=마지막으로 작업 중이던) 배치가 아직 "완료" 처리 안 됐는지 먼저
+  //   확인한다. 아직 안 끝났으면 절대 조용히 안 끌고 가고, 화면은 그대로
+  //   두고 배너로만 "새 배치가 열렸습니다"라고 알려서 사람이 직접 선택하게
+  //   한다. 이미 끝난 배치였다면(=더 볼 이유가 없으면) 예전처럼 자동으로
+  //   새 활성 배치를 따라간다(정상 동작 유지).
+  if(cached && cached.batchId && res.ok && res.batch && String(res.batch.batchId) !== String(cached.batchId)){
+    let staleStillOpen = false;
+    try{
+      const staleCheck = await gasQuery('getBatch', { batchId: cached.batchId });
+      staleStillOpen = !!(staleCheck.ok && staleCheck.batch && staleCheck.batch.status !== 'completed');
+    }catch(e){
+      staleStillOpen = true; // 확인 실패 시 안전한 쪽(=끌고 가지 않는 쪽)으로
+    }
+    if(staleStillOpen){
+      state.bootSyncPending = false; showBootSyncChip(false);
+      showNewBatchAvailableBanner(res.batch.batchId, cached.batchId);
+      // 배치는 그대로 유지하고(이미 캐시로 화면에 그려둔 상태), 스캔 진행률만 최신화
+      if(!scanStateApplied) await pollScanState();
+      startScanPolling();
+      startStructurePolling();
+      return;
+    }
+    // else: 캐시된 배치가 이미 완료됨 → 아래로 내려가서 평소처럼 새 활성 배치를 따라감
+  }
+
   // 서버가 알려준 진짜 배치로 전부 덮어씀 (캐시와 같아도 최신 구조로 갱신됨)
   applyBatchPayload(res, { fromCache: false });
   saveBatchCache(res);
@@ -4996,6 +5031,51 @@ function showSaveFailureBanner(title, detail){
   document.body.appendChild(el);
   try{ if(navigator.vibrate) navigator.vibrate([120,80,120,80,120]); }catch(e){}
   try{ scanFeedback('err'); }catch(e){}
+}
+
+// ★ 2026-08-12 신규 — 새 배치가 서버에 활성 배치로 등록됐는데, 이 기기는 아직
+//   완료 안 된 "예전" 배치를 보고 있을 때 뜨는 안내. 절대 자동으로 전환하지
+//   않고, 사람이 직접 고르게 함. 여러 번 겹쳐 뜨지 않도록 기존 배너는 지우고 새로 그림.
+function showNewBatchAvailableBanner(newBatchId, myBatchId){
+  const prev = document.getElementById('newBatchBanner');
+  if(prev) prev.remove();
+  const el = document.createElement('div');
+  el.id = 'newBatchBanner';
+  el.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9998; background:#0a2a3a; color:#fff; padding:14px 20px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-bottom:3px solid var(--cyan);';
+  el.innerHTML = `
+    <div style="max-width:900px; margin:0 auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <div style="font-size:24px; flex-shrink:0;">🔔</div>
+      <div style="flex:1; min-width:200px;">
+        <div style="font-weight:800; font-size:14px;">새 배치(${newBatchId})가 열렸습니다</div>
+        <div style="font-size:12px; opacity:0.85; margin-top:2px;">지금 보시는 배치(${myBatchId})는 아직 완료되지 않아 자동으로 전환하지 않았습니다. 계속 이 배치를 작업하세요 — 새 배치로 넘어가려면 아래 버튼을 눌러주세요.</div>
+      </div>
+      <div style="display:flex; gap:8px; flex-shrink:0;">
+        <button onclick="document.getElementById('newBatchBanner').remove()" style="background:transparent; border:1px solid rgba(255,255,255,0.4); color:#fff; padding:9px 14px; border-radius:8px; font-weight:700; font-size:12.5px; cursor:pointer;">계속 이 배치 작업</button>
+        <button onclick="switchToBannerBatch('${newBatchId}')" style="background:var(--cyan); border:none; color:#052030; padding:9px 14px; border-radius:8px; font-weight:800; font-size:12.5px; cursor:pointer;">새 배치로 이동</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+}
+
+// ★ 2026-08-12 신규 — showNewBatchAvailableBanner의 "새 배치로 이동" 전용 함수.
+//   continueOpenBatch(id, true)는 "조회전용"이라 Scan Log 탭으로 가고 배지에
+//   "(조회전용)"이 붙는데, 이 경우는 실제로 그 배치에서 계속 작업하려는 것이므로
+//   맞지 않음. 반대로 continueOpenBatch(id, false)는 "다른 모든 기기도 같이
+//   전환됩니다" 확인창과 setActiveBatch 재방송이 딸려오는데, 이미 그 배치가
+//   전체 활성 배치로 정해진 뒤라(그래서 이 배너가 뜬 것) 불필요하고 오히려
+//   헷갈림. 그래서 조용히 이 기기만 최신 활성 배치로 정상 진입시키는 전용 경로.
+async function switchToBannerBatch(batchId){
+  const el = document.getElementById('newBatchBanner');
+  if(el) el.remove();
+  const res = await gasQuery('getBatch', { batchId });
+  if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
+  applyBatchPayload(res, { fromCache: false });
+  saveBatchCache(res);
+  await pollScanState();
+  startScanPolling();
+  startStructurePolling();
+  gotoView('v-slots');
+  toast(`배치 ${batchId}로 이동했습니다`, 'success');
 }
 
 // Init
