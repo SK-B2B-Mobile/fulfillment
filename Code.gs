@@ -649,6 +649,7 @@ function upsertJob_mergeText_(job) {
       rowVals = sh.getRange(rowIdx, 1, 1, lastCol).getValues()[0];
     } else {
       rowIdx = last + 1;
+      ensureSheetRoom_(sh, rowIdx); // ★ 2026-08-12 신규 — 시트 행 부족 시 자동으로 미리 늘려둠 (BatchPicking.gs에 정의, 같은 프로젝트라 호출 가능)
       rowVals = new Array(lastCol).fill('');
     }
 
