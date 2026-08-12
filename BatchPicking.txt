@@ -520,6 +520,24 @@ function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId',
 function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
 // ★ 2026-07-16 신규: 고객사(Invoice) 하나에 대해 등록된 이슈 한 건 = 한 행
 function issuelogSheet_() { return ensureBatchSheet_(ISSUELOG_SHEET, ['BatchId','IssueId','Timestamp','Worker','Barcode','SKU','Name','Invoice','Customer','Reason','Qty','Note','Status']); }
+
+// ★ 2026-08-12 신규(매니저 요청) — ScanLog/IssueLog처럼 스캔마다 행이 계속
+//   느는 시트는, 구글시트에 할당된 행이 다 차면 getRange(newRow,...)가 실패해서
+//   스캔 저장 자체가 안 될 위험이 있음(시트 맨 아래 "더 보기 1000행" 버튼이
+//   뜨는 게 바로 그 여유가 얼마 안 남았다는 신호). appendRow는 자동으로 늘려주지만
+//   여기서는 텍스트 서식 고정 때문에 getRange+setValues를 쓰므로 직접 챙겨야 함.
+//   매 스캔마다 검사하되, 실제로 늘리는 건 여유가 200행 이하로 줄었을 때만
+//   (그것도 2000행씩 넉넉히) — 매번 늘리면 느려지고, 안 늘리면 위험하므로 절충.
+function ensureSheetRoom_(sheet, neededRow) {
+  try {
+    const maxRows = sheet.getMaxRows();
+    if (neededRow > maxRows - 200) {
+      sheet.insertRowsAfter(maxRows, 2000);
+    }
+  } catch (e) {
+    // 확장이 실패해도(권한 등) 원래 쓰기 시도는 그대로 진행 — best-effort 안전장치
+  }
+}
 // ★ 2026-07-16 신규: 작업자 명단 — Id/Name/Status 한 명당 한 행. batch.html의 로컬 하드코딩을 대체.
 function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name','Status']); }
 
@@ -1139,6 +1157,7 @@ function logScan(data) {
     //   새로 추가될 행 번호를 먼저 계산해서, 그 행의 Barcode(E)/SKU(F) 컬럼을
     //   텍스트로 고정한 뒤에 값을 씀 — appendRow 대신 getRange+setValues 사용.
     const newRow = sl.getLastRow() + 1;
+    ensureSheetRoom_(sl, newRow); // ★ 2026-08-12 신규 — 시트 행 부족 시 자동으로 미리 늘려둠
     sl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
     sl.getRange(newRow, 1, 1, 12).setValues([[
       data.batchId, scanId, batchNow_(), data.worker || '', data.barcode || '',
@@ -1186,6 +1205,7 @@ function logIssue(data) {
     //   0 소실)을 막음.
     const il = issuelogSheet_();
     const ilNewRow = il.getLastRow() + 1;
+    ensureSheetRoom_(il, ilNewRow); // ★ 2026-08-12 신규
     il.getRange(ilNewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
     il.getRange(ilNewRow, 1, 1, 13).setValues([[
       data.batchId, issueId, batchNow_(), data.worker || '',
@@ -1207,6 +1227,7 @@ function logIssue(data) {
     // ★ 2026-08-05 긴급 수정 — 이 ADJ 상쇄기록도 같은 이유로 텍스트 고정.
     const sl2 = scanlogSheet_();
     const sl2NewRow = sl2.getLastRow() + 1;
+    ensureSheetRoom_(sl2, sl2NewRow); // ★ 2026-08-12 신규
     sl2.getRange(sl2NewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
     sl2.getRange(sl2NewRow, 1, 1, 12).setValues([[
       data.batchId, 'ADJ-' + issueId, batchNow_(), data.worker || '',
