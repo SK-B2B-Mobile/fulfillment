@@ -2915,6 +2915,23 @@ function stopScanPolling(){
   if(__scanPollTimer){ clearInterval(__scanPollTimer); __scanPollTimer = null; }
 }
 
+// ★ 2026-08-13 긴급 신규(매니저 발견) — 모바일 브라우저는 화면이 꺼지거나
+//   다른 앱으로 전환되면 배터리 절약을 위해 setInterval 타이머를 강제로
+//   멈추거나 크게 늦춘다. pollScanState(5초)·refreshBatchStructure(30초) 둘 다
+//   순수 setInterval이라, 화면이 꺼졌다 켜지는 사이 최대 20분 이상 조용히
+//   멈춰있을 수 있음이 실제 사례로 확인됨(스캔 화면에 계속 떠있었는데도
+//   서버에 새로 추가된 상품 요구량을 20분 동안 못 따라잡음).
+//   해결: visibilitychange로 "화면이 다시 보이게 됐다"를 감지하는 즉시
+//   구조/진행률을 강제로 한 번 더 받아온다(타이머가 알아서 돌아오길
+//   기다리지 않음). 배치가 로드돼 있을 때만 동작.
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState !== 'visible') return;
+  if(!state.batchId || !GAS_READY) return;
+  console.log('👁 화면 복귀 감지 — 구조/진행률 즉시 재동기화');
+  refreshBatchStructure(true);
+  pollScanState();
+});
+
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-09 신규 — "고객사·상품 배정 구조" 자체도 주기적으로 재동기화
 // ─────────────────────────────────────────────────────────────
