@@ -2926,11 +2926,24 @@ function stopScanPolling(){
 //   기다리지 않음). 배치가 로드돼 있을 때만 동작.
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState !== 'visible') return;
-  if(!state.batchId || !GAS_READY) return;
-  console.log('👁 화면 복귀 감지 — 구조/진행률 즉시 재동기화');
-  refreshBatchStructure(true);
-  pollScanState();
+  if(!GAS_READY) return;
+  console.log('👁 화면 복귀 감지 — 재동기화');
+  if(state.batchId){
+    refreshBatchStructure(true);
+    pollScanState();
+  }
+  // ★ 2026-08-14 신규(매니저 발견) — "완료된 배치" 안내 카드(01 Batch 탭
+  //   맨 위, openBatchesPanel)는 checkOpenBatches()가 페이지 로드/특정 동작
+  //   시에만 호출되고 주기적으로 다시 확인하는 로직이 아예 없었음. 탭을 오래
+  //   열어두면 "27건 전부 출고완료" 이후에도 그 이전의 오래된 "미출고 27건"
+  //   스냅샷을 계속 보여주는 문제가 실제로 있었음(8/14 확인). 화면 복귀 시에도
+  //   같이 갱신되도록 추가. state.batchId 유무와 무관하게 항상 최신화되어야 함.
+  checkOpenBatches();
 });
+
+// ★ 2026-08-14 신규 — 위와 같은 이유로, 화면을 계속 켜놓고 있는 경우에도
+//   "완료된 배치" 목록이 스스로 낡지 않도록 60초마다 자체 갱신.
+setInterval(() => { if(GAS_READY) checkOpenBatches(); }, 60000);
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-09 신규 — "고객사·상품 배정 구조" 자체도 주기적으로 재동기화
