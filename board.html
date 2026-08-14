@@ -389,6 +389,15 @@ async function togglePackingMoved(invoice){
   if(!slot) return;
   const cur = packStageOf(slot);
   const next = (cur === 'none') ? 'moved' : (cur === 'moved') ? 'taken' : 'moved';
+  // ★ 2026-08-14 신규(매니저 요청) — 파랑("이동 완료" = 출고팀이 실제로 가져감)
+  //   상태에서 그 자리를 한 번 더 누르면 아무 확인 없이 조용히 핑크로 되돌아갔음.
+  //   TV가 터치스크린이라 지나가던 사람이 스치듯 건드리거나 확인차 한 번 더
+  //   눌러도 그대로 취소돼버린 사고가 실제로 있었음(8/12). "이미 출고 완료로
+  //   표시된 걸 취소"하는 방향만 확인을 받고, 앞으로 진행하는 방향(초록→핑크,
+  //   핑크→블루)은 지금처럼 그대로 바로 처리되게 둠.
+  if(cur === 'taken'){
+    if(!confirm(`정말 되돌리시겠습니까?\n\n"${slot.customer || invoice}"는 이미 출고팀이 가져간 것으로(블루) 표시돼 있습니다.\n다시 누르면 "이동 필요"(핑크) 상태로 돌아가서, 출고팀이 다시 가져가야 하는 것처럼 보이게 됩니다.`)) return;
+  }
   const prevMoved = slot.movedToPacking, prevTaken = slot.takenOut;
   _pendingPackMoves[invoice] = next; // ★ 폴링이 이 값을 되돌리지 못하게 보류 등록
   slot.movedToPacking = true;               // moved/taken 둘 다 "이동 표시는 켜진" 상태
