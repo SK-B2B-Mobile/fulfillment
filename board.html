@@ -369,7 +369,32 @@ let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상
 // "아직 안 바뀐" 값으로 화면을 통째로 덮어써서 핑크가 다시 초록으로 되돌아갔음.
 // 저장 요청을 보낸 인보이스는 여기 기록해두고, renderBoard가 폴링 데이터로 화면을
 // 새로 그릴 때 "서버 값이 아직 이 값을 안 따라왔으면" 보류값을 그대로 유지하도록 함.
-let _pendingPackMoves = {}; // invoice -> 'moved'|'taken' (서버 확인 대기중인 낙관적 단계값) ★ 2026-08-04: boolean → stage 문자열로 변경
+// ★ 2026-08-14 긴급 수정(매니저 발견) — 이 "보류" 상태에 만료시간이 없어서,
+//   서버 저장이 실제로는 실패했거나 나중에 그 값이 다른 이유로 지워져도 화면은
+//   영원히 가짜 값을 계속 우겨서 보여주고 있었음(TV는 계속 파랑인데, 01 Batch
+//   탭의 "출고 대기" 안내는 서버 원본을 그대로 읽어서 정직하게 "27건 미출고"라고
+//   서로 다르게 말하는 불일치 발생). 이제 { stage, ts } 형태로 설정 시각을 같이
+//   기록하고, PENDING_MAX_MS(30초)가 지나도록 서버가 못 따라오면 더는 우기지
+//   않고 서버의 실제 값을 그대로 인정한다(+콘솔에 경고 남김, 진단용).
+let _pendingPackMoves = {}; // invoice -> { stage:'moved'|'taken', ts:Number }
+const PENDING_PACK_MAX_MS = 30000; // 이 시간 넘도록 서버가 확인 안 해주면 서버 값을 신뢰
+
+// ★ 2026-08-14 신규 — 패킹존 이동 상태가 서버와 30초 넘게 안 맞을 때 눈에 보이게 알림.
+//   콘솔 경고만으로는 창고 TV 앞에서 아무도 못 봄.
+function showSyncFailToast(customerName){
+  const id = 'syncFailToast';
+  let el = document.getElementById(id);
+  if(!el){
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = 'position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:9999; background:#7a0000; color:#fff; padding:14px 22px; border-radius:10px; font-size:14px; font-weight:700; box-shadow:0 6px 24px rgba(0,0,0,0.5); border:1px solid #ff4d4d; max-width:80vw; text-align:center;';
+    document.body.appendChild(el);
+  }
+  el.textContent = `⚠️ "${customerName}" 패킹존 이동 표시가 서버에 저장되지 않았습니다 — 다시 눌러주세요`;
+  el.style.display = 'block';
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 8000);
+}
 
 // ★ 2026-08-04 신규 — 슬롯의 현재 패킹 단계: none(초록) / moved(핑크) / taken(파랑)
 function packStageOf(slot){
@@ -399,7 +424,7 @@ async function togglePackingMoved(invoice){
     if(!confirm(`정말 되돌리시겠습니까?\n\n"${slot.customer || invoice}"는 이미 출고팀이 가져간 것으로(블루) 표시돼 있습니다.\n다시 누르면 "이동 필요"(핑크) 상태로 돌아가서, 출고팀이 다시 가져가야 하는 것처럼 보이게 됩니다.`)) return;
   }
   const prevMoved = slot.movedToPacking, prevTaken = slot.takenOut;
-  _pendingPackMoves[invoice] = next; // ★ 폴링이 이 값을 되돌리지 못하게 보류 등록
+  _pendingPackMoves[invoice] = { stage: next, ts: Date.now() }; // ★ 폴링이 이 값을 되돌리지 못하게 보류 등록(만료시간 포함)
   slot.movedToPacking = true;               // moved/taken 둘 다 "이동 표시는 켜진" 상태
   slot.takenOut = (next === 'taken');
   renderBoard(Object.values(_slotsByInvoice)); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
@@ -784,8 +809,17 @@ function renderBoard(slots, fromPoll){
     // ★ 2026-08-04 확장 — boolean 대신 3단계(stage) 값으로 비교 (moved/taken)
     if(fromPoll && Object.prototype.hasOwnProperty.call(_pendingPackMoves, s.invoice)){
       const serverStage = s.takenOut ? 'taken' : s.movedToPacking ? 'moved' : 'none';
-      const pending = _pendingPackMoves[s.invoice];
+      const pendingEntry = _pendingPackMoves[s.invoice];
+      const pending = pendingEntry.stage;
+      const age = Date.now() - pendingEntry.ts;
       if(serverStage === pending){
+        delete _pendingPackMoves[s.invoice]; // 서버가 따라옴 — 정상 종료
+      } else if(age > PENDING_PACK_MAX_MS){
+        // ★ 2026-08-14 신규 — 30초가 지나도록 서버가 이 값을 확인해주지 않음.
+        //   저장이 실패했거나 나중에 다른 이유로 지워진 것 — 더는 우기지 않고
+        //   서버의 실제 값을 그대로 인정한다(s.movedToPacking/s.takenOut을 안 건드림).
+        console.warn('⚠ 패킹존 이동 상태 동기화 실패 — 서버 값으로 되돌림:', s.invoice, '기대값:', pending, '실제값:', serverStage);
+        showSyncFailToast(s.customer || s.invoice);
         delete _pendingPackMoves[s.invoice];
       } else {
         s.movedToPacking = (pending !== 'none');
