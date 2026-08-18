@@ -428,8 +428,18 @@ async function togglePackingMoved(invoice){
   slot.movedToPacking = true;               // moved/taken 둘 다 "이동 표시는 켜진" 상태
   slot.takenOut = (next === 'taken');
   renderBoard(Object.values(_slotsByInvoice)); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
-  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
+  // ★ 2026-08-18 신규 — 배치 막바지에 여러 슬롯이 짧은 시간 안에 몰려서 눌리면,
+  //   서버 쪽 문서 락 경합으로 첫 시도가 "일시적으로" 실패하는 경우가 있었음
+  //   (32개가 거의 동시에 완료되며 실제로 발생). 곧바로 초록으로 되돌리지 않고,
+  //   짧은 간격을 두고 최대 2번 더 자동 재시도한 뒤에도 계속 실패해야만
+  //   원래 값으로 되돌림 — 대부분의 일시적 경합은 재시도 안에서 조용히 복구됨.
+  let res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
+  for(let attempt = 1; !res.ok && attempt <= 2; attempt++){
+    await new Promise(r => setTimeout(r, 1200 * attempt)); // 1.2초, 2.4초 대기 후 재시도
+    res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
+  }
   if(!res.ok){
+    console.warn('⚠ setPackingMoved 재시도 후에도 실패:', invoice, res.error);
     delete _pendingPackMoves[invoice]; // 실패 시 보류 해제하고 원상복구
     slot.movedToPacking = prevMoved;
     slot.takenOut = prevTaken;
