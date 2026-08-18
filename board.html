@@ -82,7 +82,11 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .unfulfilled-row .ur-meta{color:var(--text-dim); font-size:12px; margin-top:3px; font-family:var(--mono);}
 
 /* ═══════════════ 슬롯 그리드 ═══════════════ */
-.board{padding:26px 36px; height:calc(100vh - 108px); overflow-y:auto;}
+/* ★ 2026-08-18 신규 — 하단 여백(padding-bottom)을 넉넉히 줌. 배치 고객사가
+   30개를 넘어 "추가 배정 구역"(31번 이상)이 생기면, 스크롤을 끝까지 내려도
+   그 마지막 줄의 "패킹존 이동" 체크박스가 화면 맨 아래 가장자리에 거의 딱
+   붙어버려서(여유 공간 없음) 터치가 잘 안 먹는 문제가 있었음. */
+.board{padding:26px 36px 200px 36px; height:calc(100vh - 108px); overflow-y:auto;}
 .zone-label{font-family:var(--mono); font-size:15px; color:var(--text-dim); letter-spacing:0.1em; margin:18px 0 12px; text-transform:uppercase;}
 .zone-label:first-child{margin-top:0;}
 .grid{display:grid; grid-template-columns:repeat(5, 1fr); gap:16px;}
@@ -500,6 +504,10 @@ const ISSUE_REASON_OPTS = [
   // ★ 2026-07-24 신규 — 실제로는 정상 출고됐는데 작업자가 스캔만 깜빡한 경우.
   //   진짜 결품/품질 문제와 헷갈리지 않게 별도 사유로 구분.
   {v:'MISS', label:'MISS · 스캔 누락(실제 출고됨)'},
+  // ★ 2026-08-18 신규 — 세일즈팀이 출고 직전/도중에 특정 제품만 빼달라고
+  //   요청하는 경우. 이미 피킹은 됐지만 출고는 안 되고 회수(go-back)해야
+  //   하는 물건이라, 다른 사유들과 동일하게 필요수량에서 제외됨.
+  {v:'CANC', label:'CANC · 세일즈 취소요청(피킹 후 회수)'},
 ];
 // ★ 2026-07-23 신규 — 배치 전체 아이템(고객사별 SKU 목록)을 한 번만 받아서 캐싱.
 //   "새 이슈 등록" 폼의 SKU 드롭다운을 채우는 데만 씀 (진행률 폴링과는 별개).
@@ -600,7 +608,12 @@ function renderIssueModalBody(){
   const invoice = _issueModalInvoice;
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
-  const reasonLabel = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절', SKUMIS:'SKUMIS · SKU 불일치', MISS:'MISS · 스캔누락'};
+  // ★ 2026-08-18 수정 — 예전엔 여기 별도로 라벨을 하드코딩해뒀는데, 위
+  //   ISSUE_REASON_OPTS(사유 등록 드롭다운)를 고쳐도 여긴 안 따라와서
+  //   "MISS · 스캔누락"만 뜨고 "(실제 출고됨)"이 빠진 채 표시되는 문제가
+  //   있었음(영업팀이 실제로 출고 안 된 것으로 오해할 수 있음). 사유 목록을
+  //   하나로 합쳐서, 앞으로는 ISSUE_REASON_OPTS만 고치면 둘 다 같이 반영됨.
+  const reasonLabel = {}; ISSUE_REASON_OPTS.forEach(r => reasonLabel[r.v] = r.label);
   const issues = slot.issues || [];
   const rowsHtml = issues.length ? issues.map((i, idx) => `
     <div class="issue-modal-row" id="issueRow-${idx}">
