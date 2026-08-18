@@ -749,7 +749,13 @@ function assignSlots(data) {
  * ================================================================================ */
 function setPackingMoved(data) {
   const lock = LockService.getDocumentLock();
-  lock.waitLock(15000);
+  // ★ 2026-08-18 신규 — 15초→25초로 상향. TV 현황판에서 여러 슬롯을 짧은 시간에
+  //   연달아 눌러(배치 막바지에 32개가 한꺼번에 완료되는 경우 자주 발생) 이
+  //   함수 호출이 몰리면, 하나의 문서 락을 놓고 줄을 서다가 뒤쪽 순번은 15초
+  //   안에 락을 못 잡고 예외로 실패했음. 클라이언트(board.html)가 "저장 실패
+  //   확정" 판정을 내리기까지 기다려주는 시간이 30초(PENDING_PACK_MAX_MS)라,
+  //   서버도 그 안에서 최대한 순서를 기다려 실제로 저장에 성공할 기회를 늘림.
+  lock.waitLock(25000);
   try {
     const batchId = data.batchId, invoice = data.invoice;
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
