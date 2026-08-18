@@ -4163,6 +4163,15 @@ function togglePlaced(idx){
   if(!card) return;
   const isPlaced = window.__placedSet.has(idx);
   if(isPlaced){
+    // ★ 2026-08-18 신규(현장 요청) — 이미 "넣었다"고 체크해둔 카드를 실수로
+    //   또 누르면 확인 없이 조용히 흰색(안 넣음)으로 되돌아갔음. 이 체크리스트가
+    //   데이터에 영향은 없지만(스캔 즉시 서버엔 이미 반영됨), 작업자가 "안
+    //   넣었나?" 착각해서 이미 넣은 슬롯에 실수로 한 번 더 넣는(과다 배분)
+    //   현장 사고로 이어질 수 있음. 넣는 방향(흰색→체크)은 스캔 흐름을 막지
+    //   않도록 지금처럼 바로 처리하고, 되돌리는 방향에만 확인을 받음.
+    const r = _lastScanCtx && _lastScanCtx.results && _lastScanCtx.results[idx];
+    const label = r ? `SLOT ${String(r.slot).padStart(2,'0')} · ${r.customer}` : '이 슬롯';
+    if(!confirm(`"${label}"은 이미 넣음으로 체크돼 있습니다.\n다시 누르면 "안 넣음"(흰색)으로 되돌아갑니다 — 정말 되돌리시겠습니까?\n\n(참고: 실제 수량은 스캔 시점에 이미 서버에 반영돼 있어 이 체크는 영향을 주지 않습니다. 실물을 그 슬롯에서 빼실 때만 되돌리세요.)`)) return;
     window.__placedSet.delete(idx);
     card.classList.remove('placed');
   } else {
