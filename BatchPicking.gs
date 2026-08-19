@@ -517,7 +517,98 @@ function bcustSheetSafe_() {
 }
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
 function scanlogSheet_()  { return ensureBatchSheet_(SCANLOG_SHEET,  ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty']); }
-function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes']); }
+function picktimeSheet_() { return ensureBatchSheet_(PICKTIME_SHEET, ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes','Note']); }
+// ★ 2026-08-18 신규 — 이미 운영 중이던 시트는 6개 컬럼으로 만들어져 있어서,
+//   위 headers 배열을 바꿔도 기존 시트엔 7번째 컬럼(Note)이 자동으로 안 생김
+//   (ensureBatchSheet_는 신규 생성 시에만 헤더를 씀). bcustSheetSafe_()와 동일한
+//   패턴으로, 실제 사용 시점에 헤더가 비어있으면 한 번만 채워주는 안전장치.
+//   Note는 "종료를 안 누르고 다음날 강제종료된 세션" 같은 걸 감사(audit) 목적으로
+//   표시하는 용도 — 소요시간 계산 자체(calcWorkMinutes_)와는 무관.
+function picktimeSheetSafe_() {
+  const pt = picktimeSheet_();
+  if (!pt.getRange(1, 7).getValue()) pt.getRange(1, 7).setValue('Note');
+  return pt;
+}
+// ★ 2026-08-18 신규 — 근무시간 기준 소요시간 계산 (예전 SK B2C/SK-NJ-MOIDA
+//   프로젝트에서 이미 확정·검증했던 규칙과 동일하게 재사용).
+//   근무시간: 08:30~12:00(오전 210분) + 13:00~17:30(오후 270분) = 하루 최대 480분.
+//   점심시간(12:00~13:00)과 근무시간 외(퇴근 후~다음날 출근 전 등)는 자동 제외.
+//   여러 날에 걸치면 하루 단위로 끊어서, 그날의 근무시간과 겹치는 구간만 합산.
+//   (예: 어제 15:05 시작 → 오늘 08:31 종료 = 어제 145분 + 오늘 1분 = 146분)
+//   입력: Date 객체 또는 new Date()로 파싱 가능한 값. 출력: 정수 분(잘못된 입력이면 0).
+function calcWorkMinutes_(startVal, endVal) {
+  const WORK_START_MIN = 8 * 60 + 30;   // 08:30
+  const LUNCH_START_MIN = 12 * 60;      // 12:00
+  const LUNCH_END_MIN = 13 * 60;        // 13:00
+  const WORK_END_MIN = 17 * 60 + 30;    // 17:30
+
+  const start = (startVal instanceof Date) ? startVal : new Date(startVal);
+  const end = (endVal instanceof Date) ? endVal : new Date(endVal);
+  if (isNaN(start) || isNaN(end) || end <= start) return 0;
+
+  // 하루 안에서(분 단위 0~1440 기준) 근무시간과 겹치는 분만 계산
+  function dayWorkMinutes(dayStartMin, dayEndMin) {
+    const s = Math.max(dayStartMin, WORK_START_MIN);
+    const e = Math.min(dayEndMin, WORK_END_MIN);
+    if (e <= s) return 0;
+    let mins = 0;
+    if (s < LUNCH_START_MIN) mins += Math.min(e, LUNCH_START_MIN) - s; // 점심 전
+    if (e > LUNCH_END_MIN) mins += e - Math.max(s, LUNCH_END_MIN);     // 점심 후
+    return Math.max(0, mins);
+  }
+
+  // ★ 2026-08-18 신규 — 미국 연방공휴일 11개(회사 전체 휴무일). 고정일 5개
+  //   (신년/준틴틴/독립기념일/베테랑데이/크리스마스)와 유동일 6개(요일 기준이라
+  //   매년 날짜가 바뀜 — MLK/대통령의날/메모리얼데이/노동절/콜럼버스데이/
+  //   추수감사절)를 연도 상관없이 자동 계산. 공휴일이 주말과 겹쳐도 별도로
+  //   평일로 옮겨서 쉬는 "관찰일(observed)" 이동은 반영하지 않음(주말은 이미
+  //   근무일이 아니라 계산에 영향 없음) — 필요하면 추후 요청.
+  function isUsFederalHoliday_(dateObj) {
+    const y = dateObj.getFullYear(), mo = dateObj.getMonth(), d = dateObj.getDate();
+
+    function nthWeekdayOfMonth_(year, month, weekday, n) { // month: 0=1월, weekday: 0=일~6=토
+      const firstWeekday = new Date(year, month, 1).getDay();
+      return 1 + ((7 + weekday - firstWeekday) % 7) + (n - 1) * 7;
+    }
+    function lastWeekdayOfMonth_(year, month, weekday) {
+      const last = new Date(year, month + 1, 0); // 그 달의 마지막 날짜
+      return last.getDate() - ((7 + last.getDay() - weekday) % 7);
+    }
+
+    const holidays = [
+      [0, 1],                                     // 신년(New Year's Day) 1/1
+      [0, nthWeekdayOfMonth_(y, 0, 1, 3)],         // MLK Day: 1월 셋째 월요일
+      [1, nthWeekdayOfMonth_(y, 1, 1, 3)],         // 대통령의날(Presidents Day): 2월 셋째 월요일
+      [4, lastWeekdayOfMonth_(y, 4, 1)],           // 메모리얼데이(Memorial Day): 5월 마지막 월요일
+      [5, 19],                                     // 준틴틴(Juneteenth) 6/19
+      [6, 4],                                      // 독립기념일(Independence Day) 7/4
+      [8, nthWeekdayOfMonth_(y, 8, 1, 1)],         // 노동절(Labor Day): 9월 첫째 월요일
+      [9, nthWeekdayOfMonth_(y, 9, 1, 2)],         // 콜럼버스데이(Columbus Day): 10월 둘째 월요일
+      [10, 11],                                    // 베테랑데이(Veterans Day) 11/11
+      [10, nthWeekdayOfMonth_(y, 10, 4, 4)],       // 추수감사절(Thanksgiving): 11월 넷째 목요일
+      [11, 25],                                    // 크리스마스(Christmas) 12/25
+    ];
+    return holidays.some(h => h[0] === mo && h[1] === d);
+  }
+
+  let total = 0;
+  let cur = new Date(start);
+  let guard = 0; // 무한루프 방지(최대 400일)
+  while (cur < end && guard++ < 400) {
+    const y = cur.getFullYear(), mo = cur.getMonth(), d = cur.getDate();
+    const dow = cur.getDay(); // 0=일요일, 6=토요일. 회사 근무일은 주 5일(월~금)
+    const dayEnd = new Date(y, mo, d + 1, 0, 0, 0);
+    // ★ 2026-08-18 신규 — 주말(토/일)뿐 아니라 미국 연방공휴일(회사 전체 휴무)도 건너뜀
+    if (dow !== 0 && dow !== 6 && !isUsFederalHoliday_(cur)) {
+      const curMin = cur.getHours() * 60 + cur.getMinutes();
+      const sameDayAsEnd = (end.getFullYear() === y && end.getMonth() === mo && end.getDate() === d);
+      const endMin = sameDayAsEnd ? (end.getHours() * 60 + end.getMinutes()) : (24 * 60);
+      total += dayWorkMinutes(curMin, endMin);
+    }
+    cur = dayEnd;
+  }
+  return Math.round(total);
+}
 // ★ 2026-07-16 신규: 고객사(Invoice) 하나에 대해 등록된 이슈 한 건 = 한 행
 function issuelogSheet_() { return ensureBatchSheet_(ISSUELOG_SHEET, ['BatchId','IssueId','Timestamp','Worker','Barcode','SKU','Name','Invoice','Customer','Reason','Qty','Note','Status']); }
 
@@ -1399,7 +1490,7 @@ function logPickTiming(data) {
   lock.waitLock(10000);
   try {
     if (!data.batchId || !data.worker) return { ok: false, error: 'batchId, worker required' };
-    const sh = picktimeSheet_();
+    const sh = picktimeSheetSafe_();
 
     if (data.action === 'start') {
       // ★ 2026-07-22 신규: 두 기기에서 거의 동시에 같은 작업자로 "피킹 시작"을
@@ -1408,7 +1499,7 @@ function logPickTiming(data) {
       //   이 체크와 appendRow 사이에 다른 요청이 끼어들 수 없음(원자적 처리).
       const last0 = sh.getLastRow();
       if (last0 >= 2) {
-        const rows0 = sh.getRange(2, 1, last0 - 1, 6).getValues();
+        const rows0 = sh.getRange(2, 1, last0 - 1, 7).getValues();
         for (let i = 0; i < rows0.length; i++) {
           const hasEnd = (rows0[i][4] !== '' && rows0[i][4] !== null && rows0[i][4] !== undefined);
           if (String(rows0[i][0]) === String(data.batchId) && String(rows0[i][1]) === String(data.worker) && !hasEnd) {
@@ -1419,10 +1510,16 @@ function logPickTiming(data) {
             //   기기가 "종료"를 누를 방법이 없어져 버린 orphan(고아) 세션을
             //   지금 시각으로 자동 종료 처리한 뒤, 새 세션을 시작함. 작업자/매니저가
             //   명시적으로 "강제 종료 후 새로 시작"을 선택했을 때만 이 경로를 탐.
+            // ★ 2026-08-18 수정 — 예전엔 (지금시각−시작시각)을 그대로 분으로
+            //   써서, 전날 퇴근 후 종료를 안 누르고 다음날 강제종료하면 17시간
+            //   넘는 값이 그대로 찍혔음. 근무시간 기준 계산(calcWorkMinutes_)으로
+            //   바꿔서, 실제 근무시간에 해당하는 만큼만 정확히 반영되게 함.
+            //   또한 Note 컬럼에 강제종료 사실을 남겨 감사(audit) 시 구분 가능하게 함.
             const forceEndTs = batchNow_();
-            const forceMins = Math.round((new Date(forceEndTs) - new Date(rows0[i][3])) / 60000);
+            const forceMins = calcWorkMinutes_(rows0[i][3], forceEndTs);
             sh.getRange(i + 2, 5).setValue(forceEndTs);
             sh.getRange(i + 2, 6).setValue(forceMins);
+            sh.getRange(i + 2, 7).setValue('⚠ force-closed · 전날(이전) 세션 미종료 상태에서 강제종료됨 · 시간은 근무시간 기준 자동계산');
             break; // 한 작업자당 열린 세션은 최대 1개이므로 찾으면 종료 처리 후 계속 진행
           }
         }
@@ -1434,7 +1531,7 @@ function logPickTiming(data) {
       //   → 저장할 칸의 서식을 '텍스트'로 고정해서 입력값이 그대로 남게 함.
       const _ptRow = sh.getLastRow() + 1;
       try { sh.getRange(_ptRow, 3).setNumberFormat('@'); } catch (e) { /* 서식 실패해도 저장은 진행 */ }
-      sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '']);
+      sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '', '']);
       // ★ 2026-08-06 신규 — 작업자가 "▶ 피킹 시작"을 누른 이 순간이 실제 피킹 시작.
       //   스캔은 분류 단계일 뿐이라 스캔 유무로 판단하면 안 됨(매니저 확인 사항).
       //   배치에 속한 모든 오더를 한꺼번에 Started로 만들어, 메인 대시보드·영업
@@ -1449,8 +1546,10 @@ function logPickTiming(data) {
         const rows = sh.getRange(2, 1, last - 1, 6).getValues();
         for (let i = rows.length - 1; i >= 0; i--) {
           if (String(rows[i][0]) === String(data.batchId) && String(rows[i][1]) === String(data.worker) && !rows[i][4]) {
+            // ★ 2026-08-18 수정 — 근무시간 기준 계산으로 교체(위 force-close와 동일 함수).
+            //   평소(당일 종료) 케이스는 근무시간 안에서 끝나므로 예전 계산과 결과가 같음.
             const endTs = batchNow_();
-            const mins = Math.round((new Date(endTs) - new Date(rows[i][3])) / 60000);
+            const mins = calcWorkMinutes_(rows[i][3], endTs);
             sh.getRange(i + 2, 5).setValue(endTs);
             sh.getRange(i + 2, 6).setValue(mins);
             return { ok: true, durationMinutes: mins };
@@ -1480,15 +1579,21 @@ function logPickTiming(data) {
 function getActivePickers(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
-    const sh = picktimeSheet_();
+    const sh = picktimeSheetSafe_();
     const last = sh.getLastRow();
     const active = {};
     const STALE_MS = 4 * 60 * 60 * 1000; // 4시간
     const nowMs = Date.now();
+    // ★ 2026-08-19 신규 — 작업자별 "이 배치에서 가장 최근에 담당했던 페이지
+    //   범위"도 같이 계산. 시간순으로 훑으면서 매번 최신 것으로 덮어씀(시트가
+    //   시간순 append라 순서대로 훑으면 마지막에 남는 게 최신).
+    //   batch.html에서 "전날 담당페이지 이어서 시작할까요?" 확인창에 씀.
+    const lastPageRange = {};
     if (last >= 2) {
       sh.getRange(2, 1, last - 1, 6).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const worker = r[1];
+        const pageRange = fixPageRange_(r[2]);
         const startTs = r[3], endTs = r[4];
         const hasStart = (Object.prototype.toString.call(startTs) === '[object Date]' && !isNaN(startTs));
         const hasEnd = (endTs !== '' && endTs !== null && endTs !== undefined);
@@ -1498,9 +1603,12 @@ function getActivePickers(batchId) {
             active[worker] = Utilities.formatDate(startTs, batchTz_(), 'HH:mm');
           }
         }
+        if (worker && pageRange) {
+          lastPageRange[worker] = { pageRange: pageRange, ended: hasEnd };
+        }
       });
     }
-    return { ok: true, active: active };
+    return { ok: true, active: active, lastPageRange: lastPageRange };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -1548,7 +1656,7 @@ function getBatchKPI(batchId) {
     }
 
     // ① 피킹 세션 목록
-    const pt = picktimeSheet_();
+    const pt = picktimeSheetSafe_();
     const ptLast = pt.getLastRow();
     // ★ 2026-08-07 재설계 — SKU/PCS 집계 구간을 바꿈.
     //   예전: 피킹 시작 ~ 피킹 종료 사이만 집계.
@@ -1559,7 +1667,7 @@ function getBatchKPI(batchId) {
     //   다음 세션이 없으면 지금까지. 구간이 겹치지 않아 중복 집계도 없음.
     const rawSessions = [];
     if (ptLast >= 2) {
-      pt.getRange(2, 1, ptLast - 1, 6).getValues().forEach(r => {
+      pt.getRange(2, 1, ptLast - 1, 7).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const worker = r[1];
         const workerKey = String(worker || '').trim().toUpperCase();
@@ -1574,6 +1682,7 @@ function getBatchKPI(batchId) {
           start: !isNaN(startMs) ? Utilities.formatDate(startTs, batchTz_(), 'HH:mm') : '-',
           end: !isNaN(endMs) ? Utilities.formatDate(endTs, batchTz_(), 'HH:mm') : '진행중',
           durationMinutes: Number(r[5]) || 0,
+          note: String(r[6] || ''), // ★ 2026-08-18 신규 — 강제종료(전날 미종료) 등 감사용 메모
           totalSku: 0, totalQty: 0,
           _startMs: startMs,
           _sortMs: isNaN(startMs) ? 0 : startMs,
