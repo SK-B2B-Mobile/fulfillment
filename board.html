@@ -293,7 +293,10 @@ const CONFIG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec',
 };
 const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
-const POLL_MS = 8000; // 8초마다 새로고침
+// ★ 2026-08-19 수정(현장 확인) — 서버(Apps Script)에 여러 기기의 요청이
+//   몰려 간헐적으로 응답 실패하는 게 확인돼서, 8초→12초로 완화. TV는 실시간성이
+//   더 중요하긴 하지만, 12초 정도는 체감 차이가 크지 않고 서버 부담은 확실히 줄어듦.
+const POLL_MS = 12000;
 
 /* ★ 2026-08-11 신규 — TV를 새로고침했을 때 즉시 화면이 뜨도록,
  * 마지막으로 보던 배치 번호를 이 기기에 기억해둠. 데이터가 아니라
@@ -315,8 +318,9 @@ function rememberBatch(id){
 async function gasQueryWithRetry(op, params, retries){
   const maxRetries = (retries === undefined) ? 2 : retries;
   let res = await gasQuery(op, params);
+  // ★ 2026-08-19 수정 — 재시도 대기시간을 0.9/1.8초→2/4초로 늘림(batch.html과 동일한 이유)
   for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
-    await new Promise(r => setTimeout(r, 900 * attempt));
+    await new Promise(r => setTimeout(r, 2000 * attempt));
     res = await gasQuery(op, params);
   }
   return res;
@@ -1106,7 +1110,7 @@ document.getElementById('unfulfilledModalOverlay').addEventListener('click', (e)
   if(e.target.id === 'unfulfilledModalOverlay') document.getElementById('unfulfilledModalOverlay').classList.remove('show');
 });
 setTimeout(pollUnfulfilledAlerts, 2000); // 배치ID가 확정될 시간을 조금 준 뒤 첫 조회
-setInterval(pollUnfulfilledAlerts, 30000);
+setInterval(pollUnfulfilledAlerts, 45000); // ★ 2026-08-19 수정: 30초→45초(서버 부담 완화)
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-23 신규 — TV "다른 배치 조회" 드롭다운
