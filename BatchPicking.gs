@@ -712,6 +712,14 @@ function createBatch(data) {
  * ============================================================ */
 function getBatch(batchId) {
   try {
+    // ★ 2026-08-19 신규(긴급) — getSlotProgress/getOpenBatches와 동일한 이유.
+    //   getActiveBatch가 매 폴링마다 이 함수를 호출하고, batch.html의
+    //   ensureBatchItemsLoaded도 이슈 모달 열 때마다 호출함. 6초 캐시로 완화.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'getBatch_v1_' + (batchId || '_today_');
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const bSh = batchesSheet_();
     let row = 0, resolvedId = batchId;
 
@@ -779,7 +787,12 @@ function getBatch(batchId) {
     }
     customers.forEach(c => { c.items = custItemsMap[c.invoice] || []; });
 
-    return { ok: true, batch: batch, sumItems: sumItems, customers: customers };
+    const _result = { ok: true, batch: batch, sumItems: sumItems, customers: customers };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -1579,6 +1592,14 @@ function logPickTiming(data) {
 function getActivePickers(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
+    // ★ 2026-08-19 신규(긴급) — 작업자 6명 이상이 각자 10초마다 이 함수를
+    //   호출해서 서버 부담이 큼. 다른 함수보다 짧게(4초) 캐싱 — 피킹 시작/종료
+    //   확인은 좀 더 즉각적이어야 하므로.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'activePickers_v1_' + batchId;
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const sh = picktimeSheetSafe_();
     const last = sh.getLastRow();
     const active = {};
@@ -1608,7 +1629,12 @@ function getActivePickers(batchId) {
         }
       });
     }
-    return { ok: true, active: active, lastPageRange: lastPageRange };
+    const _result = { ok: true, active: active, lastPageRange: lastPageRange };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 4);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -1875,6 +1901,19 @@ function getSlotProgress(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
 
+    // ★ 2026-08-19 신규(긴급) — TV가 12초, batch.html이 8~10초마다 이 함수를
+    //   부르는데, 그때마다 ScanLog/IssueLog 등 여러 시트를 통째로 훑는 무거운
+    //   계산을 매번 새로 함. 오늘 여러 기기(TV+작업자 6명+폰)가 동시에 몰리면서
+    //   Apps Script 동시 실행 한도에 부딪혀 fetch/XHR/JSONP 전부 실패하는 사고로
+    //   이어짐. 6초짜리 짧은 캐시를 둬서, 그 사이 여러 기기가 물어봐도 첫
+    //   번째만 실제 계산하고 나머지는 캐시를 즉시 돌려줌(계산 자체가 없어서
+    //   실행시간이 거의 0에 가까움 → 동시 실행 슬롯을 훨씬 빨리 비워줌).
+    //   데이터가 실제로 바뀌면(logScan 등) 최대 6초의 지연만 감수하면 됨.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'slotProgress_v1_' + batchId;
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     // 고객사별 스캔 통과(pass) 수량 집계 (undone 제외) — 전체 QTY용, 그리고
     // invoice+바코드+SKU 조합별로도 따로 집계 — SKU 단위 완료 판정용
     const sl = scanlogSheet_();
@@ -2055,7 +2094,13 @@ function getSlotProgress(batchId) {
     //   따로 다시 계산할 필요가 없음. 다만 이 API는 TV가 8초, batch.html이 5초마다
     //   부르므로, "완료된 슬롯 목록이 지난번과 같으면 즉시 빠져나가기"로 막아둠.
     maybeSyncBatchJobsDone_(batchId, slots);
-    return { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
+    const _result = { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
+    // ★ 2026-08-19 신규 — 위 캐시 조회와 짝을 이루는 저장. 6초 후 자동 만료.
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -2262,6 +2307,14 @@ function getScanState(batchId) {
  * ================================================================== */
 function getOpenBatches() {
   try {
+    // ★ 2026-08-19 신규(긴급) — getSlotProgress와 동일한 이유. "다른 배치"
+    //   드롭다운·초기 배치 감지 등에서 자주 불리는데 시트 여러 개를 훑는
+    //   무거운 함수라, 여러 기기가 동시에 부르면 부담이 큼. 6초 캐시로 완화.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'openBatches_v1';
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const bSh = batchesSheet_();
     const last = bSh.getLastRow();
     if (last < 2) return { ok: true, batches: [] };
@@ -2459,7 +2512,12 @@ function getOpenBatches() {
     // 최신 생성순
     open.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 
-    return { ok: true, batches: open };
+    const _result = { ok: true, batches: open };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
