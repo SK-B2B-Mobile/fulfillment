@@ -1200,6 +1200,23 @@ async function gasCallWithRetry(op, data, maxAttempts){
 //   순간적으로 끊기면 응답도 실패도 오지 않고 영원히 기다리는 상태가 됐음.
 //   그 결과 Scan Log의 KPI가 "불러오는 중..."에서 멈춘 채 복구되지 않았음.
 //   20초가 지나면 실패로 끊어서, 화면이 "다시 시도" 버튼을 띄울 수 있게 함.
+// ★ 2026-08-19 신규(현장 요청) — 작업자가 6명 넘게 동시에 batch.html/TV를
+//   열어놓고 각자 5~8초마다 폴링하다 보니, 서버(Apps Script)에 순간적으로
+//   요청이 몰려 "No logs available"로 조용히 실패하는 경우가 실제로 확인됨.
+//   화면이 처음 뜰 때 배치를 못 찾으면 "배치 없음"으로 멈춰버리던 곳처럼,
+//   한 번 실패해도 사람이 못 느낄 정도로 짧게 쉬었다가 자동으로 다시
+//   시도하게 만드는 헬퍼. (다른 곳의 재시도 로직과 같은 원칙 — 서버 부담을
+//   더 늘리지 않도록 요청 자체를 줄이는 건 별도 작업으로 남겨둠)
+async function gasQueryWithRetry(op, params, retries, timeoutMs){
+  const maxRetries = (retries === undefined) ? 2 : retries;
+  let res = await gasQuery(op, params, timeoutMs);
+  for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
+    await new Promise(r => setTimeout(r, 900 * attempt)); // 0.9초, 1.8초 대기 후 재시도
+    res = await gasQuery(op, params, timeoutMs);
+  }
+  return res;
+}
+
 async function gasQuery(op, params, timeoutMs){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정 (데모 모드)' };
   const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -1468,7 +1485,7 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">불러오는 중...</div>`;
   dd.style.display = 'block';
 
-  const res = await gasQuery('getOpenBatches', {});
+  const res = await gasQueryWithRetry('getOpenBatches', {});
   if(!res.ok){ dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`; return; }
   const list = (res.batches || []).filter(b => b.batchId !== state.batchId);
   if(!list.length){
@@ -1852,9 +1869,9 @@ async function restoreBatchFromServer(){
   //   어제 배치를 "이어서 작업하기"로 열었을 때, 다른 기기(작업자 폰 등)들도
   //   페이지를 열면 클릭 없이 자동으로 같은 배치를 따라옴 (날짜 무관).
   //   활성 배치 기록이 없으면(아무도 아직 안 정했으면) 예전처럼 "오늘 배치"를 확인.
-  let res = await gasQuery('getActiveBatch', {});
+  let res = await gasQueryWithRetry('getActiveBatch', {});
   if(!res.ok || !res.batch){
-    res = await gasQuery('getBatch', {});
+    res = await gasQueryWithRetry('getBatch', {});
   }
   if(!res.ok || !res.batch){
     // ★ 2026-08-04 신규 — 심각한 사고 방지: 활성 배치 기록도 없고 "오늘 생성된"
