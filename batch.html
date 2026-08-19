@@ -616,8 +616,19 @@ select option:disabled{color:var(--text-dim2);}
   .logo{width:28px; height:28px; font-size:11px;}
   .brand-txt h1{font-size:12.5px;}
   .brand-txt small{font-size:9px;}
+  /* ★ 2026-08-19 신규(현장 요청) — "⇄ 다른 배치" 버튼이 너무 작아서 잘 안
+     보인다는 피드백. 높이는 로고(28px) 안에 맞춰서 topbar 자체 높이는 그대로
+     유지하고(밑에 nav/본문이 안 밀림), 대신 가로폭·글자 굵기·색상 대비를
+     확실히 키워서 눈에 띄게 함. CODE 버전 텍스트는 작업자에게는 불필요한
+     개발자용 정보라 모바일에서는 숨겨서 그만큼 공간을 확보함. */
+  .topbar-right > span[title]{display:none;}
+  .batch-chip{padding:7px 13px; font-size:12.5px; font-weight:800;}
+  #btnSwitchBatch{padding:7px 16px !important; font-size:12.5px !important; font-weight:800 !important; border:1.5px solid var(--purple) !important; color:var(--purple) !important; background:var(--purple-bg) !important; border-radius:20px !important;}
+  /* ★ 2026-08-19 신규 — 01 Batch / 02 Slot Layout 등 nav 탭도 너무 작다는
+     피드백 반영, 터치하기 편하게 확대(스텝 배지도 같이 키움). */
   nav{padding:0 10px;}
-  nav button{padding:11px 10px; font-size:11px;}
+  nav button{padding:13px 13px; font-size:12.5px; font-weight:700;}
+  nav button .step{font-size:10.5px; padding:2px 7px;}
   .h-page{font-size:18px;}
   .sub{font-size:11.5px;}
   .drop{padding:20px 12px;}
@@ -1005,6 +1016,19 @@ select option:disabled{color:var(--text-dim2);}
     <div class="modal-actions">
       <button class="btn btn-ghost" data-modal-close>취소</button>
       <button class="btn btn-primary" id="manualScanSubmit">처리</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-08-19 신규 — KPI 표 "② 작업자별 분류·검수 현황"에서 이슈 건수를
+     클릭하면 그 작업자가 등록한 이슈 상세(고객사·상품·사유·수량)를 보여줌 -->
+<div class="modal-bg" id="kpiIssueModal">
+  <div class="modal" style="max-width:560px; max-height:80vh; display:flex; flex-direction:column;">
+    <h3 id="kpiIssueModalTitle">이슈 상세</h3>
+    <p class="sub" id="kpiIssueModalSub"></p>
+    <div id="kpiIssueModalBody" style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeKpiIssueModal()">닫기</button>
     </div>
   </div>
 </div>
@@ -4719,6 +4743,32 @@ function handoffToInspection(){
 // ═══════════════════════════════════════════════════════════
 // Full log with undo
 // ═══════════════════════════════════════════════════════════
+// ★ 2026-08-19 신규 — KPI 표의 이슈 건수 클릭 팝업용 데이터/함수
+let _kpiIssueItemsByWorker = {};
+const ISSUE_REASON_LABEL_KPI = {EXP:'EXP · 유통기한', NF:'NF · 재고없음', DMG:'DMG · 파손', OOS:'OOS · 품절', SKUMIS:'SKUMIS · SKU 불일치', MISS:'MISS · 스캔 누락(실제 출고됨)', CANC:'CANC · 세일즈 취소요청(피킹 후 회수)'};
+function openKpiIssueModal(worker){
+  const items = _kpiIssueItemsByWorker[worker] || [];
+  document.getElementById('kpiIssueModalTitle').textContent = `${worker} · 이슈 ${items.length}건`;
+  const totalQty = items.reduce((sum, it) => sum + (Number(it.qty)||0), 0);
+  document.getElementById('kpiIssueModalSub').textContent = `총 ${totalQty.toLocaleString()}pcs`;
+  const body = document.getElementById('kpiIssueModalBody');
+  body.innerHTML = items.length ? items.map(it => `
+    <div style="background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:10px; padding:10px 12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span style="font-weight:800; color:var(--red); font-size:12.5px;">${ISSUE_REASON_LABEL_KPI[it.reason] || it.reason}</span>
+        <span style="font-weight:800; font-size:13px;">${Number(it.qty).toLocaleString()}pcs</span>
+      </div>
+      <div style="font-size:13px; font-weight:700; color:var(--text);">${it.name || it.sku || ''}</div>
+      <div style="font-size:11.5px; color:var(--text-dim); font-family:var(--mono); margin-top:2px;">${it.customer || '-'} · ${it.invoice || '-'} · 바코드 ${it.barcode || '-'} · ${it.time || '-'}</div>
+      ${it.note ? `<div style="font-size:11.5px; color:var(--text-dim); margin-top:4px; font-style:italic;">"${it.note}"</div>` : ''}
+    </div>
+  `).join('') : '<div style="color:var(--text-dim); text-align:center; padding:20px 0;">상세 내역 없음</div>';
+  document.getElementById('kpiIssueModal').classList.add('open');
+}
+function closeKpiIssueModal(){
+  document.getElementById('kpiIssueModal').classList.remove('open');
+}
+
 async function renderKPI(){
   const el = document.getElementById('kpiPanel');
   if(!el) return;
@@ -4758,8 +4808,15 @@ async function renderKPI(){
     || '<tr><td colspan="8" style="color:var(--text-dim)">피킹 기록 없음</td></tr>';
 
   // ② 작업자별 Pass / 이슈(EXP·NF·Damaged·OOS) 건수·수량
-  const scanRows = (res.scanStats||[]).map(s =>
-    `<tr><td>${s.worker}</td><td style="color:var(--green); font-weight:700;">${s.pass}</td><td style="color:${s.issueCount>0?'var(--red)':'var(--text-dim)'}; font-weight:700;">${s.issueCount}건</td><td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim)'}; font-weight:700;">${s.issueQty.toLocaleString()}pcs</td></tr>`).join('')
+  // ★ 2026-08-19 신규 — 모달에서 참조할 수 있게 상세 데이터를 저장해둠
+  _kpiIssueItemsByWorker = res.issueItemsByWorker || {};
+  const scanRows = (res.scanStats||[]).map(s => {
+      const hasIssue = s.issueCount > 0;
+      const clickAttr = hasIssue ? ` onclick="openKpiIssueModal('${String(s.worker).replace(/'/g,"\\'")}')" style="cursor:pointer; text-decoration:underline; text-decoration-style:dotted;" title="클릭하면 상세 이슈 내역을 볼 수 있습니다"` : '';
+      return `<tr><td>${s.worker}</td><td style="color:var(--green); font-weight:700;">${s.pass}</td>` +
+        `<td style="color:${hasIssue?'var(--red)':'var(--text-dim)'}; font-weight:700;"${clickAttr}>${s.issueCount}건</td>` +
+        `<td style="color:${s.issueQty>0?'var(--red)':'var(--text-dim)'}; font-weight:700;"${clickAttr}>${s.issueQty.toLocaleString()}pcs</td></tr>`;
+    }).join('')
     || '<tr><td colspan="4" style="color:var(--text-dim)">스캔 기록 없음</td></tr>';
 
   const reasonLabel = {EXP:'EXP', NF:'NF', DMG:'DMG', OOS:'OOS', SKUMIS:'SKUMIS', MISS:'MISS(스캔누락)', CANC:'CANC(세일즈취소)'};
@@ -4768,9 +4825,41 @@ async function renderKPI(){
     ? Object.entries(byReason).map(([k,v]) => `${reasonLabel[k]||k} ${v.toLocaleString()}pcs`).join(' · ')
     : '이슈 없음';
 
+  // ★ 2026-08-19 신규 — 작업자별 총 소요시간 합계. 하루에 배치가 여러 개
+  //   나올 수 있고, 같은 배치라도 세션이 여러 개(예: 어제 강제종료분 + 오늘분)로
+  //   나뉠 수 있어서, 매니저가 일일이 더할 필요 없게 작업자당 한 줄로 합산.
+  const workerTotals = {};
+  (res.pickSessions||[]).forEach(p => {
+    if (!workerTotals[p.worker]) workerTotals[p.worker] = { minutes: 0, sessions: 0, forceCount: 0 };
+    workerTotals[p.worker].minutes += Number(p.durationMinutes) || 0;
+    workerTotals[p.worker].sessions += 1;
+    if (p.note && p.note.indexOf('force-closed') >= 0) workerTotals[p.worker].forceCount += 1;
+  });
+  const totalsRows = Object.entries(workerTotals)
+    .sort((a,b) => b[1].minutes - a[1].minutes)
+    .map(([worker, t]) => {
+      const h = Math.floor(t.minutes/60), m = t.minutes%60;
+      const hm = h > 0 ? `${h}시간 ${m}분` : `${m}분`;
+      const forceTag = t.forceCount > 0
+        ? ` <span style="color:var(--amber); font-size:10.5px; font-weight:700;">(⚠ 강제복구 ${t.forceCount}건 포함)</span>`
+        : '';
+      return `<tr><td style="font-weight:800">${worker}</td><td style="font-weight:800; color:var(--text)">${hm}${forceTag}</td><td style="color:var(--text-dim)">${t.sessions}개</td></tr>`;
+    }).join('')
+    || '<tr><td colspan="3" style="color:var(--text-dim)">기록 없음</td></tr>';
+
   el.innerHTML = `
+    <div style="margin-bottom:4px; font-size:11px; color:var(--text-dim); font-family:var(--mono);">배치 ${state.batchId}</div>
     <div style="margin-bottom:16px;">
-      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">① 작업자별 피킹 세션 (시작~종료 · 실제 처리 SKU/PCS)</div>
+      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">① 작업자별 총 소요시간 (세션 여러 개면 합산)</div>
+      <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+      <table style="width:100%; min-width:280px; font-size:12px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
+        <th style="text-align:left">작업자</th><th style="text-align:left">총 소요시간</th><th style="text-align:left">세션 수</th>
+      </tr></thead>
+      <tbody>${totalsRows}</tbody></table>
+      </div>
+    </div>
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">② 작업자별 피킹 세션 상세 (시작~종료 · 실제 처리 SKU/PCS)</div>
       <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
       <table style="width:100%; min-width:520px; font-size:11.5px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
         <th style="text-align:left">작업자</th><th style="text-align:left">담당페이지</th><th style="text-align:left">장수</th><th style="text-align:left">시작</th><th style="text-align:left">종료</th><th style="text-align:left">소요</th><th style="text-align:left">SKU</th><th style="text-align:left">PCS</th>
@@ -4779,7 +4868,7 @@ async function renderKPI(){
       </div>
     </div>
     <div>
-      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">② 작업자별 분류·검수 현황 (Pass · 이슈)</div>
+      <div style="font-weight:700; color:var(--text); margin-bottom:6px;">③ 작업자별 분류·검수 현황 (Pass · 이슈)</div>
       <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
       <table style="width:100%; min-width:340px; font-size:11.5px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
         <th style="text-align:left">작업자</th><th style="text-align:left">Pass</th><th style="text-align:left">이슈 건수</th><th style="text-align:left">이슈 수량</th>
@@ -4787,7 +4876,7 @@ async function renderKPI(){
       <tbody>${scanRows}</tbody></table>
       </div>
     </div>
-    <div style="margin-top:10px; color:var(--text-dim); font-size:11px;">③ 총 처리: Pass ${res.totals.pass.toLocaleString()} · 이슈 ${res.totals.issueCount}건 (${reasonSummary})</div>
+    <div style="margin-top:10px; color:var(--text-dim); font-size:11px;">④ 총 처리: Pass ${res.totals.pass.toLocaleString()} · 이슈 ${res.totals.issueCount}건 (${reasonSummary})</div>
   `;
 }
 document.getElementById('btnRefreshKPI').onclick = renderKPI;
