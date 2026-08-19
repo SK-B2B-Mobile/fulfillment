@@ -1200,13 +1200,31 @@ async function gasCallWithRetry(op, data, maxAttempts){
 //   순간적으로 끊기면 응답도 실패도 오지 않고 영원히 기다리는 상태가 됐음.
 //   그 결과 Scan Log의 KPI가 "불러오는 중..."에서 멈춘 채 복구되지 않았음.
 //   20초가 지나면 실패로 끊어서, 화면이 "다시 시도" 버튼을 띄울 수 있게 함.
-// ★ 2026-08-19 신규(현장 요청) — 작업자가 6명 넘게 동시에 batch.html/TV를
-//   열어놓고 각자 5~8초마다 폴링하다 보니, 서버(Apps Script)에 순간적으로
-//   요청이 몰려 "No logs available"로 조용히 실패하는 경우가 실제로 확인됨.
-//   화면이 처음 뜰 때 배치를 못 찾으면 "배치 없음"으로 멈춰버리던 곳처럼,
-//   한 번 실패해도 사람이 못 느낄 정도로 짧게 쉬었다가 자동으로 다시
-//   시도하게 만드는 헬퍼. (다른 곳의 재시도 로직과 같은 원칙 — 서버 부담을
-//   더 늘리지 않도록 요청 자체를 줄이는 건 별도 작업으로 남겨둠)
+// ★ 2026-08-19 신규(긴급) — board.html과 동일한 이유. fetch()가 CORS로 계속
+//   막히는데(서버 자체는 직접 접속하면 항상 정상 200) JSONP는 애초에 CORS
+//   검사 대상이 아니라서 이 문제를 원천적으로 피해감. 서버(Code.gs json_())가
+//   이미 callback= 파라미터를 지원해서 별도 서버 수정 없이 바로 적용 가능.
+let _jsonpCounter = 0;
+function jsonpGet(url, timeoutMs){
+  return new Promise((res, rej) => {
+    const cbName = '__jsonp_' + (++_jsonpCounter) + '_' + Date.now();
+    const timer = setTimeout(() => { cleanup(); rej(new Error('jsonp timeout')); }, timeoutMs || 15000);
+    function cleanup(){
+      clearTimeout(timer);
+      try{ delete window[cbName]; }catch(e){}
+      const s = document.getElementById(cbName);
+      if(s && s.parentNode) s.parentNode.removeChild(s);
+    }
+    window[cbName] = (data) => { cleanup(); res(data); };
+    const script = document.createElement('script');
+    script.id = cbName;
+    script.onerror = () => { cleanup(); rej(new Error('jsonp error')); };
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    script.src = url + sep + 'callback=' + cbName;
+    document.head.appendChild(script);
+  });
+}
+
 async function gasQueryWithRetry(op, params, retries, timeoutMs){
   const maxRetries = (retries === undefined) ? 2 : retries;
   let res = await gasQuery(op, params, timeoutMs);
@@ -1225,15 +1243,21 @@ async function gasQuery(op, params, timeoutMs){
   const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
   const limit = timeoutMs || 20000;
   let timer = null;
+  const qs = new URLSearchParams(Object.assign({op}, params||{})).toString();
   try{
-    const qs = new URLSearchParams(Object.assign({op}, params||{})).toString();
     if(ctrl) timer = setTimeout(() => ctrl.abort(), limit);
     const res = await fetch(`${CONFIG.GAS_URL}?${qs}`, ctrl ? { signal: ctrl.signal } : undefined);
     return await res.json();
   }catch(e){
-    const aborted = e && (e.name === 'AbortError');
-    console.error('gasQuery failed:', op, e);
-    return { ok:false, error: aborted ? ('응답이 ' + Math.round(limit/1000) + '초 안에 오지 않았습니다 (네트워크 확인)') : String(e) };
+    // ★ 2026-08-19 신규 — fetch가 CORS 등으로 실패하면 JSONP로 한 번 더 시도
+    console.warn('gasQuery fetch 실패, JSONP로 재시도:', op, e);
+    try{
+      return await jsonpGet(`${CONFIG.GAS_URL}?${qs}`, limit);
+    }catch(e2){
+      const aborted = e && (e.name === 'AbortError');
+      console.error('gasQuery 완전 실패(fetch+JSONP 둘다):', op, e2);
+      return { ok:false, error: aborted ? ('응답이 ' + Math.round(limit/1000) + '초 안에 오지 않았습니다 (네트워크 확인)') : String(e2) };
+    }
   }finally{
     if(timer) clearTimeout(timer);
   }
