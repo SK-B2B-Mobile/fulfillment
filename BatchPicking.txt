@@ -1724,6 +1724,10 @@ function getBatchKPI(batchId) {
     const ilLast = il.getLastRow();
     const issueByWorker = {};
     const issueTotalsByReason = {};
+    // ★ 2026-08-19 신규 — 이슈 "건수"만이 아니라 실제 내역(어떤 고객사의
+    //   어떤 상품이 무슨 사유로 등록됐는지)도 작업자별로 모아둠. KPI 표에서
+    //   이슈 건수를 클릭하면 팝업으로 상세를 바로 보여주기 위함.
+    const issueItemsByWorker = {};
     let totalIssueCount = 0, totalIssueQty = 0;
     if (ilLast >= 2) {
       il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
@@ -1735,6 +1739,15 @@ function getBatchKPI(batchId) {
         issueByWorker[w].issueQty += qty;
         issueTotalsByReason[reason] = (issueTotalsByReason[reason] || 0) + qty;
         totalIssueCount++; totalIssueQty += qty;
+
+        if (!issueItemsByWorker[w]) issueItemsByWorker[w] = [];
+        const tsVal = r[2];
+        const timeStr = (Object.prototype.toString.call(tsVal) === '[object Date]' && !isNaN(tsVal))
+          ? Utilities.formatDate(tsVal, batchTz_(), 'MM-dd HH:mm') : String(tsVal || '');
+        issueItemsByWorker[w].push({
+          time: timeStr, barcode: r[4], sku: r[5], name: r[6],
+          invoice: r[7], customer: r[8], reason: reason, qty: qty, note: r[11] || ''
+        });
       });
     }
 
@@ -1759,6 +1772,7 @@ function getBatchKPI(batchId) {
       batch: batchInfo,
       pickSessions: sessions,
       scanStats: scanStats,
+      issueItemsByWorker: issueItemsByWorker, // ★ 2026-08-19 신규 — 이슈 클릭 팝업용
       totals: {
         pass: totalPass,
         issueCount: totalIssueCount,
