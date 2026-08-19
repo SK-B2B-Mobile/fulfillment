@@ -1210,8 +1210,11 @@ async function gasCallWithRetry(op, data, maxAttempts){
 async function gasQueryWithRetry(op, params, retries, timeoutMs){
   const maxRetries = (retries === undefined) ? 2 : retries;
   let res = await gasQuery(op, params, timeoutMs);
+  // ★ 2026-08-19 수정 — 재시도 대기시간을 0.9/1.8초→2/4초로 늘림. 서버 혼잡이
+  //   몇 초씩 지속되는 게 확인돼서, 너무 짧게 재시도하면 같은 혼잡 구간
+  //   안에서 다 실패할 수 있음(실제로 3번 다 실패하는 사례가 확인됨).
   for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
-    await new Promise(r => setTimeout(r, 900 * attempt)); // 0.9초, 1.8초 대기 후 재시도
+    await new Promise(r => setTimeout(r, 2000 * attempt)); // 2초, 4초 대기 후 재시도
     res = await gasQuery(op, params, timeoutMs);
   }
   return res;
@@ -2978,13 +2981,16 @@ async function pollScanState(){
 let __scanPollTimer = null;
 function startScanPolling(){
   if(__scanPollTimer) return; // 중복 시작 방지
-  // ★ 2026-07-14 신규: 여러 스캔 기기가 정확히 같은 5초 주기로 돌면 서버 요청이
-  //   몰리는 문제가 있어서, 기기마다 소폭(0~1.5초) 다르게 어긋나도록 지터 추가.
-  //   실시간성은 거의 그대로 유지.
+  // ★ 2026-08-19 수정(현장 확인) — 작업자 6명 이상이 이 화면을 동시에 열어두고
+  //   각자 폴링하다 보니, Apps Script 서버에 요청이 몰려 간헐적으로 응답이
+  //   실패하는 게 실제로 확인됨(실행 로그에 동시 Running 다수 확인). 재시도만으론
+  //   짧은 시간 안에 몰린 혼잡을 못 피해서, 애초에 요청 자체를 줄이기로 함.
+  //   5초→8초, 6초→10초로 완화(체감 실시간성 차이는 거의 없음). 기기마다
+  //   소폭 어긋나도록 지터도 유지.
   const jitter = Math.floor(Math.random()*1500);
-  __scanPollTimer = setInterval(pollScanState, 5000+jitter);
+  __scanPollTimer = setInterval(pollScanState, 8000+jitter);
   // ★ 2026-07-22 신규: 다른 기기의 피킹 시작/종료를 이 화면에도 곧 반영하기 위한 폴링
-  if(!__activePickersTimer) __activePickersTimer = setInterval(pollActivePickers, 6000+jitter);
+  if(!__activePickersTimer) __activePickersTimer = setInterval(pollActivePickers, 10000+jitter);
   pollActivePickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
 }
 let __activePickersTimer = null;
@@ -3117,7 +3123,8 @@ let __structPollTimer = null;
 function startStructurePolling(){
   if(__structPollTimer) return;
   const jitter = Math.floor(Math.random()*6000); // ★ 2026-07-14 신규: 기기간 폴링 충돌 방지
-  __structPollTimer = setInterval(() => refreshBatchStructure(true), 30000+jitter); // 30초 내외로 조용히 재동기화
+  // ★ 2026-08-19 수정 — 서버 부담 완화를 위해 30초→45초로 완화(현장 확인된 서버 혼잡 대응)
+  __structPollTimer = setInterval(() => refreshBatchStructure(true), 45000+jitter);
 }
 
 
