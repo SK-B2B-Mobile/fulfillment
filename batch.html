@@ -656,6 +656,13 @@ select option:disabled{color:var(--text-dim2);}
   .complete-stats{grid-template-columns:1fr; gap:8px;}
   table{font-size:10.5px;}
   th, td{padding:8px 6px;}
+  /* ★ 2026-08-19 신규(현장 피드백) — 배치 KPI 표(①작업자별 총 소요시간/
+     ②세션상세/③Pass·이슈)는 한꺼번에 다 안 보여도 되니(좌우로 스크롤해서
+     보는 걸 이미 감안한 표), 정보 밀도보다 가독성이 더 중요하다는 판단.
+     인라인으로 폰트크기가 지정돼 있어 !important로 덮어씀 — PC(11.5~12px)와
+     비슷하거나 살짝 더 크게. 다른 표(예: 전체 스캔 이벤트 목록)는 원래대로 둠. */
+  #kpiPanel table{font-size:13px !important;}
+  #kpiPanel th, #kpiPanel td{padding:10px 8px !important;}
   .modal{padding:16px; max-width:94vw;}
   .toast{font-size:11px; padding:9px 14px; max-width:88vw;}
 }
@@ -4957,6 +4964,18 @@ function renderFullLog(){
       const idx = state.scans.findIndex(s => s.scanId === scanId);
       if(idx < 0) return;
       const scan = state.scans[idx];
+      // ★ 2026-08-19 신규(현장 요청) — 예전엔 누르자마자 바로 취소돼서, 실수로
+      //   잘못 누르면 정상 스캔이 조용히 사라질 위험이 있었음. 어떤 스캔을
+      //   취소하려는 건지 보여주고 확인을 받은 뒤에만 실행하도록 안전장치 추가.
+      const ok = confirm(
+        `이 스캔을 취소(Undo)하시겠습니까?\n\n` +
+        `작업자: ${scan.worker || '-'}\n` +
+        `고객사: ${scan.customer || '-'}\n` +
+        `SKU: ${scan.sku || '-'}\n` +
+        `수량: +${scan.qty || 1}\n\n` +
+        `취소하면 이 수량만큼 해당 슬롯의 완료 수량에서 다시 빠집니다.`
+      );
+      if(!ok) return;
       for(const sku of Object.values(state.scanIndex).flatMap(entry => [entry, ...(entry.altVariants||[])])){
         const qi = sku.queue.find(x => x.invoice === scan.invoice);
         if(qi && sku.sku === scan.sku){ qi.done = Math.max(0, qi.done - (scan.qty || 1)); break; }
