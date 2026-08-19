@@ -309,6 +309,19 @@ function rememberBatch(id){
   try{ localStorage.setItem(LAST_BATCH_KEY, JSON.stringify({ id: id, at: Date.now() })); }catch(e){}
 }
 
+// ★ 2026-08-19 신규(현장 요청) — batch.html과 동일한 이유. TV+작업자폰
+//   여러 대가 동시에 폴링하다 서버가 순간적으로 바빠서 실패하는 경우,
+//   화면이 "확인 중..." / "불러오기 실패"에 멈추지 않고 자동 복구되게 함.
+async function gasQueryWithRetry(op, params, retries){
+  const maxRetries = (retries === undefined) ? 2 : retries;
+  let res = await gasQuery(op, params);
+  for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
+    await new Promise(r => setTimeout(r, 900 * attempt));
+    res = await gasQuery(op, params);
+  }
+  return res;
+}
+
 async function gasQuery(op, params){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
   try{
@@ -970,7 +983,7 @@ async function pollOnce(){
         //   직접 고르게 함.
         let resolved = null;
         try{
-          const openRes = await gasQuery('getOpenBatches', {});
+          const openRes = await gasQueryWithRetry('getOpenBatches', {});
           if(mySeq !== pollSeq) return;
           // ★ 2026-08-05 신규 — getOpenBatches가 "완료된 지 1시간 안 된 배치"도
           //   같이 내려주므로, 이 자동표시 판단에서는 반드시 제외해야 함.
@@ -1111,7 +1124,7 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
   dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
   dd.classList.add('open');
 
-  const res = await gasQuery('getOpenBatches', {});
+  const res = await gasQueryWithRetry('getOpenBatches', {});
   if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
   const list = res.batches || [];
   if(!list.length){
