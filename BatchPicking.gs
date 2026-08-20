@@ -3021,6 +3021,14 @@ function getSalesInvoiceDetail(invoice) {
     invoice = String(invoice || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
 
+    // ★ 2026-08-19 신규(긴급) — "Too many simultaneous invocations: Spreadsheets"
+    //   실제로 발생 확인됨. 이 함수도 여러 시트(Jobs/BatchItems/IssueLog/Dims)를
+    //   조합해 계산하는 무거운 함수라, 6초 캐시로 스프레드시트 동시 접근 자체를 줄임.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'salesInvDetail_v1_' + invoice;
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     // 1) Jobs 시트에서 기본 정보 + 검수결과
     // ★ 2026-08-03 성능 개선 — 예전엔 인보이스 하나 찾으려고 Jobs 시트 전체
     //   (모든 행 × 모든 컬럼)를 통째로 읽었음. 시트가 계속 커지면서 이게
@@ -3216,7 +3224,7 @@ function getSalesInvoiceDetail(invoice) {
     //   있다면, 물리적으로 이미 패킹존에서 측정된 것이므로 이동완료로 간주.
     if (dimsResult.dims.length > 0) movedToPacking = true;
 
-    return {
+    const _result = {
       ok: true,
       invoice: invoice,
       customer: customer,
@@ -3244,6 +3252,11 @@ function getSalesInvoiceDetail(invoice) {
       dimsJoinTargets: null,                                // null = 아직 안 불러옴(화면이 비동기로 채움)
       dimsAddCandidates: null
     };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
