@@ -3003,21 +3003,37 @@ async function pollScanState(){
     console.error('pollScanState failed:', e);
   }
 }
+// ★ 2026-08-19 신규(긴급, 요청 합치기) — 반복 폴링(8/10초)에서만 이 통합
+//   함수를 쓰고, pollScanState/pollActivePickers 개별 함수는 그대로 둬서
+//   (수동 새로고침 등 다른 곳에서 부르는 코드에 영향 없게) 안전하게 분리.
+async function pollScanAndPickers(){
+  if(!GAS_READY || !state.batchId) return;
+  try{
+    const res = await gasQuery('getScanAndPickers', { batchId: state.batchId });
+    if(!res.ok) return;
+    if(res.scanState && res.scanState.ok) applyScanStateRes(res.scanState);
+    if(res.activePickers && res.activePickers.ok){
+      state.activePickers = res.activePickers.active || {};
+      state.lastPageRange = res.activePickers.lastPageRange || {};
+      if(!state.pickTimerRunning) populateWorkerSelect();
+    }
+  }catch(e){
+    console.error('pollScanAndPickers failed:', e);
+  }
+}
 
 let __scanPollTimer = null;
 function startScanPolling(){
   if(__scanPollTimer) return; // 중복 시작 방지
-  // ★ 2026-08-19 수정(현장 확인) — 작업자 6명 이상이 이 화면을 동시에 열어두고
-  //   각자 폴링하다 보니, Apps Script 서버에 요청이 몰려 간헐적으로 응답이
-  //   실패하는 게 실제로 확인됨(실행 로그에 동시 Running 다수 확인). 재시도만으론
-  //   짧은 시간 안에 몰린 혼잡을 못 피해서, 애초에 요청 자체를 줄이기로 함.
-  //   5초→8초, 6초→10초로 완화(체감 실시간성 차이는 거의 없음). 기기마다
-  //   소폭 어긋나도록 지터도 유지.
+  // ★ 2026-08-19 재수정(긴급, 요청 합치기) — 5초→8초 완화에 이어, 이번엔
+  //   "스캔상태(8초)"와 "활성작업자(10초)" 두 개 타이머·두 개 요청을 하나로
+  //   합침(getScanAndPickers). 폴링 주기(8초)는 그대로 유지하면서 실제
+  //   네트워크 요청 개수만 절반으로 줄임 — 활성작업자 정보는 오히려
+  //   10초→8초로 더 빨라짐(느려지는 부분 없음). 기기마다 소폭 어긋나도록
+  //   지터도 유지.
   const jitter = Math.floor(Math.random()*1500);
-  __scanPollTimer = setInterval(pollScanState, 8000+jitter);
-  // ★ 2026-07-22 신규: 다른 기기의 피킹 시작/종료를 이 화면에도 곧 반영하기 위한 폴링
-  if(!__activePickersTimer) __activePickersTimer = setInterval(pollActivePickers, 10000+jitter);
-  pollActivePickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
+  __scanPollTimer = setInterval(pollScanAndPickers, 8000+jitter);
+  pollScanAndPickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
 }
 let __activePickersTimer = null;
 function stopScanPolling(){
