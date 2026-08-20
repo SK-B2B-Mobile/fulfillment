@@ -642,10 +642,14 @@ async function gasGet(params){
 //   대부분 저절로 풀리므로, 자동으로 잠깐 쉬었다가 재시도하면 사람이 다시
 //   누를 필요 없이 복구됨. board.html/batch.html과 동일한 패턴.
 async function gasGetWithRetry(params, retries){
-  const maxRetries = (retries === undefined) ? 2 : retries;
+  // ★ 2026-08-19 재수정(긴급) — board.html/batch.html과 동일한 이유로 완화.
+  //   이 함수는 검색·클릭 등 사람이 직접 하는 동작에만 쓰이는지 확인함
+  //   — 30초 자동 동기화(autoSync)는 재시도 없는 일반 gasGet만 씀.
+  const maxRetries = (retries === undefined) ? 1 : retries;
   let res = await gasGet(params);
   for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
-    await new Promise(r => setTimeout(r, 2000 * attempt)); // 2초, 4초 대기 후 재시도
+    const jitter = Math.floor(Math.random() * 2000);
+    await new Promise(r => setTimeout(r, 3000 * attempt + jitter)); // 3초+지터
     res = await gasGet(params);
   }
   return res;
