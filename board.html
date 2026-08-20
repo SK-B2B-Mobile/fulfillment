@@ -616,7 +616,7 @@ function renderSkuOptionsHtml(items){
       }
     }
     const styleAttr = color ? ` style="color:${color};${color==='#FF4D6D'?' font-weight:800;':''}"` : '';
-    return `<option value="${it.barcode}" data-name="${(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}"${styleAttr}>${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
+    return `<option value="${it.barcode}" data-name="${String(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}"${styleAttr}>${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
   }).join('');
 }
 // ★ 2026-07-24 신규 — 검색창에 입력할 때마다 SKU/상품명/바코드 전체를 대상으로
@@ -696,7 +696,7 @@ function renderIssueModalBody(){
           ${ISSUE_REASON_OPTS.map(r => `<option value="${r.v}" ${r.v===i.reason?'selected':''}>${r.label}</option>`).join('')}
         </select>
         <input type="number" id="issueEditQty-${idx}" min="1" value="${i.qty}" placeholder="수량">
-        <input type="text" id="issueEditNote-${idx}" value="${(i.note||'').replace(/"/g,'&quot;')}" placeholder="메모(선택)">
+        <input type="text" id="issueEditNote-${idx}" value="${String(i.note||'').replace(/"/g,'&quot;')}" placeholder="메모(선택)">
         <div class="issue-edit-actions">
           <button class="issue-edit-cancel" data-idx="${idx}">닫기</button>
           <button class="issue-edit-save" data-idx="${idx}" data-issue-id="${i.issueId}">저장</button>
