@@ -1906,7 +1906,12 @@ function pullFromSalesSheet(dateFrom, dateTo) {
       return -1;
     };
 
-    const colDate        = findCol(['Date']);
+    // ★ 2026-08-20 긴급 수정 — 실제 영업시트를 확인해보니 이 칸의 헤더 이름이
+    //   "Date"가 아니라 "TAWA"로 되어 있었음(영업팀 내부 명칭으로 추정, 값 자체는
+    //   인보이스 등록일이 정상적으로 들어있음 — 예: 08/13/2026). 정확히 "Date"만
+    //   찾다 보니 못 찾고 계속 "Date column not found"로 실패했던 것.
+    //   'TAWA'를 추가하고, 혹시 또 이름이 바뀔 경우를 대비해 흔한 이름들도 같이 인식.
+    const colDate         = findCol(['TAWA', 'Date', 'Entry Date', 'Created', 'Order Date']);
     const colInvoice     = findCol(['Invoice#', 'Invoice #', 'Invoice']);
     const colCustomer    = findCol(['Customer Name', 'CustomerName', 'Customer']);
     const colShipDate    = findCol(['Ship out Date', 'ShipoutDate', 'Ship Date', 'ShipDate']);
