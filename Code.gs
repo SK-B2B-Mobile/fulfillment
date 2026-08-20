@@ -2330,6 +2330,14 @@ function getCmsStatus() {
  * ===================================================== */
 function getRevenueSummary() {
   try {
+    // ★ 2026-08-19 신규(긴급) — index.html 로드 시마다(+30분마다 자동) 부르는데,
+    //   여러 매니저가 거의 동시에 페이지를 열면 한꺼번에 몰릴 수 있어서 30초
+    //   캐시로 완화(어차피 30분 주기라 30초 정도는 지연으로 느낄 수준이 아님).
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'revenueSummary_v1';
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const sh = SHEET_();
     const hdr = headerMapCached_();
     const norm = normalizeHeaderName_;
@@ -2404,7 +2412,12 @@ function getRevenueSummary() {
       });
     });
 
-    return { ok: true, summary: summary };
+    const _result = { ok: true, summary: summary };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 30);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
 
   } catch(e) {
     return { ok: false, error: String(e), summary: {} };
@@ -2444,6 +2457,14 @@ function testRevenueSummary() {
  * ===================================================== */
 function getShipSchedule() {
   try {
+    // ★ 2026-08-19 신규(긴급) — index.html이 5분마다 자동 조회 + 페이지 로드
+    //   시 즉시 1회 조회하는데, 여러 매니저가 거의 동시에 페이지를 열면
+    //   한꺼번에 몰릴 수 있어서 60초 캐시로 완화(5분 주기 대비 충분히 짧음).
+    var _cache = CacheService.getScriptCache();
+    var _cacheKey = 'shipSchedule_v1';
+    var _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     var tz = Session.getScriptTimeZone(); // America/Los_Angeles
 
     // ── 미국 연방 공휴일 2025-2027 ──────────────────────────
@@ -2652,12 +2673,17 @@ function getShipSchedule() {
       });
     });
 
-    return {
+    var _result = {
       ok: true,
       schedule: buckets,
       dates: { today: today, d1: d1, d2: d2 },
       asOf: Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
     };
+    try {
+      var _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 60);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
 
   } catch(e) {
     Logger.log('[ShipSchedule] ERROR: ' + String(e));
