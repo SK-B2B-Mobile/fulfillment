@@ -1659,6 +1659,13 @@ function getBatchKPI(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
 
+    // ★ 2026-08-19 신규(긴급) — Scan Log 탭 열 때마다(그리고 자동 새로고침 때마다)
+    //   부르는 무거운 함수(ScanLog/PickTiming/IssueLog 조합 계산)라 6초 캐시로 완화.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'batchKPI_v1_' + batchId;
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     // 이 배치의 pass 스캔 전체를 먼저 한 번에 읽어둔다 (세션별 SKU/PCS 계산과
     // 작업자별 Pass 집계 양쪽에서 재사용)
     const sl = scanlogSheet_();
@@ -1793,7 +1800,7 @@ function getBatchKPI(batchId) {
       batchInfo = { batchId: bRow[0], date: bRow[1], status: bRow[2], totalSku: bRow[3], totalQty: bRow[4], createdAt: bRow[5], completedAt: bRow[6] };
     }
 
-    return {
+    const _result = {
       ok: true,
       batch: batchInfo,
       pickSessions: sessions,
@@ -1806,6 +1813,11 @@ function getBatchKPI(batchId) {
         byReason: issueTotalsByReason,
       }
     };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -1829,6 +1841,14 @@ function getBatchKPI(batchId) {
 function getInvoiceItemStatus(batchId, invoice) {
   try {
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
+
+    // ★ 2026-08-19 신규(긴급) — 슬롯 클릭 시(이슈 모달 열 때)마다 부르는 함수라
+    //   6초 캐시로 서버 부담 완화. 여러 사람이 같은 슬롯을 거의 동시에 봐도
+    //   첫 번째만 실제 계산.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'invItemStatus_v1_' + batchId + '_' + invoice;
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
 
     // ★ 2026-07-28 긴급 수정 — 이 함수 전체를 "바코드" 단독 키에서
     //   "바코드|SKU" 조합 키로 변경. 같은 바코드가 서로 다른 SKU 2개에
@@ -1891,7 +1911,12 @@ function getInvoiceItemStatus(batchId, invoice) {
         short: Math.max(0, reqQty - scannedQty - issueQty),
       };
     });
-    return { ok: true, invoice: invoice, items: items };
+    const _result = { ok: true, invoice: invoice, items: items };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -2127,6 +2152,14 @@ function getUnfulfilledSkuAlerts(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
 
+    // ★ 2026-08-19 신규(긴급) — 오늘 확인된 서버 혼잡("Too many simultaneous
+    //   invocations: Spreadsheets") 완화 조치를 이 함수까지 확대. 45초 폴링
+    //   주기보다 짧은 15초 캐시라 실시간성 저하는 거의 없음.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'unfulfilledAlerts_v1_' + batchId;
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const bi = bitemsSheet_();
     const biLast = bi.getLastRow();
     const custLines = [];
@@ -2194,7 +2227,12 @@ function getUnfulfilledSkuAlerts(batchId) {
       });
     });
 
-    return { ok: true, alerts: alerts, count: alerts.length };
+    const _result = { ok: true, alerts: alerts, count: alerts.length };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 15);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -2708,6 +2746,12 @@ function cleanupOldBatchData() {
  * ================================================================== */
 function getBatchWorkers() {
   try {
+    // ★ 2026-08-19 신규(긴급) — 작업자 명단은 자주 안 바뀌므로 30초로 여유있게 캐싱.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'batchWorkers_v1';
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const sh = bworkersSheet_();
     const last = sh.getLastRow();
     if (last < 2) return { ok: true, workers: [] }; // 비어있으면 클라이언트가 기본값 사용
@@ -2715,7 +2759,12 @@ function getBatchWorkers() {
     const workers = rows
       .filter(r => r[1]) // 이름 없는 빈 행 제외
       .map(r => ({ id: Number(r[0]) || 0, name: String(r[1]), status: r[2] || 'active' }));
-    return { ok: true, workers: workers };
+    const _result = { ok: true, workers: workers };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 30);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -2733,6 +2782,9 @@ function setBatchWorkers(data) {
       const rows = workers.map(w => [w.id, w.name, w.status || 'active']);
       sh.getRange(2, 1, rows.length, 3).setValues(rows);
     }
+    // ★ 2026-08-19 신규 — getBatchWorkers 캐시를 즉시 무효화(작업자 추가/수정이
+    //   30초 캐시 때문에 늦게 반영되는 것 방지)
+    try { CacheService.getScriptCache().remove('batchWorkers_v1'); } catch (eCache) {}
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
