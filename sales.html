@@ -732,6 +732,20 @@ async function loadSheetOverview(){
   //     잠깐 바뀌게 함. 다음 주기에 조용히 복구됨.
   if (!res || !res.ok){
     if (!SHEET_JOBS.length){
+      // ★ 2026-08-19 신규(긴급) — 위 안전장치는 "페이지를 이미 열어서 한 번
+      //   성공한 뒤"에만 통했음. 방금 막 페이지를 연 순간 하필 서버가
+      //   혼잡하면(오늘 실제로 자주 발생) 기댈 데이터가 없어 그냥 비어
+      //   보였음. localStorage에 저장해둔 "마지막으로 성공했던 데이터"라도
+      //   대신 보여줘서, 최소한 완전히 빈 화면보단 낫게 함.
+      const cached = loadCachedSheetOverview_();
+      if (cached && cached.jobs && cached.jobs.length){
+        SHEET_JOBS = cached.jobs;
+        renderProgressBoard(SHEET_JOBS);
+        renderSheet();
+        const ageMin = Math.round((Date.now() - cached.savedAt) / 60000);
+        setSync('err', `⚠ 서버 연결 실패 — ${ageMin}분 전 데이터 표시 중`);
+        return;
+      }
       document.getElementById('sheet-tbody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-dim);">Could not load data.</td></tr>';
     } else {
       setSync('err', 'Reconnecting…');
@@ -739,6 +753,7 @@ async function loadSheetOverview(){
     return;
   }
   SHEET_JOBS = res.jobs || [];
+  saveCachedSheetOverview_(SHEET_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 수정(매니저 지적) — 예전엔 데이터를 새로 받을 때마다 무조건
   //   1페이지로 되돌렸음. 30초 자동 동기화가 이걸 계속 실행하는 바람에,
   //   3페이지를 보고 있으면 잠시 뒤 혼자 1페이지로 튀어버렸음.
@@ -746,6 +761,19 @@ async function loadSheetOverview(){
   //   마지막 페이지로 알아서 맞춰줌(아래 clamp 로직).
   renderProgressBoard(SHEET_JOBS);
   renderSheet();
+}
+// ★ 2026-08-19 신규 — sheet overview 로컬 캐시 저장/조회 (5MB 제한 감안해 최근 500건만)
+function saveCachedSheetOverview_(jobs){
+  try{
+    localStorage.setItem('sk_sheet_overview_cache', JSON.stringify({ jobs: jobs.slice(0, 500), savedAt: Date.now() }));
+  }catch(e){ /* 저장 실패해도(용량 초과 등) 화면 동작엔 영향 없음 */ }
+}
+function loadCachedSheetOverview_(){
+  try{
+    const raw = localStorage.getItem('sk_sheet_overview_cache');
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch(e){ return null; }
 }
 
 // ★ 2026-08-05 신규 — 진행 현황판. 검색창 필터와 무관하게 항상 전체 로드된
@@ -893,6 +921,18 @@ async function loadToday(){
   if (!res || !res.ok){
     // ★ 2026-08-10 — 위와 같은 이유로, 이미 받아둔 목록이 있으면 지우지 않음
     if (!TODAY_JOBS.length){
+      // ★ 2026-08-19 신규(긴급) — loadSheetOverview와 동일한 이유. 방금 페이지를
+      //   열었는데 하필 서버가 혼잡하면 기댈 데이터가 없어 빈 화면이 뜸.
+      //   localStorage의 마지막 성공 데이터라도 대신 보여줌.
+      const cached = loadCachedTodayList_();
+      if (cached && cached.jobs && cached.jobs.length){
+        TODAY_JOBS = cached.jobs;
+        const ageMin = Math.round((Date.now() - cached.savedAt) / 60000);
+        document.getElementById('today-count').textContent = TODAY_JOBS.length + `건 (⚠ ${ageMin}분 전 데이터)`;
+        renderToday();
+        setSync('err', `⚠ 서버 연결 실패 — ${ageMin}분 전 데이터 표시 중`);
+        return;
+      }
       document.getElementById('today-list').innerHTML = '<div class="today-empty">Could not load the list.</div>';
       document.getElementById('today-count').textContent = '';
       document.getElementById('today-pager').style.display = 'none';
@@ -902,9 +942,23 @@ async function loadToday(){
     return;
   }
   TODAY_JOBS = res.jobs || [];
+  saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
   document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
   renderToday();
+}
+// ★ 2026-08-19 신규 — today list 로컬 캐시 저장/조회
+function saveCachedTodayList_(jobs){
+  try{
+    localStorage.setItem('sk_today_list_cache', JSON.stringify({ jobs: jobs.slice(0, 500), savedAt: Date.now() }));
+  }catch(e){ /* 저장 실패해도(용량 초과 등) 화면 동작엔 영향 없음 */ }
+}
+function loadCachedTodayList_(){
+  try{
+    const raw = localStorage.getItem('sk_today_list_cache');
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch(e){ return null; }
 }
 
 function onTodayPageSizeChange(){
