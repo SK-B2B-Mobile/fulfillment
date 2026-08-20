@@ -1226,13 +1226,15 @@ function jsonpGet(url, timeoutMs){
 }
 
 async function gasQueryWithRetry(op, params, retries, timeoutMs){
-  const maxRetries = (retries === undefined) ? 2 : retries;
+  // ★ 2026-08-19 재수정(긴급) — board.html과 동일한 이유로 재시도 횟수를
+  //   2번→1번으로 줄이고 지터를 크게 넣음(재시도 폭탄 완화). 이 함수는
+  //   사용자 클릭이나 페이지 최초 로딩 시(1회성)에만 쓰이는지 다시 확인함
+  //   — 반복 폴링(pollScanState 등) 안에서는 안 씀.
+  const maxRetries = (retries === undefined) ? 1 : retries;
   let res = await gasQuery(op, params, timeoutMs);
-  // ★ 2026-08-19 수정 — 재시도 대기시간을 0.9/1.8초→2/4초로 늘림. 서버 혼잡이
-  //   몇 초씩 지속되는 게 확인돼서, 너무 짧게 재시도하면 같은 혼잡 구간
-  //   안에서 다 실패할 수 있음(실제로 3번 다 실패하는 사례가 확인됨).
   for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
-    await new Promise(r => setTimeout(r, 2000 * attempt)); // 2초, 4초 대기 후 재시도
+    const jitter = Math.floor(Math.random() * 2000);
+    await new Promise(r => setTimeout(r, 3000 * attempt + jitter)); // 3초+지터
     res = await gasQuery(op, params, timeoutMs);
   }
   return res;
