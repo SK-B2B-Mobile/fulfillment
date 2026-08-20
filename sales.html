@@ -724,6 +724,12 @@ function showNamePopover(evt, fullName){
 /* ===================== Screen 1: Sheet Preview ===================== */
 async function loadSheetOverview(){
   const res = await gasGet({ op:'getSalesOverview' });
+  applySheetOverviewResult(res);
+}
+// ★ 2026-08-19 신규(긴급, 요청 합치기) — 위 로직을 분리. autoSync()가 통합
+//   요청(getSalesOverviewAndToday) 하나로 받아온 결과를 여기 그대로 넣어서
+//   재사용할 수 있게 함. 동작 자체는 기존과 완전히 동일.
+function applySheetOverviewResult(res){
   // ★ 2026-08-10 수정(매니저 지적) — "데이터가 사라졌다가 다시 살아나는" 현상의 원인.
   //   30초마다 도는 자동 갱신이 한 번이라도 실패하면(창고 와이파이 순간 끊김,
   //   구글 앱스스크립트 지연 등) 표를 통째로 "Could not load data."로 갈아엎었고,
@@ -918,6 +924,11 @@ let TODAY_PAGE_SIZE = 10;
 
 async function loadToday(){
   const res = await gasGet({ op:'getSalesTodayList' });
+  applyTodayResult(res);
+}
+// ★ 2026-08-19 신규(긴급, 요청 합치기) — 위 로직을 분리. autoSync()가 통합
+//   요청으로 받아온 결과를 여기 그대로 넣어서 재사용. 동작은 기존과 동일.
+function applyTodayResult(res){
   if (!res || !res.ok){
     // ★ 2026-08-10 — 위와 같은 이유로, 이미 받아둔 목록이 있으면 지우지 않음
     if (!TODAY_JOBS.length){
@@ -1696,7 +1707,19 @@ async function autoSync(silent){
   if (isBusyEditing()) return;
   try {
     if (!silent) setSync('busy', 'Loading...');
-    await Promise.all([loadSheetOverview(), loadToday()]);
+    // ★ 2026-08-19 신규(긴급, 요청 합치기) — 예전엔 getSalesOverview +
+    //   getSalesTodayList를 각각 따로(Promise.all로 동시에 2개) 불렀는데,
+    //   통합 엔드포인트 하나로 합침. 주기(30초)는 그대로, 요청 개수만 절반.
+    const res = await gasGet({ op:'getSalesOverviewAndToday' });
+    if (res && res.ok){
+      applySheetOverviewResult(res.overview);
+      applyTodayResult(res.today);
+    } else {
+      // 통합 요청 자체가 실패했으면, 각 apply 함수가 알아서 로컬 캐시로
+      // 대체 표시하도록 실패 응답을 그대로 넘겨줌(기존 실패 처리 로직 재사용)
+      applySheetOverviewResult(res);
+      applyTodayResult(res);
+    }
     setSync('ok', 'Connected · ' + new Date().toLocaleTimeString('en-US', {hour12:false}));
   } catch(e){
     setSync('err', 'Sync failed');
