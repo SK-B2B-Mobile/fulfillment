@@ -4874,8 +4874,8 @@ async function renderKPI(){
       //   닫힌 경우)된 세션은 소요시간 옆에 참고용 배지를 붙임. 시간 자체는
       //   근무시간 기준(calcWorkMinutes_)으로 이미 정확히 계산되므로 가릴
       //   필요는 없고, 매니저가 "종료를 깜빡한 세션이었구나"를 알 수 있게만 함.
-      const forceNote = p.note && p.note.indexOf('force-closed') >= 0
-        ? ` <span title="${p.note.replace(/"/g,'&quot;')}" style="display:inline-block; margin-left:4px; padding:1px 6px; border-radius:5px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5); color:var(--amber); font-size:9.5px; font-weight:800; cursor:help;">⚠ 강제복구</span>`
+      const forceNote = String(p.note||'').indexOf('force-closed') >= 0
+        ? ` <span title="${String(p.note||'').replace(/"/g,'&quot;')}" style="display:inline-block; margin-left:4px; padding:1px 6px; border-radius:5px; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.5); color:var(--amber); font-size:9.5px; font-weight:800; cursor:help;">⚠ 강제복구</span>`
         : '';
       return `<tr><td>${p.worker}</td><td style="color:var(--text-dim)">${pr||'-'}</td><td style="font-weight:700">${cnt?cnt+'장':'-'}</td><td>${p.start}</td><td>${p.end}</td><td>${p.durationMinutes}분${forceNote}</td><td>${p.totalSku}</td><td>${p.totalQty.toLocaleString()}</td></tr>`; })()).join('')
     || '<tr><td colspan="8" style="color:var(--text-dim)">피킹 기록 없음</td></tr>';
