@@ -244,6 +244,12 @@ function doGet(e) {
   if (op === 'getScanState') {
     return json_(getScanState((e.parameter || {}).batchId || ''));
   }
+  // ★ 2026-08-19 신규(긴급, 요청 합치기) — getScanState + getActivePickers를
+  //   한 번에 묶어서 반환. batch.html이 8초·10초마다 따로 부르던 걸 하나로
+  //   합쳐서, 폴링 주기는 그대로 두고 실제 요청 개수만 줄이기 위함.
+  if (op === 'getScanAndPickers') {
+    return json_(getScanAndPickers((e.parameter || {}).batchId || ''));
+  }
   // ★ 2026-07-10 신규 — 완료 처리 안 된 배치(날짜 무관) 전부 조회
   if (op === 'getOpenBatches') {
     return json_(getOpenBatches());
@@ -299,6 +305,12 @@ function doGet(e) {
   // ★ 2026-07-28 신규 — 영업 공유: 시트 미리보기 화면 (검수 여부 무관 전체 목록)
   if (op === 'getSalesOverview') {
     return json_(getSalesOverview());
+  }
+  // ★ 2026-08-19 신규(긴급, 요청 합치기) — getSalesOverview + getSalesTodayList
+  //   한 번에 반환. sales.html의 30초 자동동기화가 항상 이 둘을 같이 부르므로
+  //   요청 개수를 절반으로 줄임.
+  if (op === 'getSalesOverviewAndToday') {
+    return json_(getSalesOverviewAndToday());
   }
 
   return json_({ ok: false, error: 'unknown op' });
@@ -3127,6 +3139,20 @@ function getSalesOverview() {
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
+  }
+}
+
+// ★ 2026-08-19 신규(긴급, 요청 합치기) — sales.html의 autoSync()가 30초마다
+//   getSalesOverview + getSalesTodayList를 항상 같이(Promise.all) 부르는데,
+//   이걸 한 요청으로 합침. 폴링 주기(30초)는 그대로, 요청 개수만 절반으로
+//   줄임. 기존 두 함수는 그대로 남겨둠(다른 곳에서 개별로 계속 씀).
+function getSalesOverviewAndToday() {
+  try {
+    const overviewRes = getSalesOverview();
+    const todayRes = getSalesTodayList();
+    return { ok: true, overview: overviewRes, today: todayRes };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
 
