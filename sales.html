@@ -637,6 +637,19 @@ async function gasGet(params){
     }
   }
 }
+// ★ 2026-08-19 신규(긴급) — "Too many simultaneous invocations: Spreadsheets"
+//   같은 구글 쪽 일시적 혼잡 에러가 실제로 확인됨. 이런 에러는 몇 초 지나면
+//   대부분 저절로 풀리므로, 자동으로 잠깐 쉬었다가 재시도하면 사람이 다시
+//   누를 필요 없이 복구됨. board.html/batch.html과 동일한 패턴.
+async function gasGetWithRetry(params, retries){
+  const maxRetries = (retries === undefined) ? 2 : retries;
+  let res = await gasGet(params);
+  for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
+    await new Promise(r => setTimeout(r, 2000 * attempt)); // 2초, 4초 대기 후 재시도
+    res = await gasGet(params);
+  }
+  return res;
+}
 async function gasPost(op, data){
   if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
   try {
@@ -1012,7 +1025,7 @@ async function doSearch(){
 
   // 목록에 없음 → 서버 조회
   st.innerHTML = '<span class="spinner"></span> Searching all orders…';
-  const direct = await gasGet({ op:'getSalesInvoiceDetail', invoice:q });
+  const direct = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice:q });
   if (direct && direct.ok){ st.textContent = ''; CURRENT_ORDER = direct; 
     document.getElementById('detail-overlay').classList.add('show');
     document.body.style.overflow = 'hidden';
@@ -1404,7 +1417,7 @@ async function openInvoice(inv){
   card.classList.add('show');
   card.innerHTML = `<div class="modal-loading"><span class="spinner"></span>${inv} loading…</div>`;
 
-  const res = await gasGet({ op:'getSalesInvoiceDetail', invoice: inv });
+  const res = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice: inv });
   if (!res || !res.ok){
     CURRENT_ORDER = null;
     card.innerHTML = `<div class="modal-loading">❌ ${(res && res.error) ? res.error : ('Order not found: '+inv)}
