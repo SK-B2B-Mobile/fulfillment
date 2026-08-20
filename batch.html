@@ -954,8 +954,8 @@ select option:disabled{color:var(--text-dim2);}
         <div class="row" style="align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
           <h3 style="margin:0; font-size:13px;">④ 전체 스캔 이벤트</h3>
           <div class="spacer"></div>
-          <input id="logSearchInput" type="text" placeholder="바코드·SKU·고객사·작업자 검색..."
-            style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 12px; font-size:12.5px; width:220px;">
+          <input id="logSearchInput" type="text" placeholder="바코드·SKU·고객사·작업자 검색... (예: SLOT 3)"
+            style="background:var(--surface3); border:1px solid var(--border); border-radius:6px; color:var(--text); padding:7px 12px; font-size:12.5px; width:260px;">
         </div>
         <div id="logSearchInfo" style="font-size:11px; color:var(--text-dim2); margin-bottom:8px; display:none;"></div>
         <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
@@ -4972,9 +4972,18 @@ function renderFullLog(){
   const infoEl = document.getElementById('logSearchInfo');
 
   const q = state.logSearch.trim().toLowerCase();
-  const filtered = q
-    ? state.scans.filter(s => [s.barcode, s.sku, s.customer, s.worker].some(v => String(v||'').toLowerCase().includes(q)))
-    : state.scans;
+  // ★ 2026-08-20 신규(현장 요청) — "SLOT 1", "SLOT2", "슬롯 3" 처럼 입력하면
+  //   그 슬롯 번호에 해당하는 스캔만 정확히 걸러지도록 함. 예전엔 슬롯 번호가
+  //   아예 검색 대상에 없어서, "1"만 쳐도 바코드·SKU 안에 숫자 1이 들어간
+  //   전혀 다른 항목까지 다 같이 뜨는 문제가 있었음. "SLOT"/"슬롯" 접두어가
+  //   붙은 경우에만 정확히 그 슬롯 번호로만 매칭하고(부분일치 아님), 그 외에는
+  //   기존처럼 바코드·SKU·고객사·작업자 텍스트 검색을 그대로 유지함.
+  const slotMatch = q.match(/^(?:slot|슬롯)\s*(\d+)$/i);
+  const filtered = slotMatch
+    ? state.scans.filter(s => Number(s.slot) === Number(slotMatch[1]))
+    : q
+      ? state.scans.filter(s => [s.barcode, s.sku, s.customer, s.worker].some(v => String(v||'').toLowerCase().includes(q)))
+      : state.scans;
 
   if(q){
     infoEl.style.display = 'block';
