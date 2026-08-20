@@ -586,20 +586,55 @@ function tickClock(){
 tickClock();
 setInterval(tickClock, 1000);
 
+// ★ 2026-08-19 신규(긴급) — board.html/batch.html과 동일한 이유. Apps Script의
+//   script.google.com→script.googleusercontent.com 리다이렉트 구간에서 CORS
+//   허용 헤더가 불안정하게 실리는 문제로, fetch()가 간헐적으로 실패함(서버
+//   자체는 정상). <script> 태그로 데이터를 받아오는 JSONP 방식은 CORS 검사
+//   대상이 아니라서 이 문제를 원천적으로 피해감. 서버(Code.gs json_())가
+//   이미 callback= 파라미터를 지원해서 별도 서버 수정 없이 바로 적용 가능.
+let _jsonpCounter = 0;
+function jsonpGet(url, timeoutMs){
+  return new Promise((res, rej) => {
+    const cbName = '__jsonp_' + (++_jsonpCounter) + '_' + Date.now();
+    const timer = setTimeout(() => { cleanup(); rej(new Error('jsonp timeout')); }, timeoutMs || 15000);
+    function cleanup(){
+      clearTimeout(timer);
+      try{ delete window[cbName]; }catch(e){}
+      const s = document.getElementById(cbName);
+      if(s && s.parentNode) s.parentNode.removeChild(s);
+    }
+    window[cbName] = (data) => { cleanup(); res(data); };
+    const script = document.createElement('script');
+    script.id = cbName;
+    script.onerror = () => { cleanup(); rej(new Error('jsonp error')); };
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    script.src = url + sep + 'callback=' + cbName;
+    document.head.appendChild(script);
+  });
+}
+
 async function gasGet(params){
   if (!GAS_READY) return { ok:false, error:'GAS_URL not configured' };
+  const qs = new URLSearchParams(Object.assign({t:Date.now()}, params)).toString();
+  // ★ 2026-08-03 신규 — 서버가 아주 느려지거나 응답을 안 주는 경우에도 화면이
+  //   영원히 "Looking up..." 상태로 멈춰있지 않도록 25초 타임아웃 추가.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
   try {
-    const qs = new URLSearchParams(Object.assign({t:Date.now()}, params)).toString();
-    // ★ 2026-08-03 신규 — 서버가 아주 느려지거나 응답을 안 주는 경우에도 화면이
-    //   영원히 "Looking up..." 상태로 멈춰있지 않도록 25초 타임아웃 추가.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 25000);
     const res = await fetch(`${CONFIG.GAS_URL}?${qs}`, { signal: controller.signal });
     clearTimeout(timer);
     return await res.json();
   } catch(e) {
-    const timedOut = e && e.name === 'AbortError';
-    return { ok:false, error: timedOut ? 'Request timed out (25s) — please try again' : String(e && e.message || e) };
+    clearTimeout(timer);
+    // ★ 2026-08-19 신규 — fetch가 CORS 등으로 실패하면 JSONP로 한 번 더 시도
+    console.warn('gasGet fetch 실패, JSONP로 재시도:', e);
+    try{
+      return await jsonpGet(`${CONFIG.GAS_URL}?${qs}`, 25000);
+    }catch(e2){
+      const timedOut = e && e.name === 'AbortError';
+      console.error('gasGet 완전 실패(fetch+JSONP 둘다):', e2);
+      return { ok:false, error: timedOut ? 'Request timed out (25s) — please try again' : String(e2 && e2.message || e2) };
+    }
   }
 }
 async function gasPost(op, data){
