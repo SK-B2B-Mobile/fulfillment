@@ -2336,6 +2336,27 @@ function getScanState(batchId) {
   }
 }
 
+// ★ 2026-08-19 신규(긴급, 요청 합치기) — batch.html이 8초·10초마다 따로따로
+//   getScanState/getActivePickers 두 번 물어보던 걸 한 요청으로 합침. 폴링
+//   주기는 그대로 유지하면서(느려지지 않음), 실제 네트워크 요청 개수 자체를
+//   줄이는 게 목적. 기존 getScanState/getActivePickers는 그대로 남겨둠(다른
+//   화면·기존 코드가 개별적으로 계속 쓸 수 있음) — 이 함수는 그 둘을 그대로
+//   호출해서 한 응답에 담아줄 뿐, 계산 로직 자체는 중복 작성하지 않음.
+function getScanAndPickers(batchId) {
+  try {
+    if (!batchId) return { ok: false, error: 'batchId required' };
+    const scanRes = getScanState(batchId);
+    const pickersRes = getActivePickers(batchId);
+    return {
+      ok: true,
+      scanState: scanRes,
+      activePickers: pickersRes,
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 /* ===================== ⑪ getOpenBatches (★ 2026-07-10 신규) =====================
  * 목적: "오늘 날짜"가 아니어도, completeBatch()로 매니저가 명시적으로 완료 처리
  *       하지 않은 배치는 전부 보여준다. (예: 어제 배치를 완료 처리 안 하고
