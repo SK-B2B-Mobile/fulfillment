@@ -1309,11 +1309,41 @@ function logIssue(data) {
     if (!data.invoice) return { ok: false, error: 'invoice required' };
     const qty = Number(data.qty) || 0;
     if (qty <= 0) return { ok: false, error: 'qty must be > 0' };
+    const il = issuelogSheet_();
+    // ★ 2026-08-21 긴급 신규 — 이중 등록 방지 안전장치.
+    //   실제 현장에서 같은 이슈(바코드·사유·수량·작업자 전부 동일)가 몇 초 안에
+    //   3번 연속 등록되는 사고가 발생함(원인: 등록 성공 후에도 폼이 초기화되지
+    //   않아, 작업자가 "등록됐나?" 헷갈려서 같은 값 그대로 다시 눌렀을 가능성이
+    //   높음 — board.html 쪽 폼 초기화는 별도로 같이 수정함). 원인이 다중 클릭이든
+    //   네트워크 재전송이든 상관없이, 서버 쪽에서 마지막 방어선으로 한 번 더 막음.
+    //   최근 50행만 확인 — 그 이상 오래된 항목까지 매번 전수 스캔하면 이슈가
+    //   많이 쌓인 배치에서 등록 자체가 느려짐(성능 부담 최소화).
+    const ilLastRow = il.getLastRow();
+    if (ilLastRow >= 2) {
+      const scanFrom = Math.max(2, ilLastRow - 49);
+      const recent = il.getRange(scanFrom, 1, ilLastRow - scanFrom + 1, 13).getValues();
+      const nowMs = Date.now();
+      const DUP_WINDOW_MS = 120000; // 2분 — 정말 짧은 시간 안의 실수성 중복만 잡고, 나중에 실제로 또 같은 문제가 생긴 경우는 정상 등록되게 함
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const r = recent[i];
+        if (String(r[12]) !== 'active') continue;
+        if (String(r[0]) !== String(data.batchId)) continue;
+        if (String(r[7]) !== String(data.invoice)) continue;
+        if (String(r[4]||'') !== String(data.barcode||'')) continue;
+        if (String(r[9]||'ETC') !== String(data.reason||'ETC')) continue;
+        if (Number(r[10]) !== qty) continue;
+        if (String(r[3]||'') !== String(data.worker||'')) continue;
+        const rowTime = new Date(String(r[2]).replace(' ', 'T'));
+        if (isNaN(rowTime.getTime())) continue;
+        if (nowMs - rowTime.getTime() > DUP_WINDOW_MS) continue;
+        // 2분 이내에 완전히 동일한 이슈가 이미 등록돼 있음 — 새로 만들지 않고 그 이슈를 그대로 반환
+        return { ok: true, issueId: String(r[1]), duplicate: true };
+      }
+    }
     const issueId = Utilities.getUuid();
     // ★ 2026-08-05 긴급 수정 — logScan과 동일한 이유로, IssueLog의 Barcode(E)/
     //   SKU(F) 컬럼도 appendRow 전에 텍스트로 먼저 고정해서 숫자 자동변환(앞자리
     //   0 소실)을 막음.
-    const il = issuelogSheet_();
     const ilNewRow = il.getLastRow() + 1;
     ensureSheetRoom_(il, ilNewRow); // ★ 2026-08-12 신규
     il.getRange(ilNewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
