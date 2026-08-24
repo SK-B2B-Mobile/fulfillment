@@ -27,6 +27,10 @@ const ISSUELOG_SHEET = 'IssueLog'; // ★ 2026-07-16 신규 — EXP/NF/Damaged/O
 //   기록은 하나도 없어지지 않음(그냥 다른 탭으로 옮겨질 뿐).
 const ARCHIVE_PREFIX = 'Archive_';
 const BWORKERS_SHEET = 'BatchWorkers'; // ★ 2026-07-16 신규 — 총량피킹 "작업자 관리" 명단 서버 저장용
+// ★ 2026-08-24 신규 — 패킹 검증 스캔 전용 로그. 검수(ScanLog)와 완전히 분리된
+// 별도 감사기록. "검수에서 넘어온 물건이 실제로 이 고객사 것인지"를 패킹존에서
+// 한 번 더 바코드로 확인하는 절차(오출고 방지)를 위해 신설.
+const PACKSCAN_SHEET = 'PackScanLog';
 
 function batchTz_() { return Session.getScriptTimeZone(); }
 function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
@@ -513,6 +517,9 @@ function bcustSheetSafe_() {
   const bc = bcustSheet_();
   if (!bc.getRange(1, 11).getValue()) bc.getRange(1, 11).setValue('MovedToPacking');
   if (!bc.getRange(1, 12).getValue()) bc.getRange(1, 12).setValue('TakenOut'); // ★ 2026-08-04 신규 — 출고팀이 실제로 가져간 시각(파란색 상태)
+  // ★ 2026-08-24 신규 — "최종 2차 검증완료"(주황, 파랑 다음 마지막 단계) 시각.
+  //   K(핑크)/L(파랑)의 기존 의미는 절대 안 바꾸고, 그 뒤에 한 단계만 얹음.
+  if (!bc.getRange(1, 13).getValue()) bc.getRange(1, 13).setValue('PackVerified');
   return bc;
 }
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
@@ -631,6 +638,10 @@ function ensureSheetRoom_(sheet, neededRow) {
 }
 // ★ 2026-07-16 신규: 작업자 명단 — Id/Name/Status 한 명당 한 행. batch.html의 로컬 하드코딩을 대체.
 function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name','Status']); }
+// ★ 2026-08-24 신규 — 패킹 검증 스캔 로그. 한 번의 스캔 시도(성공/오배송/초과)마다 한 행.
+// pass만 "실제로 채워진 수량"으로 집계하고, wrong/over도 전부 기록해서 나중에
+// "그때 뭘 잘못 스캔했는지" 감사 추적이 가능하게 함.
+function packscanSheet_() { return ensureBatchSheet_(PACKSCAN_SHEET, ['BatchId','PackScanId','Timestamp','Worker','Barcode','SKU','Invoice','Result','Status','Qty']); }
 
 function generateBatchId_() {
   const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
@@ -759,7 +770,7 @@ function getBatch(batchId) {
       // ★ 2026-08-07 수정 — 11개 컬럼만 읽어서 12번째인 TakenOut(파란)이
       //   배열에 아예 안 들어왔음. 그래서 batch.html은 항상 false를 받았고,
       //   TV 현황판에서 파란으로 바꿔도 계속 핵크로 보였음 — 색 불일치의 진짜 원인.
-      const rows = bc.getRange(2, 1, bcLast - 1, 12).getValues();
+      const rows = bc.getRange(2, 1, bcLast - 1, 13).getValues();
       customers = rows.filter(r => String(r[0]) === String(resolvedId)).map(r => ({
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
         totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || '',
@@ -767,6 +778,7 @@ function getBatch(batchId) {
         takenOut: !!r[11], // ★ 2026-08-07 신규: 출고팀이 가져간 파란 상태.
         //   TV 현황판은 이미 쓰고 있었지만 batch.html은 이 값을 받지 못해
         //   핵크에서 멈췄음 — 두 화면 색이 서로 달랐던 직접 원인.
+        packVerified: !!r[12], // ★ 2026-08-24 신규: 최종 2차 검증완료(보라) — batch.html의 Pack Verify 탭이 사용
       }));
     }
 
@@ -842,13 +854,19 @@ function assignSlots(data) {
  * 것만 다른 기기(TV·다른 작업자 폰)와 동기화해서 보여주기 위한 것.
  * ★ 2026-08-04 확장 — 2단계(켬/끔)에서 3단계로 확장:
  *   none(초록) → moved(핑크 "패킹존 이동 필요") → taken(파랑 "패킹존 이동 완료")
- *   새 클라이언트는 { stage:'none'|'moved'|'taken' }으로 호출하고,
+ *   새 클라이언트는 { stage:'none'|'moved'|'taken'|'verified' }로 호출하고,
  *   옛 클라이언트의 { moved:true|false } 호출도 그대로 동작함(하위호환).
  *   같은 op 이름을 쓰므로 Code.gs의 doPost 라우팅은 수정할 필요 없음.
- *   저장: K(11)=MovedToPacking 시각, L(12)=TakenOut 시각(★ 신규 컬럼).
- *   - 'none' : K 비움 + L 비움 (초록으로 복귀)
- *   - 'moved': K에 시각(이미 있으면 처음 켠 시각 보존) + L 비움 (핑크)
- *   - 'taken': K 유지(없으면 지금 시각) + L에 시각 (파랑)
+ *   저장: K(11)=MovedToPacking 시각, L(12)=TakenOut 시각, M(13)=PackVerified 시각(★ 신규).
+ *   - 'none'    : K,L,M 전부 비움 (초록으로 복귀)
+ *   - 'moved'   : K에 시각(이미 있으면 처음 켠 시각 보존) + L,M 비움 (핑크)
+ *   - 'taken'   : K 유지(없으면 지금 시각) + L에 시각 (파랑) — ★ 기존 의미·동작 그대로,
+ *                 무조건 즉시 전환(검증 조건 없음). "패킹존으로 물리적으로 가져갔다"는
+ *                 뜻은 절대 바뀌지 않음. M(검증)은 비움 — 다시 확인이 필요한 상태로.
+ *   - 'verified': L(파랑)이 이미 있어야만 가능(먼저 물리적으로 가져간 다음에만 검증
+ *                 가능) + M에 시각(항상 갱신) — 최종 "2차 검증완료"(주황) 단계.
+ *                 패킹 검증 스캔(logPackScan)이 100% 끝나야만 전환 가능(오출고 방지
+ *                 핵심 안전장치) — data.force===true(관리자 강제확정)면 건너뜀.
  * 입력: { batchId, invoice, stage } 또는 { batchId, invoice, moved }
  * ================================================================================ */
 function setPackingMoved(data) {
@@ -868,8 +886,8 @@ function setPackingMoved(data) {
     let stage;
     if (data.stage !== undefined && data.stage !== null && data.stage !== '') {
       stage = String(data.stage);
-      if (stage !== 'none' && stage !== 'moved' && stage !== 'taken') {
-        return { ok: false, error: 'stage must be none|moved|taken' };
+      if (stage !== 'none' && stage !== 'moved' && stage !== 'taken' && stage !== 'verified') {
+        return { ok: false, error: 'stage must be none|moved|taken|verified' };
       }
     } else {
       stage = data.moved ? 'moved' : 'none';
@@ -887,13 +905,35 @@ function setPackingMoved(data) {
       if (stage === 'none') {
         bc.getRange(row, 11).setValue('');
         bc.getRange(row, 12).setValue('');
+        bc.getRange(row, 13).setValue('');
       } else if (stage === 'moved') {
-        // 핑크: "이동 필요"로 처음 켠 시각을 보존 (파랑에서 되돌아와도 원래 시각 유지)
+        // 핑크: "이동 필요"로 처음 켠 시각을 보존 (파랑/주황에서 되돌아와도 원래 시각 유지)
         if (!bc.getRange(row, 11).getValue()) bc.getRange(row, 11).setValue(batchNow_());
         bc.getRange(row, 12).setValue('');
-      } else { // 'taken'
+        bc.getRange(row, 13).setValue('');
+      } else if (stage === 'taken') {
+        // ★ 파랑 — 기존 그대로. "패킹존으로 물리적으로 가져갔다"는 뜻이며,
+        //   검증 여부와 무관하게 클릭 한 번에 즉시 전환됨(안전장치 없음, 원래 설계 그대로).
+        //   여기로 다시 들어오면(주황에서 되돌아오는 경우 포함) 검증(M)은 초기화 —
+        //   "아직 다시 확인 안 된 상태"로 정직하게 되돌림.
         if (!bc.getRange(row, 11).getValue()) bc.getRange(row, 11).setValue(batchNow_());
         bc.getRange(row, 12).setValue(batchNow_());
+        bc.getRange(row, 13).setValue('');
+      } else { // 'verified' — ★ 2026-08-24 신규: 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
+        if (!bc.getRange(row, 12).getValue()) {
+          return { ok: false, error: '먼저 패킹존 이동(파랑) 표시부터 완료해주세요' };
+        }
+        if (!data.force) {
+          const pv = getPackScanState(batchId, invoice);
+          if (!pv.ok || !pv.complete) {
+            return {
+              ok: false,
+              error: '2차 검증이 완료되지 않았습니다' + (pv.ok ? ` (${pv.totalPacked}/${pv.totalReq}pcs)` : ''),
+              needsVerification: true,
+            };
+          }
+        }
+        bc.getRange(row, 13).setValue(batchNow_());
       }
       found = true;
       break;
@@ -906,6 +946,235 @@ function setPackingMoved(data) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/* ===================== ③c logPackScan / undoPackScan / getPackScanState (★ 2026-08-24 신규) =====================
+ * ★★★ 오출고 방지 — 패킹 검증 스캔 ★★★
+ *
+ * 배경: 분류·검수(ScanLog)는 여러 고객사에게 물건을 나누는 과정이라 사람 실수나
+ * 슬롯 간 혼입이 발생할 수 있음. 지금까지는 검수가 끝나면(핑크) 패킹 작업자가
+ * 그 내용을 100% 믿고 바로 팔레타이징/박스패킹 → 출고했음. 이 함수들은 패킹존에서
+ * "검수에서 넘어온 물건이 실제로 이 고객사 것이 맞는지"를 바코드로 한 번 더
+ * 확인하는 마지막 관문. ScanLog와는 완전히 분리된 PackScanLog에 기록되므로
+ * 검수 기록을 전혀 건드리지 않음(감사 추적 목적상 절대 섞으면 안 됨).
+ *
+ * 매칭 기준: SKU가 아니라 "바코드" 단위. 패킹 작업자는 SKU를 모르고 바코드만
+ * 스캔하기 때문 — 같은 바코드가 그 인보이스 안에서 여러 줄(SKU)에 걸쳐 있으면
+ * 합산해서 하나의 풀로 취급함(현장에서 바코드로만 구분 가능하므로 불가피한 단순화).
+ * ================================================================================ */
+
+/* logPackScan — 스캔 1번마다 호출. 이 인보이스가 필요로 하는 바코드인지,
+ * 이미 다 채워졌는지(초과), 아예 다른 고객사 것인지(오배송 위험)를 즉시 판정.
+ * 입력: { batchId, invoice, worker, barcode, qty(기본 1) }
+ * 반환: { ok, result: 'pass'|'wrong'|'over', packed, required, ownerInvoices(wrong일 때만) } */
+function logPackScan(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    if (!data.batchId) return { ok: false, error: 'batchId required' };
+    if (!data.invoice) return { ok: false, error: 'invoice required' };
+    const barcode = String(data.barcode || '').trim();
+    if (!barcode) return { ok: false, error: 'barcode required' };
+    const qty = Number(data.qty) || 1;
+    const normBc = normBarcode_(barcode);
+
+    // 이 인보이스가 필요로 하는 줄(들) 중 이 바코드와 일치하는 것 찾기
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    const matchLines = [];
+    const biRows = biLast >= 2 ? bi.getRange(2, 1, biLast - 1, 7).getValues() : [];
+    biRows.forEach(r => {
+      if (String(r[0]) !== String(data.batchId)) return;
+      if (String(r[1]) !== String(data.invoice)) return;
+      if (normBarcode_(r[4]) !== normBc) return;
+      matchLines.push({ sku: String(r[2]), name: String(r[3]), reqQty: Number(r[5]) || 0 });
+    });
+
+    const pl = packscanSheet_();
+
+    if (matchLines.length === 0) {
+      // ★ 이 인보이스 것이 아님 — 배치 안 다른 고객사 중 실제로 이 바코드가
+      //   필요한 곳을 찾아서 "이 물건은 어디 것인지" 바로 안내해줌(오배송 예방 핵심)
+      const owners = new Set();
+      biRows.forEach(r => {
+        if (String(r[0]) !== String(data.batchId)) return;
+        if (!r[1]) return; // 총량 행 제외
+        if (String(r[1]) === String(data.invoice)) return;
+        if (normBarcode_(r[4]) !== normBc) return;
+        owners.add(String(r[1]));
+      });
+      const packScanId = Utilities.getUuid();
+      const newRow = pl.getLastRow() + 1;
+      ensureSheetRoom_(pl, newRow);
+      pl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+      pl.getRange(newRow, 1, 1, 10).setValues([[
+        data.batchId, packScanId, batchNow_(), data.worker || '', barcode, '',
+        data.invoice, 'wrong', 'active', qty,
+      ]]);
+      return { ok: true, result: 'wrong', packScanId: packScanId, ownerInvoices: Array.from(owners) };
+    }
+
+    // 이미 이 바코드로 채운 수량(같은 배치+인보이스, pass만, undone 제외)
+    const plLast = pl.getLastRow();
+    let already = 0;
+    if (plLast >= 2) {
+      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+        if (String(r[0]) !== String(data.batchId)) return;
+        if (String(r[6]) !== String(data.invoice)) return;
+        if (r[7] !== 'pass' || r[8] === 'undone') return;
+        if (normBarcode_(r[4]) !== normBc) return;
+        already += Number(r[9]) || 0;
+      });
+    }
+    const totalReq = matchLines.reduce((a, l) => a + l.reqQty, 0);
+    // 검수 단계에서 이미 EXP/OOS 등으로 이슈 처리된 수량만큼 필요수량에서 제외
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    let issueQty = 0;
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(data.batchId)) return;
+        if (String(r[7]) !== String(data.invoice)) return;
+        if (r[12] === 'undone') return;
+        if (normBarcode_(r[4]) !== normBc) return;
+        issueQty += Number(r[10]) || 0;
+      });
+    }
+    const effectiveReq = Math.max(0, totalReq - issueQty);
+    const sku = matchLines.length === 1 ? matchLines[0].sku : matchLines.map(l => l.sku).join('+');
+    const name = matchLines[0].name;
+    const result = (already + qty > effectiveReq) ? 'over' : 'pass';
+
+    const packScanId = Utilities.getUuid();
+    const newRow2 = pl.getLastRow() + 1;
+    ensureSheetRoom_(pl, newRow2);
+    pl.getRange(newRow2, 5, 1, 2).setNumberFormat('@');
+    pl.getRange(newRow2, 1, 1, 10).setValues([[
+      data.batchId, packScanId, batchNow_(), data.worker || '', barcode, sku,
+      data.invoice, result, 'active', qty,
+    ]]);
+    bumpVersion_();
+    return {
+      ok: true, result: result, packScanId: packScanId, sku: sku, name: name,
+      packed: already + (result === 'pass' ? qty : 0), required: effectiveReq,
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* undoPackScan — 잘못 스캔한 것을 취소(실제 삭제 대신 Status를 undone으로)
+ * 입력: { packScanId } */
+function undoPackScan(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    const id = data.packScanId;
+    if (!id) return { ok: false, error: 'packScanId required' };
+    const sh = packscanSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: false, error: 'no pack scans' };
+    const ids = sh.getRange(2, 2, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(id)) {
+        sh.getRange(i + 2, 9).setValue('undone');
+        bumpVersion_();
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'pack scan not found' };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* getPackScanState — 패킹 검증 모달을 열 때(그리고 몇 초마다) 호출.
+ * 이 인보이스가 필요로 하는 바코드별 체크리스트 + 진행률 + 최근 스캔 이력 반환.
+ * 입력: batchId, invoice (둘 다 문자열) */
+function getPackScanState(batchId, invoice) {
+  try {
+    if (!batchId) return { ok: false, error: 'batchId required' };
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    const rawLines = [];
+    if (biLast >= 2) {
+      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[1]) !== String(invoice)) return;
+        rawLines.push({ sku: String(r[2]), name: String(r[3]), barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
+      });
+    }
+    // 패킹검증은 바코드 단위로 매칭하므로, 같은 바코드를 쓰는 줄들을 하나로 합침
+    const linesByBarcode = {};
+    rawLines.forEach(l => {
+      const k = normBarcode_(l.barcode);
+      if (!linesByBarcode[k]) linesByBarcode[k] = { barcode: l.barcode, skus: [], names: [], reqQty: 0 };
+      linesByBarcode[k].skus.push(l.sku);
+      linesByBarcode[k].names.push(l.name);
+      linesByBarcode[k].reqQty += l.reqQty;
+    });
+
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const issueQtyByBarcode = {};
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[7]) !== String(invoice)) return;
+        if (r[12] === 'undone') return;
+        const k = normBarcode_(r[4]);
+        issueQtyByBarcode[k] = (issueQtyByBarcode[k] || 0) + (Number(r[10]) || 0);
+      });
+    }
+
+    const pl = packscanSheet_();
+    const plLast = pl.getLastRow();
+    const packedByBarcode = {};
+    const history = [];
+    if (plLast >= 2) {
+      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[6]) !== String(invoice)) return;
+        const entry = { packScanId: r[1], time: String(r[2]), worker: r[3], barcode: String(r[4]), sku: String(r[5]), result: r[7], status: r[8], qty: Number(r[9]) || 0 };
+        history.push(entry);
+        if (r[8] === 'undone') return;
+        if (r[7] !== 'pass') return;
+        const k = normBarcode_(r[4]);
+        packedByBarcode[k] = (packedByBarcode[k] || 0) + entry.qty;
+      });
+    }
+    history.sort((a, b) => String(b.time).localeCompare(String(a.time)));
+
+    const lines = Object.entries(linesByBarcode).map(([k, l]) => {
+      const issueQty = issueQtyByBarcode[k] || 0;
+      const effectiveReq = Math.max(0, l.reqQty - issueQty);
+      const packed = Math.min(packedByBarcode[k] || 0, effectiveReq);
+      return {
+        barcode: l.barcode, sku: l.skus.join('+'), name: l.names[0],
+        reqQty: l.reqQty, issueQty: issueQty, effectiveReq: effectiveReq,
+        packed: packed, complete: packed >= effectiveReq,
+      };
+    });
+    lines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    const totalReq = lines.reduce((a, l) => a + l.effectiveReq, 0);
+    const totalPacked = lines.reduce((a, l) => a + l.packed, 0);
+    const complete = lines.length > 0 && lines.every(l => l.complete);
+    const wrongCount = history.filter(h => h.result === 'wrong' && h.status !== 'undone').length;
+
+    return {
+      ok: true, lines: lines, totalReq: totalReq, totalPacked: totalPacked,
+      complete: complete, history: history.slice(0, 40), wrongCount: wrongCount,
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
 
@@ -2088,13 +2357,61 @@ function getSlotProgress(batchId) {
       if (scannedQty + issueQty >= line.reqQty) skuStatsByInvoice[inv].doneSku++;
     });
 
+    // ★ 2026-08-24 신규 — 패킹검증 진행률 집계(오출고 방지 신기능). 검수 진행률과는
+    //   완전히 별개로, PackScanLog(패킹존 재검증 스캔)를 바코드 단위로 집계함.
+    //   패킹 작업자는 SKU를 모르고 바코드만 스캔하므로 SKU가 아니라 바코드로 매칭.
+    const pl = packscanSheet_();
+    const plLast = pl.getLastRow();
+    const packedByInvBarcode = {}; // "invoice|바코드"
+    if (plLast >= 2) {
+      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[8] === 'undone') return;
+        if (r[7] !== 'pass') return;
+        const key = String(r[6]) + '|' + normBarcode_(r[4]);
+        packedByInvBarcode[key] = (packedByInvBarcode[key] || 0) + (Number(r[9]) || 0);
+      });
+    }
+    const packReqByInvBarcode = {}; // "invoice|바코드" -> 필요수량(합산)
+    if (biLast >= 2) {
+      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        const inv = r[1];
+        if (!inv) return;
+        const key = String(inv) + '|' + normBarcode_(r[4]);
+        packReqByInvBarcode[key] = (packReqByInvBarcode[key] || 0) + (Number(r[5]) || 0);
+      });
+    }
+    const packIssueByInvBarcode = {}; // 검수 단계 이슈 반영(같은 바코드 기준으로 재집계)
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (r[12] === 'undone') return;
+        const key = String(r[7]) + '|' + normBarcode_(r[4]);
+        packIssueByInvBarcode[key] = (packIssueByInvBarcode[key] || 0) + (Number(r[10]) || 0);
+      });
+    }
+    const packStatsByInvoice = {}; // invoice -> {totalReq, packed, totalLines, doneLines}
+    Object.entries(packReqByInvBarcode).forEach(([key, reqQty]) => {
+      const inv = key.slice(0, key.lastIndexOf('|'));
+      const issueQty = packIssueByInvBarcode[key] || 0;
+      const effReq = Math.max(0, reqQty - issueQty);
+      const packedQty = Math.min(packedByInvBarcode[key] || 0, effReq);
+      if (!packStatsByInvoice[inv]) packStatsByInvoice[inv] = { totalReq: 0, packed: 0, totalLines: 0, doneLines: 0 };
+      const st = packStatsByInvoice[inv];
+      st.totalReq += effReq;
+      st.packed += packedQty;
+      st.totalLines++;
+      if (packedQty >= effReq) st.doneLines++;
+    });
+
     // 고객사별 슬롯 정보 + 목표 수량
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     const slots = [];
     if (bcLast >= 2) {
-      // ★ 2026-08-04 확장 — 12번째 컬럼(TakenOut)까지 읽음
-      bc.getRange(2, 1, bcLast - 1, 12).getValues().forEach(r => {
+      // ★ 2026-08-24 확장 — 13번째 컬럼(PackVerified, 주황/최종 2차 검증완료)까지 읽음
+      bc.getRange(2, 1, bcLast - 1, 13).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (!r[7] && r[7] !== 0) return; // 슬롯 미배정이면 현황판에 안 띄움
         const invoice = r[1];
@@ -2118,6 +2435,15 @@ function getSlotProgress(batchId) {
         if (effectiveTotal >= 0 && totalQty > 0 && scanned >= effectiveTotal) {
           status = skuComplete ? 'done' : 'active'; // 수량은 찼는데 SKU가 덜 끝났으면 진행중으로 유지
         }
+        // ★ 2026-08-24 신규 — 패킹 단계(오출고 방지). K/L/M 컬럼 값을 그대로 신뢰.
+        //   none: 검수완료 전 / moved(핑크): 이동대기 / taken(파랑): 패킹존 이동완료
+        //   (★ 기존 의미·동작 그대로, 검증과 무관하게 즉시 전환됨)
+        //   verified(주황): 최종 2차 검증완료 — 파랑 다음의 마지막 단계
+        const packStat = packStatsByInvoice[invoice] || { totalReq: 0, packed: 0, totalLines: 0, doneLines: 0 };
+        let packStage = 'none';
+        if (r[12]) { packStage = 'verified'; }
+        else if (r[11]) { packStage = 'taken'; }
+        else if (r[10]) { packStage = 'moved'; }
         // ★ 매니저가 "임시A" 같은 문자 라벨로 수동 배정한 슬롯도 있을 수 있어
         //   숫자로 안 바뀌면 원래 값을 그대로 씀 (화면 정렬은 숫자만 우선순위로)
         const rawSlot = r[7];
@@ -2130,10 +2456,14 @@ function getSlotProgress(batchId) {
           scanned: scanned, status: status,
           totalSku: skuStat.totalSku, doneSku: skuStat.doneSku,
           cleared: r[9] || '', // ★ 2026-07-14 신규: 비어있으면 "패킹완료·슬롯비우기" 버튼 표시 대상
-          movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용, clearSlot과 무관)
-          takenOut: !!r[11], // ★ 2026-08-04 신규: 출고팀이 실제로 가져감(파란색 "패킹존 이동 완료" 상태)
+          movedToPacking: !!r[10], // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용, clearSlot과 무관) — 기존 그대로
+          takenOut: !!r[11], // ★ 2026-08-04 신규: 출고팀이 실제로 가져감(파란색 "패킹존 이동 완료" 상태) — 기존 그대로, 절대 안 바뀜
+          packVerified: !!r[12], // ★ 2026-08-24 신규: 최종 2차 검증완료(주황) — 파랑 다음의 별도 마지막 단계
           issueQty: issueQty, // ★ 2026-07-16 신규: 현황판 "⚠ N" 뱃지용
           issues: issuesByInvoice[invoice] || [], // ★ 2026-07-16 신규: 뱃지 클릭 시 상세 목록
+          // ★ 2026-08-24 신규 — 패킹검증(오출고 방지) 진행 상태
+          packStage: packStage, packScanned: packStat.packed, packRequired: packStat.totalReq,
+          packDoneLines: packStat.doneLines, packTotalLines: packStat.totalLines,
         });
       });
     }
@@ -3178,6 +3508,7 @@ function getSalesInvoiceDetail(invoice) {
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     let movedToPacking = false;
+    let packStage = 'none'; // ★ 2026-08-24 신규 — none/moved/taken/verified (K/L/M 컬럼을 그대로 신뢰)
     if (bcLast >= 2) {
       const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
       for (let i = bcInvVals.length - 1; i >= 0; i--) {
@@ -3186,6 +3517,11 @@ function getSalesInvoiceDetail(invoice) {
           //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
           //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
           movedToPacking = !!bc.getRange(i + 2, 12).getValue();
+          const kVal = bc.getRange(i + 2, 11).getValue();
+          const mVal = bc.getRange(i + 2, 13).getValue(); // ★ 2026-08-24 신규: PackVerified(주황, 최종 2차 검증완료)
+          if (mVal) packStage = 'verified';
+          else if (movedToPacking) packStage = 'taken';
+          else if (kVal) packStage = 'moved';
           break;
         }
       }
@@ -3230,7 +3566,7 @@ function getSalesInvoiceDetail(invoice) {
       const iManualBy = hmManual[normalizeHeaderName_('PackingMovedManualBy')];
       if (iManualFlag) {
         const v = jobRow[iManualFlag - 1];
-        if (v) { movedToPacking = true; manualMovedAt = String(v); }
+        if (v) { movedToPacking = true; manualMovedAt = String(v); packStage = 'taken'; } // ★ 2026-08-24: 수동표시도 taken으로 취급(총량피킹 배치가 없는 단독오더라 검증스캔 대상 자체가 아님)
       }
       if (iManualBy) manualMovedBy = String(jobRow[iManualBy - 1] || '');
     } catch (e) { /* best-effort */ }
@@ -3325,7 +3661,7 @@ function getSalesInvoiceDetail(invoice) {
     // ★ 2026-08-06 신규(매니저 요청) — "디멘션이 저장됐는데 Moved는 No"인
     //   앞뒤 안 맞는 상태를 원천 차단. 디멘션(치수/무게)이 하나라도 저장돼
     //   있다면, 물리적으로 이미 패킹존에서 측정된 것이므로 이동완료로 간주.
-    if (dimsResult.dims.length > 0) movedToPacking = true;
+    if (dimsResult.dims.length > 0) { movedToPacking = true; packStage = 'taken'; }
 
     const _result = {
       ok: true,
@@ -3339,6 +3675,7 @@ function getSalesInvoiceDetail(invoice) {
       inspector: inspector,
       inspEnd: inspEndRaw,
       movedToPacking: movedToPacking,
+      packStage: packStage, // ★ 2026-08-24 신규 — none/moved/taken/verified
       hasBatchRecord: hasBatchRecord, // ★ 2026-08-06 신규 — false면 단독 오더(수동 버튼 노출 대상)
       manualMovedAt: manualMovedAt,
       manualMovedBy: manualMovedBy,
