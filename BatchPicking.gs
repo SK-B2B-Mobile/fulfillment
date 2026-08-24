@@ -643,9 +643,35 @@ function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name
 // "그때 뭘 잘못 스캔했는지" 감사 추적이 가능하게 함.
 function packscanSheet_() { return ensureBatchSheet_(PACKSCAN_SHEET, ['BatchId','PackScanId','Timestamp','Worker','Barcode','SKU','Invoice','Result','Status','Qty']); }
 
+// ★ 2026-08-24 재설계(매니저 요청) — 예전엔 날짜 뒤에 무작위 6자리(예: D03E5E)를
+// 붙여서, 같은 날 배치가 여러 개 생겨도 작업자가 몇 번째 배치인지 전혀 구분할
+// 수 없었음. 이제 그 자리에 "오늘 몇 번째로 만든 배치인지"를 그대로 보여주는
+// 알파벳(A, B, C…)을 붙임 — 예: B20260824-A(오늘 1번째), B20260824-B(오늘 2번째).
+// 26개(Z)를 넘어가면 AA, AB… 순으로 이어짐(하루에 26개 넘게 만드는 일은
+// 사실상 없겠지만 안전하게 처리).
+function seqToLetters_(n) {
+  let s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || 'A';
+}
+function nextBatchSeqForDate_(datePart) {
+  const sh = batchesSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return 1;
+  const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  const prefix = 'B' + datePart + '-';
+  let count = 0;
+  ids.forEach(r => { if (String(r[0]).indexOf(prefix) === 0) count++; });
+  return count + 1; // 오늘 이미 만들어진 배치(예전 방식 포함) 다음 순번
+}
 function generateBatchId_() {
   const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
-  return 'B' + datePart + '-' + Utilities.getUuid().slice(0, 6).toUpperCase();
+  const seq = nextBatchSeqForDate_(datePart);
+  return 'B' + datePart + '-' + seqToLetters_(seq);
 }
 
 function _findBatchRow_(batchId) {
