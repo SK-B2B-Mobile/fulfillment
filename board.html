@@ -56,7 +56,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .tb-switch-row .tb-sw-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
 .tb-switch-row .tb-sw-tag{font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; white-space:nowrap;}
 .tb-switch-empty{padding:12px 8px; font-size:12px; color:var(--text-dim);}
-.manual-banner{display:none; align-items:center; gap:10px; background:var(--amber-bg); border:1px solid var(--amber); color:var(--amber); font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px;}
+.manual-banner{display:none; align-items:center; flex-wrap:wrap; row-gap:6px; gap:10px; background:var(--amber-bg); border:1px solid var(--amber); color:var(--amber); font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px;}
 .manual-banner.show{display:flex;}
 .manual-banner button{font-family:var(--sans); font-size:12px; font-weight:700; background:none; border:1px solid var(--amber); color:var(--amber); border-radius:6px; padding:4px 10px; cursor:pointer;}
 .manual-banner button:hover{background:var(--amber); color:#1a1300;}
@@ -291,10 +291,10 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <div class="tb-sub" id="batchLabel"><span class="status-dot off" id="liveDot"></span>연결 대기중...</div>
       <div style="font-size:10px; color:var(--text-dim2); margin-top:1px;">Built by David Kim · 2026</div>
       <div class="manual-banner" id="manualBanner">
-        🔍 <b>지난 배치를 보는 중입니다</b> — 창고 진행과 별개로 고정돼 있습니다
-        <span id="backToLiveCountdown" style="font-family:var(--mono); font-weight:800; margin:0 8px;"></span>
-        <button id="btnPinViewOnly" style="background:var(--surface2); border:1px solid var(--border2); color:var(--text-dim); border-radius:6px; padding:5px 10px; font-size:11px; font-weight:700; cursor:pointer; margin-right:6px;">📌 계속 보기(자동복귀 끄기)</button>
-        <button id="btnBackToLive">지금 작업 중인 배치로 →</button>
+        <span style="white-space:nowrap;">🔍 <b>지난 배치를 보는 중입니다</b> — 창고 진행과 별개로 고정돼 있습니다</span>
+        <span id="backToLiveCountdown" style="font-family:var(--mono); font-weight:800; white-space:nowrap;"></span>
+        <button id="btnPinViewOnly" style="background:var(--surface2); border:1px solid var(--border2); color:var(--text-dim); border-radius:6px; padding:5px 10px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;">📌 계속 보기</button>
+        <button id="btnBackToLive" style="white-space:nowrap;">지금 작업 중인 배치로 →</button>
       </div>
       <!-- ★ 2026-08-05 신규 — 미배분 경보: 다른 고객사에겐 스캔됐는데 이 고객사만
            완전히 빠진 상품이 있으면 뜸. 클릭하면 상세 목록 모달. -->
@@ -1718,12 +1718,12 @@ function updatePinButtonUI(){
   const btn = document.getElementById('btnPinViewOnly');
   if(!btn) return;
   if(viewOnlyPinned){
-    btn.textContent = '📌 고정됨 · 탭하면 자동복귀 다시 켜기';
+    btn.textContent = '📌 고정됨(해제하기)';
     btn.style.background = 'var(--amber-bg)';
     btn.style.color = 'var(--amber)';
     btn.style.borderColor = 'var(--amber)';
   } else {
-    btn.textContent = '📌 계속 보기(자동복귀 끄기)';
+    btn.textContent = '📌 계속 보기';
     btn.style.background = 'var(--surface2)';
     btn.style.color = 'var(--text-dim)';
     btn.style.borderColor = 'var(--border2)';
