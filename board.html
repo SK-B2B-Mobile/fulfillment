@@ -169,6 +169,21 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card.done.taken .card-pack-check .box{border-color:#04140D; background:#04140D;}
 .card.done.taken .card-pack-check .box svg{display:block;}
 .card.done.taken .card-pack-check .label{color:#04140D !important;}
+/* ★ 2026-08-24 신규 — 오출고 방지: 최종 4단계째 "2ND VERIFICATION COMPLETE"(보라).
+   ★★★ 파랑(taken)의 기존 의미는 절대 안 바뀜 — .card.done.taken 클래스는 그대로
+   유지된 채, 이 규칙이 그 위에 색만 오버라이드해서 얹힘(선택자 우선순위로 이김).
+   파랑 다음의 마지막 단계이며, 검증이 끝나야만 붙는 class="verified"로만 켜짐.
+   ★ 주황(진행중 active 상태와 색이 겹쳐 헷갈릴 수 있음)이 아니라 보라를 사용 —
+   기존 5색(회색/주황/초록/핑크/파랑) 어디와도 안 겹치는 "인증 완료" 느낌의 색. */
+.card.done.taken.verified{background:#8B5CF6; border-color:#8B5CF6; animation:none;}
+.card.done.taken.verified .card-slot, .card.done.taken.verified .card-cust, .card.done.taken.verified .card-invoice,
+.card.done.taken.verified .card-metarow, .card.done.taken.verified .card-sku{color:#FFFFFF !important;}
+.card.done.taken.verified .card-bar{background:rgba(255,255,255,0.22);}
+.card.done.taken.verified .card-bar > div{background:#FFFFFF;}
+.card.done.taken.verified .card-issue-badge{color:#FFFFFF; background:rgba(255,255,255,0.2); border-color:rgba(255,255,255,0.45);}
+.card.done.taken.verified .card-pack-check .box{border-color:#FFFFFF; background:#FFFFFF;}
+.card.done.taken.verified .card-pack-check .box svg{display:block; stroke:#8B5CF6 !important;}
+.card.done.taken.verified .card-pack-check .label{color:#FFFFFF !important;}
 .card-empty{display:flex; align-items:center; justify-content:center; height:100%; font-family:var(--mono); font-size:20px; color:var(--text-dim); opacity:0.4;}
 
 .empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
@@ -220,6 +235,50 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .issue-edit-delete{margin-top:4px; width:100%; padding:8px; background:none; border:1px dashed rgba(255,77,109,0.4); border-radius:6px; color:#FF4D6D; font-size:12px; font-weight:600; cursor:pointer;}
 .issue-edit-delete:hover{background:rgba(255,77,109,0.1);}
 .issue-edit-delete:disabled{opacity:0.6;}
+
+/* ═══════════════ ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지) ═══════════════ */
+.pack-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.78); z-index:200; align-items:center; justify-content:center;}
+.pack-modal-overlay.open{display:flex;}
+.pack-modal{background:var(--surface); border:2px solid #8B5CF6; border-radius:18px; width:min(880px, 94vw); max-height:92vh; display:flex; flex-direction:column; overflow:hidden;}
+.pack-modal-head{padding:20px 26px; border-bottom:2px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+.pack-modal-head h3{font-size:22px; font-weight:800;}
+.pack-modal-head .sub{font-family:var(--mono); font-size:13px; color:var(--text-dim); margin-top:4px;}
+.pack-modal-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:38px; height:38px; border-radius:10px; font-size:16px; cursor:pointer;}
+.pack-modal-scanrow{padding:16px 26px; border-bottom:1px solid var(--border2); display:flex; gap:10px; align-items:center; background:rgba(139,92,246,0.08);}
+.pack-modal-scanrow input{flex:1; padding:16px 18px; font-size:20px; font-family:var(--mono); font-weight:700; background:var(--bg); border:2px solid #8B5CF6; border-radius:10px; color:var(--text);}
+.pack-modal-scanrow input:focus{outline:none; box-shadow:0 0 0 3px rgba(139,92,246,0.35);}
+.pack-modal-progress{padding:12px 26px; display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:14px; font-weight:700; color:var(--text-dim); border-bottom:1px solid var(--border2);}
+.pack-modal-progress .n{font-size:22px; color:var(--text); font-weight:800;}
+.pack-modal-progress-bar{height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; margin:0 26px;}
+.pack-modal-progress-bar > div{height:100%; background:linear-gradient(90deg,#F59E0B,#8B5CF6); transition:width 0.4s;}
+.pack-modal-body{padding:14px 26px; overflow-y:auto; flex:1;}
+.pack-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02);}
+.pack-line.done{border-color:rgba(139,92,246,0.5); background:rgba(139,92,246,0.1);}
+.pack-line-name{font-size:15px; font-weight:700;}
+.pack-line-meta{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-top:2px;}
+.pack-line-qty{font-family:var(--mono); font-size:18px; font-weight:800; white-space:nowrap;}
+.pack-line.done .pack-line-qty{color:#8B5CF6;}
+.pack-line-check{font-size:20px; margin-left:10px;}
+.pack-modal-flash{position:fixed; inset:0; pointer-events:none; z-index:9999; opacity:0; transition:opacity 0.15s;}
+.pack-modal-flash.show-ok{background:rgba(139,92,246,0.4); opacity:1;}
+.pack-modal-flash.show-bad{background:rgba(239,68,68,0.45); opacity:1;}
+.pack-modal-msg{padding:10px 26px; font-size:14px; font-weight:700; text-align:center;}
+.pack-modal-msg.ok{color:#A78BFA;}
+.pack-modal-msg.bad{color:#FF4D6D;}
+.pack-modal-footer{padding:16px 26px; border-top:2px solid var(--border); display:flex; gap:10px;}
+.pack-modal-footer button{flex:1; padding:14px; border-radius:10px; font-size:15px; font-weight:800; cursor:pointer; border:none;}
+.pack-btn-print{background:var(--surface2); color:var(--text); border:1px solid var(--border2) !important;}
+.pack-btn-complete{background:#8B5CF6; color:#FFFFFF;}
+.pack-btn-complete:disabled{opacity:0.35; cursor:not-allowed;}
+.pack-btn-force{background:none; border:1px dashed rgba(255,77,109,0.5) !important; color:#FF4D6D; font-size:11px !important; font-weight:600 !important; flex:0 0 auto !important; padding:14px 12px !important;}
+.pack-worker-row{padding:10px 26px 0; display:flex; gap:10px; align-items:center;}
+.pack-worker-row label{font-size:12px; color:var(--text-dim); font-weight:700; white-space:nowrap;}
+.pack-worker-row select, .pack-worker-row input{flex:1; padding:8px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:13px;}
+.pack-history-toggle{font-size:12px; color:var(--text-dim); cursor:pointer; text-decoration:underline; margin:6px 0 10px;}
+.pack-history-row{font-family:var(--mono); font-size:11px; color:var(--text-dim); padding:4px 0; display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.05);}
+.pack-history-row.wrong{color:#FF4D6D;}
+.pack-history-row.over{color:#F59E0B;}
+.pack-history-undo{cursor:pointer; text-decoration:underline; margin-left:8px;}
 </style>
 </head>
 <body>
@@ -283,6 +342,40 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <button class="issue-modal-close" onclick="closeIssueModal()">✕</button>
     </div>
     <div class="issue-modal-body" id="issueModalBody"></div>
+  </div>
+</div>
+
+<!-- ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지): 핑크/검증중 카드 클릭 시 열림 -->
+<div class="pack-modal-flash" id="packModalFlash"></div>
+<div class="pack-modal-overlay" id="packModalOverlay">
+  <div class="pack-modal">
+    <div class="pack-modal-head">
+      <div>
+        <h3 id="packModalTitle">2차 검증 (최종)</h3>
+        <div class="sub" id="packModalSub"></div>
+      </div>
+      <button class="pack-modal-close" onclick="closePackVerifyModal()">✕</button>
+    </div>
+    <div class="pack-worker-row">
+      <label>작업자</label>
+      <select id="packWorkerSelect" onchange="document.getElementById('packWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
+      <input type="text" id="packWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+    </div>
+    <div class="pack-modal-scanrow">
+      <input type="text" id="packScanInput" placeholder="📷 바코드를 스캔하세요..." autocomplete="off">
+    </div>
+    <div class="pack-modal-msg" id="packModalMsg" style="display:none;"></div>
+    <div class="pack-modal-progress">
+      <span>진행률</span>
+      <span class="n" id="packProgressText">0 / 0 pcs</span>
+    </div>
+    <div class="pack-modal-progress-bar"><div id="packProgressBar" style="width:0%"></div></div>
+    <div class="pack-modal-body" id="packModalBody"></div>
+    <div class="pack-modal-footer">
+      <button class="pack-btn-force" id="packForceBtn" onclick="forceCompletePackVerify()">⚠ 관리자 강제확정</button>
+      <button class="pack-btn-print" onclick="printPackingSlip()">🖨 패킹슬립 인쇄</button>
+      <button class="pack-btn-complete" id="packCompleteBtn" disabled onclick="completePackVerify()">🟠 최종 2차 검증완료 확정</button>
+    </div>
   </div>
 </div>
 
@@ -464,12 +557,17 @@ function packStageOf(slot){
 
 // ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
 // 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
-// ★ 2026-08-04 확장 — 2단계(초록↔핑크 토글)에서 3단계 순환으로 변경:
+// ★ 2026-08-04 확장 — 2단계(초록↔핑크 토글)에서 3단계로 확장:
 //   초록(완료) →클릭→ 핑크("패킹존 이동 필요" = 출고팀이 가져가야 함)
-//   →클릭→ 파랑("패킹존 이동 완료" = 출고팀이 실제로 가져감)
-//   →클릭→ 핑크 복귀(실수로 눌렀을 때 되돌리기)
+//   →클릭→ 파랑("패킹존 이동 완료" = 출고팀이 실제로 가져감) — ★ 기존 의미 그대로
 //   서버에는 stage('moved'|'taken')로 전달 — 기존 setPackingMoved op를 확장한 것이라
 //   Code.gs 라우팅 수정 없이 동작. (moved 파라미터만 보내는 옛 클라이언트도 계속 호환됨)
+// ★ 2026-08-24 재설계(오출고 방지) — 파랑(taken) 상태에서 한 번 더 누르는 동작은
+//   이제 이 함수를 거치지 않고(document click 위임에서 먼저 가로채서) 대신
+//   "최종 2차 검증" 모달을 엶. 이 함수는 오직 none→moved, moved→taken 두 전진
+//   방향만 담당 — 아래 cur==='taken' 되돌리기 확인 분기는 이 함수가 그 상태로
+//   호출되는 경로가 없어져서 사실상 도달 불가능하지만, 혹시 모를 예외적 호출
+//   경로에 대비해 안전장치로 그대로 남겨둠(제거해도 되지만 방어적으로 유지).
 async function togglePackingMoved(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
@@ -529,7 +627,17 @@ function cardHtml(slot){
   const issueBadge = slot.issueQty > 0
     ? `<span class="card-issue-badge" data-invoice="${slot.invoice}">⚠ ${slot.issueQty.toLocaleString()}</span>`
     : '';
-  return `<div class="card ${slot.status}${slot.takenOut?' taken':slot.movedToPacking?' moved':''}${flashClass}" data-invoice="${slot.invoice}">
+  // ★ 2026-08-24 신규(오출고 방지 재설계) — 초록/핑크/파랑의 기존 의미와 전환
+  //   방식은 절대 안 바꿈(takenOut = "패킹존으로 물리적으로 가져감", 원래 그대로).
+  //   주황(verified)은 파랑 위에 "얹는" 마지막 단계일 뿐 — 클래스도 taken은
+  //   그대로 유지하고 verified만 추가로 붙여서 색만 오버라이드함.
+  const packStage = slot.packVerified ? 'verified' : (slot.takenOut ? 'taken' : slot.movedToPacking ? 'moved' : 'none');
+  const verifiedClass = slot.packVerified ? ' verified' : '';
+  let packLabel = '검수완료 · 이동준비';
+  if(packStage === 'moved') packLabel = '패킹존 이동 필요';
+  else if(packStage === 'taken') packLabel = '패킹존 이동 완료 · 탭해서 2차 검증 →';
+  else if(packStage === 'verified') packLabel = '2ND VERIFICATION COMPLETE ✓';
+  return `<div class="card ${slot.status}${slot.takenOut?' taken':slot.movedToPacking?' moved':''}${verifiedClass}${flashClass}" data-invoice="${slot.invoice}">
     <div class="card-top">
       <span class="card-slot">${numLabel}</span>
       <div class="card-top-right">
@@ -545,9 +653,9 @@ function cardHtml(slot){
         <span>${slot.scanned.toLocaleString()} / ${target.toLocaleString()} pcs</span>
       </div>
       <div class="card-bar"><div style="width:${pct}%"></div></div>
-      <div class="card-pack-check" data-pack-invoice="${slot.invoice}">
+      <div class="card-pack-check" data-pack-invoice="${slot.invoice}" data-pack-stage="${packStage}">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
-        <span class="label">${slot.takenOut ? '패킹존 이동 완료' : slot.movedToPacking ? '패킹존 이동 필요' : '검수완료 · 이동준비'}</span>
+        <span class="label">${packLabel}</span>
       </div>
     </div>
   </div>`;
@@ -878,6 +986,291 @@ async function deleteIssueFromBoard(issueId, idx){
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지 핵심 기능)
+ * 검수(ScanLog)와 완전히 별개로, 패킹존에서 실제 물건을 바코드로 한 번 더
+ * 확인한다. 서버(logPackScan)가 "이 인보이스 것이 맞는지/이미 다 찼는지"를
+ * 즉시 판정해서 돌려주고, 100% 다 맞아야만(또는 관리자 강제확정) 파랑(출고
+ * 가능)으로 넘어갈 수 있게 서버가 직접 막는다(setPackingMoved 참고).
+ * ═══════════════════════════════════════════════════════════ */
+let _packModalInvoice = null;
+let _packModalState = null;
+let _packAudioCtx = null;
+
+async function openPackVerifyModal(invoice){
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  // ★ 2026-08-24 신규 — 이 모달은 반드시 파랑(패킹존 이동완료) 이후에만 열려야 함.
+  //   (문서 click 위임에서 이미 taken 상태일 때만 호출하지만, 방어적으로 한 번 더 확인)
+  if(!slot.takenOut){ alert('먼저 패킹존 이동(파랑) 표시부터 완료해주세요'); return; }
+  _packModalInvoice = invoice;
+  _packModalState = null;
+  document.getElementById('packModalTitle').textContent = `${slot.customer || invoice} · 최종 2차 검증`;
+  document.getElementById('packModalSub').textContent = `${invoice} · SLOT ${slot.slotNum}`;
+  document.getElementById('packModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
+  document.getElementById('packModalMsg').style.display = 'none';
+  document.getElementById('packCompleteBtn').disabled = true;
+  document.getElementById('packCompleteBtn').textContent = '🟠 최종 2차 검증완료 확정';
+  document.getElementById('packModalOverlay').classList.add('open');
+  await ensureWorkersLoaded();
+  populatePackWorkerSelect();
+  const input = document.getElementById('packScanInput');
+  input.value = '';
+  setTimeout(() => input.focus(), 60);
+  await refreshPackModalState();
+}
+
+function populatePackWorkerSelect(){
+  const sel = document.getElementById('packWorkerSelect');
+  const opts = (_workersCache && _workersCache.length)
+    ? _workersCache.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
+    : '<option value="">등록된 작업자 없음</option>';
+  sel.innerHTML = opts + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+}
+function currentPackWorker(){
+  const sel = document.getElementById('packWorkerSelect').value;
+  if(sel === '__manual__') return document.getElementById('packWorkerManual').value.trim();
+  return (sel || '').trim();
+}
+
+async function refreshPackModalState(){
+  const invoice = _packModalInvoice;
+  if(!invoice) return;
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: currentBatchId, invoice });
+  if(!res.ok){
+    document.getElementById('packModalBody').innerHTML = `<div class="issue-modal-empty">불러오기 실패: ${res.error||''}</div>`;
+    return;
+  }
+  _packModalState = res;
+  renderPackModalBody();
+}
+
+function renderPackModalBody(){
+  const state = _packModalState;
+  if(!state || _packModalInvoice === null) return;
+  const pct = state.totalReq > 0 ? Math.min(100, Math.round(state.totalPacked / state.totalReq * 100)) : 0;
+  document.getElementById('packProgressText').textContent = `${state.totalPacked.toLocaleString()} / ${state.totalReq.toLocaleString()} pcs`;
+  document.getElementById('packProgressBar').style.width = pct + '%';
+  document.getElementById('packCompleteBtn').disabled = !state.complete;
+
+  const linesHtml = (state.lines || []).map(l => `
+    <div class="pack-line ${l.complete ? 'done' : ''}">
+      <div>
+        <div class="pack-line-name">${l.name || l.sku}</div>
+        <div class="pack-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+      </div>
+      <div style="display:flex; align-items:center;">
+        <span class="pack-line-qty">${l.packed}/${l.effectiveReq}</span>
+        <span class="pack-line-check">${l.complete ? '✅' : '⏳'}</span>
+      </div>
+    </div>`).join('') || `<div class="issue-modal-empty">이 인보이스에 등록된 상품이 없습니다</div>`;
+
+  const activeHistory = (state.history || []).filter(h => h.status !== 'undone');
+  const historyHtml = activeHistory.length ? `
+    <div class="pack-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ 스캔 이력 보기 (${activeHistory.length}건)</div>
+    <div style="display:none;">
+      ${activeHistory.slice(0, 30).map(h => `
+        <div class="pack-history-row ${h.result !== 'pass' ? h.result : ''}">
+          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (초과)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span class="pack-history-undo" onclick="undoPackScanEntry('${h.packScanId}')">되돌리기</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  document.getElementById('packModalBody').innerHTML = linesHtml + historyHtml;
+}
+
+async function submitPackScan(){
+  const input = document.getElementById('packScanInput');
+  const barcode = input.value.trim();
+  if(!barcode) return;
+  input.value = '';
+  const worker = currentPackWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  const res = await gasCall('logPackScan', { batchId: currentBatchId, invoice: _packModalInvoice, worker, barcode, qty: 1 });
+  if(!res.ok){
+    flashPackModal('bad'); beepPack(false);
+    showPackModalMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    input.focus();
+    return;
+  }
+  if(res.result === 'pass'){
+    flashPackModal('ok'); beepPack(true);
+    showPackModalMsg(`✓ ${res.name || res.sku || barcode} 확인됨`, 'ok');
+  } else if(res.result === 'wrong'){
+    flashPackModal('bad'); beepPack(false);
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
+    showPackModalMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → 실제로는 [${owners}] 것입니다. 상자에서 빼주세요.`, 'bad');
+  } else if(res.result === 'over'){
+    flashPackModal('bad'); beepPack(false);
+    showPackModalMsg('⚠ 이미 필요수량을 다 채웠습니다 (초과 스캔 — 다른 고객사 몫이 섞였을 수 있습니다)', 'bad');
+  }
+  await refreshPackModalState();
+  input.focus();
+}
+
+function flashPackModal(kind){
+  const el = document.getElementById('packModalFlash');
+  el.className = 'pack-modal-flash show-' + kind;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'pack-modal-flash'; }, 350);
+}
+function showPackModalMsg(msg, kind){
+  const el = document.getElementById('packModalMsg');
+  el.textContent = msg;
+  el.className = 'pack-modal-msg ' + kind;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+// ★ 외부 오디오 파일 없이 WebAudio로 즉석 생성 — 성공(높은 짧은음) / 실패(낮은 두번음)
+function beepPack(ok){
+  try{
+    const ctx = _packAudioCtx || (_packAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    function tone(freq, start, dur){
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = freq; o.type = 'sine';
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.001, ctx.currentTime + start);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+      o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02);
+    }
+    if(ok){ tone(1200, 0, 0.12); } else { tone(280, 0, 0.16); tone(280, 0.19, 0.16); }
+  }catch(e){ /* 오디오 실패해도 스캔 자체엔 지장 없음 */ }
+}
+
+async function undoPackScanEntry(packScanId){
+  if(!confirm('이 스캔을 취소하시겠습니까?')) return;
+  const res = await gasCall('undoPackScan', { packScanId });
+  if(res.ok) await refreshPackModalState();
+  else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+}
+
+async function completePackVerify(){
+  const invoice = _packModalInvoice;
+  if(!invoice) return;
+  const btn = document.getElementById('packCompleteBtn');
+  btn.disabled = true; btn.textContent = '처리 중...';
+  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'verified' });
+  if(res.ok){
+    showPackModalMsg('🟠 최종 2차 검증완료 — 주황 상태로 전환됐습니다', 'ok');
+    await pollOnce();
+    printPackingSlip();
+    setTimeout(() => closePackVerifyModal(), 900);
+  } else {
+    btn.disabled = false; btn.textContent = '🟠 최종 2차 검증완료 확정';
+    alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
+    await refreshPackModalState();
+  }
+}
+
+async function forceCompletePackVerify(){
+  const invoice = _packModalInvoice;
+  if(!invoice) return;
+  if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
+  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'verified', force: true });
+  if(res.ok){
+    showPackModalMsg('⚠ 관리자 강제확정으로 최종 검증완료 처리됐습니다', 'warn');
+    await pollOnce();
+    setTimeout(() => closePackVerifyModal(), 900);
+  } else {
+    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
+function closePackVerifyModal(){
+  document.getElementById('packModalOverlay').classList.remove('open');
+  _packModalInvoice = null;
+  _packModalState = null;
+}
+
+// ★ 패킹 슬립 인쇄 — StyleKorean 헤더/주소 포함, 새 창에서 브라우저 인쇄 다이얼로그 사용
+// (전용 프린터가 없어도 어디서나 동작하고, "PDF로 저장"도 그대로 가능)
+function printPackingSlip(){
+  const invoice = _packModalInvoice;
+  const slot = _slotsByInvoice[invoice];
+  const state = _packModalState;
+  if(!slot){ alert('먼저 패킹 검증 모달을 여세요'); return; }
+  const lines = (state && state.lines) ? state.lines : [];
+  const issues = slot.issues || [];
+  const verified = state ? !!state.complete : false;
+  const worker = currentPackWorker() || '-';
+  const printedAt = new Date().toLocaleString('en-US');
+
+  const rowsHtml = lines.map(l => `
+    <tr>
+      <td>${l.sku}</td>
+      <td>${l.name || ''}</td>
+      <td style="text-align:center;">${l.reqQty}</td>
+      <td style="text-align:center;">${l.issueQty || 0}</td>
+      <td style="text-align:center; font-weight:700;">${l.packed}</td>
+    </tr>`).join('');
+
+  const issuesHtml = issues.length ? `
+    <h4 style="margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;">Issues / Shortages</h4>
+    <table class="slip-table"><thead><tr><th>Reason</th><th>Product</th><th style="text-align:center;">Qty</th></tr></thead><tbody>
+    ${issues.map(i => `<tr><td>${i.reason}</td><td>${i.name || i.sku || ''}</td><td style="text-align:center;">${i.qty}</td></tr>`).join('')}
+    </tbody></table>` : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
+  <style>
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
+    .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
+    .slip-title{font-size:20px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:12px; color:#555; text-align:right; margin-top:4px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; font-size:13px;}
+    .slip-info div b{display:block; font-size:11px; color:#777; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
+    table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
+    table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
+    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
+    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
+    @media print{ body{padding:12mm;} }
+  </style></head><body>
+    <div class="slip-head">
+      <div>
+        <div class="slip-logo">StyleKorean</div>
+        <div class="slip-addr">5609 River Way, Buena Park, CA 90621</div>
+      </div>
+      <div>
+        <div class="slip-title">PACKING SLIP</div>
+        <div class="slip-meta">Batch ${currentBatchId || '-'}<br>Printed ${printedAt}</div>
+      </div>
+    </div>
+    <div class="slip-info">
+      <div><b>Customer</b>${slot.customer || '-'}</div>
+      <div><b>Invoice #</b>${invoice}</div>
+      <div><b>Ship Via</b>${slot.shipVia || '-'}</div>
+      <div><b>Slot</b>${slot.slotNum}</div>
+    </div>
+    <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table>
+    ${issuesHtml}
+    <div class="verify-badge ${verified ? 'verify-ok' : 'verify-bad'}">${verified ? '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED' : '⚠ NOT FULLY VERIFIED (2nd check pending)'}</div>
+    <div class="slip-footer">
+      <span>Verified by: ${worker}</span>
+      <span>StyleKorean B2B Fulfillment System</span>
+    </div>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=820,height=1000');
+  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 300);
+}
+
+document.getElementById('packScanInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitPackScan(); }
+});
+document.getElementById('packModalOverlay').addEventListener('click', e => {
+  if(e.target.id === 'packModalOverlay') closePackVerifyModal();
+});
+
 // ★ 2026-07-24 신규 — 이슈 등록 폼의 SKU 검색창은 매번 다시 그려지므로
 // document 레벨 위임으로 입력 이벤트를 잡음 (직접 바인딩하면 재렌더링마다 유실됨)
 document.addEventListener('input', e => {
@@ -887,7 +1280,28 @@ document.addEventListener('click', e => {
   // ★ 2026-07-23 신규: "패킹존 이동" 체크박스는 카드 안에 있지만 완전히 다른 동작
   //   (이슈 모달을 열지 않고 그 자리에서 바로 토글) — 카드 클릭 판정보다 먼저 처리.
   const packCheck = e.target.closest('.card-pack-check');
-  if(packCheck){ togglePackingMoved(packCheck.dataset.packInvoice); return; }
+  if(packCheck){
+    const invoice = packCheck.dataset.packInvoice;
+    const slot = _slotsByInvoice[invoice];
+    if(!slot) return;
+    // ★ 2026-08-24 신규(오출고 방지 재설계) — 기존 약속(초록→핑크→파랑)은 절대
+    //   안 바꿈: none→moved, moved→taken은 지금까지와 완전히 동일하게 클릭 한 번에
+    //   즉시 전환(togglePackingMoved 그대로). 파랑(taken) 상태에서 한 번 더 누르면
+    //   더 이상 곧장 핑크로 안 돌아가고, "최종 2차 검증" 모달이 열림 — 이 모달
+    //   안에서 100% 스캔 확인이 끝나야만 주황(verified, 최종)으로 넘어감.
+    //   주황 상태에서 누르면(실수 정정용) 파랑으로 되돌리는 확인창만 뜸.
+    if(slot.packVerified){
+      if(!confirm(`정말 되돌리시겠습니까?\n\n"${slot.customer || invoice}"는 이미 최종 2차 검증완료(주황)된 상태입니다.\n다시 누르면 검증 전(파랑) 상태로 돌아갑니다.`)) return;
+      gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'taken' }).then(res => {
+        if(res.ok) pollOnce();
+        else alert('되돌리기 실패: ' + (res.error || '알 수 없는 오류'));
+      });
+      return;
+    }
+    if(packStageOf(slot) === 'taken'){ openPackVerifyModal(invoice); return; }
+    togglePackingMoved(invoice); // none→moved, moved→taken은 기존 그대로
+    return;
+  }
   // ★ 2026-07-23 수정: 이슈 배지뿐 아니라 카드 전체 아무 곳이나 눌러도 모달이 열리도록 확장
   //   (이슈가 0건이어도 열려서 새로 등록할 수 있어야 하므로)
   const card = e.target.closest('.card[data-invoice]');
