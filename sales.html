@@ -126,6 +126,14 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   100%{ left:120%; }
 }
 
+/* ★ 2026-08-24 신규(오출고 방지) — "최종 2차 검증완료"(파랑 다음 마지막 단계) 배지.
+   board.html의 보라 카드와 색을 맞춤. 주황(진행중 상태와 겹쳐 헷갈릴 수 있음) 대신
+   기존 팔레트 어디와도 안 겹치는 보라를 사용 — "인증 완료" 느낌. */
+.badge.moved-final{
+  background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.55);
+  font-weight:800;
+}
+
 .detail-link{font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--blue); text-decoration:none; cursor:pointer; border-bottom:1px dashed var(--blue);}
 .detail-link:hover{color:#93C1FF;}
 /* ★ 2026-08-10 — 이슈가 있는 오더는 링크도 빨갛게. 모든 행에 링크가 생겨도
@@ -262,6 +270,8 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .status-small.moved-yes{background:var(--green-bg); color:var(--green); position:relative; overflow:hidden; border:1px solid rgba(16,217,126,0.5);}
 .status-small.moved-yes::after{content:''; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(120deg, transparent, rgba(16,217,126,0.55), transparent); animation:sparkleSweep 2.6s ease-in-out infinite;}
 .status-small.moved-no{background:var(--gray-bg); color:var(--text-dim);}
+/* ★ 2026-08-24 신규 — 상세 모달의 "최종 2차 검증완료"(status-small 크기용, 보라) */
+.status-small.moved-final{background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.55); font-weight:800;}
 
 .section-title-row{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;}
 .section-title-row:first-of-type{margin-top:0;}
@@ -684,6 +694,20 @@ function methodClass(m){
   return '';
 }
 
+// ★ 2026-08-24 신규(오출고 방지) — 4단계 뱃지: No(회색) / Moved to Packing(초록,
+// 기존 그대로 — 파랑=물리적 이동완료의 원래 의미) / 2nd Verification Complete(금색,
+// 파랑 다음에 얹히는 최종 단계). 서버가 계산해서 보내주는 o.packStage를 우선
+// 사용하고, 옛 캐시된 응답 등 packStage가 없는 경우엔 기존 movedToPacking
+// 불리언으로 안전하게 대체(하위호환).
+function packStageBadgeHtml(o, cls){
+  const stage = o.packStage || (o.movedToPacking ? 'taken' : 'none');
+  if (stage === 'verified') return `<span class="${cls} moved-final">✓ 2nd Verification Complete</span>`;
+  if (stage === 'taken') return `<span class="${cls} moved-yes">✓ Moved to Packing</span>`; // ★ 기존 문구/색 그대로 — 파랑의 의미는 안 바뀜
+  if (stage === 'moved') return `<span class="${cls} moved-no">Pending Move</span>`;
+  return `<span class="${cls} moved-no">No</span>`;
+}
+
+
 // ★ 피킹 진행 상태 뱃지 — Waiting(아직 시작 안 함) / Active(피킹 중, 초록 깜빡임) /
 //   Complete(검수까지 끝남, 파란색 정적 체크)로 3단계 표시.
 // ★ 2026-08-05 수정(영업팀 요청) — 예전엔 검수 완료 건은 이 컬럼을 "—"로 비워두고
@@ -874,7 +898,7 @@ function renderSheet(){
       if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
       else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
       else { badge = '<span class="badge issue">'+o.inspection+'</span>'; }
-      const movedBadge = o.movedToPacking ? '<span class="badge moved-yes">✓ Yes</span>' : '<span class="badge moved-no">No</span>';
+      const movedBadge = packStageBadgeHtml(o, 'badge');
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
       return `<tr>
         <td class="mono" style="font-weight:800">${o.invoice}</td>
@@ -1000,7 +1024,7 @@ function renderToday(){
     if (insp.indexOf('PASS') >= 0) badge = '<span class="plain-tag pass">✓ PASS</span>';
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="plain-tag issue">'+insp+' →</span>';
     else badge = '<span class="plain-tag pending">'+insp+'</span>';
-    const movedBadge = j.movedToPacking ? '<span class="plain-tag moved-yes">✓ Moved</span>' : '<span class="plain-tag moved-no">Not Moved</span>';
+    const movedBadge = packStageBadgeHtml(j, 'plain-tag');
     const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>')) : '<span class="plain-tag na">N/A</span>';
@@ -1523,7 +1547,7 @@ function renderDetail(res){
   }
 
   let statusHtml, itemsSectionHtml='';
-  const movedHtml = `<span class="status-small ${res.movedToPacking?'moved-yes':'moved-no'}">${res.movedToPacking?'✓ Moved to Packing':'Not Moved to Packing Yet'}</span>`;
+  const movedHtml = packStageBadgeHtml(res, 'status-small');
   // ★ 2026-08-06 신규 — 총량피킹 배치에 아예 안 속한(hasBatchRecord=false) 오더는
   //   TV 현황판이 관리할 방법이 없어서 "Moved to Packing"이 영원히 No로 고정됨.
   //   출고 작업자가 직접 표시할 수 있는 버튼을 추가 — 실수 방지를 위해 클릭 시
