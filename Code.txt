@@ -241,6 +241,10 @@ function doGet(e) {
     }
   }
   // ★ 2026-07-09 신규 — 기기간 실시간 스캔 동기화용
+  // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 진행 상태 조회
+  if (op === 'getPackScanState') {
+    return json_(getPackScanState((e.parameter||{}).batchId||'', (e.parameter||{}).invoice||''));
+  }
   if (op === 'getScanState') {
     return json_(getScanState((e.parameter || {}).batchId || ''));
   }
@@ -453,6 +457,9 @@ function doPost(e) {
   // ★ 2026-07-14 신규 — "패킹완료·슬롯비우기" 버튼
   if (op === 'clearSlot')      return json_(clearSlot(data));
   if (op === 'setPackingMoved') return json_(setPackingMoved(data)); // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용)
+  // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 스캔 기록/취소
+  if (op === 'logPackScan')   return json_(logPackScan(data));
+  if (op === 'undoPackScan')  return json_(undoPackScan(data));
   // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
   if (op === 'logIssue')       return json_(logIssue(data));
   if (op === 'undoIssue')      return json_(undoIssue(data));
@@ -2935,6 +2942,33 @@ function buildMovedToPackingMap_() {
   return map;
 }
 
+/* ---------------------------------------------------------------------
+ * buildPackStageMap_() — ★ 2026-08-24 신규 (오출고 방지 신기능 연동)
+ * sales.html이 기존의 boolean(movedToPacking)만으로는 파랑(패킹존 이동완료)과
+ * 주황(최종 2차 검증완료)을 구분할 수 없어서, 4단계 문자열 상태를 별도로
+ * 계산해서 반환. (K=핑크/L=파랑의 기존 의미·계산 방식은 절대 안 건드림 — 이
+ * 함수는 그 뒤에 M=주황(최종 검증완료)만 추가로 얹어주는 것.)
+ * 반환: { invoice: 'none'|'moved'|'taken'|'verified' }
+ * ------------------------------------------------------------------- */
+function buildPackStageMap_() {
+  const map = {};
+  try {
+    const bc = bcustSheetSafe_();
+    const last = bc.getLastRow();
+    if (last < 2) return map;
+    const rows = bc.getRange(2, 1, last - 1, 13).getValues();
+    rows.forEach(r => {
+      const inv = String(r[1] || '').trim();
+      if (!inv) return;
+      if (r[12]) map[inv] = 'verified';       // M컬럼: 최종 2차 검증완료(주황)
+      else if (r[11]) map[inv] = 'taken';     // L컬럼: 패킹존 이동완료(파랑) — 기존 그대로
+      else if (r[10]) map[inv] = 'moved';     // K컬럼: 이동대기(핑크) — 기존 그대로
+      else map[inv] = 'none';
+    });
+  } catch (e) { /* best-effort */ }
+  return map;
+}
+
 /* =====================================================
  * ★ 2026-07-28 신규 — 영업 공유: 오늘 완료된 오더 경량 조회
  * listJobs 전체를 재사용하지 않고, Jobs 시트에서 딱 필요한 필드만
@@ -2978,6 +3012,7 @@ function getSalesTodayList() {
 
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
+    const packStageMap = buildPackStageMap_(); // ★ 2026-08-24 신규 — 4단계 패킹 상태(none/moved/taken/verified)
 
     // ★ 2026-08-06 재설계(매니저 요청) — 예전엔 "오늘 날짜에 검수완료된 것"만
     //   보여줬음. 그런데 이제 자동보관 규칙이 "검수 다음날"이 아니라 "디멘션
@@ -3010,7 +3045,10 @@ function getSalesTodayList() {
         movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
         dimsCount: (dimsMap[invoice] || {}).count || 0,
         // ★ 2026-08-06 신규 — 이 오더의 디멘션이 다른(대표) 인보이스에 포함돼 있으면 그 번호
-        dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || ''
+        dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || '',
+        // ★ 2026-08-24 신규 — 오출고 방지: 핑크(moved)/파랑(taken)/주황(verified, 최종 2차 검증완료) 4단계.
+        //   디멘션이 이미 저장된 건(수기 배송 준비 완료로 간주) taken(파랑)으로 승격.
+        packStage: ((dimsMap[invoice] || {}).count || 0) > 0 ? 'taken' : (packStageMap[invoice] || 'none'),
       });
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
