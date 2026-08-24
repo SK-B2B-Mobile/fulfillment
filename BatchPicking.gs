@@ -644,9 +644,11 @@ function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name
 function packscanSheet_() { return ensureBatchSheet_(PACKSCAN_SHEET, ['BatchId','PackScanId','Timestamp','Worker','Barcode','SKU','Invoice','Result','Status','Qty']); }
 
 // ★ 2026-08-24 재설계(매니저 요청) — 예전엔 날짜 뒤에 무작위 6자리(예: D03E5E)를
-// 붙여서, 같은 날 배치가 여러 개 생겨도 작업자가 몇 번째 배치인지 전혀 구분할
-// 수 없었음. 이제 그 자리에 "오늘 몇 번째로 만든 배치인지"를 그대로 보여주는
-// 알파벳(A, B, C…)을 붙임 — 예: B20260824-A(오늘 1번째), B20260824-B(오늘 2번째).
+// 붙여서, 같은 날 배치가 여러 개 생겨도 작업자가 몇 번째·몇 시 배치인지 전혀
+// 구분할 수 없었음. 이제 그 자리에 "생성 시각(HHmm) + 오늘 몇 번째인지(알파벳)"를
+// 붙임 — 예: B20260824-1010A(오늘 오전 10:10, 1번째), B20260824-1300B(오늘 오후
+// 1시, 2번째). 시각까지 있어서 자연스럽게 시간순 정렬도 되고, "아침 배치/점심
+// 이후 배치"처럼 현장에서 실제로 쓰는 말과 바로 매칭됨.
 // 26개(Z)를 넘어가면 AA, AB… 순으로 이어짐(하루에 26개 넘게 만드는 일은
 // 사실상 없겠지만 안전하게 처리).
 function seqToLetters_(n) {
@@ -670,8 +672,9 @@ function nextBatchSeqForDate_(datePart) {
 }
 function generateBatchId_() {
   const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
+  const timePart = Utilities.formatDate(new Date(), batchTz_(), 'HHmm'); // ★ 2026-08-24 신규(매니저 요청) — "몇 시에 만든 배치인지"까지 한눈에 보이도록 시:분(HHmm) 추가
   const seq = nextBatchSeqForDate_(datePart);
-  return 'B' + datePart + '-' + seqToLetters_(seq);
+  return 'B' + datePart + '-' + timePart + seqToLetters_(seq);
 }
 
 function _findBatchRow_(batchId) {
