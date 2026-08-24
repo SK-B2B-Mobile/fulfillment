@@ -86,6 +86,11 @@ nav button.active{color:var(--text); border-bottom-color:var(--purple);}
 nav button:disabled{opacity:0.35; cursor:not-allowed;}
 nav button .step{font-family:var(--mono); font-size:10px; color:var(--text-dim2); background:var(--surface3); padding:1px 6px; border-radius:4px;}
 nav button.active .step{color:var(--purple); background:var(--purple-bg);}
+/* ★ 2026-08-24 신규 — Pack Verify 탭은 비활성 상태여도 항상 보라 톤을 유지해서,
+   목록에서부터 "이건 피킹 스캔이랑 다른 탭"이라는 게 바로 눈에 들어오게 함. */
+nav button.tab-pack{color:var(--purple);}
+nav button.tab-pack .step{color:var(--purple); background:var(--purple-bg);}
+nav button.tab-pack.active{border-bottom-color:var(--purple);}
 
 /* Main */
 main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
@@ -295,6 +300,57 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .scan-chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;}
 .scan-chip{background:var(--surface3); border:1px solid var(--border); color:var(--text-dim); padding:5px 10px; border-radius:14px; font-size:10.5px; font-family:var(--mono); cursor:pointer;}
 .scan-chip:hover{color:var(--cyan); border-color:var(--cyan);}
+
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-08-24 신규 — Pack Verify(최종 2차 검증) 전용 스타일.
+ * ★★★ 피킹 스캔(위 .scan-input-wrap 등, 청록/cyan 테마)과 절대 헷갈리지
+ * 않도록, 전부 다른 색(보라/purple)·다른 이름(pv- 접두사)로 완전히 분리.
+ * 작업자가 이 탭 안에 있는 동안엔 화면 전체가 "여긴 피킹이 아니다"라는
+ * 걸 색으로 계속 느끼게 하는 게 목적. ═══════════════════════════════ */
+.pv-banner{display:flex; align-items:center; gap:12px; background:var(--purple-bg); border:1.5px solid var(--purple); border-radius:12px; padding:14px 18px; margin-bottom:18px;}
+.pv-banner-icon{font-size:26px;}
+.pv-banner-text b{color:var(--purple); font-size:14px;}
+.pv-banner-text div{font-size:12px; color:var(--text-dim); margin-top:2px;}
+.pv-invoice-picker{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:16px;}
+.pv-invoice-picker select{width:100%; padding:12px 14px; background:var(--surface2); border:2px solid var(--purple); border-radius:10px; color:var(--text); font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer;}
+.pv-worker-row{display:flex; align-items:center; gap:10px; margin-top:12px;}
+.pv-worker-row label{font-size:11px; color:var(--text-dim); font-weight:700; white-space:nowrap;}
+.pv-worker-row select, .pv-worker-row input{flex:1; padding:9px 12px; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:13px;}
+.pv-scan-panel{display:none;}
+.pv-scan-panel.active{display:block;}
+.pv-scan-input-wrap{display:flex; align-items:center; gap:10px; background:var(--surface2); border:2.5px solid var(--purple); border-radius:10px; padding:16px 18px; box-shadow:0 0 0 4px var(--purple-bg);}
+.pv-scan-icon{color:var(--purple); font-family:var(--mono); font-size:18px;}
+.pv-scan-input-wrap input{flex:1; background:transparent; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:17px; font-weight:700; letter-spacing:0.05em;}
+.pv-scan-input-wrap input::placeholder{color:var(--text-dim2);}
+.pv-progress{display:flex; justify-content:space-between; align-items:center; margin:14px 0 6px; font-family:var(--mono); font-size:13px; color:var(--text-dim); font-weight:700;}
+.pv-progress .n{font-size:20px; color:var(--purple); font-weight:800;}
+.pv-progress-bar{height:8px; background:var(--surface3); border-radius:4px; overflow:hidden;}
+.pv-progress-bar > div{height:100%; background:linear-gradient(90deg,var(--amber),var(--purple)); transition:width 0.4s;}
+.pv-msg{margin:10px 0; padding:10px 14px; border-radius:8px; font-size:13px; font-weight:700; text-align:center; display:none;}
+.pv-msg.ok{display:block; background:rgba(139,92,246,0.15); color:#C4B5FD; border:1px solid var(--purple);}
+.pv-msg.bad{display:block; background:var(--red-bg); color:#FF8A8A; border:1px solid var(--red);}
+.pv-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02);}
+.pv-line.done{border-color:rgba(139,92,246,0.5); background:var(--purple-bg);}
+.pv-line-name{font-size:14px; font-weight:700;}
+.pv-line-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
+.pv-line-qty{font-family:var(--mono); font-size:16px; font-weight:800; white-space:nowrap;}
+.pv-line.done .pv-line-qty{color:var(--purple);}
+.pv-flash{position:fixed; inset:0; pointer-events:none; z-index:9999; opacity:0; transition:opacity 0.15s;}
+.pv-flash.show-ok{background:rgba(139,92,246,0.35); opacity:1;}
+.pv-flash.show-bad{background:rgba(239,68,68,0.4); opacity:1;}
+.pv-actions{display:flex; gap:10px; margin-top:16px;}
+.pv-actions button{flex:1; padding:14px; border-radius:10px; font-size:14px; font-weight:800; cursor:pointer; border:none;}
+.pv-btn-print{background:var(--surface3); color:var(--text); border:1px solid var(--border2) !important;}
+.pv-btn-complete{background:var(--purple); color:#fff;}
+.pv-btn-complete:disabled{opacity:0.35; cursor:not-allowed;}
+.pv-btn-force{background:none; border:1px dashed rgba(239,68,68,0.5) !important; color:var(--red); font-size:10.5px !important; font-weight:600 !important; flex:0 0 auto !important; padding:14px 12px !important;}
+.pv-history-toggle{font-size:11px; color:var(--text-dim); cursor:pointer; text-decoration:underline; margin:10px 0 8px;}
+.pv-history-row{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); padding:4px 0; display:flex; justify-content:space-between; border-bottom:1px solid var(--border2);}
+.pv-history-row.wrong{color:#FF8A8A;}
+.pv-history-row.over{color:var(--amber);}
+.pv-history-undo{cursor:pointer; text-decoration:underline; margin-left:8px;}
+.pv-empty{text-align:center; padding:40px 20px; color:var(--text-dim);}
+.pv-empty-icon{font-size:32px; margin-bottom:10px;}
 
 /* Scan result */
 .scan-result{margin-top:16px; padding:16px; background:var(--surface2); border-radius:10px; border:1px solid var(--border);}
@@ -702,6 +758,7 @@ select option:disabled{color:var(--text-dim2);}
     <button data-view="v-slots" disabled><span class="step">02</span> Slot Layout</button>
     <button data-view="v-scan" disabled><span class="step">03</span> Scan & Sort</button>
     <button data-view="v-log"><span class="step">04</span> Scan Log</button>
+    <button data-view="v-pack" class="tab-pack"><span class="step">P</span> Pack Verify</button>
     <button data-view="v-workers"><span class="step">M</span> Workers</button>
   </nav>
 
@@ -984,6 +1041,55 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
 
+    <!-- ─── VIEW P: Pack Verify (최종 2차 검증) ─── -->
+    <div class="view" id="v-pack">
+      <div class="eyebrow" style="color:var(--purple);">Packing Zone · Final Check (2nd)</div>
+      <h2 class="h-page">패킹 최종검증</h2>
+      <p class="sub">패킹존으로 물리적으로 이동한(파랑) 고객사만 여기서 다시 스캔으로 확인합니다.</p>
+
+      <div class="pv-banner">
+        <div class="pv-banner-icon">🟣</div>
+        <div class="pv-banner-text">
+          <b>이 화면은 피킹 스캔(Scan & Sort)과 완전히 별개입니다</b>
+          <div>피킹 분류·검수와는 무관하게, 이미 파랑(패킹존 이동완료)으로 표시된 오더만 골라서 상자/팔레트에 담긴 실물을 다시 확인하는 화면입니다.</div>
+        </div>
+      </div>
+
+      <div class="pv-invoice-picker">
+        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검증할 오더 선택 (파랑 상태만 표시)</label>
+        <select id="pvInvoiceSelect" style="margin-top:8px;" onchange="onPvInvoiceChange()"></select>
+        <div class="pv-worker-row">
+          <label>작업자</label>
+          <select id="pvWorkerSelect" onchange="document.getElementById('pvWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
+          <input type="text" id="pvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+        </div>
+      </div>
+
+      <div class="pv-scan-panel" id="pvScanPanel">
+        <div class="pv-scan-input-wrap">
+          <span class="pv-scan-icon">🟣▤</span>
+          <input id="pvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
+        </div>
+        <div class="pv-msg" id="pvMsg"></div>
+        <div class="pv-progress">
+          <span>진행률</span>
+          <span class="n" id="pvProgressText">0 / 0 pcs</span>
+        </div>
+        <div class="pv-progress-bar"><div id="pvProgressBar" style="width:0%"></div></div>
+        <div id="pvLines" style="margin-top:14px;"></div>
+        <div class="pv-actions">
+          <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ 관리자 강제확정</button>
+          <button class="pv-btn-print" onclick="printPvSlip()">🖨 패킹슬립 인쇄</button>
+          <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 최종 2차 검증완료 확정</button>
+        </div>
+      </div>
+
+      <div class="pv-empty" id="pvEmptyState">
+        <div class="pv-empty-icon">📦</div>
+        <div>패킹존 이동완료(파랑)된 오더가 없습니다.<br>TV 현황판 또는 이 탭 상단에서 먼저 파랑으로 표시된 오더가 있어야 검증할 수 있습니다.</div>
+      </div>
+    </div>
+
     <!-- ─── VIEW M: Workers CRUD ─── -->
     <div class="view" id="v-workers">
       <div class="eyebrow">Manager · Team</div>
@@ -1011,6 +1117,9 @@ select option:disabled{color:var(--text-dim2);}
 
   </main>
 </div>
+
+<!-- ★ 2026-08-24 신규 — Pack Verify 스캔 성공/실패 시 화면 전체 플래시(오출고 방지) -->
+<div class="pv-flash" id="pvFlash"></div>
 
 <!-- Modals -->
 <div class="modal-bg" id="manualScanModal">
@@ -1333,6 +1442,7 @@ const state = {
   clearedInvoices: new Set(), // ★ 2026-07-14 신규: 이번 세션에서 "패킹완료·슬롯비우기" 누른 고객사 추적
   movedToPackingInvoices: new Set(), // ★ 2026-07-23 신규: "패킹존 이동" 체크된 고객사 (clearSlot과 무관한 순수 표시용)
   takenOutInvoices: new Set(),      // ★ 2026-08-07 신규: 출고팀이 실제로 가져간(파랑) 고객사 — TV 현황판과 색을 맞추기 위함
+  packVerifiedInvoices: new Set(),  // ★ 2026-08-24 신규: 최종 2차 검증완료(보라) — Pack Verify 탭 전용
   occupiedSlots: new Set(),   // ★ 2026-07-14 신규: 다른 미완료 배치가 점유 중인 슬롯 번호 (더 이상 배정 차단엔 안 씀, 참고용)
   occupiedSlotDetail: {},     // ★ 2026-07-23 신규: num -> {batchId, batchDate, customer} — 경고 배지 표시 전용
   lastStructureSync: null, // ★ 2026-07-10: buildScanIndex()가 마지막으로 언제 실행됐는지 진단용
@@ -1749,6 +1859,7 @@ async function continueOpenBatch(batchId, viewOnly){
     if(c.cleared) state.clearedInvoices.add(c.invoice);
     if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
+    if(c.packVerified) state.packVerifiedInvoices.add(c.invoice); // ★ 2026-08-24 신규: 보라(최종 검증완료) 상태도 같이 복원
   });
 
   buildScanIndex();
@@ -1851,6 +1962,7 @@ function applyBatchPayload(res, opts){
     if(c.cleared) state.clearedInvoices.add(c.invoice);
     if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
+    if(c.packVerified) state.packVerifiedInvoices.add(c.invoice); // ★ 2026-08-24 신규: 보라(최종 검증완료) 상태도 같이 복원
   });
 
   document.getElementById('dropSum').className = 'drop filled';
@@ -3135,9 +3247,11 @@ async function refreshBatchStructure(silent){
     //   새로고침해야만 반영됐음. 이제 갱신할 때마다 두 상태를 서버 기준으로 다시 맞춤.
     const nextMoved = new Set();
     const nextTaken = new Set();
+    const nextVerified = new Set(); // ★ 2026-08-24 신규: 최종 2차 검증완료(보라) — Pack Verify 탭용
     newCustomers.forEach(c => {
       if(c.movedToPacking) nextMoved.add(c.invoice);
       if(c.takenOut) nextTaken.add(c.invoice);
+      if(c.packVerified) nextVerified.add(c.invoice);
       if(!c.slotNum) return;
       const slot = state.slots.find(s => s.num === Number(c.slotNum));
       if(slot) slot.assignedTo = c.invoice;
@@ -3147,6 +3261,10 @@ async function refreshBatchStructure(silent){
     state.movedToPackingInvoices.forEach(inv => { if(_pendingPackToggle[inv]) nextMoved.add(inv); });
     state.movedToPackingInvoices = nextMoved;
     state.takenOutInvoices = nextTaken;
+    state.packVerifiedInvoices = nextVerified;
+    // ★ 2026-08-24 신규 — Pack Verify 탭이 열려있는 상태에서 구조가 갱신됐으면
+    //   드롭다운(파랑 오더 목록)도 최신으로 다시 채움
+    if(document.getElementById('v-pack') && document.getElementById('v-pack').classList.contains('active')) populatePvInvoiceSelect();
 
     buildScanIndex();
     updateSlotQueueNumbers();
@@ -3192,6 +3310,9 @@ function gotoView(vid){
   //   바뀌었을 경우 잠깐 옛날 값이 보일 수 있었음. 탭 진입 즉시 최신으로 맞춤.
   if(vid==='v-scan'){ populateWorkerSelect(); renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
   if(vid==='v-log'){ renderFullLog(); renderKPI(); }
+  // ★ 2026-08-24 신규 — Pack Verify 탭(최종 2차 검증). 피킹용 workerSelect/scanInput과는
+  //   완전히 분리된 pvWorkerSelect/pvInvoiceSelect를 씀 — 절대 서로 안 섞임.
+  if(vid==='v-pack'){ populatePvInvoiceSelect(); populatePvWorkerSelect(); }
   if(vid==='v-workers') loadBatchWorkersFromServer(); // ★ 2026-07-16: 다른 기기 변경사항까지 최신으로
   // ★ 탭을 옮길 때마다 최신 스캔 현황을 즉시 한 번 더 당겨옴 (5초 폴링 사이 텀 줄이기)
   if(vid==='v-slots' || vid==='v-scan' || vid==='v-log') pollScanState();
@@ -5086,6 +5207,318 @@ document.getElementById('logSearchInput').addEventListener('input', (e) => {
   }, 200);
 });
 
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-08-24 신규 — Pack Verify(최종 2차 검증) 탭 전용 로직
+// ★★★ 위쪽 "Scan & Sort"(피킹, populateWorkerSelect/scanInput/state.currentWorker)와
+// 완전히 분리된 별도 상태·함수를 씀 — 이름도(pv 접두사) 다르고, 저장하는
+// localStorage 키도 다르고, 화면 색도(보라) 다름. 절대 서로 안 섞이게 하는 게 목적.
+// ═══════════════════════════════════════════════════════════
+let _pvInvoice = null;
+let _pvState = null;
+let pvCurrentWorker = null;
+let _pvAudioCtx = null;
+
+function populatePvInvoiceSelect(){
+  const sel = document.getElementById('pvInvoiceSelect');
+  const panel = document.getElementById('pvScanPanel');
+  const empty = document.getElementById('pvEmptyState');
+  const picker = document.querySelector('.pv-invoice-picker');
+  if(!sel) return;
+  const candidates = [];
+  state.slots.forEach(s => {
+    const inv = s.assignedTo;
+    if(!inv) return;
+    if(!state.takenOutInvoices.has(inv)) return; // ★ 파랑(패킹존 이동완료) 상태만 대상 — 그 전 단계는 검증 대상 아님
+    const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === inv);
+    candidates.push({ invoice: inv, slotNum: s.num, customer: cf ? cf.meta.customer : '', verified: state.packVerifiedInvoices.has(inv) });
+  });
+  candidates.sort((a,b) => Number(a.slotNum) - Number(b.slotNum));
+  if(candidates.length === 0){
+    if(picker) picker.style.display = 'none';
+    if(panel) panel.classList.remove('active');
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(picker) picker.style.display = 'block';
+  if(empty) empty.style.display = 'none';
+  const prevSelected = sel.value;
+  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(c =>
+    `<option value="${c.invoice}">${c.verified ? '🟣 [검증완료] ' : ''}SLOT ${c.slotNum} · ${c.invoice} · ${c.customer||''}</option>`
+  ).join('');
+  if(prevSelected && candidates.some(c => c.invoice === prevSelected)) sel.value = prevSelected;
+  else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
+}
+
+function populatePvWorkerSelect(){
+  const sel = document.getElementById('pvWorkerSelect');
+  if(!sel) return;
+  if(document.activeElement === sel) return; // 드롭다운 열려있는 동안은 건드리지 않음(scan&sort와 동일 원칙)
+  const all = [...state.workers].sort((a,b) => (b.status==='active')-(a.status==='active'));
+  const optsHtml = '<option value="">— 선택 안 함 —</option>' + all.map(w =>
+    `<option value="${w.name}">${w.name}${w.status!=='active' ? ' (Off)' : ''}</option>`
+  ).join('') + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+  const savedWorker = localStorage.getItem('sk_pack_verify_worker'); // ★ 피킹 작업자 저장키(sk_scan_worker)와 완전히 다른 별도 키
+  const prev = (pvCurrentWorker === null || pvCurrentWorker === undefined) ? savedWorker : pvCurrentWorker;
+  sel.innerHTML = optsHtml;
+  if(prev) sel.value = prev;
+  document.getElementById('pvWorkerManual').style.display = (sel.value === '__manual__') ? 'block' : 'none';
+}
+function currentPvWorker(){
+  const sel = document.getElementById('pvWorkerSelect');
+  if(!sel) return '';
+  if(sel.value === '__manual__') return document.getElementById('pvWorkerManual').value.trim();
+  return (sel.value || '').trim();
+}
+document.getElementById('pvWorkerSelect').addEventListener('change', function(){
+  pvCurrentWorker = this.value;
+  localStorage.setItem('sk_pack_verify_worker', this.value);
+  document.getElementById('pvWorkerManual').style.display = (this.value === '__manual__') ? 'block' : 'none';
+});
+
+async function onPvInvoiceChange(){
+  const sel = document.getElementById('pvInvoiceSelect');
+  const invoice = sel.value;
+  const panel = document.getElementById('pvScanPanel');
+  if(!invoice){ panel.classList.remove('active'); _pvInvoice = null; _pvState = null; return; }
+  _pvInvoice = invoice;
+  panel.classList.add('active');
+  document.getElementById('pvMsg').style.display = 'none';
+  document.getElementById('pvCompleteBtn').disabled = true;
+  document.getElementById('pvCompleteBtn').textContent = '🟣 최종 2차 검증완료 확정';
+  document.getElementById('pvLines').innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  await refreshPvState();
+  const input = document.getElementById('pvScanInput');
+  input.value = '';
+  setTimeout(() => input.focus(), 60);
+}
+
+async function refreshPvState(){
+  if(!_pvInvoice) return;
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: state.batchId, invoice: _pvInvoice });
+  if(!res.ok){
+    document.getElementById('pvLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
+    return;
+  }
+  _pvState = res;
+  renderPvBody();
+}
+
+function renderPvBody(){
+  const st = _pvState;
+  if(!st) return;
+  const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
+  document.getElementById('pvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
+  document.getElementById('pvProgressBar').style.width = pct + '%';
+  document.getElementById('pvCompleteBtn').disabled = !st.complete;
+
+  const linesHtml = (st.lines || []).map(l => `
+    <div class="pv-line ${l.complete ? 'done' : ''}">
+      <div>
+        <div class="pv-line-name">${l.name || l.sku}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
+        <span>${l.complete ? '✅' : '⏳'}</span>
+      </div>
+    </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
+
+  const activeHistory = (st.history || []).filter(h => h.status !== 'undone');
+  const historyHtml = activeHistory.length ? `
+    <div class="pv-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ 스캔 이력 보기 (${activeHistory.length}건)</div>
+    <div style="display:none;">
+      ${activeHistory.slice(0, 30).map(h => `
+        <div class="pv-history-row ${h.result !== 'pass' ? h.result : ''}">
+          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (초과)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span class="pv-history-undo" onclick="undoPvScanEntry('${h.packScanId}')">되돌리기</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  document.getElementById('pvLines').innerHTML = linesHtml + historyHtml;
+}
+
+async function submitPvScan(){
+  const input = document.getElementById('pvScanInput');
+  const barcode = input.value.trim();
+  if(!barcode || !_pvInvoice) return;
+  input.value = '';
+  const worker = currentPvWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  const res = await gasCall('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode, qty: 1 });
+  if(!res.ok){
+    flashPv('bad'); beepPv(false);
+    showPvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    input.focus();
+    return;
+  }
+  if(res.result === 'pass'){
+    flashPv('ok'); beepPv(true);
+    showPvMsg(`✓ ${res.name || res.sku || barcode} 확인됨`, 'ok');
+  } else if(res.result === 'wrong'){
+    flashPv('bad'); beepPv(false);
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
+    showPvMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → 실제로는 [${owners}] 것입니다. 상자에서 빼주세요.`, 'bad');
+  } else if(res.result === 'over'){
+    flashPv('bad'); beepPv(false);
+    showPvMsg('⚠ 이미 필요수량을 다 채웠습니다 (초과 스캔 — 다른 고객사 몫이 섞였을 수 있습니다)', 'bad');
+  }
+  await refreshPvState();
+  input.focus();
+}
+document.getElementById('pvScanInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitPvScan(); }
+});
+
+function flashPv(kind){
+  const el = document.getElementById('pvFlash');
+  el.className = 'pv-flash show-' + kind;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'pv-flash'; }, 350);
+}
+function showPvMsg(msg, kind){
+  const el = document.getElementById('pvMsg');
+  el.textContent = msg;
+  el.className = 'pv-msg ' + kind;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'pv-msg'; el.style.display = 'none'; }, 4000);
+}
+// ★ 외부 오디오 파일 없이 WebAudio로 즉석 생성 — 피킹 쪽과 소리도 다르게(더 높은 음)
+//   해서, 눈을 안 봐도 "이건 2차 검증 소리"라는 걸 구분할 수 있게 함.
+function beepPv(ok){
+  try{
+    const ctx = _pvAudioCtx || (_pvAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    function tone(freq, start, dur){
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = freq; o.type = 'sine';
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.001, ctx.currentTime + start);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+      o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02);
+    }
+    if(ok){ tone(1400, 0, 0.12); } else { tone(280, 0, 0.16); tone(280, 0.19, 0.16); }
+  }catch(e){ /* 오디오 실패해도 스캔 자체엔 지장 없음 */ }
+}
+
+async function undoPvScanEntry(packScanId){
+  if(!confirm('이 스캔을 취소하시겠습니까?')) return;
+  const res = await gasCall('undoPackScan', { packScanId });
+  if(res.ok) await refreshPvState();
+  else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+}
+
+async function completePvVerify(){
+  if(!_pvInvoice) return;
+  const btn = document.getElementById('pvCompleteBtn');
+  btn.disabled = true; btn.textContent = '처리 중...';
+  const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified' });
+  if(res.ok){
+    showPvMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
+    state.packVerifiedInvoices.add(_pvInvoice);
+    populatePvInvoiceSelect();
+    printPvSlip();
+  } else {
+    btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
+    alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
+    await refreshPvState();
+  }
+}
+
+async function forcePvComplete(){
+  if(!_pvInvoice) return;
+  if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
+  const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
+  if(res.ok){
+    showPvMsg('⚠ 관리자 강제확정으로 처리됐습니다', 'ok');
+    state.packVerifiedInvoices.add(_pvInvoice);
+    populatePvInvoiceSelect();
+  } else {
+    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
+// ★ 패킹 슬립 인쇄 — StyleKorean 헤더/주소 포함, 새 창에서 브라우저 인쇄 다이얼로그 사용
+function printPvSlip(){
+  const invoice = _pvInvoice;
+  if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
+  const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
+  const slotObj = state.slots.find(s => s.assignedTo === invoice);
+  const st = _pvState;
+  const lines = (st && st.lines) ? st.lines : [];
+  const invoiceIssues = state.issues.filter(i => i.invoice === invoice);
+  const verified = st ? !!st.complete : false;
+  const worker = currentPvWorker() || '-';
+  const printedAt = new Date().toLocaleString('en-US');
+  const customer = cf ? cf.meta.customer : '';
+  const shipVia = cf ? cf.meta.ship_via : '';
+
+  const rowsHtml = lines.map(l => `
+    <tr>
+      <td>${l.sku}</td>
+      <td>${l.name || ''}</td>
+      <td style="text-align:center;">${l.reqQty}</td>
+      <td style="text-align:center;">${l.issueQty || 0}</td>
+      <td style="text-align:center; font-weight:700;">${l.packed}</td>
+    </tr>`).join('');
+
+  const issuesHtml = invoiceIssues.length ? `
+    <h4 style="margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;">Issues / Shortages</h4>
+    <table class="slip-table"><thead><tr><th>Reason</th><th>Product</th><th style="text-align:center;">Qty</th></tr></thead><tbody>
+    ${invoiceIssues.map(i => `<tr><td>${i.reason}</td><td>${i.name || i.sku || ''}</td><td style="text-align:center;">${i.qty}</td></tr>`).join('')}
+    </tbody></table>` : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
+  <style>
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
+    .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
+    .slip-title{font-size:20px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:12px; color:#555; text-align:right; margin-top:4px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; font-size:13px;}
+    .slip-info div b{display:block; font-size:11px; color:#777; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
+    table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
+    table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
+    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
+    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
+    @media print{ body{padding:12mm;} }
+  </style></head><body>
+    <div class="slip-head">
+      <div>
+        <div class="slip-logo">StyleKorean</div>
+        <div class="slip-addr">5609 River Way, Buena Park, CA 90621</div>
+      </div>
+      <div>
+        <div class="slip-title">PACKING SLIP</div>
+        <div class="slip-meta">Batch ${state.batchId || '-'}<br>Printed ${printedAt}</div>
+      </div>
+    </div>
+    <div class="slip-info">
+      <div><b>Customer</b>${customer || '-'}</div>
+      <div><b>Invoice #</b>${invoice}</div>
+      <div><b>Ship Via</b>${shipVia || '-'}</div>
+      <div><b>Slot</b>${slotObj ? slotObj.num : '-'}</div>
+    </div>
+    <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table>
+    ${issuesHtml}
+    <div class="verify-badge ${verified ? 'verify-ok' : 'verify-bad'}">${verified ? '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED' : '⚠ NOT FULLY VERIFIED (2nd check pending)'}</div>
+    <div class="slip-footer">
+      <span>Verified by: ${worker}</span>
+      <span>StyleKorean B2B Fulfillment System</span>
+    </div>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=820,height=1000');
+  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 300);
+}
 
 // ═══════════════════════════════════════════════════════════
 // Workers CRUD
