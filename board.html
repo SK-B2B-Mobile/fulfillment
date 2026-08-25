@@ -313,6 +313,10 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <button class="tb-switch-btn" id="btnSwitchBatchTV">⇄ 다른 배치</button>
       <div class="tb-switch-dd" id="switchBatchDropdownTV"></div>
     </div>
+    <div class="tb-switch-wrap">
+      <button class="tb-switch-btn" id="btnBatchHistoryTV">📅 지난 배치 전체</button>
+      <div class="tb-switch-dd" id="batchHistoryDropdownTV"></div>
+    </div>
   </div>
   <div class="tb-right">
     <div class="tb-stat">
@@ -1748,6 +1752,61 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('switchBatchDropdownTV');
   if(dd && dd.classList.contains('open') && !e.target.closest('#btnSwitchBatchTV') && !e.target.closest('#switchBatchDropdownTV')){
+    dd.classList.remove('open');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-08-25 신규(매니저 요청) — "지난 배치 전체" 조회.
+// 위 "⇄ 다른 배치"는 일부러 미완료 배치만 보여주도록 설계돼 있어서(그게
+// 정상 동작), 몇 주 전에 이미 정상적으로 끝난 배치의 고객사별 진행상황을
+// 다시 보고 싶어도 볼 방법이 없었음. 이건 완료 여부와 무관하게 전체 배치를
+// 최신순으로 보여주는 별도 목록 — 완전히 조회 전용(다른 기기에 영향 없음,
+// 위 "다른 배치"와 완전히 같은 방식으로 manualBatchOverride만 켜줌).
+// ═══════════════════════════════════════════════════════════
+document.getElementById('btnBatchHistoryTV').onclick = async (e) => {
+  e.stopPropagation();
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  if(dd.classList.contains('open')){ dd.classList.remove('open'); return; }
+
+  dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
+  dd.classList.add('open');
+
+  const res = await gasQueryWithRetry('getBatchHistoryList', {});
+  if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
+  const list = res.batches || [];
+  if(!list.length){
+    dd.innerHTML = `<div class="tb-switch-empty">배치 기록이 없습니다</div>`;
+    return;
+  }
+  dd.innerHTML = list.map(b => {
+    const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+    const tag = isCurrent
+      ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+      : b.status === 'completed'
+      ? `<span class="tb-sw-tag" style="background:var(--gray-bg); color:var(--text-dim)">완료됨</span>`
+      : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">진행중</span>`;
+    return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
+      <div>
+        <div class="tb-sw-id">${b.batchId}</div>
+        <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs</div>
+      </div>
+      ${tag}
+    </div>`;
+  }).join('');
+  dd.querySelectorAll('[data-batch]').forEach(row => {
+    row.onclick = () => {
+      manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
+      document.getElementById('manualBanner').classList.add('show');
+      dd.classList.remove('open');
+      startViewOnlyTimer(); // ★ 10분 뒤 자동 복귀 카운트다운 시작(계속 보기로 고정도 가능)
+      pollOnce(); // 고른 배치로 즉시 갱신
+    };
+  });
+};
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  if(dd && dd.classList.contains('open') && !e.target.closest('#btnBatchHistoryTV') && !e.target.closest('#batchHistoryDropdownTV')){
     dd.classList.remove('open');
   }
 });
