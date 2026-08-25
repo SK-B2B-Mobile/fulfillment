@@ -1236,7 +1236,7 @@ function printPackingSlip(format){
   //   "확인 안 됨"이라는 게 명확히 드러나도록 대시(—)로 표시.
   const rowsHtml = lines.map(l => `
     <tr>
-      <td>${l.sku}</td>
+      <td>${l.barcode}</td>
       <td>${l.name || ''}</td>
       <td style="text-align:center;">${l.reqQty}</td>
       <td style="text-align:center;">${l.issueQty || 0}</td>
@@ -1314,7 +1314,7 @@ function printPackingSlip(format){
       <div><b>Ship Via</b>${slot.shipVia || '-'}</div>
       <div><b>Slot</b>${slot.slotNum}</div>
     </div>
-    <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
+    <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody></table>
     ${issuesHtml}
     ${forcedNote}
