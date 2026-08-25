@@ -2859,19 +2859,38 @@ function getScanAndPickers(batchId) {
  * 배치의 고객사별 진행상황을 다시 보고 싶을 때 볼 방법이 없었음. 이 함수는
  * 완료 여부와 무관하게 전체 배치를 최신순으로 돌려줌(가벼운 요약 정보만 —
  * getOpenBatches처럼 스캔량까지 집계하면 무거워지므로 기본 정보만).
- * 최근 90개까지만(그 이상은 스크롤이 무의미할 정도로 많음). */
-function getBatchHistoryList() {
+ * ★ 2026-08-25 수정(매니저 요청) — 계속 쌓이면 목록이 지저분해지니, 기본은
+ * 최근 14일(2주)치만 보여줌. "지난주 배치"는 요일과 무관하게 항상 이 안에
+ * 들어옴(7일이면 주 초반 조회 시 애매하게 걸릴 수 있어서 여유를 둠).
+ * 더 예전 것이 필요하면 클라이언트가 data.days를 크게(예: 365) 넘겨서 요청.
+ * 입력: { days (기본 14) } */
+function getBatchHistoryList(data) {
   try {
+    const days = (data && data.days) ? Number(data.days) : 14;
     const bSh = batchesSheet_();
     const last = bSh.getLastRow();
     if (last < 2) return { ok: true, batches: [] };
     const rows = bSh.getRange(2, 1, last - 1, 7).getValues();
-    const list = rows.map(r => ({
+    let list = rows.map(r => ({
       batchId: String(r[0]), date: r[1], status: String(r[2] || ''),
       totalSku: r[3], totalQty: r[4], createdAt: r[5], completedAt: r[6],
     }));
+    if (days > 0) {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const cutoffStr = Utilities.formatDate(cutoff, batchTz_(), 'yyyy-MM-dd');
+      list = list.filter(b => {
+        let dStr = b.date;
+        if (Object.prototype.toString.call(dStr) === '[object Date]') {
+          dStr = Utilities.formatDate(dStr, batchTz_(), 'yyyy-MM-dd');
+        } else {
+          dStr = String(dStr || '').slice(0, 10);
+        }
+        return dStr >= cutoffStr;
+      });
+    }
     list.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    return { ok: true, batches: list.slice(0, 90) };
+    return { ok: true, batches: list.slice(0, 90), days: days };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
