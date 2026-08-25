@@ -1436,6 +1436,19 @@ function normBarcode(v){
 // ═══════════════════════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════════════════════
+// ★ 2026-08-25 신규 — 기기별 고유 ID(로컬에 한 번 생성해서 계속 재사용).
+//   "지금 이 이름을 다른 기기에서도 쓰고 있는지"를 판단할 때, 내 자신의
+//   하트비트는 "다른 기기"로 착각하면 안 되므로 구분용으로 필요함.
+function getDeviceId_(){
+  let id = localStorage.getItem('sk_device_id');
+  if(!id){
+    id = 'dev-' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+    localStorage.setItem('sk_device_id', id);
+  }
+  return id;
+}
+const DEVICE_ID = getDeviceId_();
+
 const state = {
   batchId: null,
   batchStartTs: null,
@@ -1667,9 +1680,10 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
         <button class="btn btn-primary btn-sm" data-switch-to="${b.batchId}" style="white-space:nowrap;">전환</button>
       </div>
     </div>`).join('');
-  // ★ 2026-08-07 신규(매니저 요청) — "보기"는 내 화면에서만 열림(다른 기기 영향 없음),
-  //   "전환"은 예전처럼 전체 기기가 같이 옮겨감. 지난 배치를 잠깐 확인하려고
-  //   전체를 튕기게 만들 필요가 없어서 분리함.
+  // ★ 2026-08-07 신규 → 2026-08-25 재확정(매니저 결정) — "보기"/"전환" 둘 다
+  //   이 기기 안에서만 바뀌고 다른 기기에는 절대 영향을 주지 않음(완전 독립).
+  //   차이는 표시상 의미뿐: "보기"는 조회전용 배지가 붙고 Scan Log로 이동,
+  //   "전환"은 실제로 이어서 작업한다는 뜻으로 Slot Layout(또는 원래 보던 탭)으로 이동.
   dd.querySelectorAll('[data-view-only]').forEach(btn => {
     btn.onclick = () => { dd.style.display = 'none'; continueOpenBatch(btn.dataset.viewOnly, true); };
   });
@@ -1839,21 +1853,16 @@ async function continueOpenBatch(batchId, viewOnly){
   //   번거로움이 있었음. 전환 직전에 지금 보고 있던 탭을 기억해뒀다가, 전환이
   //   끝나면 그 탭으로 그대로 돌아가도록 함(스캔 디바이스에서 특히 유용).
   const _prevView = document.querySelector('.view.active')?.id || null;
-  // ★ 2026-07-24 신규 — 심각한 사고 방지: 이 배치로 전환하면 이 기기뿐 아니라
-  //   TV 현황판·다른 작업자 폰 등 "전체 기기"가 자동으로 같은 배치를 따라가도록
-  //   서버에 방송됨(setActiveBatch). 여러 탭을 켜놓고 작업하다가 예전 탭에서
-  //   무심코 이 버튼을 눌러서, 다른 기기들이 다시 옛날 배치로 튕겨나가는 사고가
-  //   실제로 있었음. 조용히 방송하지 않고 명확히 확인받도록 함.
-  // ★ 2026-08-07 개선(매니저 요청) — 예전엔 배치를 열면 무조건 "전체 기기 전환"이라
-  //   확인 팝업이 떴고, 지난 배치를 잠깐 들여다보려는 사람 때문에 TV 현황판과
-  //   다른 작업자 폰까지 같이 튕기는 구조였음.
-  //   이제 두 가지를 분리함:
-  //     · 조회 전용(viewOnly) — 내 화면에서만 열림. 다른 기기에 영향 0. 확인창 없음.
-  //     · 이어서 작업        — 예전처럼 전체 기기가 같이 전환됨(확인창 유지).
-  //   TV 현황판(board.html)이 이미 쓰던 방식과 동일하게 맞춘 것.
-  if(!viewOnly){
-    if(!confirm(`배치 ${batchId}(으)로 전환하면 TV 현황판·다른 작업자 폰 등\n다른 모든 기기도 자동으로 이 배치로 같이 전환됩니다.\n\n계속하시겠습니까?`)) return;
-  }
+  // ★ 2026-08-25 재설계(매니저 확정) — 예전엔 "전환"을 누르면 서버의 "활성 배치"를
+  //   바꿔서 TV 현황판·다른 작업자 폰까지 전부 같이 끌려갔음(그래서 확인창이
+  //   있었음). 그런데 실제 현장은 여러 팀이 동시에 서로 다른 배치를 각자
+  //   독립적으로 작업하는 구조라서, 한 사람이 배치를 바꾸면 다른 사람 화면까지
+  //   영향받는 건 대형 사고 요인임(실제로 8/12에 이 방식 때문에 사고가 있었음).
+  //   그래서 "작업자 기기(batch.html)"는 이제 "전환"과 "보기"를 구분하지 않고
+  //   둘 다 완전히 이 기기 안에서만 바뀌게 통일함(서버에 절대 방송 안 함).
+  //   TV 현황판(board.html)은 화면이 하나뿐이라 여러 배치를 번갈아 보여줘야
+  //   하는 게 정상 업무 흐름이라, 그쪽의 "활성 배치 따라가기"는 그대로 유지함
+  //   (board.html은 이 파일과 별개이며 이번 변경의 영향을 받지 않음).
 
   const res = await gasQuery('getBatch', { batchId });
   if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
@@ -1893,7 +1902,6 @@ async function continueOpenBatch(batchId, viewOnly){
   buildScanIndex();
   updateSlotQueueNumbers();
   const _when = fmtBatchWhen(res.batch.createdAt || res.batch.date);
-  document.getElementById('batchChip').textContent = state.batchId + (_when ? ' · ' + _when : '');
   syncPickAreaBatchLabel();
   document.getElementById('batchChip').classList.add('active');
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
@@ -1903,25 +1911,21 @@ async function continueOpenBatch(batchId, viewOnly){
   startScanPolling();
   startStructurePolling();
   checkOpenBatches(); // 방금 고른 배치는 목록에서 빠지도록 다시 그림
-  // ★ 2026-07-23 신규: 서버에 "지금 활성 배치는 이거다"라고 기록 →
-  //   다른 기기들이 페이지를 열 때 클릭 없이 자동으로 같은 배치를 따라옴
+  // ★ 2026-08-25 수정 — 이제 "전환"도 완전히 이 기기 안에서만 바뀌므로, 서버에는
+  //   절대 방송하지 않음(gasCall('setActiveBatch', ...) 완전히 제거함). "보기"와
+  //   "전환"의 차이는 이제 배지 문구·기본 이동 탭 정도의 표시상 차이만 남음 —
+  //   둘 다 다른 기기에는 100% 영향이 없다는 점은 완전히 동일함.
+  state.viewOnlyBatch = viewOnly ? state.batchId : null;
+  const chip = document.getElementById('batchChip');
+  if(chip) chip.textContent = state.batchId + (_when ? ' · ' + _when : '') + (viewOnly ? ' (조회전용)' : '');
+  syncPickAreaBatchLabel();
   if(viewOnly){
-    // 서버에 방송하지 않음 — 이 기기에서만 보는 상태
-    state.viewOnlyBatch = state.batchId;
-    const chip = document.getElementById('batchChip');
-    if(chip) chip.textContent = state.batchId + (_when ? ' · ' + _when : '') + ' (조회전용)';
-    syncPickAreaBatchLabel();
     toast(`배치 ${state.batchId} 조회 전용으로 열었습니다 — 다른 기기에는 영향 없습니다`, 'success');
-    // ★ 2026-08-25 수정 — 원래 보고 있던 탭이 있으면 거기로, 없으면(최초 진입)
-    //   기존처럼 Scan Log로. Pack Verify를 보고 있었다면 그 탭으로 돌아가면서
-    //   드롭다운도 새 배치 기준으로 자동 갱신됨(gotoView 내부 로직).
     gotoView(_prevView || 'v-log');
     renderKPI();
     return;
   }
-  state.viewOnlyBatch = null;
-  if(GAS_READY) gasCall('setActiveBatch', { batchId: state.batchId });
-  toast(`배치 ${state.batchId} 이어서 작업 시작`, 'success');
+  toast(`배치 ${state.batchId}(으)로 전환했습니다 — 이 기기에서만 바뀝니다`, 'success');
   gotoView(_prevView || 'v-slots');
 }
 
@@ -2042,36 +2046,49 @@ async function restoreBatchFromServer(){
     if(cached) prefetchScanState = gasQuery('getScanState', { batchId: cached.batchId }).catch(() => null);
   }
 
-  // ★ 2026-07-23 신규: "오늘 배치"만 자동으로 찾던 것을, 매니저가 서버에
-  //   기록해둔 "활성 배치"부터 우선 확인하도록 변경. 이러면 매니저가 PC에서
-  //   어제 배치를 "이어서 작업하기"로 열었을 때, 다른 기기(작업자 폰 등)들도
-  //   페이지를 열면 클릭 없이 자동으로 같은 배치를 따라옴 (날짜 무관).
-  //   활성 배치 기록이 없으면(아무도 아직 안 정했으면) 예전처럼 "오늘 배치"를 확인.
-  let res = await gasQueryWithRetry('getActiveBatch', {});
-  if(!res.ok || !res.batch){
-    res = await gasQueryWithRetry('getBatch', {});
+  // ★ 2026-08-25 재설계(매니저 확정 — 기기 독립 원칙) — 예전엔 "서버가 기억하는
+  //   활성 배치"부터 우선 확인해서, 이 기기가 마지막으로 쓰던 배치와 다르면
+  //   "새 배치가 열렸습니다" 배너로 사람이 고르게 했음(8/12 사고 이후 안전장치).
+  //   그런데 이제 batch.html의 어떤 동작도 setActiveBatch를 서버에 방송하지
+  //   않으므로(완전 기기 독립), "활성 배치"라는 개념 자체가 더 이상 신뢰할
+  //   근거가 없는 값이 되어버림(누구도 갱신하지 않으니 옛날 값에 멈춰있음).
+  //   그래서 이제부터는:
+  //     · 이 기기에 캐시된 배치가 있으면 → 무조건 그 배치ID로만 직접 조회
+  //       (다른 기기가 뭘 하든 전혀 참고하지 않음 — 완전 독립)
+  //     · 캐시가 없으면(이 기기에서 처음) → "미완료 배치가 정확히 1개"일 때만
+  //       자동으로 열어주고, 2개 이상이면 절대 임의로 안 고르고 사람이
+  //       "⇄ 다른 배치"에서 직접 선택하게 함(여러 팀이 동시에 다른 배치를
+  //       작업하는 게 이제 정상 운영이므로, 애매하면 절대 추측하지 않음).
+  let res;
+  if(cached && cached.batchId){
+    res = await gasQueryWithRetry('getBatch', { batchId: cached.batchId });
+    if(res.ok && res.batch && res.batch.status === 'completed'){
+      // 마지막으로 작업하던 배치가 그새 완료 처리됐으면, 캐시를 지우고
+      // "새로 고를 배치"가 필요한 상태로 전환(아래 없음-분기로 흘러가게 함)
+      clearBatchCache();
+      cached = null;
+      res = { ok: true, batch: null };
+    }
+  } else {
+    res = { ok: true, batch: null };
   }
   if(!res.ok || !res.batch){
-    // ★ 2026-08-04 신규 — 심각한 사고 방지: 활성 배치 기록도 없고 "오늘 생성된"
-    //   배치도 없으면(=날짜가 바뀐 다음날 아침 등), 예전엔 여기서 그냥 포기하고
-    //   "배치 없음" 상태로 멈췄음. 그런데 어제 만든 배치가 아직 완료 안 된 채로
-    //   남아있어도 아무도 명시적으로 "이어서 작업하기"를 누르기 전까진 2/3번 탭이
-    //   계속 잠겨서 작업자들이 스캔을 아예 못 하는 사고가 실제로 발생했음.
-    //   완료 안 된 배치가 "정확히 1개"뿐이면(=헷갈릴 여지가 없으면) 자동으로 그
-    //   배치를 이어서 열어줌. 2개 이상이면(=어느 걸 열지 사람이 판단해야 하면)
-    //   절대 임의로 고르지 않고, 화면 상단 경고 패널에서 사람이 직접 고르게 함.
     try{
       const openRes = await gasQuery('getOpenBatches', {});
-      // ★ 2026-08-05 신규 — getOpenBatches가 이제 "완료된 지 1시간 안 된 배치"도
-      //   같이 내려주므로(recentlyCompleted:true), 이 자동-이어서-열기 판단에서는
-      //   반드시 제외해야 함. 안 그러면 방금 끝난 배치가 유일한 항목일 때 그걸
-      //   "미완료 배치"로 착각해서 자동으로 다시 열어버리는 사고가 생김.
+      // recentlyCompleted(완료된 지 1시간 안 된 배치)는 "미완료"로 착각하면 안 됨
       const trulyOpen = (openRes.batches || []).filter(b => !b.recentlyCompleted);
       if(openRes.ok && trulyOpen.length === 1){
         res = await gasQuery('getBatch', { batchId: trulyOpen[0].batchId });
+      } else if(openRes.ok && trulyOpen.length > 1){
+        // 2개 이상 — 절대 임의로 안 고름. 사람이 "⇄ 다른 배치"에서 직접 선택.
+        state.bootSyncPending = false; showBootSyncChip(false);
+        toast(`진행 중인 배치가 ${trulyOpen.length}개 있습니다 — 상단 "⇄ 다른 배치"에서 작업할 배치를 선택해주세요`, 'success');
+        tryRestoreDraftFromLocalStorage();
+        return;
       }
     }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
   }
+
   if(!res.ok || !res.batch) {
     // ★ 2026-08-04 신규 — 캐시로 화면을 이미 그려놨는데 서버엔 진행중 배치가 없는
     //   경우(=그 배치가 그새 완료 처리된 것). 옛 화면을 남겨두면 완료된 배치에
@@ -2088,40 +2105,10 @@ async function restoreBatchFromServer(){
     tryRestoreDraftFromLocalStorage(); return; // 진행중 배치 없음 → 임시저장 확인
   }
 
-  // ★ 2026-08-12 긴급 수정(매니저 발견) — 심각한 사고: 매니저가 새 배치를 만들면
-  //   setActiveBatch로 "전체 기기가 자동으로 새 배치를 따라오게" 방송되는데,
-  //   이때 다른 작업자가 아직 완료 안 된 "예전" 배치에서 스캔 작업 중이었다면,
-  //   그 사람 화면도 새로고침 한 번에 조용히 새 배치로 끌려가버림 — 본인은
-  //   여전히 예전 배치를 스캔하는 줄 알고 계속 스캔했는데 실제로는 엉뚱한(새)
-  //   배치에 기록됨(8/12 오후 Jien Lee 사례: MEGA MART 등 3건이 새 배치에
-  //   잘못 기록됐다가 1분 뒤 재스캔으로 원래 배치에 다시 기록된 흔적이
-  //   ScanLog에서 확인됨). 서버의 "활성 배치"가 편의상 전체 공용 값 하나뿐이라
-  //   생기는 구조적 문제.
-  //   해결: 이 기기가 마지막으로 캐시해둔 배치와 서버의 활성 배치가 다르면,
-  //   캐시된(=마지막으로 작업 중이던) 배치가 아직 "완료" 처리 안 됐는지 먼저
-  //   확인한다. 아직 안 끝났으면 절대 조용히 안 끌고 가고, 화면은 그대로
-  //   두고 배너로만 "새 배치가 열렸습니다"라고 알려서 사람이 직접 선택하게
-  //   한다. 이미 끝난 배치였다면(=더 볼 이유가 없으면) 예전처럼 자동으로
-  //   새 활성 배치를 따라간다(정상 동작 유지).
-  if(cached && cached.batchId && res.ok && res.batch && String(res.batch.batchId) !== String(cached.batchId)){
-    let staleStillOpen = false;
-    try{
-      const staleCheck = await gasQuery('getBatch', { batchId: cached.batchId });
-      staleStillOpen = !!(staleCheck.ok && staleCheck.batch && staleCheck.batch.status !== 'completed');
-    }catch(e){
-      staleStillOpen = true; // 확인 실패 시 안전한 쪽(=끌고 가지 않는 쪽)으로
-    }
-    if(staleStillOpen){
-      state.bootSyncPending = false; showBootSyncChip(false);
-      showNewBatchAvailableBanner(res.batch.batchId, cached.batchId);
-      // 배치는 그대로 유지하고(이미 캐시로 화면에 그려둔 상태), 스캔 진행률만 최신화
-      if(!scanStateApplied) await pollScanState();
-      startScanPolling();
-      startStructurePolling();
-      return;
-    }
-    // else: 캐시된 배치가 이미 완료됨 → 아래로 내려가서 평소처럼 새 활성 배치를 따라감
-  }
+  // ★ 2026-08-25 — 이제 캐시가 있으면 항상 "그 배치ID"로만 조회하므로, 서버가
+  //   "다른 배치"를 알려주는 경우 자체가 생기지 않음(기기 독립 원칙과 정확히
+  //   일치). 그래서 예전에 있던 "새 배치가 열렸습니다" 불일치 배너 로직은
+  //   더 이상 발생할 수 없는 상황을 다루던 코드라 제거함.
 
   // 서버가 알려준 진짜 배치로 전부 덮어씀 (캐시와 같아도 최신 구조로 갱신됨)
   applyBatchPayload(res, { fromCache: false });
@@ -2147,11 +2134,9 @@ async function restoreBatchFromServer(){
   // ★ 2026-08-04 수정 — 현장 버그: 캐시 부팅으로 이미 02(슬롯 배치도)를 보여준 뒤,
   //   작업자가 그 사이 03(스캔)으로 이동했는데 2~3초 뒤 서버 확인이 끝나는 순간
   //   여기서 또 gotoView를 호출해 02로 강제로 끌려갔다가 다시 03을 눌러야 했음.
-  //   같은 배치로 확인되면 화면 이동을 반복하지 않고 작업자가 보던 탭을 그대로 유지.
-  //   단, 서버가 "다른 배치"를 알려준 경우(그새 배치가 교체됨)는 화면 내용이
-  //   통째로 바뀐 것이므로 02로 이동시켜 변경 사실을 확실히 인지하게 함.
-  const batchChangedDuringSync = navigatedFromCache && cached && cached.batchId !== state.batchId;
-  if(!navigatedFromCache || batchChangedDuringSync) gotoView('v-slots');
+  //   ★ 2026-08-25 — 이제 캐시된 배치와 다른 배치로 바뀌는 경우 자체가 없으므로
+  //   (기기 독립), 캐시로 이미 화면 이동을 했다면 항상 그 화면을 그대로 유지함.
+  if(!navigatedFromCache) gotoView('v-slots');
 }
 document.addEventListener('DOMContentLoaded', restoreBatchFromServer);
 if(document.readyState !== 'loading') restoreBatchFromServer();
@@ -2862,7 +2847,9 @@ document.getElementById('startBatchBtn').onclick = async () => {
     state.batchTotalQty = created.totalQty != null ? created.totalQty : null; // ★ 2026-08-11
     state.batchFormIsFreshDraft = false; // ★ 2026-07-23: 이제 "작성 중 초안"이 아니라 "실제 활성 배치"가 됨
     clearDraftFromLocalStorage(); // ★ 서버 저장 성공 → 임시저장은 더 이상 필요 없음
-    gasCall('setActiveBatch', { batchId: state.batchId }); // ★ 2026-07-23 신규: 다른 기기들이 자동으로 이 새 배치를 따라오게 함
+    // ★ 2026-08-25 수정(매니저 확정) — 새 배치를 만들어도 더 이상 다른 기기를
+    //   자동으로 끌고 오지 않음(setActiveBatch 호출 제거). 각 기기는 자기가
+    //   직접 "다른 배치" 목록에서 고른 것만 독립적으로 작업함.
   }
 
   // ★ 2026-07-23 재수정: 이제 다른 배치 점유는 배정을 막지 않음(완전 독립) —
@@ -3761,6 +3748,7 @@ function onPickWorkerChange(userInitiated){
       localStorage.setItem('sk_scan_worker', wNow);
       const initEl = document.getElementById('workerInitial');
       if(initEl) initEl.textContent = wNow.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
+      pingScanWorkerHeartbeat(); // ★ 2026-08-25 신규 — 다른 기기가 빨리 인지하도록 즉시 알림
     }
   }
   if (state.pickTimerRunning) return;               // 이 기기에서 진행 중이면 그대로
@@ -3926,6 +3914,7 @@ async function startPickTimer(worker, pageRange, force){
     localStorage.setItem('sk_scan_worker', worker);
     const initEl = document.getElementById('workerInitial');
     if(initEl) initEl.textContent = worker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
+    pingScanWorkerHeartbeat(); // ★ 2026-08-25 신규 — 다른 기기가 빨리 인지하도록 즉시 알림
   }
   pollActivePickers(); // 다른 기기 드롭다운에도 최대한 빨리 반영되도록 즉시 한 번 더
 }
@@ -5109,6 +5098,12 @@ async function renderKPI(){
     </div>
     <div style="margin-bottom:16px;">
       <div style="font-weight:700; color:var(--text); margin-bottom:6px;">② 작업자별 피킹 세션 상세 (시작~종료 · 실제 처리 SKU/PCS)</div>
+      <div style="font-size:11px; color:var(--text-dim); margin-bottom:8px; line-height:1.5;">
+        ※ SKU/PCS는 <b>이 사람이 시작~종료 버튼을 누른 시간 동안 실제로 스캔된 양</b>입니다.
+        같은 사람이 피킹부터 스캔·분류까지 이어서 했다면 그대로 그 사람의 처리량이지만,
+        <b>피킹은 A가 하고 가져온 물건을 B가 스캔했다면</b> 그 시간 동안 스캔은 B의 이름으로
+        기록되므로 A의 세션엔 <b>0으로 보이는 게 정상</b>입니다(A가 일을 안 한 게 아닙니다).
+      </div>
       <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
       <table style="width:100%; min-width:520px; font-size:11.5px; color:var(--text); font-weight:600;"><thead><tr style="color:var(--text-dim); font-weight:700;">
         <th style="text-align:left">작업자</th><th style="text-align:left">담당페이지</th><th style="text-align:left">장수</th><th style="text-align:left">시작</th><th style="text-align:left">종료</th><th style="text-align:left">소요</th><th style="text-align:left">SKU</th><th style="text-align:left">PCS</th>
@@ -5674,7 +5669,14 @@ function populateWorkerSelect(){
   //   바꾸면 엉뚱한 사람 이름으로 스캔이 기록될 위험이 있어서, 여기도 동일하게
   //   "선택 안 함"을 기본값으로 두고 반드시 직접 골라야만 스캔 작업자가 정해지게 함.
   const optsHtml = '<option value="">— 선택 안 함 —</option>' + (all.length
-    ? all.map(w => `<option value="${w.name}">${w.name}${w.status!=='active' ? ' (Off)' : ''}</option>`).join('')
+    ? all.map(w => {
+        // ★ 2026-08-25 신규 — 지금 다른 기기에서 이 이름을 쓰고 있으면 표시.
+        //   1인 1기기 전제라, 다른 기기에 이미 켜져 있는 이름이 또 선택되는 건
+        //   곧 "그 사람 이름으로 엉뚱한 스캔이 섞인다"는 뜻이라 반드시 눈에 띄어야 함.
+        const busy = w.name !== state.currentWorker && isWorkerBusyElsewhere(w.name);
+        const label = busy ? `${w.name} — 🔴 다른 기기에서 사용 중` : `${w.name}${w.status!=='active' ? ' (Off)' : ''}`;
+        return `<option value="${w.name}">${label}</option>`;
+      }).join('')
     : '');
 
   const sel = document.getElementById('workerSelect');
@@ -5715,12 +5717,24 @@ function populateWorkerSelect(){
     document.getElementById('workerInitial').textContent = state.currentWorker
       ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
     sel.onchange = () => {
-      state.currentWorker = sel.value;
+      const picked = sel.value;
+      // ★ 2026-08-25 신규 — 다른 기기에서 이미 쓰고 있는 이름을 고르면 한 번 더 확인.
+      //   1인 1기기 전제이므로, 정말 그 사람이 기기를 바꿔 든 경우(폰 방전 등)가
+      //   아니라면 실수로 남의 이름을 고른 것일 가능성이 높음. 완전히 막지는
+      //   않되(예외 상황 대응 위해), 명확히 확인은 받도록 함.
+      if(picked && isWorkerBusyElsewhere(picked)){
+        if(!confirm(`⚠ ${picked}님은 지금 다른 기기에서 스캔 작업자로 이미 선택되어 있습니다.\n\n같은 사람이 기기를 바꿔서 쓰는 경우가 아니라면, 실수로 다른 사람 이름을 고른 것일 수 있습니다.\n\n그래도 이 이름으로 계속하시겠습니까?`)){
+          sel.value = state.currentWorker || '';
+          return;
+        }
+      }
+      state.currentWorker = picked;
       // ★ 2026-08-04 수정 — 위와 동일: "선택 안 함" 선택 시 localStorage도 삭제
       if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
       else localStorage.removeItem('sk_scan_worker');
       document.getElementById('workerInitial').textContent = state.currentWorker
         ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
+      pingScanWorkerHeartbeat(); // ★ 2026-08-25 신규 — 바꾸자마자 즉시 알려서 다른 기기가 빨리 인지하게 함
     };
   }
 
@@ -5778,6 +5792,39 @@ async function pollActivePickers(){
   }catch(e){
     console.error('pollActivePickers failed:', e);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-08-25 신규 — Scan & Sort 작업자 중복 선택 방지(1인 1기기 전제)
+// 피킹(활성 피커)과 달리 스캔 작업자 선택은 "시작/종료" 이벤트가 없어서, 그냥
+// 20초마다 "나 지금 이 이름 쓰고 있어요"를 계속 알리는 방식(하트비트)으로
+// "지금 다른 기기에서도 이 이름이 쓰이고 있는지"를 판단함. 60초 안에 신호가
+// 없으면(기기가 꺼졌거나 이름을 바꿨거나) 더 이상 활성으로 안 봄.
+// ═══════════════════════════════════════════════════════════
+let _activeScanWorkers = {}; // { "작업자명": ["deviceId", ...] }
+
+async function pingScanWorkerHeartbeat(){
+  if(!GAS_READY || !state.batchId) return;
+  try{ await gasCall('pingScanWorker', { batchId: state.batchId, deviceId: DEVICE_ID, worker: state.currentWorker || '' }); }
+  catch(e){ /* 하트비트 실패는 조용히 무시 — 다음 주기에 다시 시도됨 */ }
+}
+async function pollActiveScanWorkers(){
+  if(!GAS_READY || !state.batchId) return;
+  try{
+    const res = await gasQuery('getActiveScanWorkers', { batchId: state.batchId });
+    if(!res.ok) return;
+    _activeScanWorkers = res.active || {};
+    // 열려있는 동안은 populateWorkerSelect 안 건드림(이미 내부에서 그렇게 처리됨)
+    populateWorkerSelect();
+  }catch(e){ /* 조용히 무시 */ }
+}
+setInterval(pingScanWorkerHeartbeat, 20000);
+setInterval(pollActiveScanWorkers, 20000);
+
+// ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
+function isWorkerBusyElsewhere(name){
+  const devices = _activeScanWorkers[name] || [];
+  return devices.some(d => d !== DEVICE_ID);
 }
 
 // ★ 2026-07-16 신규 — 피킹 타이머 드롭다운 옆에 지금 선택된 작업자의
@@ -5926,50 +5973,10 @@ function showSaveFailureBanner(title, detail){
   try{ scanFeedback('err'); }catch(e){}
 }
 
-// ★ 2026-08-12 신규 — 새 배치가 서버에 활성 배치로 등록됐는데, 이 기기는 아직
-//   완료 안 된 "예전" 배치를 보고 있을 때 뜨는 안내. 절대 자동으로 전환하지
-//   않고, 사람이 직접 고르게 함. 여러 번 겹쳐 뜨지 않도록 기존 배너는 지우고 새로 그림.
-function showNewBatchAvailableBanner(newBatchId, myBatchId){
-  const prev = document.getElementById('newBatchBanner');
-  if(prev) prev.remove();
-  const el = document.createElement('div');
-  el.id = 'newBatchBanner';
-  el.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:9998; background:#0a2a3a; color:#fff; padding:14px 20px; box-shadow:0 4px 20px rgba(0,0,0,0.5); border-bottom:3px solid var(--cyan);';
-  el.innerHTML = `
-    <div style="max-width:900px; margin:0 auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
-      <div style="font-size:24px; flex-shrink:0;">🔔</div>
-      <div style="flex:1; min-width:200px;">
-        <div style="font-weight:800; font-size:14px;">새 배치(${newBatchId})가 열렸습니다</div>
-        <div style="font-size:12px; opacity:0.85; margin-top:2px;">지금 보시는 배치(${myBatchId})는 아직 완료되지 않아 자동으로 전환하지 않았습니다. 계속 이 배치를 작업하세요 — 새 배치로 넘어가려면 아래 버튼을 눌러주세요.</div>
-      </div>
-      <div style="display:flex; gap:8px; flex-shrink:0;">
-        <button onclick="document.getElementById('newBatchBanner').remove()" style="background:transparent; border:1px solid rgba(255,255,255,0.4); color:#fff; padding:9px 14px; border-radius:8px; font-weight:700; font-size:12.5px; cursor:pointer;">계속 이 배치 작업</button>
-        <button onclick="switchToBannerBatch('${newBatchId}')" style="background:var(--cyan); border:none; color:#052030; padding:9px 14px; border-radius:8px; font-weight:800; font-size:12.5px; cursor:pointer;">새 배치로 이동</button>
-      </div>
-    </div>`;
-  document.body.appendChild(el);
-}
-
-// ★ 2026-08-12 신규 — showNewBatchAvailableBanner의 "새 배치로 이동" 전용 함수.
-//   continueOpenBatch(id, true)는 "조회전용"이라 Scan Log 탭으로 가고 배지에
-//   "(조회전용)"이 붙는데, 이 경우는 실제로 그 배치에서 계속 작업하려는 것이므로
-//   맞지 않음. 반대로 continueOpenBatch(id, false)는 "다른 모든 기기도 같이
-//   전환됩니다" 확인창과 setActiveBatch 재방송이 딸려오는데, 이미 그 배치가
-//   전체 활성 배치로 정해진 뒤라(그래서 이 배너가 뜬 것) 불필요하고 오히려
-//   헷갈림. 그래서 조용히 이 기기만 최신 활성 배치로 정상 진입시키는 전용 경로.
-async function switchToBannerBatch(batchId){
-  const el = document.getElementById('newBatchBanner');
-  if(el) el.remove();
-  const res = await gasQuery('getBatch', { batchId });
-  if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
-  applyBatchPayload(res, { fromCache: false });
-  saveBatchCache(res);
-  await pollScanState();
-  startScanPolling();
-  startStructurePolling();
-  gotoView('v-slots');
-  toast(`배치 ${batchId}로 이동했습니다`, 'success');
-}
+// ★ 2026-08-25 삭제 — showNewBatchAvailableBanner / switchToBannerBatch는
+// "서버의 활성 배치가 내 캐시와 다를 때" 뜨던 배너였는데, 이제 배치 선택이
+// 완전히 기기 독립이라(캐시된 배치ID로만 조회) 이 상황 자체가 더 이상
+// 발생하지 않아서 제거함(죽은 코드로 남겨두면 나중에 헷갈릴 수 있음).
 
 // Init
 renderWorkers();
