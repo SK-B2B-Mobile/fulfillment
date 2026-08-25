@@ -519,6 +519,14 @@ async function gasCall(op, data){
 let currentBatchId = null;
 let prevStatus = {}; // slotNum -> 'waiting'|'active'|'done' (완료 순간 감지용 flash 처리)
 
+// ★ 2026-08-25 신규(버그 수정) — currentBatchId는 override 모드에 들어가면
+// override 배치ID로 덮어써지므로, "진짜 지금 실제로 진행 중인 활성 배치가
+// 뭔지"를 override와 무관하게 항상 따로 기억해둘 변수가 필요함. 이게 없어서
+// "다른 배치"/"지난 배치" 목록에서 마침 지금 작업 중인 배치를 그대로 클릭해도
+// 무조건 "지난 배치를 보는 중입니다"로 잘못 들어가는 버그가 있었음(실제 현장
+// 사진으로 확인됨 — 오늘 만든 배치를 보고 있는데 "지난 배치" 배너가 뜸).
+let liveBatchId = null;
+
 // ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 모드.
 // null이면 평소대로 getActiveBatch(매니저가 batch.html에서 정한 활성 배치)를 실시간으로 따라감.
 // 값이 있으면 그 배치만 고정으로 조회하며, getActiveBatch 폴링은 건너뜀
@@ -1596,6 +1604,12 @@ async function pollOnce(){
         `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
       }
     }
+    // ★ 2026-08-25 신규(버그 수정) — 위 else 블록(비-override 상태) 안에서
+    //   확정된 currentBatchId를 "진짜 실제 활성 배치"로 항상 같이 기억해둠.
+    //   override 모드로 들어가도 이 값은 안 바뀌므로, "다른 배치"/"지난 배치"
+    //   목록에서 이 값과 같은 배치를 다시 클릭했을 때 "그건 이미 지금 보고
+    //   있는 실제 배치니까 override 모드로 들어갈 필요 없다"를 판단할 수 있음.
+    liveBatchId = currentBatchId;
     }
 
     const res = await gasQuery('getSlotProgress', { batchId: currentBatchId });
@@ -1743,6 +1757,16 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
   }).join('');
   dd.querySelectorAll('[data-batch]').forEach(row => {
     row.onclick = () => {
+      // ★ 2026-08-25 신규(버그 수정) — 목록에서 고른 배치가 사실은 지금 실제로
+      //   작업 중인 배치(liveBatchId)와 같은 것이면, "지난 배치를 보는 중"이
+      //   아니라 그냥 원래 실시간 모드 그대로 둬야 함. 예전엔 이걸 구분 안 해서
+      //   현장 사진처럼 "오늘 만든 진짜 진행 중인 배치"를 봐도 "지난 배치를
+      //   보는 중입니다" 배너가 잘못 뜨는 사고가 있었음.
+      if(row.dataset.batch === liveBatchId){
+        backToLiveNow();
+        dd.classList.remove('open');
+        return;
+      }
       manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
       document.getElementById('manualBanner').classList.add('show');
       dd.classList.remove('open');
@@ -1807,6 +1831,14 @@ async function loadBatchHistoryList(days){
   }
   dd.querySelectorAll('[data-batch]').forEach(row => {
     row.onclick = () => {
+      // ★ 2026-08-25 신규(버그 수정) — 위 "다른 배치"와 동일한 이유. "지난 배치"
+      //   목록에서 골라도, 그게 사실 지금 실제로 작업 중인 배치라면 override로
+      //   들어가지 않고 실시간 모드를 그대로 유지함.
+      if(row.dataset.batch === liveBatchId){
+        backToLiveNow();
+        dd.classList.remove('open');
+        return;
+      }
       manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
       document.getElementById('manualBanner').classList.add('show');
       dd.classList.remove('open');
