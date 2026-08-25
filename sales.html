@@ -56,21 +56,74 @@ a{color:inherit;}
 .section-head{margin-bottom:5px;}
 .section-head h2{font-size:16px; font-weight:800;}
 .section-head p{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px; line-height:1.4;}
+/* ★ 2026-08-24 — Screen 1(Sales Sheet Preview)의 .section-head는 아래 ship-row
+   대시보드로 대체됨. 위 CSS 자체는 Screen 2(Order Detail Lookup)가 계속 쓰므로 남겨둠. */
+
+/* ═══════════════ ★ 2026-08-24 신규 — 출고 요약 카드(Overdue/Today/Tomorrow/In 2 Days) ═══════════════
+   안내 문구(.section-head) 자리를 대체. 패킹 작업자가 오더 하나하나 열어보지
+   않아도 "오늘/내일/모레 뭐가 나가는지, TK/PU/UPS가 몇 건씩인지, 디멘션 안 된
+   게 있는지"를 한눈에 보게 하는 게 목적. 클릭하면 아래에 목록이 펼쳐짐.
+   ★ progress-board(아래 4단계 카드)와 높이를 통일해서 위아래가 한 세트처럼
+   보이도록 함(둘 다 min-height:66px + 내용은 flex로 세로 중앙정렬). */
+.ship-row{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:10px;}
+.ship-card{background:var(--surface); border:1.5px solid var(--border2); border-radius:10px; padding:8px 14px; min-height:66px; cursor:pointer; display:flex; flex-direction:column; justify-content:center; gap:4px; transition:border-color 0.15s, background 0.15s;}
+.ship-card:hover{border-color:var(--blue);}
+.ship-card.open{border-color:var(--blue); background:var(--blue-bg);}
+.ship-card.overdue{border-color:var(--red); background:var(--red-bg);}
+.ship-card.overdue.open{border-color:var(--red);}
+.ship-card.overdue-clear{border-color:rgba(16,217,126,0.4); background:var(--green-bg);}
+.ship-top{display:flex; justify-content:space-between; align-items:baseline;}
+.ship-day-label{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
+.ship-card.overdue .ship-day-label{color:#FF8A8A;}
+.ship-card.overdue-clear .ship-day-label{color:var(--green);}
+.ship-date{font-family:var(--mono); font-size:10px; color:var(--text-dim);}
+.ship-bottom{display:flex; justify-content:space-between; align-items:center;}
+.ship-count{font-family:var(--mono); font-size:20px; font-weight:800; line-height:1;}
+.ship-mini{display:flex; gap:8px; align-items:center; font-family:var(--mono); font-size:11px;}
+.ship-mini span.grp{display:inline-flex; gap:3px; align-items:center;}
+.ship-mini .tk{color:var(--amber);}
+.ship-mini .pu{color:var(--green);}
+.ship-mini .ups{color:var(--purple);}
+.ship-mini .other{color:var(--text-dim);}
+.ship-mini .mlabel{opacity:0.75;}
+.ship-mini .mnum{font-weight:700;}
+.ship-miss-badge{display:inline-flex; align-items:center; gap:3px; background:rgba(239,68,68,0.18); color:#FF8A8A; font-weight:700; font-size:10.5px; padding:2px 6px; border-radius:5px; border:1px solid rgba(239,68,68,0.5); white-space:nowrap;}
+.ship-clear-text{color:var(--green); font-size:12px; font-weight:700;}
+
+.ship-expand{display:none; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-bottom:10px;}
+.ship-expand.show{display:block;}
+.ship-expand-cols{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+.ship-expand-col h4{font-family:var(--mono); font-size:10.5px; letter-spacing:0.05em; margin-bottom:8px;}
+.ship-expand-col.tk h4{color:var(--amber);}
+.ship-expand-col.pu h4{color:var(--green);}
+.ship-expand-col.ups h4{color:var(--purple);}
+.ship-order-item{background:var(--surface2); border:1px solid var(--border2); border-radius:7px; padding:7px 10px; margin-bottom:5px; font-size:12px;}
+.ship-order-item .inv{font-family:var(--mono); font-weight:700; cursor:pointer;}
+.ship-order-item .inv:hover{text-decoration:underline; color:var(--blue);}
+.ship-order-item .cust{color:var(--text-dim); margin-top:1px;}
+.ship-order-item.missing{border-color:var(--red); background:rgba(239,68,68,0.1);}
+.ship-order-item.missing .dims-flag{color:#FF8A8A; font-size:11px; font-weight:800; margin-top:4px;}
+.ship-order-item .dims-ok{color:var(--green); font-size:11px; margin-top:4px;}
+.ship-order-item .days-late{color:#FF8A8A; font-size:11px; font-weight:700; margin-top:4px;}
+.ship-empty-col{color:var(--text-dim); font-size:11.5px; font-style:italic;}
 
 /* ═══════════════ 진행 현황판 (★ 2026-08-05 신규) ═══════════════
    피킹 → 검수 → 패킹존 이동 → 디멘션, 실제 작업 순서대로 4단계 카드.
    각 카드: 단계명 + "N / Total" 큰 숫자 + 퍼센트 + 얇은 진행바.
-   4단계 사이에 화살표를 둬서 "순서가 있는 흐름"임을 시각적으로 표현. */
-.progress-board{display:flex; align-items:stretch; gap:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 16px; margin-bottom:10px; overflow-x:auto;}
-.pb-stage{flex:1; min-width:130px; display:flex; flex-direction:column; gap:3px; padding:0 16px;}
+   4단계 사이에 화살표를 둬서 "순서가 있는 흐름"임을 시각적으로 표현.
+   ★ 2026-08-24 수정 — 위 ship-row와 높이를 맞추려고 min-height:66px 지정 +
+   숫자/퍼센트를 한 줄로 합쳐서 압축(예전엔 퍼센트가 따로 한 줄 더 차지했음). */
+.progress-board{display:flex; align-items:stretch; gap:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:10px; overflow-x:auto; min-height:66px;}
+.pb-stage{flex:1; min-width:130px; display:flex; flex-direction:column; justify-content:center; gap:4px; padding:0 16px;}
 .pb-stage:first-child{padding-left:2px;}
 .pb-arrow{display:flex; align-items:center; color:var(--border); flex-shrink:0; font-size:16px;}
 .pb-label{font-family:var(--mono); font-size:9.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; display:flex; align-items:center; gap:5px;}
 .pb-label .pb-dot{width:6px; height:6px; border-radius:50%; flex-shrink:0;}
-.pb-num{font-family:var(--mono); font-size:clamp(18px,1.3vw,32px); font-weight:800; line-height:1.15;}
-.pb-num small{font-size:12px; font-weight:700; color:var(--text-dim);}
+.pb-bottom-row{display:flex; align-items:baseline; gap:8px;}
+.pb-num{font-family:var(--mono); font-size:18px; font-weight:800; line-height:1;}
+.pb-num small{font-size:11px; font-weight:700; color:var(--text-dim);}
 .pb-pct{font-family:var(--mono); font-size:10px; font-weight:700;}
-.pb-bar-outer{height:4px; border-radius:2px; background:var(--surface2); overflow:hidden; margin-top:1px;}
+.pb-bar-outer{height:4px; border-radius:2px; background:var(--surface2); overflow:hidden; margin-top:2px;}
 .pb-bar-inner{height:100%; border-radius:2px; transition:width 0.4s ease;}
 
 .search-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px 16px; margin-bottom:10px; max-width:420px;}
@@ -444,10 +497,11 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 
   <!-- ===================== Screen 1 ===================== -->
   <div class="screen active" id="screen-sheet">
-    <div class="section-head">
-      <h2>WMS Invoice and Issue — New Columns</h2>
-      <p>Live from the same Jobs data the warehouse uses. Fulfillment Status and Moved to Packing update automatically — no manual entry.</p>
-    </div>
+    <!-- ★ 2026-08-24 신규 — 안내 문구 자리를 출고 요약 대시보드로 대체.
+         Overdue(디멘션 미입력 지연건) / Today / Tomorrow / In 2 Days 4칸.
+         클릭하면 바로 아래(ship-expand)에 TK/PU/UPS별 오더 목록이 펼쳐짐. -->
+    <div class="ship-row" id="shipRow"></div>
+    <div class="ship-expand" id="shipExpand"></div>
 
     <!-- ★ 2026-08-05 신규 — 전체 진행 현황판. 검색/필터와 무관하게 항상 전체
          오더 기준으로 계산되며, 실제 작업 흐름 순서(피킹→검수→패킹존 이동→
@@ -772,6 +826,7 @@ function applySheetOverviewResult(res){
       if (cached && cached.jobs && cached.jobs.length){
         SHEET_JOBS = cached.jobs;
         renderProgressBoard(SHEET_JOBS);
+        renderShipRow(SHEET_JOBS); // ★ 2026-08-24 신규
         renderSheet();
         const ageMin = Math.round((Date.now() - cached.savedAt) / 60000);
         setSync('err', `⚠ 서버 연결 실패 — ${ageMin}분 전 데이터 표시 중`);
@@ -791,6 +846,7 @@ function applySheetOverviewResult(res){
   //   보던 페이지는 그대로 두고, 목록이 줄어 페이지 수를 넘기면 renderSheet()가
   //   마지막 페이지로 알아서 맞춰줌(아래 clamp 로직).
   renderProgressBoard(SHEET_JOBS);
+  renderShipRow(SHEET_JOBS); // ★ 2026-08-24 신규
   renderSheet();
 }
 // ★ 2026-08-19 신규 — sheet overview 로컬 캐시 저장/조회 (5MB 제한 감안해 최근 500건만)
@@ -835,11 +891,146 @@ function renderProgressBoard(jobs){
     const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
     return `${i>0 ? arrowSvg : ''}<div class="pb-stage">
       <div class="pb-label"><span class="pb-dot" style="background:${s.color}"></span>${s.label}</div>
-      <div class="pb-num">${s.done}<small> / ${s.total}</small></div>
-      <div class="pb-pct" style="color:${s.color}">${pct}%</div>
+      <div class="pb-bottom-row">
+        <span class="pb-num">${s.done}<small> / ${s.total}</small></span>
+        <span class="pb-pct" style="color:${s.color}">${pct}%</span>
+      </div>
       <div class="pb-bar-outer"><div class="pb-bar-inner" style="width:${pct}%; background:${s.color};"></div></div>
     </div>`;
   }).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-08-24 신규 — 출고 요약 카드(Overdue / Today / Tomorrow / In 2 Days)
+ * 패킹 작업자가 오더를 하나하나 열어보지 않고도 "오늘/내일/모레 뭐가 몇 건
+ * 나가는지, TK/PU/UPS 배송방법별로 몇 건인지, 디멘션이 빠진 게 있는지"를
+ * 카드만 보고 바로 알 수 있게 함. 클릭하면 아래에 TK/PU/UPS 3열로 나뉜
+ * 인보이스+고객사 목록이 펼쳐짐(디멘션 미입력 건은 빨간 테두리로 강조).
+ * ═══════════════════════════════════════════════════════════ */
+function ymdLocal_(d){
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
+}
+function needsDims_(method){
+  const m = String(method||'').trim().toUpperCase();
+  return m === 'TK' || m === 'TRUCKING' || m === 'UPS';
+}
+function methodBucket_(method){
+  const m = String(method||'').trim().toUpperCase();
+  if (m === 'TK' || m === 'TRUCKING') return 'tk';
+  if (m === 'UPS') return 'ups';
+  if (m === 'PU' || m === 'PICK UP' || m === 'PICKUP') return 'pu';
+  return 'other';
+}
+
+let SHIP_DAY_DATA = [];
+let SHIP_OPEN_IDX = null;
+
+function buildShipDayData(jobs){
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayStr = ymdLocal_(today);
+  const mkDay = (offset) => { const d = new Date(today); d.setDate(d.getDate()+offset); return d; };
+  const tomorrowStr = ymdLocal_(mkDay(1));
+  const in2Str = ymdLocal_(mkDay(2));
+
+  const buckets = { overdue:[], today:[], tomorrow:[], in2days:[] };
+  jobs.forEach(o => {
+    const sd = String(o.shipDate||'').slice(0,10);
+    if (!sd) return;
+    const bucket = methodBucket_(o.method);
+    const missingDims = needsDims_(o.method) && !((o.dimsCount||0) > 0) && !o.dimsLinkedTo;
+    const item = { invoice:o.invoice, customer:o.remarks||'', dims: needsDims_(o.method) ? !missingDims : null, bucket };
+    if (sd < todayStr && needsDims_(o.method) && missingDims){
+      const days = Math.round((today - new Date(sd+'T00:00:00')) / 86400000);
+      buckets.overdue.push({ ...item, days: days>0?days:1 });
+    } else if (sd === todayStr) buckets.today.push(item);
+    else if (sd === tomorrowStr) buckets.tomorrow.push(item);
+    else if (sd === in2Str) buckets.in2days.push(item);
+  });
+
+  function grouped(list){ return { tk:list.filter(o=>o.bucket==='tk'), pu:list.filter(o=>o.bucket==='pu'), ups:list.filter(o=>o.bucket==='ups'), other:list.filter(o=>o.bucket==='other') }; }
+
+  return [
+    { key:'overdue', label:'OVERDUE', sub:'Past ship date', overdue:true, orders: grouped(buckets.overdue) },
+    { key:'today', label:'TODAY', sub: fmtShipDate_(today), orders: grouped(buckets.today) },
+    { key:'tomorrow', label:'TOMORROW', sub: fmtShipDate_(mkDay(1)), orders: grouped(buckets.tomorrow) },
+    { key:'in2days', label:'IN 2 DAYS', sub: fmtShipDate_(mkDay(2)), orders: grouped(buckets.in2days) },
+  ];
+}
+function fmtShipDate_(d){
+  const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  return (d.getMonth()+1)+'/'+d.getDate()+' ('+days[d.getDay()]+')';
+}
+function countMissingDims_(list){ return (list||[]).filter(o=>o.dims===false).length; }
+
+function shipCardHtml_(d, idx){
+  if (d.overdue){
+    const total = d.orders.tk.length + d.orders.pu.length + d.orders.ups.length + d.orders.other.length;
+    const cls = total>0 ? 'overdue' : 'overdue-clear';
+    const right = total>0
+      ? `<div class="ship-mini">${d.orders.tk.length?'<span class="grp tk"><span class="mlabel">TK</span><span class="mnum">'+d.orders.tk.length+'</span></span>':''}${d.orders.ups.length?'<span class="grp ups"><span class="mlabel">UPS</span><span class="mnum">'+d.orders.ups.length+'</span></span>':''}</div>`
+      : `<div class="ship-clear-text">All clear</div>`;
+    return `<div class="ship-card ${cls}" id="shipCard${idx}" onclick="toggleShipCard(${idx})">
+      <div class="ship-top"><span class="ship-day-label">${d.label}</span><span class="ship-date">${d.sub}</span></div>
+      <div class="ship-bottom"><span class="ship-count">${total}</span>${right}</div>
+    </div>`;
+  }
+  const tk=d.orders.tk.length, pu=d.orders.pu.length, ups=d.orders.ups.length, other=d.orders.other.length;
+  const missing = countMissingDims_(d.orders.tk) + countMissingDims_(d.orders.ups);
+  const otherBadge = other>0 ? `<span class="grp other"><span class="mlabel">Other</span><span class="mnum">${other}</span></span>` : '';
+  return `<div class="ship-card" id="shipCard${idx}" onclick="toggleShipCard(${idx})">
+    <div class="ship-top"><span class="ship-day-label">${d.label}</span><span class="ship-date">${d.sub}</span></div>
+    <div class="ship-bottom">
+      <span class="ship-count">${tk+pu+ups+other}</span>
+      <div class="ship-mini">
+        <span class="grp tk"><span class="mlabel">TK</span><span class="mnum">${tk}</span></span>
+        <span class="grp pu"><span class="mlabel">PU</span><span class="mnum">${pu}</span></span>
+        <span class="grp ups"><span class="mlabel">UPS</span><span class="mnum">${ups}</span></span>
+        ${otherBadge}
+        ${missing>0?'<span class="ship-miss-badge">⚠ '+missing+' missing</span>':''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderShipRow(jobs){
+  const row = document.getElementById('shipRow');
+  if (!row) return;
+  SHIP_DAY_DATA = buildShipDayData(jobs);
+  row.innerHTML = SHIP_DAY_DATA.map((d,i)=>shipCardHtml_(d,i)).join('');
+  // 데이터가 새로고침돼도 펼쳐놓은 카드가 있으면 다시 펼쳐서 보여줌(닫히는 깜빡임 방지)
+  if (SHIP_OPEN_IDX !== null) renderShipExpand(SHIP_OPEN_IDX, true);
+}
+
+function toggleShipCard(idx){
+  if (SHIP_OPEN_IDX === idx){ SHIP_OPEN_IDX = null; document.getElementById('shipExpand').classList.remove('show'); document.querySelectorAll('.ship-card').forEach(c=>c.classList.remove('open')); return; }
+  SHIP_OPEN_IDX = idx;
+  renderShipExpand(idx);
+}
+
+function renderShipExpand(idx, silent){
+  document.querySelectorAll('.ship-card').forEach(c=>c.classList.remove('open'));
+  const card = document.getElementById('shipCard'+idx);
+  if (card) card.classList.add('open');
+  const d = SHIP_DAY_DATA[idx];
+  if (!d) return;
+  function col(list, cls, label){
+    if (!list.length) return `<div class="ship-expand-col ${cls}"><h4>${label} (0)</h4><div class="ship-empty-col">No orders</div></div>`;
+    const items = list.map(o => {
+      const invLink = `<span class="inv" onclick="event.stopPropagation(); jumpToInvoice('${o.invoice}')">${o.invoice}</span>`;
+      if (d.overdue){
+        return `<div class="ship-order-item missing"><div>${invLink}</div><div class="cust">${o.customer}</div><div class="days-late">${o.days} day${o.days>1?'s':''} overdue — no dims</div></div>`;
+      }
+      if (o.dims === null) return `<div class="ship-order-item"><div>${invLink}</div><div class="cust">${o.customer}</div></div>`;
+      if (o.dims === false) return `<div class="ship-order-item missing"><div>${invLink}</div><div class="cust">${o.customer}</div><div class="dims-flag">⚠ Missing dimensions</div></div>`;
+      return `<div class="ship-order-item"><div>${invLink}</div><div class="cust">${o.customer}</div><div class="dims-ok">Dimensions saved</div></div>`;
+    }).join('');
+    return `<div class="ship-expand-col ${cls}"><h4>${label} (${list.length})</h4>${items}</div>`;
+  }
+  const panel = document.getElementById('shipExpand');
+  panel.innerHTML = `<div class="ship-expand-cols">${col(d.orders.tk,'tk','TK')}${col(d.orders.pu,'pu','PU')}${col(d.orders.ups,'ups','UPS')}</div>`;
+  panel.classList.add('show');
 }
 
 function onSheetSearch(){ SHEET_PAGE = 1; renderSheet(); }
