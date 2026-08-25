@@ -1679,7 +1679,7 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   dd.innerHTML = list.map(b => `
     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
       <div>
-        <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?(b.pendingTakeOut?'#F472B6':'var(--green)'):(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?(b.pendingTakeOut?' · 📦 출고 대기 '+b.pendingTakeOut+'건':' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전'):''}</div>
+        <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?(b.pendingTakeOut?'#8B5CF6':'var(--green)'):(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?(b.pendingTakeOut?' · 🟣 2차 검증 대기 '+b.pendingTakeOut+'건':' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전'):''}</div>
         <div style="font-size:10px; color:var(--text-dim);">🕐 ${fmtBatchWhen(b.createdAt) || b.date} 생성 · ${b.totalSku} SKU · 스캔 ${b.scannedPass||0}건</div>
       </div>
       <div style="display:flex; gap:6px; flex-shrink:0;">
@@ -1755,11 +1755,11 @@ function renderOpenBatchesPanel(batches){
       <div class="openb-card" style="border-color:var(--green);">
         <div class="openb-head">
           <span class="openb-id">${b.batchId}<span style="font-family:var(--sans); font-size:12px; font-weight:700; color:var(--amber); margin-left:9px;">🕐 ${fmtBatchWhen(b.createdAt) || b.date} 생성</span></span>
-          <span style="font-family:var(--mono); font-size:11px; font-weight:700; color:${b.pendingTakeOut ? '#F472B6' : 'var(--green)'};">${b.pendingTakeOut ? ('📦 출고 대기 ' + b.pendingTakeOut + '건') : ('✅ 완료됨 · ' + b.completedMinutesAgo + '분 전')}</span>
+          <span style="font-family:var(--mono); font-size:11px; font-weight:700; color:${b.pendingTakeOut ? '#8B5CF6' : 'var(--green)'};">${b.pendingTakeOut ? ('🟣 2차 검증 대기 ' + b.pendingTakeOut + '건') : ('✅ 완료됨 · ' + b.completedMinutesAgo + '분 전')}</span>
         </div>
         <div class="openb-meta">${b.pendingTakeOut
-          ? ('모든 상품 스캔·분류 완료 — 출고팀이 아직 ' + b.pendingTakeOut + '건을 안 가져갔습니다')
-          : ('모든 상품 출고 완료 — <b>마지막 출고 시점(' + b.completedMinutesAgo + '분 전)</b>부터 1시간이 지나면 이 목록에서 자동으로 사라집니다')}</div>
+          ? ('모든 상품 스캔·분류·패킹존 이동(파랑) 완료 — 아직 ' + b.pendingTakeOut + '건이 <b>최종 2차 검증(보라)</b>이 안 끝났습니다. Pack Verify 탭에서 확인해주세요.')
+          : ('모든 상품 2차 검증까지 완료 — <b>마지막 검증 시점(' + b.completedMinutesAgo + '분 전)</b>부터 1시간이 지나면 이 목록에서 자동으로 사라집니다')}</div>
         <div class="openb-actions">
           <button class="btn btn-ghost btn-sm" data-reopen="${b.batchId}">📄 스캔 로그·KPI 열기</button>
           <button class="btn btn-ghost btn-sm" data-hide="${b.batchId}">✕ 목록에서 숨기기</button>
