@@ -264,7 +264,7 @@ function doGet(e) {
   }
   // ★ 2026-08-25 신규 — TV 현황판에서 "지난 배치" 전체(완료 여부 무관)를 조회
   if (op === 'getBatchHistoryList') {
-    return json_(getBatchHistoryList());
+    return json_(getBatchHistoryList({ days: (e.parameter||{}).days || 14 }));
   }
   // ★ 2026-07-14 신규 — 아직 안 비워진(패킹 대기중이거나 진행중인) 슬롯 전체 조회.
   //   새 배치 만들 때 이 슬롯 번호들을 피해서 자동배정하기 위함.
