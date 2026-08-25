@@ -987,8 +987,8 @@ function shipCardHtml_(d, idx){
       <span class="ship-count-wrap"><span class="ship-count">${tk+pu+ups+other}</span><span class="ship-count-unit">orders</span></span>
       <div class="ship-mini">
         <span class="grp tk"><span class="mlabel">TK</span><span class="mnum">${tk}</span></span>
-        <span class="grp pu"><span class="mlabel">PU</span><span class="mnum">${pu}</span></span>
         <span class="grp ups"><span class="mlabel">UPS</span><span class="mnum">${ups}</span></span>
+        <span class="grp pu"><span class="mlabel">PU</span><span class="mnum">${pu}</span></span>
         ${otherBadge}
         ${missing>0?'<span class="ship-miss-badge">⚠ '+missing+' missing</span>':''}
       </div>
@@ -1031,7 +1031,7 @@ function renderShipExpand(idx, silent){
     return `<div class="ship-expand-col ${cls}"><h4>${label} (${list.length})</h4>${items}</div>`;
   }
   const panel = document.getElementById('shipExpand');
-  panel.innerHTML = `<div class="ship-expand-cols">${col(d.orders.tk,'tk','TK')}${col(d.orders.pu,'pu','PU')}${col(d.orders.ups,'ups','UPS')}</div>`;
+  panel.innerHTML = `<div class="ship-expand-cols">${col(d.orders.tk,'tk','TK')}${col(d.orders.ups,'ups','UPS')}${col(d.orders.pu,'pu','PU')}</div>`;
   panel.classList.add('show');
 }
 
