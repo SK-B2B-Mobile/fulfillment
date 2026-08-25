@@ -341,6 +341,13 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-actions{display:flex; gap:10px; margin-top:16px;}
 .pv-actions button{flex:1; padding:14px; border-radius:10px; font-size:14px; font-weight:800; cursor:pointer; border:none;}
 .pv-btn-print{background:var(--surface3); color:var(--text); border:1px solid var(--border2) !important;}
+.pv-print-group{position:relative; flex:1; display:flex;}
+.pv-print-group .pv-btn-print{flex:1; border-radius:10px 0 0 10px !important;}
+.pv-print-toggle{width:34px; flex:0 0 34px; background:var(--surface3); border:1px solid var(--border2); border-left:none; border-radius:0 10px 10px 0; color:var(--text-dim); cursor:pointer; font-size:11px;}
+.pv-print-menu{display:none; position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; overflow:hidden; z-index:20;}
+.pv-print-menu.open{display:block;}
+.pv-print-menu button{width:100%; text-align:left; padding:10px 12px; background:none; border:none; color:var(--text); font-size:12.5px; cursor:pointer; border-radius:0 !important;}
+.pv-print-menu button:hover{background:var(--surface3);}
 .pv-btn-complete{background:var(--purple); color:#fff;}
 .pv-btn-complete:disabled{opacity:0.35; cursor:not-allowed;}
 .pv-btn-force{background:none; border:1px dashed rgba(239,68,68,0.5) !important; color:var(--red); font-size:10.5px !important; font-weight:600 !important; flex:0 0 auto !important; padding:14px 12px !important;}
@@ -1079,7 +1086,14 @@ select option:disabled{color:var(--text-dim2);}
         <div id="pvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
           <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ 관리자 강제확정</button>
-          <button class="pv-btn-print" onclick="printPvSlip()">🖨 패킹슬립 인쇄</button>
+          <div class="pv-print-group">
+            <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 패킹슬립 인쇄 (Letter)</button>
+            <button class="pv-print-toggle" onclick="event.stopPropagation(); document.getElementById('pvPrintMenu').classList.toggle('open');" title="다른 용지 크기">▾</button>
+            <div class="pv-print-menu" id="pvPrintMenu">
+              <button onclick="document.getElementById('pvPrintMenu').classList.remove('open'); printPvSlip('letter');">📄 Letter (일반 A4/레터 용지)</button>
+              <button onclick="document.getElementById('pvPrintMenu').classList.remove('open'); printPvSlip('label');">🏷 4×6 라벨 (라벨 프린터)</button>
+            </div>
+          </div>
           <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 최종 2차 검증완료 확정</button>
         </div>
       </div>
@@ -5221,6 +5235,7 @@ document.getElementById('logSearchInput').addEventListener('input', (e) => {
 // ═══════════════════════════════════════════════════════════
 let _pvInvoice = null;
 let _pvState = null;
+let _pvForceVerified = false; // ★ 2026-08-24 신규 — 지금 선택된 오더가 관리자 강제확정으로 완료된 것인지
 let pvCurrentWorker = null;
 let _pvAudioCtx = null;
 
@@ -5287,15 +5302,29 @@ async function onPvInvoiceChange(){
   const panel = document.getElementById('pvScanPanel');
   if(!invoice){ panel.classList.remove('active'); _pvInvoice = null; _pvState = null; return; }
   _pvInvoice = invoice;
+  _pvForceVerified = false;
   panel.classList.add('active');
   document.getElementById('pvMsg').style.display = 'none';
+  const input = document.getElementById('pvScanInput');
+  input.disabled = false;
+  input.placeholder = '바코드를 스캔하세요...';
   document.getElementById('pvCompleteBtn').disabled = true;
   document.getElementById('pvCompleteBtn').textContent = '🟣 최종 2차 검증완료 확정';
   document.getElementById('pvLines').innerHTML = '<div class="empty-log">불러오는 중...</div>';
   await refreshPvState();
-  const input = document.getElementById('pvScanInput');
-  input.value = '';
-  setTimeout(() => input.focus(), 60);
+  // ★ 2026-08-24 신규 — 이미 검증완료된(정상 스캔이든 관리자 강제확정이든) 오더를
+  //   다시 선택했을 때도, 처음 볼 때와 똑같이 "완료됨" 상태가 바로 보이게 함.
+  if(state.packVerifiedInvoices.has(invoice)){
+    _pvForceVerified = !(_pvState && _pvState.complete);
+    input.disabled = true;
+    input.placeholder = _pvForceVerified ? '이미 관리자 강제확정으로 완료된 오더입니다' : '이미 스캔으로 검증완료된 오더입니다';
+    const completeBtn = document.getElementById('pvCompleteBtn');
+    completeBtn.disabled = true;
+    completeBtn.textContent = _pvForceVerified ? '✅ 이미 검증완료됨 (관리자 확정)' : '✅ 이미 검증완료됨 (스캔 100%)';
+  } else {
+    input.value = '';
+    setTimeout(() => input.focus(), 60);
+  }
 }
 
 async function refreshPvState(){
@@ -5438,16 +5467,30 @@ async function forcePvComplete(){
   if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
   const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
   if(res.ok){
-    showPvMsg('⚠ 관리자 강제확정으로 처리됐습니다', 'ok');
+    showPvMsg('⚠ 관리자 강제확정으로 처리됐습니다 — 실제 스캔은 되지 않았습니다', 'ok');
     state.packVerifiedInvoices.add(_pvInvoice);
+    _pvForceVerified = true; // ★ 2026-08-24 신규 — 슬립 판정 및 화면 잠금에 사용
     populatePvInvoiceSelect();
+    // ★ 2026-08-24 버그 수정 — 예전엔 여기서 화면이 그대로 남아있어서, 이미
+    //   강제확정됐는데도 스캔칸·완료버튼이 그대로 "미완료"처럼 보여 혼란을 줬음.
+    //   이제 스캔 입력을 잠그고, 완료 버튼도 "이미 완료됨"으로 명확히 표시.
+    const input = document.getElementById('pvScanInput');
+    if(input){ input.disabled = true; input.placeholder = '이미 관리자 강제확정으로 완료된 오더입니다'; }
+    const completeBtn = document.getElementById('pvCompleteBtn');
+    if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ 이미 검증완료됨 (관리자 확정)'; }
+    printPvSlip(); // ★ 2026-08-24 버그 수정 — 강제확정 때는 슬립 인쇄가 아예 빠져있었음
   } else {
     alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
   }
 }
 
 // ★ 패킹 슬립 인쇄 — StyleKorean 헤더/주소 포함, 새 창에서 브라우저 인쇄 다이얼로그 사용
-function printPvSlip(){
+// ★ 2026-08-24 신규 — 4x6 라벨 프린터 지원 추가. format: 'letter'(기본, A4/레터 용지)
+//   또는 'label'(4x6인치 라벨 — 여백·글자크기를 훨씬 촘촘하게 줄여서 라벨 1장에
+//   최대한 들어가도록 함. 그래도 SKU가 아주 많으면 자동으로 다음 라벨로 넘어감
+//   — 이건 라벨 프린팅의 정상 동작이라 막을 필요 없음).
+function printPvSlip(format){
+  format = format || 'letter';
   const invoice = _pvInvoice;
   if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
@@ -5455,11 +5498,23 @@ function printPvSlip(){
   const st = _pvState;
   const lines = (st && st.lines) ? st.lines : [];
   const invoiceIssues = state.issues.filter(i => i.invoice === invoice);
-  const verified = st ? !!st.complete : false;
+  // ★ 2026-08-24 버그 수정 — 예전엔 스캔 진행률(st.complete)만 보고 판정해서,
+  //   "관리자 강제확정"으로 넘어간 오더는 실제로 검증완료 상태인데도 슬립엔
+  //   계속 "NOT FULLY VERIFIED"로 잘못 찍혔음. 이제 실제 최종 상태
+  //   (state.packVerifiedInvoices, 강제확정 포함)를 최우선으로 보고, 스캔
+  //   100%로 정상 검증된 것과 관리자가 강제로 넘긴 것을 구분해서 표시함.
+  const scanComplete = st ? !!st.complete : false;
+  const verified = state.packVerifiedInvoices.has(invoice);
+  const forcedVerify = verified && !scanComplete;
   const worker = currentPvWorker() || '-';
   const printedAt = new Date().toLocaleString('en-US');
   const customer = cf ? cf.meta.customer : '';
   const shipVia = cf ? cf.meta.ship_via : '';
+
+  const badgeClass = verified ? (forcedVerify ? 'verify-forced' : 'verify-ok') : 'verify-bad';
+  const badgeText = verified
+    ? (forcedVerify ? '⚠ 2ND VERIFICATION — ADMIN OVERRIDE (not scan-checked)' : '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED')
+    : '⚠ NOT FULLY VERIFIED (2nd check pending)';
 
   const rowsHtml = lines.map(l => `
     <tr>
@@ -5471,14 +5526,14 @@ function printPvSlip(){
     </tr>`).join('');
 
   const issuesHtml = invoiceIssues.length ? `
-    <h4 style="margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;">Issues / Shortages</h4>
+    <h4 class="issues-h4">Issues / Shortages</h4>
     <table class="slip-table"><thead><tr><th>Reason</th><th>Product</th><th style="text-align:center;">Qty</th></tr></thead><tbody>
     ${invoiceIssues.map(i => `<tr><td>${i.reason}</td><td>${i.name || i.sku || ''}</td><td style="text-align:center;">${i.qty}</td></tr>`).join('')}
     </tbody></table>` : '';
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
-  <style>
-    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto;}
+  const letterCss = `
+    @page{ size: letter; margin: 12mm; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px;}
     .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
     .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
     .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
@@ -5489,11 +5544,34 @@ function printPvSlip(){
     table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
     table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
     table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
-    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
-    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
-    @media print{ body{padding:12mm;} }
+  `;
+  const labelCss = `
+    @page{ size: 4in 6in; margin: 0.14in; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:0; width:3.72in; margin:0 auto; font-size:9px; line-height:1.3;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1.5px solid #111; padding-bottom:5px; margin-bottom:7px;}
+    .slip-logo{font-size:15px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:7px; color:#555; margin-top:2px; line-height:1.3;}
+    .slip-title{font-size:11px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:7px; color:#555; text-align:right; margin-top:2px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px; font-size:8.5px;}
+    .slip-info div b{display:block; font-size:6.5px; color:#777; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:1px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:8px; margin-top:4px;}
+    table.slip-table th{background:#111; color:#fff; padding:2.5px 4px; text-align:left; font-size:6.5px; text-transform:uppercase;}
+    table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
+    .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
+    .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
+    .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
+  `;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
+  <style>
+    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
+    .verify-forced{background:#fef3c7; color:#92400e; border:1px solid #f59e0b;}
+    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    ${format === 'label' ? labelCss : letterCss}
   </style></head><body>
     <div class="slip-head">
       <div>
@@ -5514,7 +5592,7 @@ function printPvSlip(){
     <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody></table>
     ${issuesHtml}
-    <div class="verify-badge ${verified ? 'verify-ok' : 'verify-bad'}">${verified ? '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED' : '⚠ NOT FULLY VERIFIED (2nd check pending)'}</div>
+    <div class="verify-badge ${badgeClass}">${badgeText}</div>
     <div class="slip-footer">
       <span>Verified by: ${worker}</span>
       <span>StyleKorean B2B Fulfillment System</span>
@@ -5531,6 +5609,13 @@ function printPvSlip(){
 // ═══════════════════════════════════════════════════════════
 // Workers CRUD
 // ═══════════════════════════════════════════════════════════
+// ★ 2026-08-24 신규 — 패킹슬립 용지 선택 드롭업 메뉴, 바깥 클릭 시 닫힘
+document.addEventListener('click', e => {
+  const menu = document.getElementById('pvPrintMenu');
+  if(!menu || !menu.classList.contains('open')) return;
+  if(!e.target.closest('.pv-print-group')) menu.classList.remove('open');
+});
+
 function populateWorkerSelect(){
   // ★ 2026-07-16 수정: Active인 사람만 보여주다가, 아무도 Active로 안 돼있으면
   //   드롭다운이 통째로 비어서 "피킹 시작"조차 못 누르는 막다른 상황이 생겼음.
