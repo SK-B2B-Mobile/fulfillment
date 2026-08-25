@@ -994,9 +994,16 @@ function setPackingMoved(data) {
  * ================================================================================ */
 
 /* logPackScan — 스캔 1번마다 호출. 이 인보이스가 필요로 하는 바코드인지,
- * 이미 다 채워졌는지(초과), 아예 다른 고객사 것인지(오배송 위험)를 즉시 판정.
- * 입력: { batchId, invoice, worker, barcode, qty(기본 1) }
- * 반환: { ok, result: 'pass'|'wrong'|'over', packed, required, ownerInvoices(wrong일 때만) } */
+ * 아예 다른 고객사 것인지(오배송 위험)를 즉시 판정.
+ * ★ 2026-08-24 재설계(매니저 승인) — "스캔 1번 = 그 상품 전체 수량 채우기"로
+ *   변경. 예전엔 스캔할 때마다 1개씩만 채워져서(qty:1), SKU 하나에 50개가
+ *   있으면 50번을 스캔해야 했음. 이제 바코드를 한 번 스캔하면 그 줄(SKU)에
+ *   남아있는 필요수량 전체가 한 번에 채워짐 — 실제 물류 현장 표준 방식
+ *   그대로(바코드=신원 확인 담당, 수량=작업자 육안 확인 담당). 수량은 더
+ *   이상 클라이언트가 지정하지 않고 서버가 "남은 만큼 전부"로 직접 계산함
+ *   (data.qty는 이제 안 씀 — 혹시 옛 클라이언트가 보내도 무시됨).
+ * 반환: { ok, result: 'pass'|'wrong'|'over', filled(이번 스캔으로 채워진 양),
+ *         packed(누적), required, ownerInvoices(wrong일 때만) } */
 function logPackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -1005,7 +1012,6 @@ function logPackScan(data) {
     if (!data.invoice) return { ok: false, error: 'invoice required' };
     const barcode = String(data.barcode || '').trim();
     if (!barcode) return { ok: false, error: 'barcode required' };
-    const qty = Number(data.qty) || 1;
     const normBc = normBarcode_(barcode);
 
     // 이 인보이스가 필요로 하는 줄(들) 중 이 바코드와 일치하는 것 찾기
@@ -1039,7 +1045,7 @@ function logPackScan(data) {
       pl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
       pl.getRange(newRow, 1, 1, 10).setValues([[
         data.batchId, packScanId, batchNow_(), data.worker || '', barcode, '',
-        data.invoice, 'wrong', 'active', qty,
+        data.invoice, 'wrong', 'active', 0,
       ]]);
       return { ok: true, result: 'wrong', packScanId: packScanId, ownerInvoices: Array.from(owners) };
     }
@@ -1073,20 +1079,42 @@ function logPackScan(data) {
     const effectiveReq = Math.max(0, totalReq - issueQty);
     const sku = matchLines.length === 1 ? matchLines[0].sku : matchLines.map(l => l.sku).join('+');
     const name = matchLines[0].name;
-    const result = (already + qty > effectiveReq) ? 'over' : 'pass';
 
+    // ★ 핵심 변경 — 남은 필요수량을 전부 채움. 이미 다 채워진 상태에서 또
+    //   스캔하면(중복 스캔) 채울 게 없으므로 'over'로 판정하고 기록만 남김.
+    //   ★ 추가 보완 — "이미 다 채워서 남은 게 없는 경우"와 "애초에 이슈
+    //   처리(EXP/OOS 등)로 필요수량 자체가 0이 된 경우"는 원인이 다르므로
+    //   note로 구분해서, 클라이언트가 헷갈리지 않는 메시지를 보여줄 수 있게 함.
+    const remaining = effectiveReq - already;
+    if (remaining <= 0) {
+      const note = effectiveReq <= 0 ? 'excluded' : 'duplicate';
+      const packScanId0 = Utilities.getUuid();
+      const newRow0 = pl.getLastRow() + 1;
+      ensureSheetRoom_(pl, newRow0);
+      pl.getRange(newRow0, 5, 1, 2).setNumberFormat('@');
+      pl.getRange(newRow0, 1, 1, 10).setValues([[
+        data.batchId, packScanId0, batchNow_(), data.worker || '', barcode, sku,
+        data.invoice, 'over', 'active', 0,
+      ]]);
+      return {
+        ok: true, result: 'over', note: note, packScanId: packScanId0, sku: sku, name: name,
+        filled: 0, packed: already, required: effectiveReq,
+      };
+    }
+
+    const fillQty = remaining; // 한 번 스캔에 남은 수량 전부
     const packScanId = Utilities.getUuid();
     const newRow2 = pl.getLastRow() + 1;
     ensureSheetRoom_(pl, newRow2);
     pl.getRange(newRow2, 5, 1, 2).setNumberFormat('@');
     pl.getRange(newRow2, 1, 1, 10).setValues([[
       data.batchId, packScanId, batchNow_(), data.worker || '', barcode, sku,
-      data.invoice, result, 'active', qty,
+      data.invoice, 'pass', 'active', fillQty,
     ]]);
     bumpVersion_();
     return {
-      ok: true, result: result, packScanId: packScanId, sku: sku, name: name,
-      packed: already + (result === 'pass' ? qty : 0), required: effectiveReq,
+      ok: true, result: 'pass', packScanId: packScanId, sku: sku, name: name,
+      filled: fillQty, packed: already + fillQty, required: effectiveReq,
     };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -2775,24 +2803,30 @@ function getOpenBatches() {
     //   예전: 모든 상품 스캔이 끝난 시점(completeBatch)부터 1시간.
     //   문제: 그 시점엔 물건이 아직 분류존에 그대로 있음(TV 현황판 전부 핵크).
     //   실제로 18/18이 전부 핵크인데 목록에서 사라져 당황하는 일이 생겼음.
-    //   새 기준: 출고팀이 전부 가져가서 파랑(TakenOut)이 된 뒤부터 1시간.
-    //   하나라도 안 가져갔으면 시간과 관계없이 계속 보임.
-    const takenOutInfo = {}; // batchId -> { total, taken, lastMs }
+    //   중간 기준: 출고팀이 전부 가져가서 파랑(TakenOut)이 된 뒤부터 1시간.
+    // ★ 2026-08-24 재수정(매니저 지적) — 오출고 방지용 "최종 2차 검증"(보라)
+    //   기능이 새로 생기면서, 위 "파랑 기준"이 또 낡아버렸음. 파랑은 이제
+    //   "물리적으로 옮겼다"는 뜻일 뿐 진짜 끝난 게 아닌데, 이 기준대로면
+    //   2차 검증이 채 끝나기도 전에 배치가 "다른 배치" 목록에서 사라질 수
+    //   있었음(실제로 이 문제가 발생해서 TV에서 지난 배치를 못 찾는 일이 있었음).
+    //   최종 기준: 전부 보라(PackVerified)가 된 뒤부터 1시간. 하나라도 아직
+    //   검증 전이면(파랑에 머물러 있어도) 시간과 무관하게 계속 보임.
+    const verifiedInfo = {}; // batchId -> { total, verified, lastMs }
     try {
       const bc = bcustSheetSafe_();
       const bcLast = bc.getLastRow();
       if (bcLast >= 2) {
-        const bcRows = bc.getRange(2, 1, bcLast - 1, 12).getValues();
+        const bcRows = bc.getRange(2, 1, bcLast - 1, 13).getValues();
         bcRows.forEach(r2 => {
           const bid = String(r2[0] || '').trim();
           if (!bid) return;
-          if (!takenOutInfo[bid]) takenOutInfo[bid] = { total: 0, taken: 0, lastMs: 0 };
-          const info = takenOutInfo[bid];
+          if (!verifiedInfo[bid]) verifiedInfo[bid] = { total: 0, verified: 0, lastMs: 0 };
+          const info = verifiedInfo[bid];
           info.total++;
-          const t = r2[11];
-          if (t) {
-            info.taken++;
-            const ms = parseBatchTs_(t);
+          const v = r2[12]; // M열: PackVerified
+          if (v) {
+            info.verified++;
+            const ms = parseBatchTs_(v);
             if (!isNaN(ms) && ms > info.lastMs) info.lastMs = ms;
           }
         });
@@ -2820,19 +2854,21 @@ function getOpenBatches() {
         //   때문에 그 이전 배치는 값이 비어 있고, 그걸 "아직 안 가져감"으로
         //   오판해버렸음. 그래서 최근 24시간 이내에 완료된 배치에만 이 규칙을 적용함.
         const _cMs = parseBatchTs_(completedAtRaw);
-        const _to = takenOutInfo[String(r[0] || '').trim()];
+        const _vi = verifiedInfo[String(r[0] || '').trim()];
         const _fresh = !isNaN(_cMs) && (nowMs - _cMs) <= 24 * 60 * 60 * 1000;
-        if (_fresh && _to && _to.total > 0 && _to.taken < _to.total) {
-          // 출고팀이 아직 안 가져간 고객사가 남아 있으면 시간과 무관하게 계속 보임
+        if (_fresh && _vi && _vi.total > 0 && _vi.verified < _vi.total) {
+          // ★ 2026-08-24 수정 — "아직 안 가져간 고객사" 대신 "아직 2차 검증 안 된
+          //   고객사"가 남아 있으면 시간과 무관하게 계속 보임(파랑까지만 되고
+          //   검증 전인 경우도 여기 포함됨 — 정확히 매니저가 지적한 부분).
           recentlyCompleted = true;
           completedMinutesAgo = null;
-          pendingTakeOut = _to.total - _to.taken;
+          pendingTakeOut = _vi.total - _vi.verified;
           const b0 = { batchId: String(r[0]), date: r[1], status: status, totalSku: r[3], totalQty: r[4], createdAt: r[5], recentlyCompleted: true, completedMinutesAgo: null, pendingTakeOut: pendingTakeOut };
           open.push(b0); openIds[b0.batchId] = true; return;
         }
-        // 전부 가져갔다면 마지막으로 가져간 시각부터 1시간을 셀
-        const _lastTakeMs = (_to && _to.lastMs) ? _to.lastMs : 0;
-        const completedMs = (_lastTakeMs && !isNaN(_cMs)) ? Math.max(_lastTakeMs, _cMs) : (_lastTakeMs || _cMs);
+        // 전부 검증 완료됐다면 마지막으로 검증된 시각부터 1시간을 셀
+        const _lastVerifyMs = (_vi && _vi.lastMs) ? _vi.lastMs : 0;
+        const completedMs = (_lastVerifyMs && !isNaN(_cMs)) ? Math.max(_lastVerifyMs, _cMs) : (_lastVerifyMs || _cMs);
         // ★ 2026-08-06 긴급 수정 — 1시간 유예가 처음부터 한 번도 작동하지 않던 버그.
         //   완료시각을 batchNow_()가 'yyyy-MM-dd HH:mm:ss' 문자열로 저장하지만,
         //   구글시트가 이를 날짜 값으로 자동 변환해서 getValues()는 Date 객체를 돌려줌.
