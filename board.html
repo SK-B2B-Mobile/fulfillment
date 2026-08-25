@@ -268,6 +268,13 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .pack-modal-footer{padding:16px 26px; border-top:2px solid var(--border); display:flex; gap:10px;}
 .pack-modal-footer button{flex:1; padding:14px; border-radius:10px; font-size:15px; font-weight:800; cursor:pointer; border:none;}
 .pack-btn-print{background:var(--surface2); color:var(--text); border:1px solid var(--border2) !important;}
+.pack-print-group{position:relative; flex:1; display:flex;}
+.pack-print-group .pack-btn-print{flex:1; border-radius:10px 0 0 10px !important;}
+.pack-print-toggle{width:34px; flex:0 0 34px; background:var(--surface2); border:1px solid var(--border2); border-left:none; border-radius:0 10px 10px 0; color:var(--text-dim); cursor:pointer; font-size:11px;}
+.pack-print-menu{display:none; position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; overflow:hidden; z-index:20;}
+.pack-print-menu.open{display:block;}
+.pack-print-menu button{width:100%; text-align:left; padding:10px 12px; background:none; border:none; color:var(--text); font-size:12.5px; cursor:pointer; border-radius:0 !important;}
+.pack-print-menu button:hover{background:rgba(255,255,255,0.08);}
 .pack-btn-complete{background:#8B5CF6; color:#FFFFFF;}
 .pack-btn-complete:disabled{opacity:0.35; cursor:not-allowed;}
 .pack-btn-force{background:none; border:1px dashed rgba(255,77,109,0.5) !important; color:#FF4D6D; font-size:11px !important; font-weight:600 !important; flex:0 0 auto !important; padding:14px 12px !important;}
@@ -374,8 +381,15 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
     <div class="pack-modal-body" id="packModalBody"></div>
     <div class="pack-modal-footer">
       <button class="pack-btn-force" id="packForceBtn" onclick="forceCompletePackVerify()">⚠ 관리자 강제확정</button>
-      <button class="pack-btn-print" onclick="printPackingSlip()">🖨 패킹슬립 인쇄</button>
-      <button class="pack-btn-complete" id="packCompleteBtn" disabled onclick="completePackVerify()">🟠 최종 2차 검증완료 확정</button>
+      <div class="pack-print-group">
+        <button class="pack-btn-print" onclick="printPackingSlip('letter')">🖨 패킹슬립 인쇄 (Letter)</button>
+        <button class="pack-print-toggle" onclick="event.stopPropagation(); document.getElementById('packPrintMenu').classList.toggle('open');" title="다른 용지 크기">▾</button>
+        <div class="pack-print-menu" id="packPrintMenu">
+          <button onclick="document.getElementById('packPrintMenu').classList.remove('open'); printPackingSlip('letter');">📄 Letter (일반 A4/레터 용지)</button>
+          <button onclick="document.getElementById('packPrintMenu').classList.remove('open'); printPackingSlip('label');">🏷 4×6 라벨 (라벨 프린터)</button>
+        </div>
+      </div>
+      <button class="pack-btn-complete" id="packCompleteBtn" disabled onclick="completePackVerify()">🟣 최종 2차 검증완료 확정</button>
     </div>
   </div>
 </div>
@@ -1157,12 +1171,12 @@ async function completePackVerify(){
   btn.disabled = true; btn.textContent = '처리 중...';
   const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'verified' });
   if(res.ok){
-    showPackModalMsg('🟠 최종 2차 검증완료 — 주황 상태로 전환됐습니다', 'ok');
+    showPackModalMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
     await pollOnce();
     printPackingSlip();
     setTimeout(() => closePackVerifyModal(), 900);
   } else {
-    btn.disabled = false; btn.textContent = '🟠 최종 2차 검증완료 확정';
+    btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
     alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
     await refreshPackModalState();
   }
@@ -1175,7 +1189,8 @@ async function forceCompletePackVerify(){
   const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'verified', force: true });
   if(res.ok){
     showPackModalMsg('⚠ 관리자 강제확정으로 최종 검증완료 처리됐습니다', 'warn');
-    await pollOnce();
+    await pollOnce(); // ★ slot.packVerified를 최신으로 받아와야 슬립에 정확한 상태가 찍힘
+    printPackingSlip(); // ★ 2026-08-24 버그 수정 — 강제확정 때는 슬립 인쇄가 아예 빠져있었음
     setTimeout(() => closePackVerifyModal(), 900);
   } else {
     alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
@@ -1190,16 +1205,30 @@ function closePackVerifyModal(){
 
 // ★ 패킹 슬립 인쇄 — StyleKorean 헤더/주소 포함, 새 창에서 브라우저 인쇄 다이얼로그 사용
 // (전용 프린터가 없어도 어디서나 동작하고, "PDF로 저장"도 그대로 가능)
-function printPackingSlip(){
+// ★ 2026-08-24 신규 — 4x6 라벨 프린터 지원. format: 'letter'(기본) 또는 'label'.
+function printPackingSlip(format){
+  format = format || 'letter';
   const invoice = _packModalInvoice;
   const slot = _slotsByInvoice[invoice];
   const state = _packModalState;
   if(!slot){ alert('먼저 패킹 검증 모달을 여세요'); return; }
   const lines = (state && state.lines) ? state.lines : [];
   const issues = slot.issues || [];
-  const verified = state ? !!state.complete : false;
+  // ★ 2026-08-24 버그 수정 — 예전엔 스캔 진행률(state.complete)만 보고 판정해서,
+  //   "관리자 강제확정"으로 넘어간 오더는 실제로 검증완료 상태인데도 스캔
+  //   기록이 없으니 슬립엔 계속 "NOT FULLY VERIFIED"로 잘못 찍혔음.
+  //   이제 slot.packVerified(실제 최종 상태, 강제확정 포함)를 최우선으로 보고,
+  //   스캔 100%로 정상 검증된 것과 관리자가 강제로 넘긴 것을 구분해서 표시함.
+  const scanComplete = state ? !!state.complete : false;
+  const verified = !!slot.packVerified;
+  const forcedVerify = verified && !scanComplete;
   const worker = currentPackWorker() || '-';
   const printedAt = new Date().toLocaleString('en-US');
+
+  const badgeClass = verified ? (forcedVerify ? 'verify-forced' : 'verify-ok') : 'verify-bad';
+  const badgeText = verified
+    ? (forcedVerify ? '⚠ 2ND VERIFICATION — ADMIN OVERRIDE (not scan-checked)' : '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED')
+    : '⚠ NOT FULLY VERIFIED (2nd check pending)';
 
   const rowsHtml = lines.map(l => `
     <tr>
@@ -1211,14 +1240,14 @@ function printPackingSlip(){
     </tr>`).join('');
 
   const issuesHtml = issues.length ? `
-    <h4 style="margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;">Issues / Shortages</h4>
+    <h4 class="issues-h4">Issues / Shortages</h4>
     <table class="slip-table"><thead><tr><th>Reason</th><th>Product</th><th style="text-align:center;">Qty</th></tr></thead><tbody>
     ${issues.map(i => `<tr><td>${i.reason}</td><td>${i.name || i.sku || ''}</td><td style="text-align:center;">${i.qty}</td></tr>`).join('')}
     </tbody></table>` : '';
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
-  <style>
-    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto;}
+  const letterCss = `
+    @page{ size: letter; margin: 12mm; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px;}
     .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
     .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
     .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
@@ -1229,11 +1258,34 @@ function printPackingSlip(){
     table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
     table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
     table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
-    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
-    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
-    @media print{ body{padding:12mm;} }
+  `;
+  const labelCss = `
+    @page{ size: 4in 6in; margin: 0.14in; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:0; width:3.72in; margin:0 auto; font-size:9px; line-height:1.3;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1.5px solid #111; padding-bottom:5px; margin-bottom:7px;}
+    .slip-logo{font-size:15px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:7px; color:#555; margin-top:2px; line-height:1.3;}
+    .slip-title{font-size:11px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:7px; color:#555; text-align:right; margin-top:2px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px; font-size:8.5px;}
+    .slip-info div b{display:block; font-size:6.5px; color:#777; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:1px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:8px; margin-top:4px;}
+    table.slip-table th{background:#111; color:#fff; padding:2.5px 4px; text-align:left; font-size:6.5px; text-transform:uppercase;}
+    table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
+    .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
+    .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
+    .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
+  `;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
+  <style>
+    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
+    .verify-forced{background:#fef3c7; color:#92400e; border:1px solid #f59e0b;}
+    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    ${format === 'label' ? labelCss : letterCss}
   </style></head><body>
     <div class="slip-head">
       <div>
@@ -1254,7 +1306,7 @@ function printPackingSlip(){
     <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody></table>
     ${issuesHtml}
-    <div class="verify-badge ${verified ? 'verify-ok' : 'verify-bad'}">${verified ? '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED' : '⚠ NOT FULLY VERIFIED (2nd check pending)'}</div>
+    <div class="verify-badge ${badgeClass}">${badgeText}</div>
     <div class="slip-footer">
       <span>Verified by: ${worker}</span>
       <span>StyleKorean B2B Fulfillment System</span>
@@ -1267,6 +1319,13 @@ function printPackingSlip(){
   win.document.close();
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
+
+// ★ 2026-08-24 신규 — 패킹슬립 용지 선택 드롭업 메뉴, 바깥 클릭 시 닫힘
+document.addEventListener('click', e => {
+  const menu = document.getElementById('packPrintMenu');
+  if(!menu || !menu.classList.contains('open')) return;
+  if(!e.target.closest('.pack-print-group')) menu.classList.remove('open');
+});
 
 document.getElementById('packScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitPackScan(); }
