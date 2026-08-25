@@ -56,6 +56,8 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .tb-switch-row .tb-sw-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
 .tb-switch-row .tb-sw-tag{font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; white-space:nowrap;}
 .tb-switch-empty{padding:12px 8px; font-size:12px; color:var(--text-dim);}
+.tb-switch-more{padding:10px 8px; margin-top:4px; border-top:1px solid var(--border); font-size:12px; color:#3EB8F5; text-align:center; cursor:pointer;}
+.tb-switch-more:hover{text-decoration:underline;}
 .manual-banner{display:none; align-items:center; flex-wrap:wrap; row-gap:6px; gap:10px; background:var(--amber-bg); border:1px solid var(--amber); color:var(--amber); font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px;}
 .manual-banner.show{display:flex;}
 .manual-banner button{font-family:var(--sans); font-size:12px; font-weight:700; background:none; border:1px solid var(--amber); color:var(--amber); border-radius:6px; padding:4px 10px; cursor:pointer;}
@@ -314,7 +316,7 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <div class="tb-switch-dd" id="switchBatchDropdownTV"></div>
     </div>
     <div class="tb-switch-wrap">
-      <button class="tb-switch-btn" id="btnBatchHistoryTV">📅 지난 배치 전체</button>
+      <button class="tb-switch-btn" id="btnBatchHistoryTV">📅 지난 배치 (최근 14일)</button>
       <div class="tb-switch-dd" id="batchHistoryDropdownTV"></div>
     </div>
   </div>
@@ -1768,32 +1770,41 @@ document.getElementById('btnBatchHistoryTV').onclick = async (e) => {
   e.stopPropagation();
   const dd = document.getElementById('batchHistoryDropdownTV');
   if(dd.classList.contains('open')){ dd.classList.remove('open'); return; }
-
+  loadBatchHistoryList(14);
+};
+async function loadBatchHistoryList(days){
+  const dd = document.getElementById('batchHistoryDropdownTV');
   dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
   dd.classList.add('open');
 
-  const res = await gasQueryWithRetry('getBatchHistoryList', {});
+  const res = await gasQueryWithRetry('getBatchHistoryList', { days });
   if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
   const list = res.batches || [];
+  // ★ 2026-08-25 신규(매니저 요청) — 계속 쌓이면 지저분하니 기본은 최근 14일치만.
+  //   그래도 더 예전 것이 필요한 드문 경우를 위해 맨 아래에 "더 예전 배치 찾기"를
+  //   달아둠(누르면 1년치까지 넓혀서 다시 조회).
+  const moreBtn = days < 365
+    ? `<div class="tb-switch-more" id="tbHistoryMoreBtn">🔍 더 예전 배치 찾기 (최근 1년 전체)</div>`
+    : '';
   if(!list.length){
-    dd.innerHTML = `<div class="tb-switch-empty">배치 기록이 없습니다</div>`;
-    return;
+    dd.innerHTML = `<div class="tb-switch-empty">최근 ${days}일 안에 배치 기록이 없습니다</div>${moreBtn}`;
+  } else {
+    dd.innerHTML = list.map(b => {
+      const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+      const tag = isCurrent
+        ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+        : b.status === 'completed'
+        ? `<span class="tb-sw-tag" style="background:var(--gray-bg); color:var(--text-dim)">완료됨</span>`
+        : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">진행중</span>`;
+      return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
+        <div>
+          <div class="tb-sw-id">${b.batchId}</div>
+          <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs</div>
+        </div>
+        ${tag}
+      </div>`;
+    }).join('') + moreBtn;
   }
-  dd.innerHTML = list.map(b => {
-    const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
-    const tag = isCurrent
-      ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
-      : b.status === 'completed'
-      ? `<span class="tb-sw-tag" style="background:var(--gray-bg); color:var(--text-dim)">완료됨</span>`
-      : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">진행중</span>`;
-    return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
-      <div>
-        <div class="tb-sw-id">${b.batchId}</div>
-        <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs</div>
-      </div>
-      ${tag}
-    </div>`;
-  }).join('');
   dd.querySelectorAll('[data-batch]').forEach(row => {
     row.onclick = () => {
       manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
@@ -1803,7 +1814,9 @@ document.getElementById('btnBatchHistoryTV').onclick = async (e) => {
       pollOnce(); // 고른 배치로 즉시 갱신
     };
   });
-};
+  const moreEl = document.getElementById('tbHistoryMoreBtn');
+  if(moreEl) moreEl.onclick = (ev) => { ev.stopPropagation(); loadBatchHistoryList(365); };
+}
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('batchHistoryDropdownTV');
   if(dd && dd.classList.contains('open') && !e.target.closest('#btnBatchHistoryTV') && !e.target.closest('#batchHistoryDropdownTV')){
