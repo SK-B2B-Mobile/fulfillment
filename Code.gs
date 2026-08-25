@@ -44,6 +44,12 @@ function bumpVersion_() {
   //   짧은 캐시(속도용)와 즉시반영(정확성)을 둘 다 챙길 수 있음.
   try { CacheService.getScriptCache().remove('salesOverview_cache_v1'); } catch (e) {}
   try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) {}
+  // ★ 2026-08-25 신규(안전 확인) — getOpenBatches("다른 배치" 목록) 캐시를 6초→20초로
+  //   늘리면서(속도 개선), 방금 2차 검증을 끝냈는데도 목록엔 최대 20초간 예전
+  //   숫자("검증 대기 N건")가 보일 위험이 새로 생겼음. 데이터가 실제로 바뀌는
+  //   모든 쓰기 작업이 이 함수(bumpVersion_)를 거치므로, 여기서 같이 지워서
+  //   "속도는 빠르게, 정확도는 항상 최신"을 둘 다 보장함.
+  try { CacheService.getScriptCache().remove('openBatches_v1'); } catch (e) {}
 }
 
 // === Header map cache ===
