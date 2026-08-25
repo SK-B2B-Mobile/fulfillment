@@ -1871,6 +1871,15 @@ async function continueOpenBatch(batchId, viewOnly){
   //   하는 게 정상 업무 흐름이라, 그쪽의 "활성 배치 따라가기"는 그대로 유지함
   //   (board.html은 이 파일과 별개이며 이번 변경의 영향을 받지 않음).
 
+  // ★ 2026-08-25 신규(속도 개선, 매니저 지적) — 예전엔 getBatch가 끝난 "다음에"
+  //   getScanState를 또 요청해서, 서버 왕복 2번을 순서대로 기다렸음(느린 이유).
+  //   batchId는 함수 파라미터로 이미 알고 있어서 getBatch 결과를 기다릴 필요 없이
+  //   둘 다 동시에 물어봐도 전혀 문제없는 독립적인 요청이라(safety와 무관 —
+  //   정확도·정합성 검사는 그대로 다 거침), 최대한 일찍 병렬로 같이 쏴놓고
+  //   아래에서 결과만 나중에 합침. 이미 restoreBatchFromServer()의 부팅
+  //   경로에서 검증된 것과 똑같은 방식(prefetch 패턴)을 그대로 재사용함.
+  const scanStatePromise = gasQuery('getScanState', { batchId }).catch(() => null);
+
   const res = await gasQuery('getBatch', { batchId });
   if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
   saveBatchCache(res); // ★ 2026-08-04 신규: 다음 새로고침 때 이 배치가 즉시 뜨도록 캐시 갱신
@@ -1914,7 +1923,13 @@ async function continueOpenBatch(batchId, viewOnly){
   document.querySelectorAll('nav button[data-view]').forEach(b => b.disabled = false);
   renderFileTags();
   renderBatchTabMode(); // ★ 2026-08-11: "01 Batch" 탭도 안내 카드로 갱신해둠 (나중에 그 탭을 열 때 대비)
-  await pollScanState();
+  // ★ 2026-08-25 수정(속도 개선) — 위에서 getBatch와 동시에 미리 쏴둔 요청의
+  //   결과를 여기서 받음(대부분 이미 도착해 있어서 사실상 대기시간 0에 가까움).
+  //   혹시 실패했으면(드묾) 안전하게 기존처럼 다시 한 번 정식으로 요청함 —
+  //   "빠르게 하려다 데이터가 비어있는 채로 넘어가는" 일은 없도록 함.
+  const _scanRes = await scanStatePromise;
+  if(_scanRes && _scanRes.ok) applyScanStateRes(_scanRes);
+  else await pollScanState();
   startScanPolling();
   startStructurePolling();
   checkOpenBatches(); // 방금 고른 배치는 목록에서 빠지도록 다시 그림
