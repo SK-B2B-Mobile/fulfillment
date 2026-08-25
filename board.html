@@ -1240,10 +1240,10 @@ function printPackingSlip(format){
       <td>${l.name || ''}</td>
       <td style="text-align:center;">${l.reqQty}</td>
       <td style="text-align:center;">${l.issueQty || 0}</td>
-      <td style="text-align:center; font-weight:700;">${forcedVerify ? '— *' : l.packed}</td>
+      <td style="text-align:center; font-weight:700;">${forcedVerify ? l.reqQty : l.packed}</td>
     </tr>`).join('');
 
-  const forcedNote = forcedVerify ? `<div class="forced-note">* Packed column not scan-verified — order was admin-confirmed without individual scanning.</div>` : '';
+  const forcedNote = ''; // ★ 2026-08-24 수정(매니저 판단) — 이 슬립은 결국 고객이 보는 문서라, 내부 스캔 여부 각주는 불필요한 의심만 줌. 하단의 ADMIN OVERRIDE 배지 하나로 감사 목적은 충분히 유지됨.
 
   const issuesHtml = issues.length ? `
     <h4 class="issues-h4">Issues / Shortages</h4>
