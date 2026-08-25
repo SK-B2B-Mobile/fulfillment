@@ -1448,6 +1448,13 @@ function getDeviceId_(){
   return id;
 }
 const DEVICE_ID = getDeviceId_();
+// ★ 2026-08-25 신규 — Scan & Sort 작업자 중복 선택 방지용. isWorkerBusyElsewhere/
+// populateWorkerSelect가 페이지 초기화 시점(아래 initSlots() 직후 populateWorkerSelect()
+// 최초 호출)에 이미 이 변수를 참조하므로, 파일 뒤쪽이 아니라 반드시 이렇게
+// state 선언부 바로 옆(맨 위쪽)에 둬야 함 — 원래 파일 뒷부분에 선언했다가
+// "let 변수를 초기화 전에 참조"하는 ReferenceError로 batch.html 전체가
+// 부팅 단계에서 멈춰버리는 심각한 사고가 있었음(TDZ 버그).
+let _activeScanWorkers = {}; // { "작업자명": ["deviceId", ...] }
 
 const state = {
   batchId: null,
@@ -5800,8 +5807,8 @@ async function pollActivePickers(){
 // 20초마다 "나 지금 이 이름 쓰고 있어요"를 계속 알리는 방식(하트비트)으로
 // "지금 다른 기기에서도 이 이름이 쓰이고 있는지"를 판단함. 60초 안에 신호가
 // 없으면(기기가 꺼졌거나 이름을 바꿨거나) 더 이상 활성으로 안 봄.
+// (_activeScanWorkers 변수 선언은 파일 위쪽 DEVICE_ID 옆으로 옮김 — TDZ 버그 수정)
 // ═══════════════════════════════════════════════════════════
-let _activeScanWorkers = {}; // { "작업자명": ["deviceId", ...] }
 
 async function pingScanWorkerHeartbeat(){
   if(!GAS_READY || !state.batchId) return;
