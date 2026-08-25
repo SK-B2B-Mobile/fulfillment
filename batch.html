@@ -1853,8 +1853,17 @@ function fmtBatchWhen(v){
   return sameDay ? ('오늘 ' + hm) : (p(d.getMonth()+1)+'-'+p(d.getDate())+' '+hm);
 }
 
+// ★ 2026-08-25 신규 — "다른 배치" 전환 경쟁 상태(race condition) 방지용 순번 가드.
+// board.html의 pollOnce()가 이미 쓰고 있는 것과 완전히 같은 패턴: 배치를
+// 연달아 빠르게 두 번 고르면(드롭다운을 다시 열어서), 먼저 보낸 요청의 응답이
+// 나중에 도착해서 이미 반영된 최신 배치를 조용히 덮어써버릴 수 있음. 매
+// 호출마다 고유 순번을 매기고, 응답이 왔을 때 "그 사이 더 최신 호출이
+// 시작됐는지"를 확인해서, 오래된 응답은 화면에 반영하지 않고 조용히 버림.
+let _continueOpenBatchSeq = 0;
+
 // "이어서 작업하기" — 그 배치를 통째로 불러와서 지금 화면에서 이어서 작업
 async function continueOpenBatch(batchId, viewOnly){
+  const _mySeq = ++_continueOpenBatchSeq;
   // ★ 2026-08-25 신규(매니저 요청) — 배치를 전환하면 무조건 "Slot Layout"으로
   //   튕겨나가서, Pack Verify 등 원래 보고 있던 탭으로 매번 다시 들어가야 하는
   //   번거로움이 있었음. 전환 직전에 지금 보고 있던 탭을 기억해뒀다가, 전환이
@@ -1881,6 +1890,10 @@ async function continueOpenBatch(batchId, viewOnly){
   const scanStatePromise = gasQuery('getScanState', { batchId }).catch(() => null);
 
   const res = await gasQuery('getBatch', { batchId });
+  // ★ 2026-08-25 신규 — 이 응답을 기다리는 사이에 사용자가 또 다른 배치를
+  //   골라서 더 최신 호출이 이미 시작됐다면, 이 오래된 응답으로 상태를
+  //   덮어쓰지 않고 여기서 조용히 멈춤(최신 호출이 알아서 마무리함).
+  if(_mySeq !== _continueOpenBatchSeq) return;
   if(!res.ok || !res.batch){ toast('배치를 불러오지 못했습니다', 'error'); return; }
   saveBatchCache(res); // ★ 2026-08-04 신규: 다음 새로고침 때 이 배치가 즉시 뜨도록 캐시 갱신
 
@@ -1928,6 +1941,10 @@ async function continueOpenBatch(batchId, viewOnly){
   //   혹시 실패했으면(드묾) 안전하게 기존처럼 다시 한 번 정식으로 요청함 —
   //   "빠르게 하려다 데이터가 비어있는 채로 넘어가는" 일은 없도록 함.
   const _scanRes = await scanStatePromise;
+  // ★ 2026-08-25 신규 — 여기서도 한 번 더 확인. getBatch 통과 이후에도(거의
+  //   동시에 실행되는 동기 코드뿐이라 가능성은 매우 낮지만) 그 사이 더 최신
+  //   호출이 시작됐을 수 있으므로, 스캔 데이터를 반영하기 직전에 다시 검사함.
+  if(_mySeq !== _continueOpenBatchSeq) return;
   if(_scanRes && _scanRes.ok) applyScanStateRes(_scanRes);
   else await pollScanState();
   startScanPolling();
