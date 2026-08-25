@@ -643,6 +643,72 @@ function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name
 // "그때 뭘 잘못 스캔했는지" 감사 추적이 가능하게 함.
 function packscanSheet_() { return ensureBatchSheet_(PACKSCAN_SHEET, ['BatchId','PackScanId','Timestamp','Worker','Barcode','SKU','Invoice','Result','Status','Qty']); }
 
+// ★ 2026-08-25 신규 — Scan & Sort "작업자 선택" 중복 방지용 가벼운 하트비트.
+// 피킹(PickTiming)은 시작/종료가 명확한 이벤트라 activePickers로 잠금이 가능했지만,
+// 스캔 작업자 선택은 그런 이벤트가 없이 그냥 "지금 드롭다운에 뭐가 선택돼있나"뿐임.
+// 그래서 기기마다 20초 간격으로 "나 지금 이 이름 쓰고 있다"를 계속 알리고(하트비트),
+// 60초(3번 놓쳐도 여유 있게) 안에 신호가 없으면 더 이상 활성 아닌 것으로 간주함.
+// 한 사람이 각자 자기 기기를 쓴다는 전제 하에, 다른 기기가 내 이름을 실수로
+// 골라버리는 사고(스캔 기록이 엉뚱하게 섞이는 사고)를 막기 위한 안전장치.
+function scanWorkerHeartbeatSheet_() { return ensureBatchSheet_('ScanWorkerHeartbeat', ['BatchId','DeviceId','Worker','LastSeen']); }
+
+/* pingScanWorker — 기기가 주기적으로(20초마다) + 선택이 바뀔 때마다 호출.
+ * worker가 빈 문자열이면 "이 기기는 지금 아무도 선택 안 함"으로 지움. */
+function pingScanWorker(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(8000);
+  try {
+    if (!data.batchId || !data.deviceId) return { ok: false, error: 'batchId, deviceId required' };
+    const sh = scanWorkerHeartbeatSheet_();
+    const last = sh.getLastRow();
+    const now = batchNow_();
+    if (last >= 2) {
+      const rows = sh.getRange(2, 1, last - 1, 2).getValues();
+      for (let i = 0; i < rows.length; i++) {
+        if (String(rows[i][0]) === String(data.batchId) && String(rows[i][1]) === String(data.deviceId)) {
+          sh.getRange(i + 2, 3, 1, 2).setValues([[data.worker || '', data.worker ? now : '']]);
+          return { ok: true };
+        }
+      }
+    }
+    if (!data.worker) return { ok: true }; // 처음부터 선택 안 함이면 새로 기록할 필요 없음
+    const newRow = sh.getLastRow() + 1;
+    ensureSheetRoom_(sh, newRow);
+    sh.getRange(newRow, 1, 1, 4).setValues([[data.batchId, data.deviceId, data.worker, now]]);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* getActiveScanWorkers — "지금 이 배치에서 어느 기기가 누구 이름을 쓰고 있는지" 조회.
+ * 반환: { active: { "작업자명": ["deviceId1","deviceId2",...] } } (60초 이내만 포함) */
+function getActiveScanWorkers(data) {
+  try {
+    if (!data.batchId) return { ok: false, error: 'batchId required' };
+    const sh = scanWorkerHeartbeatSheet_();
+    const last = sh.getLastRow();
+    if (last < 2) return { ok: true, active: {} };
+    const rows = sh.getRange(2, 1, last - 1, 4).getValues();
+    const nowMs = Date.now();
+    const active = {};
+    rows.forEach(r => {
+      if (String(r[0]) !== String(data.batchId)) return;
+      const worker = String(r[2] || '').trim();
+      if (!worker) return;
+      const ts = parseBatchTs_(r[3]);
+      if (isNaN(ts) || (nowMs - ts) > 60000) return; // 60초 넘으면 더 이상 활성 아님
+      if (!active[worker]) active[worker] = [];
+      active[worker].push(String(r[1]));
+    });
+    return { ok: true, active: active };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 // ★ 2026-08-24 재설계(매니저 요청) — 예전엔 날짜 뒤에 무작위 6자리(예: D03E5E)를
 // 붙여서, 같은 날 배치가 여러 개 생겨도 작업자가 몇 번째·몇 시 배치인지 전혀
 // 구분할 수 없었음. 이제 그 자리에 "생성 시각(HHmm) + 오늘 몇 번째인지(알파벳)"를
