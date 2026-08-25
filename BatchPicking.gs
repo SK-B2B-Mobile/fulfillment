@@ -3119,7 +3119,12 @@ function getOpenBatches() {
     const _result = { ok: true, batches: open };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+      // ★ 2026-08-25 수정(속도 개선) — 6초→20초로 확대. 이 목록은 "훑어보고 고르는"
+      //   용도라 살짝 오래된 숫자가 보여도 안전에 전혀 영향 없음 — 실제로 "전환"을
+      //   누르는 순간에는 항상 getBatch/getScanState로 100% 최신 데이터를 다시
+      //   받아오므로(안전장치 그대로 유지), 목록 자체만 좀 더 오래 캐시해서
+      //   반복적으로 여는 속도를 개선함.
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 20);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
