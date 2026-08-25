@@ -310,9 +310,9 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .scan-input-wrap input{flex:1; background:transparent; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:15px; letter-spacing:0.05em;}
 .scan-input-wrap input::placeholder{color:var(--text-dim2);}
 
-.scan-chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;}
-.scan-chip{background:var(--surface3); border:1px solid var(--border); color:var(--text-dim); padding:5px 10px; border-radius:14px; font-size:10.5px; font-family:var(--mono); cursor:pointer;}
-.scan-chip:hover{color:var(--cyan); border-color:var(--cyan);}
+/* ★ 2026-08-24 삭제 — .scan-chips/.scan-chip(개발 테스트용 "가짜 스캔" 버튼)는
+   작업자가 스캔칸 바로 밑이라 자꾸 실수로 눌러서 실제 스캔 안 한 상품이
+   스캔된 것처럼 카운트되는 사고 위험이 있어 완전히 제거함. */
 
 /* ═══════════════════════════════════════════════════════════
  * ★ 2026-08-24 신규 — Pack Verify(최종 2차 검증) 전용 스타일.
@@ -991,10 +991,6 @@ select option:disabled{color:var(--text-dim2);}
           <div class="scan-input-wrap">
             <span class="scan-icon">▤</span>
             <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus>
-          </div>
-
-          <div class="scan-chips" id="scanChips">
-            <span style="font-size:10.5px; color:var(--text-dim2); font-family:var(--mono); align-self:center; letter-spacing:0.05em;">TEST ▸</span>
           </div>
 
           <div id="scanResult"></div>
@@ -3340,7 +3336,7 @@ function gotoView(vid){
   // ★ 2026-07-23 수정: 예전엔 이 탭에 들어올 때 작업자 드롭다운을 안 건드리고 그대로
   //   뒀는데, 그러면 마지막 폴링(최대 6.5초 전) 이후 다른 기기에서 작업자 명단이
   //   바뀌었을 경우 잠깐 옛날 값이 보일 수 있었음. 탭 진입 즉시 최신으로 맞춤.
-  if(vid==='v-scan'){ populateWorkerSelect(); renderScanChips(); renderRecentScans(); document.getElementById('scanInput').focus(); }
+  if(vid==='v-scan'){ populateWorkerSelect(); renderRecentScans(); document.getElementById('scanInput').focus(); }
   if(vid==='v-log'){ renderFullLog(); renderKPI(); }
   // ★ 2026-08-24 신규 — Pack Verify 탭(최종 2차 검증). 피킹용 workerSelect/scanInput과는
   //   완전히 분리된 pvWorkerSelect/pvInvoiceSelect를 씀 — 절대 서로 안 섞임.
@@ -3982,19 +3978,6 @@ document.getElementById('btnClearSlots').onclick = () => {
 // ═══════════════════════════════════════════════════════════
 // Scan UI
 // ═══════════════════════════════════════════════════════════
-function renderScanChips(){
-  const barcodes = Object.keys(state.scanIndex).slice(0, 5);
-  const el = document.getElementById('scanChips');
-  const chips = barcodes.map(bc => {
-    const info = state.scanIndex[bc];
-    return `<span class="scan-chip" data-bc="${bc}">${info.sku}</span>`;
-  });
-  chips.push('<span class="scan-chip" data-bc="0000000000000">unknown</span>');
-  el.innerHTML = '<span style="font-size:10.5px; color:var(--text-dim2); font-family:var(--mono); align-self:center; letter-spacing:0.05em;">TEST ▸</span>' + chips.join('');
-  el.querySelectorAll('.scan-chip').forEach(c => {
-    c.onclick = () => { document.getElementById('scanInput').value = c.dataset.bc; doScan(); };
-  });
-}
 
 const scanInput = document.getElementById('scanInput');
 scanInput.addEventListener('keydown', e => { if(e.key==='Enter') doScan(); });
