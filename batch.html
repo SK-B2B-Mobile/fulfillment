@@ -1834,6 +1834,11 @@ function fmtBatchWhen(v){
 
 // "이어서 작업하기" — 그 배치를 통째로 불러와서 지금 화면에서 이어서 작업
 async function continueOpenBatch(batchId, viewOnly){
+  // ★ 2026-08-25 신규(매니저 요청) — 배치를 전환하면 무조건 "Slot Layout"으로
+  //   튕겨나가서, Pack Verify 등 원래 보고 있던 탭으로 매번 다시 들어가야 하는
+  //   번거로움이 있었음. 전환 직전에 지금 보고 있던 탭을 기억해뒀다가, 전환이
+  //   끝나면 그 탭으로 그대로 돌아가도록 함(스캔 디바이스에서 특히 유용).
+  const _prevView = document.querySelector('.view.active')?.id || null;
   // ★ 2026-07-24 신규 — 심각한 사고 방지: 이 배치로 전환하면 이 기기뿐 아니라
   //   TV 현황판·다른 작업자 폰 등 "전체 기기"가 자동으로 같은 배치를 따라가도록
   //   서버에 방송됨(setActiveBatch). 여러 탭을 켜놓고 작업하다가 예전 탭에서
@@ -1907,14 +1912,17 @@ async function continueOpenBatch(batchId, viewOnly){
     if(chip) chip.textContent = state.batchId + (_when ? ' · ' + _when : '') + ' (조회전용)';
     syncPickAreaBatchLabel();
     toast(`배치 ${state.batchId} 조회 전용으로 열었습니다 — 다른 기기에는 영향 없습니다`, 'success');
-    gotoView('v-log');
+    // ★ 2026-08-25 수정 — 원래 보고 있던 탭이 있으면 거기로, 없으면(최초 진입)
+    //   기존처럼 Scan Log로. Pack Verify를 보고 있었다면 그 탭으로 돌아가면서
+    //   드롭다운도 새 배치 기준으로 자동 갱신됨(gotoView 내부 로직).
+    gotoView(_prevView || 'v-log');
     renderKPI();
     return;
   }
   state.viewOnlyBatch = null;
   if(GAS_READY) gasCall('setActiveBatch', { batchId: state.batchId });
   toast(`배치 ${state.batchId} 이어서 작업 시작`, 'success');
-  gotoView('v-slots');
+  gotoView(_prevView || 'v-slots');
 }
 
 // "완료 처리" — 매니저가 명시적으로 이 배치를 끝난 것으로 확정
@@ -3737,6 +3745,24 @@ function setPickBanner(mode, worker, pageLabel, extra){
 //   선택했을 때(pickSel.onchange)만 true로 넘겨서, 그때만 확인창을 띄움.
 function onPickWorkerChange(userInitiated){
   updatePickWorkerDot();
+  // ★ 2026-08-25 신규(매니저 요청) — 예전엔 "▶ 피킹 시작" 버튼을 실제로 눌러야만
+  //   Scan & Sort 작업자란에 이름이 넘어갔음. 그런데 이름만 고르고 아직
+  //   시작 버튼을 안 눌렀거나(피킹은 이미 끝나서 타이머 없이 바로 스캔만
+  //   하러 가는 경우 등), 스캔 화면을 먼저 열어보는 경우엔 여전히 두 번
+  //   골라야 했음. 이제 드롭다운에서 이름을 고르는 즉시(시작 버튼 여부와
+  //   무관하게) Scan & Sort에도 바로 채워지도록 함 — 물론 Scan & Sort에서
+  //   직접 다른 이름으로 다시 바꾸는 것도 그대로 가능(수동 override 유지).
+  const wNow = document.getElementById('pickWorkerSelect').value;
+  if(userInitiated && wNow){
+    const wsel = document.getElementById('workerSelect');
+    if(wsel && document.activeElement !== wsel){
+      wsel.value = wNow;
+      state.currentWorker = wNow;
+      localStorage.setItem('sk_scan_worker', wNow);
+      const initEl = document.getElementById('workerInitial');
+      if(initEl) initEl.textContent = wNow.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
+    }
+  }
   if (state.pickTimerRunning) return;               // 이 기기에서 진행 중이면 그대로
   const w = document.getElementById('pickWorkerSelect').value;
   const since = w ? state.activePickers[w] : null;
@@ -5531,7 +5557,7 @@ function printPvSlip(format){
   //   "확인 안 됨"이라는 게 명확히 드러나도록 대시(—)로 표시.
   const rowsHtml = lines.map(l => `
     <tr>
-      <td>${l.sku}</td>
+      <td>${l.barcode}</td>
       <td>${l.name || ''}</td>
       <td style="text-align:center;">${l.reqQty}</td>
       <td style="text-align:center;">${l.issueQty || 0}</td>
@@ -5609,7 +5635,7 @@ function printPvSlip(format){
       <div><b>Ship Via</b>${shipVia || '-'}</div>
       <div><b>Slot</b>${slotObj ? slotObj.num : '-'}</div>
     </div>
-    <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
+    <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody></table>
     ${issuesHtml}
     ${forcedNote}
