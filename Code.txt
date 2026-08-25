@@ -245,6 +245,10 @@ function doGet(e) {
   if (op === 'getPackScanState') {
     return json_(getPackScanState((e.parameter||{}).batchId||'', (e.parameter||{}).invoice||''));
   }
+  // ★ 2026-08-25 신규 — Scan & Sort 작업자 중복 선택 방지(다른 기기에서 쓰는 중인지 조회)
+  if (op === 'getActiveScanWorkers') {
+    return json_(getActiveScanWorkers({ batchId: (e.parameter||{}).batchId||'' }));
+  }
   if (op === 'getScanState') {
     return json_(getScanState((e.parameter || {}).batchId || ''));
   }
@@ -460,6 +464,8 @@ function doPost(e) {
   // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 스캔 기록/취소
   if (op === 'logPackScan')   return json_(logPackScan(data));
   if (op === 'undoPackScan')  return json_(undoPackScan(data));
+  // ★ 2026-08-25 신규 — Scan & Sort 작업자 선택 하트비트(다른 기기 중복 선택 방지)
+  if (op === 'pingScanWorker') return json_(pingScanWorker(data));
   // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
   if (op === 'logIssue')       return json_(logIssue(data));
   if (op === 'undoIssue')      return json_(undoIssue(data));
@@ -2967,6 +2973,93 @@ function buildPackStageMap_() {
     });
   } catch (e) { /* best-effort */ }
   return map;
+}
+
+/* =====================================================================
+ * autoDeleteOldJobs() — ★ 2026-08-24 신규 (버그 수정)
+ *
+ * ★★★ 근본 원인 발견 ★★★
+ * 지금까지 "완료건 자동 삭제"는 서버가 아니라 index.html(매니저 대시보드)
+ * 브라우저 탭 안의 자바스크립트 타이머(AutoDelete 객체)에만 의존하고 있었음.
+ * 즉 그 화면이 실제로 열려 있고, 그 컴퓨터가 자정을 넘겨서까지 계속 켜져
+ * 있어야만 실제로 정리가 일어나는 구조였음(서버는 "지워도 되는지 규칙만
+ * 검증"할 뿐, 먼저 나서서 지우자고 하지 않았음). 그래서 index.html을 밤새
+ * 켜둔 날이 없으면 그날치 정리가 통째로 안 일어났고, 오래된 완료건이
+ * sales.html "Recently Completed" 목록에 계속 쌓이는 문제로 이어졌음.
+ *
+ * 이 함수는 정확히 같은 판정 규칙(jobArchiveCheck_ — 위 3300번대)을 서버가
+ * 직접 매일 새벽에 돌려서, 브라우저가 단 하나도 안 열려 있어도 정리가
+ * 실제로 일어나게 만듦. 규칙 자체(영업일 3일, TK/UPS는 디멘션 저장 후
+ * 기준)는 전혀 안 바뀜 — 실행 주체만 "브라우저"에서 "서버 트리거"로 옮김.
+ * ===================================================================== */
+function autoDeleteOldJobs() {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const last = sh.getLastRow();
+    if (last < 2) { Logger.log('autoDeleteOldJobs: 데이터 없음'); return { ok: true, checked: 0, deleted: 0 }; }
+
+    const iInv = hdr[norm('Invoice')];
+    const iStatus = hdr[norm('Status')];
+    const iArch = hdr[norm('archived')];
+    if (!iInv || !iStatus) { Logger.log('autoDeleteOldJobs: 필요 컬럼(Invoice/Status)을 찾지 못함'); return { ok: false, error: '필요 컬럼 없음' }; }
+
+    const n = last - 1;
+    const invCol = sh.getRange(2, iInv, n, 1).getValues();
+    const statusCol = sh.getRange(2, iStatus, n, 1).getValues();
+    const archCol = iArch ? sh.getRange(2, iArch, n, 1).getValues() : null;
+
+    const targets = [];
+    for (let i = 0; i < n; i++) {
+      const invoice = String(invCol[i][0] || '').trim();
+      if (!invoice) continue;
+      const status = String(statusCol[i][0] || '').trim().toLowerCase();
+      if (status !== 'completed') continue; // 완료된 건만 대상(진행중 오더는 절대 안 건드림)
+      const archFlag = archCol ? String(archCol[i][0] || '').trim().toLowerCase() : '';
+      if (archFlag === 'true' || archFlag === '1' || archFlag === 'y') continue; // 이미 보관된 건은 다시 검사 안 함
+      targets.push(invoice);
+    }
+
+    let deleted = 0;
+    targets.forEach(invoice => {
+      const chk = jobArchiveCheck_(invoice); // ★ sales.html/index.html과 완전히 동일한 규칙으로 판정
+      if (chk.eligible) { deleteJob_(invoice); deleted++; }
+    });
+
+    if (deleted > 0) bumpVersion_(); // 캐시 무효화 — 다음 조회부터 바로 반영
+    Logger.log('autoDeleteOldJobs: 완료건 ' + targets.length + '건 검사, ' + deleted + '건 보관 처리(3일/영업일 기준 충족)');
+    return { ok: true, checked: targets.length, deleted: deleted };
+  } catch (e) {
+    Logger.log('autoDeleteOldJobs 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* 트리거 설치 — Apps Script 편집기에서 이 함수를 딱 한 번 수동 실행해야 함
+ * (함수 목록에서 setupAutoDeleteOldJobsTrigger 선택 → ▶ 실행).
+ * 그 이후로는 매일 새벽 1시~2시 사이에 자동으로 autoDeleteOldJobs()가 실행됨 —
+ * autoDeleteOldDimensions와 같은 시간대라 순서가 꼬일 일 없음. */
+function setupAutoDeleteOldJobsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'autoDeleteOldJobs') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('autoDeleteOldJobs')
+    .timeBased()
+    .atHour(1) // 새벽 1시~2시 사이 자동 실행
+    .everyDays(1)
+    .create();
+  Logger.log('✅ 트리거 설정 완료 — 매일 새벽 1시경, 서버가 직접 영업일 3일 지난 완료건을 자동 보관 처리합니다(브라우저가 안 열려 있어도 동작).');
+}
+function removeAutoDeleteOldJobsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'autoDeleteOldJobs') ScriptApp.deleteTrigger(t);
+  });
+  Logger.log('트리거 삭제 완료');
 }
 
 /* =====================================================
