@@ -31,6 +31,11 @@ const BWORKERS_SHEET = 'BatchWorkers'; // ★ 2026-07-16 신규 — 총량피킹
 // 별도 감사기록. "검수에서 넘어온 물건이 실제로 이 고객사 것인지"를 패킹존에서
 // 한 번 더 바코드로 확인하는 절차(오출고 방지)를 위해 신설.
 const PACKSCAN_SHEET = 'PackScanLog';
+// ★ 2026-08-25 신규 — 2차 검증(Pack Verify) 기능이 실제로 배포된 시점. 이보다
+// 먼저 완료된 배치는 "검증"이라는 개념 자체가 없었으므로, getOpenBatches의
+// "검증 안 되면 시간 무관 계속 보임" 규칙을 적용하면 안 됨(적용하면 몇 주 전
+// 이미 정상 출고된 옛날 배치들까지 전부 되살아나는 사고로 이어짐 — 실제 발생).
+const PACK_VERIFY_LAUNCH_MS = new Date(2026, 7, 24, 0, 0, 0).getTime(); // 2026-08-24 00:00 (월=0 기준이라 7=8월)
 
 function batchTz_() { return Session.getScriptTimeZone(); }
 function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
@@ -2847,6 +2852,31 @@ function getScanAndPickers(batchId) {
  *       그대로 있지만 매니저가 확인할 기회 없이 안 보이던 것을 고침)
  * 반환: 완료(status='completed') 안 된 배치 전부, 최신순, 대략적인 진행률 포함
  * ================================================================== */
+/* getBatchHistoryList — ★ 2026-08-25 신규(매니저 요청)
+ * TV 현황판에서 "지난 배치"를 볼 수 있게 하는 전체 이력 조회. getOpenBatches()는
+ * 일부러 "미완료 배치"만 보여주도록 설계돼 있어서(완료된 배치는 정상적으로
+ * 목록에서 빠짐 — 이건 원래 의도된 동작), 몇 주 전에 이미 정상적으로 끝난
+ * 배치의 고객사별 진행상황을 다시 보고 싶을 때 볼 방법이 없었음. 이 함수는
+ * 완료 여부와 무관하게 전체 배치를 최신순으로 돌려줌(가벼운 요약 정보만 —
+ * getOpenBatches처럼 스캔량까지 집계하면 무거워지므로 기본 정보만).
+ * 최근 90개까지만(그 이상은 스크롤이 무의미할 정도로 많음). */
+function getBatchHistoryList() {
+  try {
+    const bSh = batchesSheet_();
+    const last = bSh.getLastRow();
+    if (last < 2) return { ok: true, batches: [] };
+    const rows = bSh.getRange(2, 1, last - 1, 7).getValues();
+    const list = rows.map(r => ({
+      batchId: String(r[0]), date: r[1], status: String(r[2] || ''),
+      totalSku: r[3], totalQty: r[4], createdAt: r[5], completedAt: r[6],
+    }));
+    list.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return { ok: true, batches: list.slice(0, 90) };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 function getOpenBatches() {
   try {
     // ★ 2026-08-19 신규(긴급) — getSlotProgress와 동일한 이유. "다른 배치"
@@ -2915,18 +2945,19 @@ function getOpenBatches() {
       if (status === 'completed') {
         const completedAtRaw = r[6];
         if (!completedAtRaw) return; // 완료시각 기록 자체가 없는 오래된 배치는 제외
-        // ★ 2026-08-25 긴급 버그 수정 — 바로 위 8/24 코멘트에는 "시간과 무관하게
-        //   계속 보임"이라고 써놨는데, 실제 코드에는 예전(8/7)에 만든 "24시간
-        //   이내" 제한(_fresh)이 그대로 남아있어서 그 약속이 지켜지지 않고
-        //   있었음. 그래서 완료된 지 24시간이 넘은 배치는(예: 4일 전 배치) 검증이
-        //   안 끝났어도 조용히 목록에서 사라져버렸음 — 실제로 이 버그 때문에
-        //   "다른 배치" 목록이 통째로 텅 비는 사고가 발생함(2차 검증 기능이
-        //   생기기 전에 완료된 오래된 배치들은 전부 "검증 0/N"인 채로 시간이
-        //   많이 지나있었기 때문). _fresh는 이제 완전히 제거 — 검증 안 된
-        //   고객사가 하나라도 있으면 완료된 지 며칠이 지났어도 무조건 계속 보임.
+        // ★ 2026-08-25 재수정(2차 버그) — 위에서 "시간 무관하게 계속 보임"으로
+        //   고쳤더니, 이번엔 정반대 사고가 남: 2차 검증(Pack Verify) 기능 자체가
+        //   8/24에 처음 생겼기 때문에, 그 이전에 완료된 배치들(7월 것들까지 전부)은
+        //   애초에 "검증"이라는 개념 자체가 없어서 전부 "검증 0/N"으로 걸려서
+        //   무한정 살아나버렸음(실제로 7월 배치까지 전부 목록에 되살아난 사고
+        //   발생). 이런 오래된 배치는 이미 몇 주 전에 정상적으로 출고 완료된
+        //   것들이라 재검증이 필요 없음 — 그래서 "2차 검증 기능이 실제로 생긴
+        //   시점(PACK_VERIFY_LAUNCH_MS) 이후에 완료된 배치"에만 이 규칙을 적용함.
+        //   그 전에 완료된 배치는 예전 그대로 "완료 후 1시간"만 보여주고 사라짐.
         const _cMs = parseBatchTs_(completedAtRaw);
         const _vi = verifiedInfo[String(r[0] || '').trim()];
-        if (_vi && _vi.total > 0 && _vi.verified < _vi.total) {
+        const _isPostVerifyLaunch = !isNaN(_cMs) && _cMs >= PACK_VERIFY_LAUNCH_MS;
+        if (_isPostVerifyLaunch && _vi && _vi.total > 0 && _vi.verified < _vi.total) {
           // ★ 2026-08-24 수정 — "아직 안 가져간 고객사" 대신 "아직 2차 검증 안 된
           //   고객사"가 남아 있으면 시간과 무관하게 계속 보임(파랑까지만 되고
           //   검증 전인 경우도 여기 포함됨 — 정확히 매니저가 지적한 부분).
