@@ -220,6 +220,19 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .slot.done.taken .slot-pack-check .label{color:#04140D !important;}
 .slot.done.taken .slot-pack-check .box{border-color:#04140D; background:#04140D;}
 .slot.done.taken .slot-pack-check .box svg{display:block;}
+/* ★ 2026-08-24 신규 — 최종 2차 검증완료(보라). TV 현황판과 동일한 4단계 색 체계의
+   마지막 단계. 파랑(.taken) 클래스는 그대로 유지한 채 이 규칙이 색만 덮어씀
+   (board.html의 .card.done.taken.verified와 완전히 같은 방식). 이 규칙이 없어서
+   TV는 보라로 바뀌는데 이 화면(Slot Layout)만 계속 파랑으로 남아있던 게 버그였음. */
+.slot.done.taken.verified{
+  background:#8B5CF6 !important; border-color:#8B5CF6 !important;
+  animation:none !important; box-shadow:none !important;
+}
+.slot.done.taken.verified .slot-num, .slot.done.taken.verified .slot-co, .slot.done.taken.verified .slot-meta,
+.slot.done.taken.verified .slot-invoice{color:#FFFFFF !important;}
+.slot.done.taken.verified .slot-pack-check .label{color:#FFFFFF !important;}
+.slot.done.taken.verified .slot-pack-check .box{border-color:#FFFFFF; background:#FFFFFF;}
+.slot.done.taken.verified .slot-pack-check .box svg{display:block; stroke:#8B5CF6 !important;}
 .slot-clear-btn{width:100%; margin-top:8px; padding:7px; border:1px solid #04140D; border-radius:6px; background:rgba(4,20,13,0.15); color:#04140D; font-weight:800; font-size:10.5px; cursor:pointer; font-family:var(--sans);}
 .slot-clear-btn:hover{background:rgba(4,20,13,0.28);}
 .slot-clear-btn:disabled{opacity:0.6; cursor:default;}
@@ -3406,7 +3419,11 @@ function renderSlots(){
     //   takenOut(파랑) 값을 아예 받지 않고 movedToPacking(핑크)만 알고 있었던 것.
     //   이제 서버에서 takenOut을 같이 받아 파랑까지 그대로 반영함.
     const taken = state.takenOutInvoices.has(cf.meta.invoice_no);
-    return `<div class="slot ${status}${moved?' moved':''}${taken?' taken':''}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
+    // ★ 2026-08-24 버그 수정 — TV(board.html)는 스캔 검증이 끝나면 보라로
+    //   바뀌는데, 이 화면(Slot Layout)은 packVerifiedInvoices를 아예 안 읽어서
+    //   계속 파랑으로 남아있었음. 두 화면이 항상 같은 색을 보여줘야 하므로 추가.
+    const verified = state.packVerifiedInvoices.has(cf.meta.invoice_no);
+    return `<div class="slot ${status}${moved?' moved':''}${taken?' taken':''}${verified?' verified':''}" data-slot="${slot.num}" data-invoice="${cf.meta.invoice_no}">
       <div class="slot-head">
         <span class="slot-num">${numLabel}</span>
         <div class="slot-badges">
@@ -3442,7 +3459,7 @@ function renderSlots(){
       </div>
       <div class="slot-pack-check" data-pack-invoice="${cf.meta.invoice_no}" onclick="event.stopPropagation(); togglePackingMoved('${cf.meta.invoice_no}')">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
-        <span class="label">${moved ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
+        <span class="label">${verified ? '최종 2차 검증완료' : moved ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
       </div>
       ${status==='done' ? (
         (state.clearedInvoices && state.clearedInvoices.has(cf.meta.invoice_no))
@@ -3522,6 +3539,15 @@ function renderSlots(){
   // ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
   // 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
   window.togglePackingMoved = async function(invoice){
+    // ★ 2026-08-24 안전장치(버그 수정) — 이 화면(Slot Layout)의 체크박스는 원래
+    //   초록↔핑크만 토글하도록 만들어진 옛날 로직인데, 파랑/보라 상태인 오더를
+    //   실수로 클릭하면 무조건 moved:false로 보내서 검증 기록까지 통째로
+    //   초기화(초록으로 리셋)되는 심각한 사고 위험이 있었음. 파랑 이후 단계는
+    //   이제 TV 현황판 또는 Pack Verify 탭에서만 다루도록 여기서는 막음.
+    if(state.takenOutInvoices.has(invoice) || state.packVerifiedInvoices.has(invoice)){
+      toast('이미 패킹존 이동/검증완료된 오더입니다 — TV 현황판 또는 Pack Verify 탭에서 확인하세요', 'info');
+      return;
+    }
     const wasMoved = state.movedToPackingInvoices.has(invoice);
     const next = !wasMoved;
     if(next) state.movedToPackingInvoices.add(invoice); else state.movedToPackingInvoices.delete(invoice);
@@ -5516,14 +5542,20 @@ function printPvSlip(format){
     ? (forcedVerify ? '⚠ 2ND VERIFICATION — ADMIN OVERRIDE (not scan-checked)' : '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED')
     : '⚠ NOT FULLY VERIFIED (2nd check pending)';
 
+  // ★ 2026-08-24 버그 수정 — 강제확정된 오더는 실제로 스캔을 안 했으니
+  //   Packed 열에 "0"을 그대로 찍으면 "물건이 하나도 없다"처럼 오해될 수
+  //   있음. 실제로는 물건이 있는데 개수 확인만 안 한 것이므로, "0"이 아니라
+  //   "확인 안 됨"이라는 게 명확히 드러나도록 대시(—)로 표시.
   const rowsHtml = lines.map(l => `
     <tr>
       <td>${l.sku}</td>
       <td>${l.name || ''}</td>
       <td style="text-align:center;">${l.reqQty}</td>
       <td style="text-align:center;">${l.issueQty || 0}</td>
-      <td style="text-align:center; font-weight:700;">${l.packed}</td>
+      <td style="text-align:center; font-weight:700;">${forcedVerify ? '— *' : l.packed}</td>
     </tr>`).join('');
+
+  const forcedNote = forcedVerify ? `<div class="forced-note">* Packed column not scan-verified — order was admin-confirmed without individual scanning.</div>` : '';
 
   const issuesHtml = invoiceIssues.length ? `
     <h4 class="issues-h4">Issues / Shortages</h4>
@@ -5549,8 +5581,12 @@ function printPvSlip(format){
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
   const labelCss = `
-    @page{ size: 4in 6in; margin: 0.14in; }
-    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:0; width:3.72in; margin:0 auto; font-size:9px; line-height:1.3;}
+    /* ★ 2026-08-24 수정 — 라벨이 오른쪽으로 치우쳐 보이던 문제. margin:auto로
+       "중앙정렬"에 맡기면 라벨 프린터마다 있는 좌우 인쇄 여백 편차 때문에
+       한쪽으로 쏠려 보일 수 있음. auto 대신 왼쪽 여백을 확실히 줄이고
+       고정시켜서, 프린터 드라이버 차이와 무관하게 항상 왼쪽에 붙게 함. */
+    @page{ size: 4in 6in; margin: 0.1in 0.12in 0.1in 0.05in; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:0; width:3.8in; margin:0; font-size:9px; line-height:1.3;}
     .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1.5px solid #111; padding-bottom:5px; margin-bottom:7px;}
     .slip-logo{font-size:15px; font-weight:800; letter-spacing:-0.02em;}
     .slip-addr{font-size:7px; color:#555; margin-top:2px; line-height:1.3;}
@@ -5571,6 +5607,7 @@ function printPvSlip(format){
     .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
     .verify-forced{background:#fef3c7; color:#92400e; border:1px solid #f59e0b;}
     .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    .forced-note{font-size:0.85em; color:#92400e; margin-top:6px; font-style:italic;}
     ${format === 'label' ? labelCss : letterCss}
   </style></head><body>
     <div class="slip-head">
@@ -5592,6 +5629,7 @@ function printPvSlip(format){
     <table class="slip-table"><thead><tr><th>SKU</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody></table>
     ${issuesHtml}
+    ${forcedNote}
     <div class="verify-badge ${badgeClass}">${badgeText}</div>
     <div class="slip-footer">
       <span>Verified by: ${worker}</span>
