@@ -1621,24 +1621,25 @@ function tryRestoreDraftFromLocalStorage(){
     //   물어본 응답이 늦게 도착하는 사이, 사용자가 이미 오늘 파일을 직접
     //   드롭해서 작업을 시작했을 수 있음. 그 경우 뒤늦게 도착한 이 복원 로직이
     //   방금 올린 정상 데이터를 예전 임시저장으로 조용히 덮어쓰는 사고가
-    //   있었음 (총량 371 SKU로 정상 표시됐다가, 뒤늦게 도착한 복원 때문에
-    //   통계 카드만 예전 645로 바뀌어버리는 버그). 실제 사용자 행동이 있었다면
-    //   그게 항상 우선.
+    //   있었음. 실제 사용자 행동이 있었다면 그게 항상 우선.
     if(state.userHasUploaded) return false;
     const raw = localStorage.getItem(DRAFT_KEY);
     if(!raw) return false;
     const draft = JSON.parse(raw);
     if(!draft || draft.date !== todayStr_()) { clearDraftFromLocalStorage(); return false; } // 날짜 지나면 폐기
-    if(!draft.sumFile && (!draft.custFiles || draft.custFiles.length === 0)) return false;
-    if(state.userHasUploaded) return false; // 위와 동일한 체크, JSON.parse 등으로 지연된 사이 또 바뀌었을 수 있어 한번 더 확인
+    if(!draft.sumFile && (!draft.custFiles || draft.custFiles.length === 0)) { clearDraftFromLocalStorage(); return false; } // 내용 없는 빈 임시저장도 정리
 
-    state.sumFile = draft.sumFile || null;
-    state.custFiles = draft.custFiles || [];
-    refreshDropZoneLabels_();
-    renderFileTags();
-    updateBatchStats();
-    toast('새로고침 전 업로드했던 내용을 복원했습니다', 'success');
-    return true;
+    // ★ 2026-08-26 재설계(매니저 확정) — 실제 업무 방식은 "총량 리스트 +
+    //   고객사 리스트 전부를 한 번에 몰아서 올린다"이지, 올리다가 중간에
+    //   끊겼다가 나중에 이어서 하는 경우가 없음. 그래서 "이어서 하시겠습니까?"
+    //   같은 선택지 자체가 무의미하고, 오히려 예전엔 이걸 조용히 자동
+    //   복원해버려서 "총량은 그대로인데 고객사 합계만 배로 뛰는" 데이터 불일치
+    //   사고로 이어졌음(실제 발생 확인됨). 이제 확인창도 안 띄우고, 남아있는
+    //   임시저장은 발견 즉시 자동으로 지우고 완전히 빈 상태로 시작함 —
+    //   작업자가 몰라도 되고, 신경 쓸 필요도 없게 함.
+    clearDraftFromLocalStorage();
+    console.warn('오래된 임시저장이 있어 자동으로 정리하고 새로 시작합니다.');
+    return false;
   }catch(e){
     console.warn('임시저장 복원 실패:', e);
     return false;
