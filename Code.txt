@@ -3013,21 +3013,30 @@ function autoDeleteOldJobs() {
     if (last < 2) { Logger.log('autoDeleteOldJobs: 데이터 없음'); return { ok: true, checked: 0, deleted: 0 }; }
 
     const iInv = hdr[norm('Invoice')];
-    const iStatus = hdr[norm('Status')];
+    // ★ 2026-08-28 긴급 버그 수정 — 예전엔 여기서 "Status"(피킹 진행 상태) 컬럼이
+    //   'completed'인 것만 검사 대상으로 추렸음. 그런데 Status는 검수 완료
+    //   여부와 다른, 순수 "피킹" 상태 필드임(getSalesOverview의 기존 주석에도
+    //   "검수는 PASS인데 피킹 기록(Status)이 전혀 없었던" 실제 불일치 사례가
+    //   남아있음). 그래서 검수는 이미 끝나서 진짜 삭제 대상이어야 할 오더가,
+    //   피킹 세션 기록이 어떤 이유로 'completed'로 안 찍혀 있다는 이유만으로
+    //   jobArchiveCheck_(진짜 판정 로직)까지 가보지도 못하고 걸러지는 사고가
+    //   있었음. 삭제 대상 여부는 "검수(Inspection)가 끝났는지"로 판단해야
+    //   맞으므로, 그 기준으로 바로잡음(jobArchiveCheck_ 내부 규칙과 일치).
+    const iInsp = hdr[norm('Inspection')];
     const iArch = hdr[norm('archived')];
-    if (!iInv || !iStatus) { Logger.log('autoDeleteOldJobs: 필요 컬럼(Invoice/Status)을 찾지 못함'); return { ok: false, error: '필요 컬럼 없음' }; }
+    if (!iInv || !iInsp) { Logger.log('autoDeleteOldJobs: 필요 컬럼(Invoice/Inspection)을 찾지 못함'); return { ok: false, error: '필요 컬럼 없음' }; }
 
     const n = last - 1;
     const invCol = sh.getRange(2, iInv, n, 1).getValues();
-    const statusCol = sh.getRange(2, iStatus, n, 1).getValues();
+    const inspCol = sh.getRange(2, iInsp, n, 1).getValues();
     const archCol = iArch ? sh.getRange(2, iArch, n, 1).getValues() : null;
 
     const targets = [];
     for (let i = 0; i < n; i++) {
       const invoice = String(invCol[i][0] || '').trim();
       if (!invoice) continue;
-      const status = String(statusCol[i][0] || '').trim().toLowerCase();
-      if (status !== 'completed') continue; // 완료된 건만 대상(진행중 오더는 절대 안 건드림)
+      const insp = String(inspCol[i][0] || '').trim();
+      if (!insp) continue; // 검수 안 끝난 건만 제외(진행중 오더는 절대 안 건드림)
       const archFlag = archCol ? String(archCol[i][0] || '').trim().toLowerCase() : '';
       if (archFlag === 'true' || archFlag === '1' || archFlag === 'y') continue; // 이미 보관된 건은 다시 검사 안 함
       targets.push(invoice);
@@ -3351,13 +3360,21 @@ function lastDow_(y, m, dow) {
 function usHolidaySet_(y) {
   const pad = n => String(n).padStart(2, '0');
   const k = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  // ★ 2026-08-28 버그 수정 — 이 목록(자동삭제 판정용)이 BatchPicking.gs/sales.html의
+  //   isUsFederalHoliday_(11개, "다음 영업일" 계산용)와 서로 다른 목록이었음.
+  //   대통령의날·콜럼버스데이·베테랑데이가 여기만 빠져 있었음. 안 지워지는
+  //   방향의 버그는 아니었지만(빠지면 오히려 더 빨리 지워지는 쪽), 시스템
+  //   전체의 "영업일" 기준이 곳에 따라 다르면 안 되므로 11개로 통일함.
   const list = [
-    k(new Date(y, 0, 1)),        // New Year's Day
+    k(new Date(y, 0, 1)),        // New Year's Day 1/1
     k(nthDow_(y, 0, 1, 3)),      // MLK (1월 셋째 월)
+    k(nthDow_(y, 1, 1, 3)),      // Presidents Day (2월 셋째 월)
     k(lastDow_(y, 4, 1)),        // Memorial Day (5월 마지막 월)
     k(new Date(y, 5, 19)),       // Juneteenth
     k(new Date(y, 6, 4)),        // Independence Day
     k(nthDow_(y, 8, 1, 1)),      // Labor Day (9월 첫째 월)
+    k(nthDow_(y, 9, 1, 2)),      // Columbus Day (10월 둘째 월)
+    k(new Date(y, 10, 11)),      // Veterans Day 11/11
     k(nthDow_(y, 10, 4, 4)),     // Thanksgiving (11월 넷째 목)
     k(new Date(y, 11, 25))       // Christmas
   ];
