@@ -251,6 +251,10 @@ function doGet(e) {
   if (op === 'getPackScanState') {
     return json_(getPackScanState((e.parameter||{}).batchId||'', (e.parameter||{}).invoice||''));
   }
+  // ★ 2026-08-31 신규 — 단독 오더 목록 조회
+  if (op === 'getStandaloneOrders') {
+    return json_(getStandaloneOrders());
+  }
   // ★ 2026-08-25 신규 — Scan & Sort 작업자 중복 선택 방지(다른 기기에서 쓰는 중인지 조회)
   if (op === 'getActiveScanWorkers') {
     return json_(getActiveScanWorkers({ batchId: (e.parameter||{}).batchId||'' }));
@@ -476,6 +480,9 @@ function doPost(e) {
   if (op === 'undoPackScan')  return json_(undoPackScan(data));
   // ★ 2026-08-25 신규 — Scan & Sort 작업자 선택 하트비트(다른 기기 중복 선택 방지)
   if (op === 'pingScanWorker') return json_(pingScanWorker(data));
+  // ★ 2026-08-31 신규 — 단독 오더 등록/삭제
+  if (op === 'addStandaloneOrder')    return json_(addStandaloneOrder(data));
+  if (op === 'removeStandaloneOrder') return json_(removeStandaloneOrder(data));
   // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
   if (op === 'logIssue')       return json_(logIssue(data));
   if (op === 'undoIssue')      return json_(undoIssue(data));
