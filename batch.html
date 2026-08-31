@@ -1070,6 +1070,7 @@ select option:disabled{color:var(--text-dim2);}
           <span class="pv-scan-icon">🔍</span>
           <input id="ssScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('ssScanInput', submitSsScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
         <div class="pv-msg" id="ssMsg"></div>
         <div class="pv-progress">
           <span>진행률</span>
@@ -1186,6 +1187,7 @@ select option:disabled{color:var(--text-dim2);}
           <span class="pv-scan-icon">🟣▤</span>
           <input id="pvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('pvScanInput', submitPvScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
         <div class="pv-msg" id="pvMsg"></div>
         <div class="pv-progress">
           <span>진행률</span>
@@ -1235,6 +1237,7 @@ select option:disabled{color:var(--text-dim2);}
           <span class="pv-scan-icon">🟣▤</span>
           <input id="psvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('psvScanInput', submitPsvScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
         <div class="pv-msg" id="psvMsg"></div>
         <div class="pv-progress">
           <span>진행률</span>
@@ -1308,6 +1311,24 @@ select option:disabled{color:var(--text-dim2);}
     <div class="modal-actions">
       <button class="btn btn-ghost" data-modal-close>취소</button>
       <button class="btn btn-primary" id="ssIssueSubmitBtn" onclick="submitSsIssue()">이슈 등록</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-08-31 신규 — 04/Pack Verify/단독 Pack Verify 공용 바코드 수동 입력 모달.
+     스캐너가 못 읽는 바코드를 사람이 직접 숫자로 입력해서, 실제 스캔과 완전히
+     동일한 경로로 처리함(어느 패널에서 열렸는지에 따라 그 패널의 제출 함수로 연결). -->
+<div class="modal-bg" id="genericManualBarcodeModal">
+  <div class="modal">
+    <h3>바코드 수동 입력</h3>
+    <p class="sub">스캐너가 인식 못 하는 바코드일 때, 숫자를 직접 입력해서 처리합니다. 실제 스캔한 것과 동일하게 처리됩니다.</p>
+    <div class="form-field">
+      <label>바코드 번호</label>
+      <input type="text" id="genericManualBarcodeInput" placeholder="예: 8809562559924" inputmode="text" autocapitalize="characters" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-modal-close>취소</button>
+      <button class="btn btn-primary" id="genericManualBarcodeSubmit">처리</button>
     </div>
   </div>
 </div>
@@ -6580,7 +6601,12 @@ async function pollActiveScanWorkers(){
     populateWorkerSelect();
   }catch(e){ /* 조용히 무시 */ }
 }
-setInterval(pingScanWorkerHeartbeat, 20000);
+// ★ 2026-08-31 수정(성능 개선) — 20초→30초. 위 서버 쪽 tryLock 개선과 함께,
+//   전체 요청 빈도 자체도 살짝 줄여서 부하를 더 낮춤. "다른 기기 중복 사용
+//   경고"는 이름 바꿀 때/배치 열 때 등 주요 시점마다 즉시 별도로도 호출되므로
+//   (아래 다른 pingScanWorkerHeartbeat() 호출부 참고), 이 주기적 하트비트가
+//   10초 늦어져도 실질적인 감지 지연은 미미함.
+setInterval(pingScanWorkerHeartbeat, 30000);
 setInterval(pollActiveScanWorkers, 20000);
 
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
@@ -6671,6 +6697,32 @@ function submitManualScan(){
 document.getElementById('manualScanSubmit').onclick = submitManualScan;
 document.getElementById('manualScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter') submitManualScan();
+});
+
+// ★ 2026-08-31 신규 — 04/Pack Verify/단독 Pack Verify 공용 바코드 수동 입력.
+// 어느 패널에서 열렸는지(targetInputId, targetSubmitFn)를 기억해뒀다가,
+// 입력값을 그 패널의 스캔칸에 넣고 그 패널의 제출 함수를 그대로 호출함 —
+// 실제 스캔과 완전히 동일한 검증·기록 경로를 그대로 탐.
+let _manualBarcodeTarget = null;
+function openManualBarcodeModal(targetInputId, targetSubmitFn){
+  _manualBarcodeTarget = { inputId: targetInputId, submitFn: targetSubmitFn };
+  document.getElementById('genericManualBarcodeInput').value = '';
+  document.getElementById('genericManualBarcodeModal').classList.add('open');
+  setTimeout(() => document.getElementById('genericManualBarcodeInput').focus(), 50);
+}
+function submitGenericManualBarcode(){
+  const code = document.getElementById('genericManualBarcodeInput').value.trim();
+  if(!code){ toast('바코드 번호를 입력하세요', 'error'); return; }
+  if(!_manualBarcodeTarget){ closeAllModals(); return; }
+  const target = _manualBarcodeTarget;
+  closeAllModals();
+  const input = document.getElementById(target.inputId);
+  if(input) input.value = code;
+  target.submitFn();
+}
+document.getElementById('genericManualBarcodeSubmit').onclick = submitGenericManualBarcode;
+document.getElementById('genericManualBarcodeInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitGenericManualBarcode(); }
 });
 document.getElementById('workerModalSave').onclick = () => {
   const name = document.getElementById('workerModalName').value.trim();
