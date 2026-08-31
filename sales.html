@@ -1129,8 +1129,14 @@ function renderSheet(){
   //   (TK→UPS→PU→FedEx→Other), 3순위 출고일. 두 화면이 서로 다른 정렬을 쓰면
   //   같은 시스템인데 순서가 달라 보여 혼란스러우므로, index.html의
   //   truckingOrder/_created 로직을 그대로 옮김.
+  // ★ 2026-08-31 긴급 버그 수정 — 실제로 구글시트에서 확인해보니, 총량피킹으로
+  //   시작된 일부 오더는 Created At이 비어있었음(원인 미상). 그 결과 방금
+  //   시작된 오더가 1페이지가 아니라 13페이지에 묻히는 사고가 실제로 있었음.
+  //   Created At이 비어있으면 이미 정상적으로 채워져 있는 걸 확인한 pickStart
+  //   (=StartAtISO의 날짜)로 대신 정렬 기준을 삼아서, "방금 등록됨"은 놓쳐도
+  //   "방금 피킹 시작됨"은 절대 놓치지 않게 함.
   const truckingOrder = {'TK':1,'UPS':2,'PU':3,'FedEx':4,'Other':5};
-  const _created = o => { const c = String(o.createdAt||'').trim(); return c || ''; };
+  const _created = o => { const c = String(o.createdAt||'').trim(); return c || String(o.pickStart||'').trim(); };
   filtered.sort((a, b) => {
     const cA = _created(a), cB = _created(b);
     if (cA !== cB) return cB.localeCompare(cA);
