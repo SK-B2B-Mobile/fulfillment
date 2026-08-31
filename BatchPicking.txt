@@ -660,8 +660,17 @@ function scanWorkerHeartbeatSheet_() { return ensureBatchSheet_('ScanWorkerHeart
 /* pingScanWorker — 기기가 주기적으로(20초마다) + 선택이 바뀔 때마다 호출.
  * worker가 빈 문자열이면 "이 기기는 지금 아무도 선택 안 함"으로 지움. */
 function pingScanWorker(data) {
+  // ★ 2026-08-31 긴급 성능 개선 — 이 하트비트는 20초마다, 배치가 열려있는 모든
+  //   기기에서 전역으로 계속 돌아감. 예전엔 8초까지 무조건 락을 기다렸는데,
+  //   그동안 스캔·2차검증확정 같은 진짜 중요한 작업이 이 하트비트 뒤에 밀려서
+  //   "처리 중..."이 오래 지속되는 사고로 이어졌음(실제 현장에서 확인됨).
+  //   하트비트는 "다른 기기가 같은 이름 쓰는지" 안내용일 뿐이라 한 번 놓쳐도
+  //   20초 뒤 다음 주기에 다시 시도되면 그만 — 그래서 락을 짧게(1초)만
+  //   시도하고, 못 잡으면 조용히 포기함(무조건 기다리지 않음). 이러면 이
+  //   하트비트가 절대로 중요한 작업의 락 대기시간을 길게 늘리지 않음.
   const lock = LockService.getDocumentLock();
-  lock.waitLock(8000);
+  const gotLock = lock.tryLock(1000);
+  if (!gotLock) return { ok: true, skipped: true }; // 락을 못 잡으면 이번 주기는 조용히 건너뜀
   try {
     if (!data.batchId || !data.deviceId) return { ok: false, error: 'batchId, deviceId required' };
     const sh = scanWorkerHeartbeatSheet_();
