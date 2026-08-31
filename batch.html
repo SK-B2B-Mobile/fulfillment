@@ -89,6 +89,25 @@ nav button.active .step{color:var(--purple); background:var(--purple-bg);}
 /* ★ 2026-08-24 신규 — Pack Verify 탭은 비활성 상태여도 항상 보라 톤을 유지해서,
    목록에서부터 "이건 피킹 스캔이랑 다른 탭"이라는 게 바로 눈에 들어오게 함. */
 nav button.tab-pack{color:var(--purple);}
+/* ★ 2026-08-31 신규 — 단독 오더 전용 탭(01-S, 04). Pack Verify와 같은 보라 계열이지만
+   조금 더 옅게 해서 "관련은 있지만 다른 흐름"이라는 걸 시각적으로 구분함. */
+nav button.tab-standalone{color:#B39DDB;}
+nav button.tab-standalone .step{background:rgba(139,92,246,0.12); color:var(--purple);}
+/* ★ 2026-08-31 신규 — Pack Verify 선택 화면(총량/단독) */
+.pack-choose-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:760px; margin-top:10px;}
+.pack-choose-card{background:var(--surface); border:1.5px solid var(--border2); border-radius:14px; padding:26px 22px; cursor:pointer; transition:transform 0.15s, box-shadow 0.15s;}
+.pack-choose-card:hover{transform:translateY(-2px); box-shadow:var(--shadow-lg);}
+.pack-choose-card.batch{border-color:rgba(34,211,238,0.35);}
+.pack-choose-card.batch:hover{border-color:var(--cyan);}
+.pack-choose-card.standalone{border-color:rgba(139,92,246,0.35);}
+.pack-choose-card.standalone:hover{border-color:var(--purple);}
+.pack-choose-icon{font-size:28px; margin-bottom:10px;}
+.pack-choose-title{font-size:16px; font-weight:800; margin-bottom:6px;}
+.pack-choose-card.batch .pack-choose-title{color:var(--cyan);}
+.pack-choose-card.standalone .pack-choose-title{color:var(--purple);}
+.pack-choose-desc{font-size:12px; color:var(--text-dim); line-height:1.6;}
+.pack-backlink{font-size:12px; color:var(--text-dim); cursor:pointer; margin-bottom:12px; display:inline-block;}
+.pack-backlink:hover{color:var(--text);}
 nav button.tab-pack .step{color:var(--purple); background:var(--purple-bg);}
 nav button.tab-pack.active{border-bottom-color:var(--purple);}
 
@@ -775,10 +794,12 @@ select option:disabled{color:var(--text-dim2);}
   <!-- ═══════ NAV ═══════ -->
   <nav id="mainNav">
     <button class="active" data-view="v-batch"><span class="step">01</span> Batch</button>
+    <button class="tab-standalone" data-view="v-standalone-upload"><span class="step">01-S</span> 단독 등록</button>
     <button data-view="v-slots" disabled><span class="step">02</span> Slot Layout</button>
     <button data-view="v-scan" disabled><span class="step">03</span> Scan & Sort</button>
-    <button data-view="v-log"><span class="step">04</span> Scan Log</button>
-    <button data-view="v-pack" class="tab-pack"><span class="step">P</span> Pack Verify</button>
+    <button class="tab-standalone" data-view="v-standalone-scan"><span class="step">04</span> 단독 1차 검수</button>
+    <button data-view="v-log"><span class="step">05</span> Scan Log</button>
+    <button data-view="v-pack-choose" class="tab-pack"><span class="step">P</span> Pack Verify</button>
     <button data-view="v-workers"><span class="step">M</span> Workers</button>
   </nav>
 
@@ -836,6 +857,24 @@ select option:disabled{color:var(--text-dim2);}
 
         <button class="btn btn-primary" id="startBatchBtn" disabled>배치 시작 · Ship Date 순 슬롯 배정 →</button>
       </div>
+    </div>
+
+    <!-- ─── VIEW 01-S: 단독 오더 등록 (★ 2026-08-31 신규) ─── -->
+    <div class="view" id="v-standalone-upload">
+      <div class="eyebrow" style="color:#B39DDB;">Step 01-S · Standalone order setup</div>
+      <h2 class="h-page" style="color:#B39DDB;">단독 오더 등록</h2>
+      <p class="sub">sk-worker 앱으로 개별 처리하던 단독 오더를, 여기서 <b>고객사 피킹 리스트 PDF</b>로 등록하면 총량피킹과 완전히 같은 방식(스캔 기반 1차 검수 + Pack Verify)으로 관리할 수 있습니다. <b style="color:#B39DDB">여기서 등록한 오더는 총량 배치와 절대 섞이지 않고, &quot;04 단독 1차 검수&quot;와 &quot;단독 Pack Verify&quot;에서만 보입니다.</b></p>
+
+      <div class="drop-row">
+        <label class="drop" id="dropStandalone" style="border-color:rgba(139,92,246,0.35);">
+          <div class="drop-icon">DROP · 단독 오더 피킹 리스트 (여러 개 동시 가능)</div>
+          <div class="drop-title">단독 오더 PDF</div>
+          <div class="drop-hint">고객사별 피킹 리스트와 같은 형식 · 여러 장 동시 선택 가능</div>
+          <input type="file" accept="application/pdf" id="standaloneFile" multiple>
+        </label>
+      </div>
+
+      <div id="standaloneOrdersPanel" style="margin-top:20px;"></div>
     </div>
 
     <!-- ─── VIEW 2: Slot Layout ─── -->
@@ -1008,6 +1047,45 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
 
+    <!-- ─── VIEW 04: 단독 1차 검수 (★ 2026-08-31 신규) ─── -->
+    <div class="view" id="v-standalone-scan">
+      <div class="eyebrow" style="color:#B39DDB;">Step 04 · Standalone Inspection (1st)</div>
+      <h2 class="h-page" style="color:#B39DDB;">단독 스캔 · 1차 검수</h2>
+      <p class="sub">01-S에서 등록한 단독 오더를 골라 <b>바코드를 실제로 스캔</b>하며 1차 검수합니다. 총량 &quot;Scan &amp; Sort&quot;와 별개로, 단독 오더만 대상입니다.</p>
+
+      <div class="pv-invoice-picker">
+        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검수할 단독 오더 선택</label>
+        <select id="ssInvoiceSelect" style="margin-top:8px;" onchange="onSsInvoiceChange()"></select>
+        <div class="pv-worker-row">
+          <label>작업자</label>
+          <select id="ssWorkerSelect" onchange="document.getElementById('ssWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
+          <input type="text" id="ssWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+        </div>
+      </div>
+
+      <div class="pv-scan-panel" id="ssScanPanel">
+        <div class="pv-scan-input-wrap">
+          <span class="pv-scan-icon">🔍</span>
+          <input id="ssScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
+        </div>
+        <div class="pv-msg" id="ssMsg"></div>
+        <div class="pv-progress">
+          <span>진행률</span>
+          <span class="n" id="ssProgressText">0 / 0 pcs</span>
+        </div>
+        <div class="pv-progress-bar"><div id="ssProgressBar" style="width:0%"></div></div>
+        <div id="ssLines" style="margin-top:14px;"></div>
+        <div class="pv-actions">
+          <button class="pv-btn-complete" id="ssCompleteBtn" disabled onclick="completeSsInspection()">✓ 1차 검수 완료 · 패킹존 이동 표시</button>
+        </div>
+      </div>
+
+      <div class="pv-empty" id="ssEmptyState">
+        <div class="pv-empty-icon">🧾</div>
+        <div>등록된 단독 오더가 없거나, 전부 1차 검수가 끝났습니다.<br>&quot;01-S 단독 등록&quot; 탭에서 먼저 PDF를 올려주세요.</div>
+      </div>
+    </div>
+
     <!-- ─── VIEW 4: Scan Log ─── -->
     <div class="view" id="v-log">
       <div class="eyebrow">Manager · Audit trail</div>
@@ -1057,10 +1135,30 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
 
+    <!-- ─── VIEW P-choose: Pack Verify 선택 (★ 2026-08-31 신규) ─── -->
+    <div class="view" id="v-pack-choose">
+      <div class="eyebrow" style="color:var(--purple);">Step P · Pack Verify</div>
+      <h2 class="h-page">최종 2차 검증 — 어느 쪽인가요?</h2>
+      <p class="sub">패킹존으로 이동한 오더를 스캔으로 최종 확인합니다. <b>총량피킹 오더인지, 단독 오더인지</b> 먼저 선택해주세요 — 두 목록은 절대 섞이지 않습니다.</p>
+      <div class="pack-choose-grid">
+        <div class="pack-choose-card batch" onclick="gotoView('v-pack')">
+          <div class="pack-choose-icon">📦</div>
+          <div class="pack-choose-title">총량피킹 Pack Verify</div>
+          <div class="pack-choose-desc">TV 현황판에서 파랑(패킹존 이동완료)으로 표시된 총량피킹 오더만 대상.</div>
+        </div>
+        <div class="pack-choose-card standalone" onclick="gotoView('v-pack-standalone')">
+          <div class="pack-choose-icon">🧾</div>
+          <div class="pack-choose-title">단독 Pack Verify</div>
+          <div class="pack-choose-desc">04번에서 1차 검수 끝내고 패킹존 이동 표시된 단독 오더만 대상.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- ─── VIEW P: Pack Verify (최종 2차 검증) ─── -->
     <div class="view" id="v-pack">
+      <div class="pack-backlink" onclick="gotoView('v-pack-choose')">← Pack Verify 선택으로</div>
       <div class="eyebrow" style="color:var(--purple);">Packing Zone · Final Check (2nd)</div>
-      <h2 class="h-page">패킹 최종검증</h2>
+      <h2 class="h-page">패킹 최종검증 (총량)</h2>
       <p class="sub">패킹존으로 물리적으로 이동한(파랑) 고객사만 여기서 다시 스캔으로 확인합니다.</p>
 
       <div class="pv-banner">
@@ -1113,6 +1211,47 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
 
+    <!-- ─── VIEW P-standalone: Pack Verify (단독, ★ 2026-08-31 신규) ─── -->
+    <div class="view" id="v-pack-standalone">
+      <div class="pack-backlink" onclick="gotoView('v-pack-choose')">← Pack Verify 선택으로</div>
+      <div class="eyebrow" style="color:#B39DDB;">Standalone · Final Check (2nd)</div>
+      <h2 class="h-page" style="color:#B39DDB;">패킹 최종검증 (단독)</h2>
+      <p class="sub">04번에서 1차 검수 끝내고 <b>패킹존 이동으로 표시된 단독 오더만</b> 여기 나타납니다. 스캔 방식은 총량과 동일 — 목록은 절대 안 섞입니다.</p>
+
+      <div class="pv-invoice-picker">
+        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검증할 단독 오더 선택 (패킹존 이동 표시된 것만)</label>
+        <select id="psvInvoiceSelect" style="margin-top:8px;" onchange="onPsvInvoiceChange()"></select>
+        <div class="pv-worker-row">
+          <label>작업자</label>
+          <select id="psvWorkerSelect" onchange="document.getElementById('psvWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
+          <input type="text" id="psvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+        </div>
+      </div>
+
+      <div class="pv-scan-panel" id="psvScanPanel">
+        <div class="pv-scan-input-wrap">
+          <span class="pv-scan-icon">🟣▤</span>
+          <input id="psvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
+        </div>
+        <div class="pv-msg" id="psvMsg"></div>
+        <div class="pv-progress">
+          <span>진행률</span>
+          <span class="n" id="psvProgressText">0 / 0 pcs</span>
+        </div>
+        <div class="pv-progress-bar"><div id="psvProgressBar" style="width:0%"></div></div>
+        <div id="psvLines" style="margin-top:14px;"></div>
+        <div class="pv-actions">
+          <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ 관리자 강제확정</button>
+          <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 최종 2차 검증완료 확정</button>
+        </div>
+      </div>
+
+      <div class="pv-empty" id="psvEmptyState">
+        <div class="pv-empty-icon">🧾</div>
+        <div>패킹존 이동완료로 표시된 단독 오더가 없습니다.<br>&quot;04 단독 1차 검수&quot;에서 먼저 1차 검수를 끝내고 이동 표시해주세요.</div>
+      </div>
+    </div>
+
     <!-- ─── VIEW M: Workers CRUD ─── -->
     <div class="view" id="v-workers">
       <div class="eyebrow">Manager · Team</div>
@@ -1145,6 +1284,32 @@ select option:disabled{color:var(--text-dim2);}
 <div class="pv-flash" id="pvFlash"></div>
 
 <!-- Modals -->
+<!-- ★ 2026-08-31 신규 — 단독 1차 검수(04)에서 문제 상품 이슈 등록용 모달.
+     총량피킹 Scan & Sort의 이슈 등록과 같은 사유 목록(ISSUE_REASONS)을 쓰되,
+     단독은 고객사 1곳뿐이라 "여러 고객사에 자동분배"할 필요가 없어 훨씬 단순함. -->
+<div class="modal-bg" id="ssIssueModal">
+  <div class="modal">
+    <h3>이슈 등록</h3>
+    <div id="ssIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
+    <div class="form-field">
+      <label>사유</label>
+      <select id="ssIssueReason"></select>
+    </div>
+    <div class="form-field">
+      <label>수량</label>
+      <input type="number" id="ssIssueQty" min="1" value="1">
+    </div>
+    <div class="form-field">
+      <label>메모 (선택)</label>
+      <input type="text" id="ssIssueNote" placeholder="추가 설명이 필요하면 입력">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-modal-close>취소</button>
+      <button class="btn btn-primary" id="ssIssueSubmitBtn" onclick="submitSsIssue()">이슈 등록</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="manualScanModal">
   <div class="modal">
     <h3>바코드 수동 입력</h3>
@@ -3362,7 +3527,13 @@ document.querySelectorAll('nav button[data-view]').forEach(b => {
   };
 });
 function gotoView(vid){
-  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view===vid));
+  document.querySelectorAll('nav button').forEach(b => {
+    // ★ 2026-08-31 신규 — v-pack/v-pack-standalone은 자체 nav 버튼이 없고
+    //   "P Pack Verify"를 통해서만 들어오므로, 그 하위 화면에 있을 때도
+    //   "P" 탭이 계속 활성으로 보이게 그룹으로 묶어서 판단.
+    const isPackGroup = (vid==='v-pack' || vid==='v-pack-standalone') && b.dataset.view==='v-pack-choose';
+    b.classList.toggle('active', b.dataset.view===vid || isPackGroup);
+  });
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id===vid));
   // ★ 2026-08-11 신규 — "01 Batch" 탭에 들어갈 때마다 최신 state 기준으로 안내 카드/업로드 폼 중
   //   어느 걸 보여줄지 다시 판단 (여러 경로로 batchId가 바뀔 수 있어 탭 진입 시점에 한 번 더 확인)
@@ -3376,6 +3547,11 @@ function gotoView(vid){
   // ★ 2026-08-24 신규 — Pack Verify 탭(최종 2차 검증). 피킹용 workerSelect/scanInput과는
   //   완전히 분리된 pvWorkerSelect/pvInvoiceSelect를 씀 — 절대 서로 안 섞임.
   if(vid==='v-pack'){ populatePvInvoiceSelect(); populatePvWorkerSelect(); }
+  // ★ 2026-08-31 신규 — 단독 오더 관련 탭들. 총량 쪽 state/워커선택과 완전히
+  //   분리된 별도 함수·엘리먼트를 씀 — 절대 서로 안 섞임.
+  if(vid==='v-standalone-upload') renderStandaloneOrdersPanel();
+  if(vid==='v-standalone-scan'){ populateSsWorkerSelect(); populateSsInvoiceSelect(); }
+  if(vid==='v-pack-standalone'){ populatePsvWorkerSelect(); populatePsvInvoiceSelect(); }
   if(vid==='v-workers') loadBatchWorkersFromServer(); // ★ 2026-07-16: 다른 기기 변경사항까지 최신으로
   // ★ 탭을 옮길 때마다 최신 스캔 현황을 즉시 한 번 더 당겨옴 (5초 폴링 사이 텀 줄이기)
   if(vid==='v-slots' || vid==='v-scan' || vid==='v-log') pollScanState();
@@ -5308,6 +5484,510 @@ let _pvState = null;
 let _pvForceVerified = false; // ★ 2026-08-24 신규 — 지금 선택된 오더가 관리자 강제확정으로 완료된 것인지
 let pvCurrentWorker = null;
 let _pvAudioCtx = null;
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-08-31 신규 — 단독 오더 시스템 (등록 → 1차 검수 → 2차 검증)
+// 총량피킹과 완전히 같은 데이터구조(BatchItems/BatchCustomers)를
+// batchId='STANDALONE_ORDERS' 고정값으로 재사용. Batches 시트에는 이
+// 값으로 행을 만들지 않으므로, "다른 배치" 목록 등 총량 전용 기능에는
+// 이 존재 자체가 절대 안 보임(완전 분리).
+// ═══════════════════════════════════════════════════════════
+const STANDALONE_BATCH_ID = 'STANDALONE_ORDERS';
+let _standaloneOrders = []; // getStandaloneOrders() 캐시(01-S/04/단독PackVerify 셋이 공유)
+
+async function fetchStandaloneOrders(){
+  const res = await gasQueryWithRetry('getStandaloneOrders', {});
+  if(res.ok) _standaloneOrders = res.orders || [];
+  return _standaloneOrders;
+}
+
+// ── 01-S: 단독 오더 등록 ──────────────────────────────────
+setupDropZone('dropStandalone', 'standaloneFile', true, async files => {
+  if(!files.length) return;
+  if(!serverAvailable()){
+    toast('run_app.py 로 실행해야 파일 업로드가 됩니다', 'error');
+    return;
+  }
+  if(__parsingLock){
+    toast('다른 파일이 서버에서 파싱 중입니다 · 끝난 뒤 다시 시도하세요', 'error');
+    return;
+  }
+  __parsingLock = true;
+  const zone = document.getElementById('dropStandalone');
+  const titleEl = zone.querySelector('.drop-title');
+  const hintEl = zone.querySelector('.drop-hint');
+  zone.className = 'drop parsing';
+  let successCount = 0;
+  const failures = [];
+  for(let i=0; i<files.length; i++){
+    titleEl.textContent = '서버 파싱 중... (' + (i+1) + '/' + files.length + ')';
+    hintEl.textContent = files[i].name;
+    try{
+      const {items, meta} = await parsePDFViaServer(files[i], 'customer');
+      if(items.length === 0 || !meta.invoice_no){ failures.push(files[i].name + ' (인식 실패)'); continue; }
+      const res = await gasCall('addStandaloneOrder', {
+        invoice: meta.invoice_no, customer: meta.customer||'', shipDate: meta.ship_date||'', shipVia: meta.ship_via||'',
+        items: items.map(it => ({ sku:it.sku||'', name:it.name||'', barcode:it.barcode||'', req_qty:Number(it.req_qty)||0 }))
+      });
+      if(res.ok) successCount++;
+      else failures.push(files[i].name + ' (' + (res.error||'저장 실패') + ')');
+    }catch(err){
+      console.error(err);
+      failures.push(files[i].name);
+    }
+  }
+  __parsingLock = false;
+  zone.className = 'drop filled';
+  titleEl.textContent = '단독 오더 PDF';
+  hintEl.textContent = '고객사별 피킹 리스트와 같은 형식 · 여러 장 동시 선택 가능';
+  if(failures.length){
+    toast(successCount + '건 성공, ' + failures.length + '건 실패 (콘솔 확인)', 'error');
+    console.warn('단독 오더 등록 실패:', failures);
+  } else {
+    toast(successCount + '건 단독 오더 등록 완료', 'success');
+  }
+  await renderStandaloneOrdersPanel();
+});
+
+async function renderStandaloneOrdersPanel(){
+  const panel = document.getElementById('standaloneOrdersPanel');
+  if(!panel) return;
+  panel.innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  await fetchStandaloneOrders();
+  if(!_standaloneOrders.length){
+    panel.innerHTML = '<div class="empty-log">아직 등록된 단독 오더가 없습니다</div>';
+    return;
+  }
+  const sorted = [..._standaloneOrders].sort((a,b) => String(a.invoice||'').localeCompare(String(b.invoice||'')));
+  panel.innerHTML = '<div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; font-family:var(--mono);">등록된 단독 오더 ' + sorted.length + '건</div>' +
+    sorted.map(o => {
+      const statusTag = o.packVerified
+        ? '<span style="font-family:var(--mono); font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.4);">🟣 2차 검증완료</span>'
+        : o.takenOut
+        ? '<span style="font-family:var(--mono); font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.4);">🔵 2차 검증 대기</span>'
+        : '<span style="font-family:var(--mono); font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--amber-bg); color:var(--amber); border:1px solid rgba(245,158,11,0.4);">⏳ 1차 검수 대기</span>';
+      return `<div style="background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:12px 16px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-family:var(--mono); font-weight:700;">${o.invoice}</div>
+          <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">${o.customer||''} · ${o.shipVia||'-'} · SKU ${o.totalSku} · Qty ${o.totalQty}</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          ${statusTag}
+          <button class="btn btn-ghost btn-sm" onclick="removeStandaloneOrderClick('${o.invoice}')" title="등록 취소">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+}
+
+async function removeStandaloneOrderClick(invoice){
+  if(!confirm(invoice + ' 단독 오더 등록을 취소하시겠습니까?\n\n등록된 상품 목록·스캔 진행상황이 모두 삭제됩니다.')) return;
+  const res = await gasCall('removeStandaloneOrder', { invoice });
+  if(res.ok){ toast('등록 취소됨', 'success'); await renderStandaloneOrdersPanel(); }
+  else alert('취소 실패: ' + (res.error||'알 수 없는 오류'));
+}
+
+// ── 04: 단독 1차 검수 (스캔) ──────────────────────────────────
+let ssCurrentWorker = null;
+let _ssInvoice = null;
+let _ssState = null;
+
+function populateSsWorkerSelect(){
+  const sel = document.getElementById('ssWorkerSelect');
+  if(!sel) return;
+  if(document.activeElement === sel) return;
+  const all = [...state.workers].sort((a,b) => (b.status==='active')-(a.status==='active'));
+  const optsHtml = '<option value="">— 선택 안 함 —</option>' + all.map(w =>
+    `<option value="${w.name}">${w.name}${w.status!=='active' ? ' (Off)' : ''}</option>`
+  ).join('') + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+  const savedWorker = localStorage.getItem('sk_standalone_scan_worker'); // ★ 다른 작업자선택 키들과 완전히 분리
+  const prev = (ssCurrentWorker === null || ssCurrentWorker === undefined) ? savedWorker : ssCurrentWorker;
+  sel.innerHTML = optsHtml;
+  if(prev) sel.value = prev;
+  document.getElementById('ssWorkerManual').style.display = (sel.value === '__manual__') ? 'block' : 'none';
+}
+function currentSsWorker(){
+  const sel = document.getElementById('ssWorkerSelect');
+  if(!sel) return '';
+  if(sel.value === '__manual__') return document.getElementById('ssWorkerManual').value.trim();
+  return (sel.value || '').trim();
+}
+document.getElementById('ssWorkerSelect').addEventListener('change', function(){
+  ssCurrentWorker = this.value;
+  localStorage.setItem('sk_standalone_scan_worker', this.value);
+  document.getElementById('ssWorkerManual').style.display = (this.value === '__manual__') ? 'block' : 'none';
+});
+
+async function populateSsInvoiceSelect(){
+  const sel = document.getElementById('ssInvoiceSelect');
+  const panel = document.getElementById('ssScanPanel');
+  const empty = document.getElementById('ssEmptyState');
+  const picker = document.querySelector('#v-standalone-scan .pv-invoice-picker');
+  if(!sel) return;
+  await fetchStandaloneOrders();
+  // 1차 검수 대상 = 아직 패킹존 이동(파랑) 표시 안 된 것들
+  const candidates = _standaloneOrders.filter(o => !o.takenOut);
+  if(candidates.length === 0){
+    if(picker) picker.style.display = 'none';
+    if(panel) panel.classList.remove('active');
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(picker) picker.style.display = 'block';
+  if(empty) empty.style.display = 'none';
+  const prevSelected = sel.value;
+  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(o =>
+    `<option value="${o.invoice}">${o.invoice} · ${o.customer||''} (SKU ${o.totalSku})</option>`
+  ).join('');
+  if(prevSelected && candidates.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
+  else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
+}
+
+async function onSsInvoiceChange(){
+  const sel = document.getElementById('ssInvoiceSelect');
+  const invoice = sel.value;
+  const panel = document.getElementById('ssScanPanel');
+  if(!invoice){ panel.classList.remove('active'); _ssInvoice = null; _ssState = null; return; }
+  _ssInvoice = invoice;
+  panel.classList.add('active');
+  document.getElementById('ssMsg').style.display = 'none';
+  const input = document.getElementById('ssScanInput');
+  input.disabled = false;
+  input.placeholder = '바코드를 스캔하세요...';
+  document.getElementById('ssCompleteBtn').disabled = true;
+  document.getElementById('ssLines').innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  await refreshSsState();
+  input.value = '';
+  setTimeout(() => input.focus(), 60);
+}
+
+async function refreshSsState(){
+  if(!_ssInvoice) return;
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice });
+  if(!res.ok){
+    document.getElementById('ssLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
+    return;
+  }
+  _ssState = res;
+  renderSsBody();
+}
+
+function renderSsBody(){
+  const st = _ssState;
+  if(!st) return;
+  const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
+  document.getElementById('ssProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
+  document.getElementById('ssProgressBar').style.width = pct + '%';
+  document.getElementById('ssCompleteBtn').disabled = !st.complete;
+
+  document.getElementById('ssLines').innerHTML = (st.lines || []).map(l => `
+    <div class="pv-line ${l.complete ? 'done' : ''}">
+      <div>
+        <div class="pv-line-name">${l.name || l.sku}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
+        <span>${l.complete ? '✅' : '⏳'}</span>
+        ${!l.complete ? `<button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이 상품에 문제가 있으면 이슈 등록">⚠ 이슈</button>` : ''}
+      </div>
+    </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
+}
+
+// ── 04 단독 1차 검수 — 이슈 등록 ──────────────────────────────
+let _ssIssueTarget = null; // { sku, barcode, name }
+function openSsIssueModal(sku, barcode, name){
+  if(!_ssInvoice){ return; }
+  _ssIssueTarget = { sku, barcode, name };
+  document.getElementById('ssIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
+  const reasonSel = document.getElementById('ssIssueReason');
+  reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
+  document.getElementById('ssIssueQty').value = 1;
+  document.getElementById('ssIssueNote').value = '';
+  document.getElementById('ssIssueModal').classList.add('open');
+}
+async function submitSsIssue(){
+  if(!_ssIssueTarget || !_ssInvoice) return;
+  const worker = currentSsWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  const reason = document.getElementById('ssIssueReason').value;
+  const qty = Number(document.getElementById('ssIssueQty').value) || 0;
+  if(qty <= 0){ alert('수량을 1 이상 입력하세요'); return; }
+  const note = document.getElementById('ssIssueNote').value.trim();
+  const ord = _standaloneOrders.find(o => o.invoice === _ssInvoice);
+  const btn = document.getElementById('ssIssueSubmitBtn');
+  btn.disabled = true; btn.textContent = '등록 중...';
+  const res = await gasCallWithRetry('logIssue', {
+    batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker,
+    barcode: _ssIssueTarget.barcode, sku: _ssIssueTarget.sku, name: _ssIssueTarget.name,
+    customer: ord ? ord.customer : '', reason, qty, note
+  });
+  btn.disabled = false; btn.textContent = '이슈 등록';
+  if(res && res.ok){
+    closeAllModals();
+    showSsMsg(`⚠ 이슈 등록됨 — ${_ssIssueTarget.name || _ssIssueTarget.sku} ${qty}개`, 'ok');
+    await refreshSsState();
+  } else {
+    alert('이슈 등록 실패: ' + ((res && res.error) || '알 수 없는 오류'));
+  }
+}
+
+
+async function submitSsScan(){
+  const input = document.getElementById('ssScanInput');
+  const barcode = input.value.trim();
+  if(!barcode || !_ssInvoice) return;
+  input.value = '';
+  const worker = currentSsWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  const res = await gasCall('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode });
+  if(!res.ok){
+    showSsMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    input.focus();
+    return;
+  }
+  if(res.result === 'pass'){
+    showSsMsg(`✓ ${res.name || res.sku || barcode} ${(res.filled||0).toLocaleString()}개 확인됨`, 'ok');
+  } else if(res.result === 'wrong'){
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
+    showSsMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → [${owners}]`, 'bad');
+  } else if(res.result === 'over'){
+    showSsMsg(res.note === 'excluded' ? '⚠ 이슈 처리되어 필요수량 없음' : '⚠ 이미 확인 완료 (중복 스캔)', 'bad');
+  }
+  await refreshSsState();
+  input.focus();
+}
+document.getElementById('ssScanInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitSsScan(); }
+});
+function showSsMsg(msg, kind){
+  const el = document.getElementById('ssMsg');
+  el.textContent = msg;
+  el.className = 'pv-msg ' + kind;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'pv-msg'; el.style.display = 'none'; }, 4000);
+}
+
+async function completeSsInspection(){
+  if(!_ssInvoice) return;
+  const btn = document.getElementById('ssCompleteBtn');
+  btn.disabled = true; btn.textContent = '처리 중...';
+  const res = await gasCall('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, stage: 'taken', worker: currentSsWorker() });
+  if(res.ok){
+    showSsMsg('✓ 1차 검수 완료 — 패킹존 이동으로 표시됐습니다. 이제 "단독 Pack Verify"에서 2차 검증할 수 있습니다.', 'ok');
+    await populateSsInvoiceSelect();
+    document.getElementById('ssScanPanel').classList.remove('active');
+  } else {
+    btn.disabled = false; btn.textContent = '✓ 1차 검수 완료 · 패킹존 이동 표시';
+    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
+// ── 단독 Pack Verify (2차 검증) ──────────────────────────────
+let psvCurrentWorker = null;
+let _psvInvoice = null;
+let _psvState = null;
+let _psvForceVerified = false;
+
+function populatePsvWorkerSelect(){
+  const sel = document.getElementById('psvWorkerSelect');
+  if(!sel) return;
+  if(document.activeElement === sel) return;
+  const all = [...state.workers].sort((a,b) => (b.status==='active')-(a.status==='active'));
+  const optsHtml = '<option value="">— 선택 안 함 —</option>' + all.map(w =>
+    `<option value="${w.name}">${w.name}${w.status!=='active' ? ' (Off)' : ''}</option>`
+  ).join('') + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+  const savedWorker = localStorage.getItem('sk_standalone_pack_verify_worker'); // ★ 총량 Pack Verify(sk_pack_verify_worker)와 완전히 분리된 키
+  const prev = (psvCurrentWorker === null || psvCurrentWorker === undefined) ? savedWorker : psvCurrentWorker;
+  sel.innerHTML = optsHtml;
+  if(prev) sel.value = prev;
+  document.getElementById('psvWorkerManual').style.display = (sel.value === '__manual__') ? 'block' : 'none';
+}
+function currentPsvWorker(){
+  const sel = document.getElementById('psvWorkerSelect');
+  if(!sel) return '';
+  if(sel.value === '__manual__') return document.getElementById('psvWorkerManual').value.trim();
+  return (sel.value || '').trim();
+}
+document.getElementById('psvWorkerSelect').addEventListener('change', function(){
+  psvCurrentWorker = this.value;
+  localStorage.setItem('sk_standalone_pack_verify_worker', this.value);
+  document.getElementById('psvWorkerManual').style.display = (this.value === '__manual__') ? 'block' : 'none';
+});
+
+async function populatePsvInvoiceSelect(){
+  const sel = document.getElementById('psvInvoiceSelect');
+  const panel = document.getElementById('psvScanPanel');
+  const empty = document.getElementById('psvEmptyState');
+  const picker = document.querySelector('#v-pack-standalone .pv-invoice-picker');
+  if(!sel) return;
+  await fetchStandaloneOrders();
+  const candidates = _standaloneOrders.filter(o => o.takenOut); // 파랑(패킹존 이동)된 것만 2차 검증 대상
+  if(candidates.length === 0){
+    if(picker) picker.style.display = 'none';
+    if(panel) panel.classList.remove('active');
+    if(empty) empty.style.display = 'block';
+    return;
+  }
+  if(picker) picker.style.display = 'block';
+  if(empty) empty.style.display = 'none';
+  const prevSelected = sel.value;
+  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(o =>
+    `<option value="${o.invoice}">${o.packVerified ? '🟣 [검증완료] ' : ''}${o.invoice} · ${o.customer||''}</option>`
+  ).join('');
+  if(prevSelected && candidates.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
+  else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
+}
+
+async function onPsvInvoiceChange(){
+  const sel = document.getElementById('psvInvoiceSelect');
+  const invoice = sel.value;
+  const panel = document.getElementById('psvScanPanel');
+  if(!invoice){ panel.classList.remove('active'); _psvInvoice = null; _psvState = null; return; }
+  _psvInvoice = invoice;
+  _psvForceVerified = false;
+  panel.classList.add('active');
+  document.getElementById('psvMsg').style.display = 'none';
+  const input = document.getElementById('psvScanInput');
+  input.disabled = false;
+  input.placeholder = '바코드를 스캔하세요...';
+  document.getElementById('psvCompleteBtn').disabled = true;
+  document.getElementById('psvCompleteBtn').textContent = '🟣 최종 2차 검증완료 확정';
+  document.getElementById('psvLines').innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  await refreshPsvState();
+  const ord = _standaloneOrders.find(o => o.invoice === invoice);
+  if(ord && ord.packVerified){
+    _psvForceVerified = !(_psvState && _psvState.complete);
+    input.disabled = true;
+    input.placeholder = _psvForceVerified ? '이미 관리자 강제확정으로 완료된 오더입니다' : '이미 스캔으로 검증완료된 오더입니다';
+    const completeBtn = document.getElementById('psvCompleteBtn');
+    completeBtn.disabled = true;
+    completeBtn.textContent = _psvForceVerified ? '✅ 이미 검증완료됨 (관리자 확정)' : '✅ 이미 검증완료됨 (스캔 100%)';
+  } else {
+    input.value = '';
+    setTimeout(() => input.focus(), 60);
+  }
+}
+
+async function refreshPsvState(){
+  if(!_psvInvoice) return;
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice });
+  if(!res.ok){
+    document.getElementById('psvLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
+    return;
+  }
+  _psvState = res;
+  renderPsvBody();
+}
+
+function renderPsvBody(){
+  const st = _psvState;
+  if(!st) return;
+  const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
+  document.getElementById('psvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
+  document.getElementById('psvProgressBar').style.width = pct + '%';
+  document.getElementById('psvCompleteBtn').disabled = !st.complete;
+
+  const linesHtml = (st.lines || []).map(l => `
+    <div class="pv-line ${l.complete ? 'done' : ''}">
+      <div>
+        <div class="pv-line-name">${l.name || l.sku}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
+        <span>${l.complete ? '✅' : '⏳'}</span>
+      </div>
+    </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
+
+  const activeHistory = (st.history || []).filter(h => h.status !== 'undone');
+  const historyHtml = activeHistory.length ? `
+    <div class="pv-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ 스캔 이력 보기 (${activeHistory.length}건)</div>
+    <div style="display:none;">
+      ${activeHistory.slice(0, 30).map(h => `
+        <div class="pv-history-row ${h.result !== 'pass' ? h.result : ''}">
+          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (중복)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span class="pv-history-undo" onclick="undoPsvScanEntry('${h.packScanId}')">되돌리기</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  document.getElementById('psvLines').innerHTML = linesHtml + historyHtml;
+}
+
+async function submitPsvScan(){
+  const input = document.getElementById('psvScanInput');
+  const barcode = input.value.trim();
+  if(!barcode || !_psvInvoice) return;
+  input.value = '';
+  const worker = currentPsvWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  const res = await gasCall('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode });
+  if(!res.ok){
+    showPsvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    input.focus();
+    return;
+  }
+  if(res.result === 'pass'){
+    showPsvMsg(`✓ ${res.name || res.sku || barcode} ${(res.filled||0).toLocaleString()}개 확인됨`, 'ok');
+  } else if(res.result === 'wrong'){
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
+    showPsvMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → [${owners}]`, 'bad');
+  } else if(res.result === 'over'){
+    showPsvMsg(res.note === 'excluded' ? '⚠ 이슈 처리되어 필요수량 없음' : '⚠ 이미 확인 완료 (중복 스캔)', 'bad');
+  }
+  await refreshPsvState();
+  input.focus();
+}
+document.getElementById('psvScanInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitPsvScan(); }
+});
+function showPsvMsg(msg, kind){
+  const el = document.getElementById('psvMsg');
+  el.textContent = msg;
+  el.className = 'pv-msg ' + kind;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'pv-msg'; el.style.display = 'none'; }, 4000);
+}
+
+async function undoPsvScanEntry(packScanId){
+  if(!confirm('이 스캔을 취소하시겠습니까?')) return;
+  const res = await gasCall('undoPackScan', { packScanId });
+  if(res.ok) await refreshPsvState();
+  else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+}
+
+async function completePsvVerify(){
+  if(!_psvInvoice) return;
+  const btn = document.getElementById('psvCompleteBtn');
+  btn.disabled = true; btn.textContent = '처리 중...';
+  const res = await gasCall('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified' });
+  if(res.ok){
+    showPsvMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
+    await populatePsvInvoiceSelect();
+  } else {
+    btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
+    alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
+    await refreshPsvState();
+  }
+}
+
+async function forcePsvComplete(){
+  if(!_psvInvoice) return;
+  if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
+  const res = await gasCall('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
+  if(res.ok){
+    showPsvMsg('⚠ 관리자 강제확정으로 처리됐습니다 — 실제 스캔은 되지 않았습니다', 'ok');
+    _psvForceVerified = true;
+    await populatePsvInvoiceSelect();
+    const input = document.getElementById('psvScanInput');
+    if(input){ input.disabled = true; input.placeholder = '이미 관리자 강제확정으로 완료된 오더입니다'; }
+    const completeBtn = document.getElementById('psvCompleteBtn');
+    if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ 이미 검증완료됨 (관리자 확정)'; }
+  } else {
+    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
 
 function populatePvInvoiceSelect(){
   const sel = document.getElementById('pvInvoiceSelect');
