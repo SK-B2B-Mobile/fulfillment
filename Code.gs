@@ -3373,8 +3373,17 @@ function getSalesOverview() {
         createdAt: createdRaw ? String(createdRaw) : ''
       });
     }
-    // 최근 생성된 순
-    jobs.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    // ★ 2026-08-31 긴급 버그 수정 — 총량피킹으로 시작된 오더 중 일부가 실제로
+    //   확인해보니 "Created At"이 비어있었음(원인 미상 — syncBatchJobsStart는
+    //   Status/Picker/Start만 쓰고 Created At은 안 건드림. 이 행들이 정확히
+    //   어떤 경로로 처음 만들어졌는지는 아직 못 찾았지만, 데이터를 함부로
+    //   추측해서 채워넣는 대신 "정렬 목적"으로만 안전하게 보완함).
+    //   Created At이 비어있으면, 이미 확실히 채워져 있는 걸 확인한 StartAtISO
+    //   (=pickStart, 날짜만) 로 대신 정렬 기준을 삼음 — "방금 등록됨"을 놓쳐도
+    //   "방금 피킹 시작됨"은 놓치지 않게 함. 서버가 최근 생성순으로 1차 정렬해서
+    //   내려주면 sales.html이 다시 같은 기준으로 확정 정렬함.
+    const sortKey = j => j.createdAt || j.pickStart || '';
+    jobs.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
 
     const out = { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
     try { cache.put(cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
