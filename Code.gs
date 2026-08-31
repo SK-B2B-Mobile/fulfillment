@@ -490,6 +490,8 @@ function doPost(e) {
   if (op === 'saveDimensions') return json_(saveDimensions(data));
   // ★ 2026-08-06 신규 — 단독 오더(총량피킹 배치 없음)의 패킹존 이동 수동 표시
   if (op === 'setManualPackingMoved') return json_(setManualPackingMoved(data));
+  // ★ 2026-08-31 신규 — Order Detail Lookup에서 검수완료 오더의 배송방법 수정
+  if (op === 'updateOrderMethod') return json_(updateOrderMethod(data));
   // ★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더). BatchPicking.gs에 구현됨.
   if (op === 'linkDimensions')   return json_(linkDimensions(data));
   if (op === 'unlinkDimensions') return json_(unlinkDimensions(data));
@@ -601,6 +603,91 @@ function ensureManualPackingCol_(sh) {
     sh.insertColumnsAfter(curLastCol, add.length);
     sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
     __HDR_CACHE = null;
+  }
+}
+
+/* ★ 2026-08-31 신규 — 영업팀이 처음엔 PU로 받았다가 나중에 UPS/TK로(또는 그
+ * 반대로) 바뀌는 경우가 실제로 자주 있음. 예전엔 패킹 작업자가 매니저에게
+ * 요청 → 매니저가 구글시트에서 직접 Trucking 컬럼을 고치는 번거로운 흐름이었음.
+ * 이제 검수 완료된 오더에 한해 Order Detail Lookup 화면에서 패킹 작업자가
+ * 직접 바로 고칠 수 있게 함. "누가/언제 바꿨는지"는 감사 추적용으로 남김
+ * (PackingMovedManualBy와 같은 패턴). */
+function ensureMethodChangeCol_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return;
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const hasAt = headers.some(h => String(h).trim().toLowerCase() === 'methodchangedat');
+  const hasBy = headers.some(h => String(h).trim().toLowerCase() === 'methodchangedby');
+  const hasOrig = headers.some(h => String(h).trim().toLowerCase() === 'originalmethod');
+  const add = [];
+  if (!hasAt) add.push('MethodChangedAt');
+  if (!hasBy) add.push('MethodChangedBy');
+  if (!hasOrig) add.push('OriginalMethod');
+  if (add.length) {
+    const curLastCol = sh.getLastColumn();
+    sh.insertColumnsAfter(curLastCol, add.length);
+    sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
+    __HDR_CACHE = null;
+  }
+}
+
+/* updateOrderMethod — ★ 2026-08-31 신규. Order Detail Lookup(Screen 2)에서만
+ * 호출되는 걸 전제로 함(클라이언트에서 검수 완료된 오더에서만 수정 버튼을
+ * 보여줌). 서버에서도 한 번 더 "검수가 완료된 오더인지"를 확인해서, 혹시
+ * 다른 경로로 요청이 와도 검수 전 오더의 배송방법이 실수로 바뀌지 않게 막음.
+ * 입력: { invoice, method('TK'|'UPS'|'PU'), by } */
+function updateOrderMethod(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const method = String((data && data.method) || '').trim().toUpperCase();
+    const by = String((data && data.by) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    const allowed = ['TK', 'UPS', 'PU'];
+    if (allowed.indexOf(method) === -1) return { ok: false, error: 'method는 TK/UPS/PU 중 하나여야 합니다' };
+
+    const sh = SHEET_();
+    ensureMethodChangeCol_(sh);
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const row = findRowByKey_('invoice', invoice);
+    if (!row) return { ok: false, error: 'invoice not found' };
+
+    const iInsp = hdr[norm('Inspection')];
+    if (iInsp) {
+      const insp = String(sh.getRange(row, iInsp).getValue() || '').trim();
+      if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 배송방법을 변경할 수 없습니다.' };
+    }
+
+    const iTruck = hdr[norm('Trucking')];
+    if (!iTruck) return { ok: false, error: 'Trucking 컬럼을 찾지 못했습니다' };
+    const oldMethod = String(sh.getRange(row, iTruck).getValue() || '').trim();
+    if (oldMethod === method) return { ok: true, method: method, unchanged: true };
+
+    const iAt = hdr[norm('MethodChangedAt')];
+    const iBy = hdr[norm('MethodChangedBy')];
+    const iOrig = hdr[norm('OriginalMethod')];
+    sh.getRange(row, iTruck).setValue(method);
+    if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
+    if (iBy) sh.getRange(row, iBy).setValue(by);
+    // ★ 최초 원래 배송방법은 한 번만 기록(이미 있으면 덮어쓰지 않음) — 여러 번
+    //   바뀌어도 "영업팀이 처음에 뭐라고 했었는지"를 계속 추적할 수 있게 함.
+    if (iOrig) {
+      const existingOrig = String(sh.getRange(row, iOrig).getValue() || '').trim();
+      if (!existingOrig) sh.getRange(row, iOrig).setValue(oldMethod);
+    }
+
+    bumpVersion_();
+    // ★ 2026-08-31 — getSalesInvoiceDetail은 인보이스별로 6초 캐시가 있어서,
+    //   수정 직후 화면을 새로고침해도 옛날 배송방법이 잠깐 보일 수 있음.
+    //   그 캐시 키를 여기서 바로 지워서, 수정하자마자 항상 최신값이 보이게 함.
+    try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
+    return { ok: true, method: method, oldMethod: oldMethod };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
   }
 }
 
