@@ -5525,7 +5525,7 @@ setupDropZone('dropStandalone', 'standaloneFile', true, async files => {
     try{
       const {items, meta} = await parsePDFViaServer(files[i], 'customer');
       if(items.length === 0 || !meta.invoice_no){ failures.push(files[i].name + ' (인식 실패)'); continue; }
-      const res = await gasCall('addStandaloneOrder', {
+      const res = await gasCallWithRetry('addStandaloneOrder', {
         invoice: meta.invoice_no, customer: meta.customer||'', shipDate: meta.ship_date||'', shipVia: meta.ship_via||'',
         items: items.map(it => ({ sku:it.sku||'', name:it.name||'', barcode:it.barcode||'', req_qty:Number(it.req_qty)||0 }))
       });
