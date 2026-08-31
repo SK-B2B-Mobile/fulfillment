@@ -826,7 +826,7 @@ function renderIssueModalBody(){
         <span class="issue-modal-qty">${Number(i.qty).toLocaleString()}pcs</span>
       </div>
       <div class="issue-modal-name">${i.name || i.sku || ''}</div>
-      <div class="issue-modal-meta">바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time||'').slice(5,16)}</div>
+      <div class="issue-modal-meta">바코드 SKU #${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time||'').slice(5,16)}</div>
       ${i.note ? `<div class="issue-modal-note">"${i.note}"</div>` : ''}
       <button class="issue-modal-edit-btn" data-idx="${idx}">✎ 수정</button>
       <div class="issue-edit-form" id="issueEditForm-${idx}" style="display:none">
