@@ -5572,11 +5572,16 @@ setupDropZone('dropStandalone', 'standaloneFile', true, async files => {
   await renderStandaloneOrdersPanel();
 });
 
-async function renderStandaloneOrdersPanel(){
+// ★ 2026-08-31 신규(매니저 지적) — 예전엔 이 탭에 들어올 때마다 화면을
+// "불러오는 중..."으로 비우고 새로 그렸음. "01 Batch" 탭은 이전에 불러온
+// 내용을 화면에 그대로 유지한 채 뒤에서 갱신하는데, 여기만 매번 깜빡이며
+// 다시 로딩하는 게 일관성이 없다는 지적을 받음. 이제 캐시된 목록이 있으면
+// 그걸 먼저 즉시 보여주고, 뒤에서 최신 데이터로 조용히 갱신함 — 진짜 처음
+// 여는 경우에만 "불러오는 중..."이 보임.
+let _standaloneOrdersFetchedOnce = false;
+function renderStandaloneOrdersList_(){
   const panel = document.getElementById('standaloneOrdersPanel');
   if(!panel) return;
-  panel.innerHTML = '<div class="empty-log">불러오는 중...</div>';
-  await fetchStandaloneOrders();
   if(!_standaloneOrders.length){
     panel.innerHTML = '<div class="empty-log">아직 등록된 단독 오더가 없습니다</div>';
     return;
@@ -5600,6 +5605,18 @@ async function renderStandaloneOrdersPanel(){
         </div>
       </div>`;
     }).join('');
+}
+async function renderStandaloneOrdersPanel(){
+  const panel = document.getElementById('standaloneOrdersPanel');
+  if(!panel) return;
+  if(_standaloneOrdersFetchedOnce){
+    renderStandaloneOrdersList_(); // 캐시된 내용 먼저 즉시 표시(깜빡임 없음)
+  } else {
+    panel.innerHTML = '<div class="empty-log">불러오는 중...</div>'; // 진짜 처음일 때만 로딩 표시
+  }
+  await fetchStandaloneOrders();
+  _standaloneOrdersFetchedOnce = true;
+  renderStandaloneOrdersList_(); // 최신 데이터로 조용히 갱신
 }
 
 async function removeStandaloneOrderClick(invoice){
