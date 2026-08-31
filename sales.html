@@ -1124,6 +1124,21 @@ function renderSheet(){
   const q = (document.getElementById('sheet-search-input').value||'').trim().toUpperCase();
   const filtered = SHEET_JOBS.filter(o => !q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q));
 
+  // ★ 2026-08-31 재수정(매니저 확정) — index.html(메인 대시보드)과 완전히 같은
+  //   기준으로 통일: 1순위 등록 최신순(Created At), 2순위 배송방법
+  //   (TK→UPS→PU→FedEx→Other), 3순위 출고일. 두 화면이 서로 다른 정렬을 쓰면
+  //   같은 시스템인데 순서가 달라 보여 혼란스러우므로, index.html의
+  //   truckingOrder/_created 로직을 그대로 옮김.
+  const truckingOrder = {'TK':1,'UPS':2,'PU':3,'FedEx':4,'Other':5};
+  const _created = o => { const c = String(o.createdAt||'').trim(); return c || ''; };
+  filtered.sort((a, b) => {
+    const cA = _created(a), cB = _created(b);
+    if (cA !== cB) return cB.localeCompare(cA);
+    const tA = truckingOrder[a.method] || 999, tB = truckingOrder[b.method] || 999;
+    if (tA !== tB) return tA - tB;
+    return String(a.shipDate||'').localeCompare(String(b.shipDate||''));
+  });
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / SHEET_PAGE_SIZE));
   if (SHEET_PAGE > totalPages) SHEET_PAGE = totalPages;
   const start = (SHEET_PAGE - 1) * SHEET_PAGE_SIZE;
