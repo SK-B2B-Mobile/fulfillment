@@ -817,6 +817,134 @@ function createBatch(data) {
   }
 }
 
+/* ===================== ①-S 단독 오더 등록/조회/삭제 (★ 2026-08-31 신규) =====================
+ * 목적: sk-worker 앱으로 개별 처리하던 "단독 오더"를, 총량피킹과 완전히 같은
+ * 구조(BatchItems/BatchCustomers)로 관리해서 Pack Verify(스캔 기반 오출고
+ * 방지)를 단독 오더에도 똑같이 적용할 수 있게 함.
+ *
+ * ★ 총량과 절대 안 섞이는 핵심 트릭: BatchId를 실제 배치ID(B{날짜}-{시간}{글자})
+ * 대신 고정 문자열 'STANDALONE_ORDERS'로 씀. Batches 시트(배치 목록/이력)에는
+ * 이 값으로 행을 아예 안 만들기 때문에, getOpenBatches/getBatch/다른배치
+ * 목록 등 기존 "배치 목록" 관련 함수들은 이 존재 자체를 전혀 모름 —
+ * 총량 쪽 화면·통계에 절대 끼어들 수 없는 구조.
+ * ================================================================================ */
+const STANDALONE_BATCH_ID = 'STANDALONE_ORDERS';
+
+/* addStandaloneOrder — 단독 오더 PDF 파싱 결과(고객사명/상품목록)를 저장.
+ * 이미 같은 인보이스로 등록된 게 있으면(재업로드) 깨끗이 지우고 새로 씀. */
+function addStandaloneOrder(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    const customer = String((data && data.customer) || '').trim();
+    const shipDate = String((data && data.shipDate) || '').trim();
+    const shipVia = String((data && data.shipVia) || '').trim();
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    if (!items.length) return { ok: false, error: '상품 목록이 비어 있습니다' };
+
+    // 재업로드 대비 — 같은 인보이스의 예전 데이터가 있으면 먼저 지움
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    if (bcLast >= 2) {
+      const rows = bc.getRange(2, 1, bcLast - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === STANDALONE_BATCH_ID && String(rows[i][1]) === invoice) bc.deleteRow(i + 2);
+      }
+    }
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    if (biLast >= 2) {
+      const rows = bi.getRange(2, 1, biLast - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === STANDALONE_BATCH_ID && String(rows[i][1]) === invoice) bi.deleteRow(i + 2);
+      }
+    }
+
+    const totalQty = items.reduce((a, it) => a + (Number(it.req_qty) || 0), 0);
+    const totalSku = items.length;
+
+    // BatchCustomers: SlotNum/SlotSize/Cleared는 해당없음(빈 값) — 단독은 랙 슬롯 개념이 없음
+    bc.getRange(bc.getLastRow() + 1, 1, 1, 10).setValues([[
+      STANDALONE_BATCH_ID, invoice, customer, shipDate, shipVia, totalQty, totalSku, '', '', ''
+    ]]);
+
+    const itemRows = items.map(it => [STANDALONE_BATCH_ID, invoice, it.sku || '', it.name || '', it.barcode || '', Number(it.req_qty) || 0, it.rack || '']);
+    const startRow = bi.getLastRow() + 1;
+    bi.getRange(startRow, 5, itemRows.length, 1).setNumberFormat('@'); // 바코드 텍스트 고정(자동 숫자변환 방지)
+    bi.getRange(startRow, 1, itemRows.length, 7).setValues(itemRows);
+
+    bumpVersion_();
+    return { ok: true, invoice: invoice, totalSku: totalSku, totalQty: totalQty };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* getStandaloneOrders — 지금까지 등록된 단독 오더 전체 목록(진행상태 포함). */
+function getStandaloneOrders() {
+  try {
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    if (bcLast < 2) return { ok: true, orders: [] };
+    const rows = bc.getRange(2, 1, bcLast - 1, 13).getValues();
+    const orders = [];
+    rows.forEach(r => {
+      if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+      orders.push({
+        invoice: String(r[1] || ''),
+        customer: String(r[2] || ''),
+        shipDate: String(r[3] || ''),
+        shipVia: String(r[4] || ''),
+        totalQty: Number(r[5]) || 0,
+        totalSku: Number(r[6]) || 0,
+        movedToPacking: !!r[10],
+        takenOut: !!r[11],
+        packVerified: !!r[12],
+      });
+    });
+    return { ok: true, orders: orders };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* removeStandaloneOrder — 잘못 올린 단독 오더 정리(등록 취소). */
+function removeStandaloneOrder(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    let removed = 0;
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    if (bcLast >= 2) {
+      const rows = bc.getRange(2, 1, bcLast - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === STANDALONE_BATCH_ID && String(rows[i][1]) === invoice) { bc.deleteRow(i + 2); removed++; }
+      }
+    }
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    if (biLast >= 2) {
+      const rows = bi.getRange(2, 1, biLast - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === STANDALONE_BATCH_ID && String(rows[i][1]) === invoice) bi.deleteRow(i + 2);
+      }
+    }
+    if (removed) bumpVersion_();
+    return { ok: true, removed: removed };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ===================== ② getBatch =====================
  * batchId 없이 호출하면 → 오늘자 진행중(active) 배치 자동 탐색
  * (새로고침해도 이어서 작업 가능하게 하는 핵심 op)
@@ -1019,6 +1147,18 @@ function setPackingMoved(data) {
         if (!bc.getRange(row, 11).getValue()) bc.getRange(row, 11).setValue(batchNow_());
         bc.getRange(row, 12).setValue(batchNow_());
         bc.getRange(row, 13).setValue('');
+        // ★ 2026-08-31 신규 — 단독 오더 1차 검수 지원. 총량피킹은 이 시점 이전에
+        //   이미 Scan & Sort(logScan)에서 Jobs.Inspection이 채워지므로 이 동기화가
+        //   필요 없다 — 그런데도 매번 돌리면, TV 현황판에서 배치 막바지에 슬롯
+        //   여러 개가 짧은 시간에 연달아 파랑으로 바뀔 때마다(흔한 상황) 시트를
+        //   여러 번 읽는 이 무거운 함수가 매번 같이 돌아서 불필요한 부하가
+        //   쌓임(구글 앱스스크립트 "동시 요청 한도" 문제를 악화시킬 수 있음).
+        //   그래서 반드시 단독 오더(STANDALONE_BATCH_ID)일 때만 실행되도록 좁힘 —
+        //   총량피킹 호출 경로는 이 줄 자체를 아예 안 타서 예전과 완전히 동일한
+        //   속도를 유지함.
+        if (batchId === STANDALONE_BATCH_ID) {
+          try { syncInspectionFromPicking_(batchId, invoice, data.worker || ''); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+        }
       } else { // 'verified' — ★ 2026-08-24 신규: 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
         if (!bc.getRange(row, 12).getValue()) {
           return { ok: false, error: '먼저 패킹존 이동(파랑) 표시부터 완료해주세요' };
