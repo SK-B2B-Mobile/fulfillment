@@ -345,7 +345,9 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-banner-text div{font-size:12px; color:var(--text-dim); margin-top:2px;}
 .pv-invoice-picker{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:16px;}
 .pv-invoice-picker select{width:100%; padding:12px 14px; background:var(--surface2); border:2px solid var(--purple); border-radius:10px; color:var(--text); font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer;}
-.pv-worker-row{display:flex; align-items:center; gap:10px; margin-top:12px;}
+.pv-worker-row{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:12px;}
+.pv-worker-row select{flex:1 1 160px; min-width:120px;}
+.pv-worker-row input[type="text"]{flex:1 1 160px; min-width:120px;}
 .pv-worker-row label{font-size:11px; color:var(--text-dim); font-weight:700; white-space:nowrap;}
 .pv-worker-row select, .pv-worker-row input{flex:1; padding:9px 12px; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:13px;}
 .pv-scan-panel{display:none;}
@@ -5759,6 +5761,21 @@ async function submitSsScan(){
 document.getElementById('ssScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitSsScan(); }
 });
+// ★ 2026-08-31 신규(버그 수정) — 03 Scan & Sort와 동일한 이유. 일부 스캐너
+// 기기는 스캔 후 자동으로 Enter를 안 보내서, 바코드는 입력창에 들어가지만
+// 제출이 영원히 안 되는 문제가 있었음(현장에서 실제 발생 확인됨). Enter가
+// 없어도 "사람이 타이핑하기엔 너무 빠르게 연속 입력된 뒤 300ms 멈추면"
+// 스캐너가 다 찍은 것으로 보고 자동 제출함.
+let __ssAutoTimer = null;
+document.getElementById('ssScanInput').addEventListener('input', function(){
+  clearTimeout(__ssAutoTimer);
+  const v = this.value.trim();
+  if(v.length < 10) return;
+  const el = this;
+  __ssAutoTimer = setTimeout(() => {
+    if(el.value.trim() === v && v.length >= 10) submitSsScan();
+  }, 300);
+});
 function showSsMsg(msg, kind){
   const el = document.getElementById('ssMsg');
   el.textContent = msg;
@@ -5940,6 +5957,17 @@ async function submitPsvScan(){
 }
 document.getElementById('psvScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitPsvScan(); }
+});
+// ★ 2026-08-31 신규(버그 수정) — ssScanInput과 동일한 이유(자동 Enter 안 보내는 스캐너 대응)
+let __psvAutoTimer = null;
+document.getElementById('psvScanInput').addEventListener('input', function(){
+  clearTimeout(__psvAutoTimer);
+  const v = this.value.trim();
+  if(v.length < 10) return;
+  const el = this;
+  __psvAutoTimer = setTimeout(() => {
+    if(el.value.trim() === v && v.length >= 10) submitPsvScan();
+  }, 300);
 });
 function showPsvMsg(msg, kind){
   const el = document.getElementById('psvMsg');
@@ -6155,6 +6183,20 @@ async function submitPvScan(){
 }
 document.getElementById('pvScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitPvScan(); }
+});
+// ★ 2026-08-31 신규(버그 수정) — 03 Scan & Sort에는 이미 있던 "자동 Enter 안
+// 보내는 스캐너" 대응 로직이 Pack Verify(2026-08-24 신설)에는 빠져 있었음.
+// 실제 현장에서 이 문제로 스캔이 영원히 제출 안 되는 사고가 확인됨 —
+// 3Scan&Sort와 동일한 방식(10자리 이상 + 300ms 정지 시 자동 제출)으로 보완.
+let __pvAutoTimer = null;
+document.getElementById('pvScanInput').addEventListener('input', function(){
+  clearTimeout(__pvAutoTimer);
+  const v = this.value.trim();
+  if(v.length < 10) return;
+  const el = this;
+  __pvAutoTimer = setTimeout(() => {
+    if(el.value.trim() === v && v.length >= 10) submitPvScan();
+  }, 300);
 });
 
 function flashPv(kind){
