@@ -307,6 +307,15 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
    실수로 눌리는 걸 막기 위해 (1) 확인 팝업을 반드시 거치고, (2) 이미 이동
    표시된 상태에서는 작은 취소 링크만 보이게 해서 평소엔 눈에 덜 띄게 함. */
 .manual-moved-btn{background:var(--purple-bg); border:1px solid var(--purple); color:#C4B0FF; font-family:var(--sans); font-size:12px; font-weight:700; padding:7px 14px; border-radius:8px; cursor:pointer; white-space:nowrap;}
+/* ★ 2026-08-31 신규 — Order Detail Lookup에서만 쓰는 배송방법(Method) 수정 UI.
+   검수완료 오더에 한해서만 표시됨(renderDetail에서 status!=='pending'일 때만 렌더). */
+.method-edit-btn{background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:12px; margin-left:6px; padding:2px 4px; border-radius:4px;}
+.method-edit-btn:hover{color:var(--text); background:var(--surface2);}
+.method-edit-row{display:flex; align-items:center; gap:6px; margin-top:6px;}
+.method-edit-row select{background:var(--surface2); border:1px solid var(--border2); color:var(--text); font-family:var(--mono); font-size:12.5px; font-weight:700; padding:5px 8px; border-radius:6px;}
+.method-edit-row button{font-family:var(--sans); font-size:11.5px; font-weight:700; padding:5px 10px; border-radius:6px; cursor:pointer; white-space:nowrap;}
+.method-save-btn{background:var(--purple-bg); border:1px solid var(--purple); color:#C4B0FF;}
+.method-cancel-btn{background:var(--surface2); border:1px solid var(--border2); color:var(--text-dim);}
 .manual-moved-btn:hover{background:var(--purple); color:#fff;}
 .manual-moved-undo{background:none; border:none; color:var(--text-dim); font-family:var(--sans); font-size:10.5px; cursor:pointer; text-decoration:underline; padding:2px 0;}
 .manual-moved-undo:hover{color:var(--red);}
@@ -1870,7 +1879,23 @@ function renderDetail(res){
         <div class="detail-meta">
           <div class="meta-item"><div class="k">Ship Date</div><div class="v">${res.shipDate||'-'}</div></div>
           <div class="meta-item"><div class="k">Picking</div><div class="v">${res.pickStart||'-'}</div></div>
-          <div class="meta-item"><div class="k">Shipping Method</div><div class="v">${res.method||'-'}</div></div>
+          <div class="meta-item">
+            <div class="k">Shipping Method</div>
+            <div class="v">
+              ${res.method||'-'}
+              ${status!=='pending' ? `<button class="method-edit-btn" onclick="toggleMethodEdit()" title="Change shipping method">✎ Edit</button>` : ''}
+            </div>
+            ${status!=='pending' ? `
+            <div class="method-edit-row" id="methodEditRow" style="display:none;">
+              <select id="methodSelect">
+                <option value="TK" ${res.method==='TK'?'selected':''}>TK</option>
+                <option value="UPS" ${res.method==='UPS'?'selected':''}>UPS</option>
+                <option value="PU" ${res.method==='PU'?'selected':''}>PU</option>
+              </select>
+              <button class="method-save-btn" onclick="saveMethodChange('${res.invoice}')">Save</button>
+              <button class="method-cancel-btn" onclick="toggleMethodEdit()">Cancel</button>
+            </div>` : ''}
+          </div>
           <div class="meta-item"><div class="k">Amount</div><div class="v">${fmtMoney(res.amount)}</div></div>
           <div class="meta-item"><div class="k">Inspector</div><div class="v">${res.inspector||'-'}</div></div>
           <div class="meta-item"><div class="k">Inspection Completed</div><div class="v">${res.inspEnd||'-'}</div></div>
@@ -1929,6 +1954,35 @@ async function markManualMoved(invoice, moved){
   // 성공 — 화면을 최신 상태로 다시 불러옴
   const inv = (CURRENT_ORDER && CURRENT_ORDER.invoice) || '';
   if (inv) await openInvoice(inv);
+  loadToday();
+}
+
+// ★ 2026-08-31 신규 — 검수완료 오더의 배송방법(Method) 수정.
+// Order Detail Lookup(Screen 2)의 renderDetail에서만 이 UI가 렌더링되므로,
+// 자연스럽게 이 화면에서만 수정 가능함(다른 화면엔 이 버튼 자체가 없음).
+function toggleMethodEdit(){
+  const row = document.getElementById('methodEditRow');
+  if (row) row.style.display = (row.style.display === 'none' ? 'flex' : 'none');
+}
+async function saveMethodChange(invoice){
+  const sel = document.getElementById('methodSelect');
+  const newMethod = sel ? sel.value : '';
+  if (!newMethod) return;
+  const oldMethod = (CURRENT_ORDER && CURRENT_ORDER.method) || '';
+  if (newMethod === oldMethod){ toggleMethodEdit(); return; }
+
+  const needsDimsNow = (newMethod === 'TK' || newMethod === 'UPS');
+  const warn = needsDimsNow
+    ? `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} requires shipping dimensions — make sure they get entered.`
+    : `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} orders don't need shipping dimensions.`;
+  if (!confirm(warn)) return;
+
+  const res = await gasPost('updateOrderMethod', { invoice: invoice, method: newMethod, by: 'Packing (Sales page)' });
+  if (!res || !res.ok){
+    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
+    return;
+  }
+  await openInvoice(invoice); // 최신 상태로 다시 불러와서 화면 갱신
   loadToday();
 }
 
