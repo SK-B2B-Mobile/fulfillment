@@ -919,6 +919,7 @@ function listJobs_textSafe_() {
   //   바꾸기 위해, 각 인보이스의 디멘션 저장 여부·시각을 같이 내려줌.
   const dimsMap = buildDimsExistsMap_();
 
+  const tz = Session.getScriptTimeZone();
   const jobs = rows.map((r, i) => ({
     _rowIndex: i + 2, // ★ 2026-07-29 신규: 원본 시트 행 번호를 미리 저장해둠(아래 메모 읽기용)
     invoice: iInv ? r[iInv - 1] : '',
@@ -934,7 +935,14 @@ function listJobs_textSafe_() {
     endTime: iEnd ? toHHmm_(r[iEnd - 1]) : '',
     startAtISO: iStartISO ? r[iStartISO - 1] : '',
     endAtISO: iEndISO ? r[iEndISO - 1] : '',
-    createdAt: iCreated ? r[iCreated - 1] : '',
+    // ★ 2026-08-31 버그 수정 — getSalesOverview와 같은 이유로 명시적으로 정규화.
+    //   예전엔 원본 값(Date 객체일 수도, 문자열일 수도 있음)을 그대로 내려보내서
+    //   JSON 직렬화 방식에 우연히 기대는 구조였음. Date 객체면 반드시 같은
+    //   형식('yyyy-MM-dd HH:mm:ss')으로 통일해서, 이후 어디서든 이 값으로
+    //   정렬/비교해도 항상 안전하게 함.
+    createdAt: iCreated
+      ? (r[iCreated - 1] instanceof Date ? Utilities.formatDate(r[iCreated - 1], tz, 'yyyy-MM-dd HH:mm:ss') : String(r[iCreated - 1] || ''))
+      : '',
     archivedAt: iArchAt ? r[iArchAt - 1] : '',
     archived: iArch ? r[iArch - 1] : '',
     month: iMonth ? r[iMonth - 1] : '',
@@ -3328,6 +3336,20 @@ function getSalesOverview() {
       const shipRaw = shipVals ? shipVals[i][0] : '';
       const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
       const createdRaw = createdVals ? createdVals[i][0] : '';
+      // ★ 2026-08-31 긴급 버그 수정(진짜 원인) — 구글시트가 "2026-08-26 16:53:39"
+      //   같은 문자열을 날짜/시간으로 자동 인식해서 내부적으로 Date 타입으로
+      //   바꿔버리는 경우가 있음(전부는 아니고 일부 행만 — 정확히 왜 이런
+      //   불일치가 생기는지는 특정 못 함). 예전엔 이걸 그냥 String()으로만
+      //   감쌌는데, Date 객체를 String()하면 "Wed Aug 26 2026 16:53:39 GMT..."
+      //   처럼 완전히 다른 형태의 문자열이 되어버림. 이 문자열이 순수 ISO
+      //   문자열("2026-08-31")과 사전순으로 비교되면 "Wed"가 "2"보다 알파벳상
+      //   뒤라서, 실제로는 훨씬 예전 날짜인데도 최신으로 잘못 정렬되는 사고로
+      //   이어졌음(실제 발생 확인됨). Date 객체면 반드시 같은 형식
+      //   ('yyyy-MM-dd HH:mm:ss')으로 다시 포맷해서, 문자열이든 Date든 항상
+      //   똑같은 형태로 비교되게 함.
+      const createdAt = createdRaw
+        ? (createdRaw instanceof Date ? Utilities.formatDate(createdRaw, tz, 'yyyy-MM-dd HH:mm:ss') : String(createdRaw))
+        : '';
       // 작업(피킹) 시작일 — StartAtISO의 날짜 부분만 추출.
       let pickStart = '';
       if (startISOVals) {
@@ -3370,7 +3392,7 @@ function getSalesOverview() {
         dimsCount: (dimsMap[invoice] || {}).count || 0,
         // ★ 2026-08-06 신규 — 디멘션이 다른(대표) 인보이스에 포함돼 있으면 그 번호
         dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || '',
-        createdAt: createdRaw ? String(createdRaw) : ''
+        createdAt: createdAt
       });
     }
     // ★ 2026-08-31 긴급 버그 수정 — 총량피킹으로 시작된 오더 중 일부가 실제로
