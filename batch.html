@@ -363,6 +363,23 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-msg{margin:10px 0; padding:10px 14px; border-radius:8px; font-size:13px; font-weight:700; text-align:center; display:none;}
 .pv-msg.ok{display:block; background:rgba(139,92,246,0.15); color:#C4B5FD; border:1px solid var(--purple);}
 .pv-msg.bad{display:block; background:var(--red-bg); color:#FF8A8A; border:1px solid var(--red);}
+/* ★ 2026-09-01 신규 — "마지막 스캔" 상시 표시 카드. 스캔 리스트를 스크롤해서
+   맨 아래(제품이 많으면 100개 이상)까지 눈으로 확인해야 했던 문제를 없애기
+   위해, 스캔 직후 결과가 항상 입력창 바로 밑에 남아있게 함(예전엔 4초
+   지나면 자동으로 사라졌음 — 다음 스캔 전까지 계속 보이도록 변경). */
+.pv-msg.pv-lastscan{display:flex; align-items:center; gap:12px; text-align:left; padding:12px 14px;}
+.pv-msg.pv-lastscan.ok{background:rgba(139,92,246,0.15); border:1px solid var(--purple);}
+.pv-msg.pv-lastscan.bad{background:var(--red-bg); border:1px solid var(--red);}
+.pv-lastscan-icon{font-size:26px; flex-shrink:0; width:34px; text-align:center; line-height:1;}
+.pv-lastscan-body{flex:1; min-width:0;}
+.pv-lastscan-title{font-size:15px; font-weight:800; color:#C4B5FD; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-msg.pv-lastscan.bad .pv-lastscan-title{color:#FF8A8A;}
+.pv-lastscan-sub{font-size:11.5px; color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-lastscan-qty{font-family:var(--mono); font-size:19px; font-weight:800; color:#C4B5FD; flex-shrink:0; white-space:nowrap;}
+.pv-msg.pv-lastscan.bad .pv-lastscan-qty{color:#FF8A8A;}
+/* 내용이 똑같아도(예: 같은 상품 연속 스캔) "방금 갱신됐다"는 걸 알 수 있게 매번 살짝 튀는 애니메이션 */
+.pv-msg.pv-lastscan.pulse{animation: pvLastScanPulse 0.35s ease;}
+@keyframes pvLastScanPulse{ 0%{ transform:scale(1.025); box-shadow:0 0 0 3px rgba(139,92,246,0.35);} 100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(139,92,246,0);} }
 .pv-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02);}
 .pv-line.done{border-color:rgba(139,92,246,0.5); background:var(--purple-bg);}
 .pv-line-name{font-size:14px; font-weight:700;}
@@ -1188,7 +1205,14 @@ select option:disabled{color:var(--text-dim2);}
           <input id="pvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('pvScanInput', submitPvScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
-        <div class="pv-msg" id="pvMsg"></div>
+        <div class="pv-msg" id="pvMsg">
+          <div class="pv-lastscan-icon" id="pvMsgIcon"></div>
+          <div class="pv-lastscan-body">
+            <div class="pv-lastscan-title" id="pvMsgTitle"></div>
+            <div class="pv-lastscan-sub" id="pvMsgSub"></div>
+          </div>
+          <div class="pv-lastscan-qty" id="pvMsgQty"></div>
+        </div>
         <div class="pv-progress">
           <span>진행률</span>
           <span class="n" id="pvProgressText">0 / 0 pcs</span>
@@ -1238,7 +1262,14 @@ select option:disabled{color:var(--text-dim2);}
           <input id="psvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('psvScanInput', submitPsvScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
-        <div class="pv-msg" id="psvMsg"></div>
+        <div class="pv-msg" id="psvMsg">
+          <div class="pv-lastscan-icon" id="psvMsgIcon"></div>
+          <div class="pv-lastscan-body">
+            <div class="pv-lastscan-title" id="psvMsgTitle"></div>
+            <div class="pv-lastscan-sub" id="psvMsgSub"></div>
+          </div>
+          <div class="pv-lastscan-qty" id="psvMsgQty"></div>
+        </div>
         <div class="pv-progress">
           <span>진행률</span>
           <span class="n" id="psvProgressText">0 / 0 pcs</span>
@@ -5975,12 +6006,29 @@ async function submitPsvScan(){
     return;
   }
   if(res.result === 'pass'){
-    showPsvMsg(`✓ ${res.name || res.sku || barcode} ${(res.filled||0).toLocaleString()}개 확인됨`, 'ok');
+    // ★ 2026-09-01 신규 — submitPvScan과 동일한 이유: 목록을 스크롤하지 않아도
+    //   이 상품의 누적 진행량을 바로 볼 수 있게 함.
+    await refreshPsvState();
+    const key = normBarcode(barcode);
+    const line = (_psvState && _psvState.lines || []).find(l => normBarcode(l.barcode) === key);
+    showPsvMsg({
+      kind: 'ok',
+      icon: (line && line.complete) ? '✅' : '✓',
+      title: res.name || res.sku || barcode,
+      sub: (res.sku ? `SKU ${res.sku}` : '') + ((line && line.complete) ? ' · 이 상품 완료' : ' · 확인됨'),
+      qty: line ? `${line.packed}/${line.effectiveReq}` : `+${(res.filled||0).toLocaleString()}`,
+    });
+    input.focus();
+    return;
   } else if(res.result === 'wrong'){
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
-    showPsvMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → [${owners}]`, 'bad');
+    showPsvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
   } else if(res.result === 'over'){
-    showPsvMsg(res.note === 'excluded' ? '⚠ 이슈 처리되어 필요수량 없음' : '⚠ 이미 확인 완료 (중복 스캔)', 'bad');
+    showPsvMsg({
+      kind:'bad', icon:'⚠',
+      title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
+      sub: '중복 스캔입니다',
+    });
   }
   await refreshPsvState();
   input.focus();
@@ -5999,13 +6047,24 @@ document.getElementById('psvScanInput').addEventListener('input', function(){
     if(el.value.trim() === v && v.length >= 10) submitPsvScan();
   }, 300);
 });
-function showPsvMsg(msg, kind){
+// ★ 2026-09-01 재설계 — showPvMsg와 동일한 이유·동일한 구조로 변경.
+function showPsvMsg(msgOrOpts, kind){
   const el = document.getElementById('psvMsg');
-  el.textContent = msg;
-  el.className = 'pv-msg ' + kind;
-  el.style.display = 'block';
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.className = 'pv-msg'; el.style.display = 'none'; }, 4000);
+  let icon, title, sub, qty, k;
+  if(typeof msgOrOpts === 'string'){
+    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind;
+  } else {
+    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind;
+  }
+  document.getElementById('psvMsgIcon').textContent = icon;
+  document.getElementById('psvMsgTitle').textContent = title;
+  document.getElementById('psvMsgSub').textContent = sub;
+  document.getElementById('psvMsgQty').textContent = qty;
+  el.className = 'pv-msg pv-lastscan ' + k;
+  el.style.display = 'flex';
+  el.classList.remove('pulse');
+  void el.offsetWidth;
+  el.classList.add('pulse');
 }
 
 async function undoPsvScanEntry(packScanId){
@@ -6200,14 +6259,33 @@ async function submitPvScan(){
   }
   if(res.result === 'pass'){
     flashPv('ok'); beepPv(true);
-    showPvMsg(`✓ ${res.name || res.sku || barcode} ${(res.filled||0).toLocaleString()}개 확인됨`, 'ok');
+    // ★ 2026-09-01 신규 — 서버 최신 상태를 먼저 받아온 뒤(누적 수량 정확히
+    //   반영하기 위해), 방금 스캔한 상품의 "지금까지 누적/필요수량"을 찾아서
+    //   카드에 표시. 목록을 스크롤해서 찾지 않아도 이 상품이 몇 개 남았는지
+    //   바로 보임.
+    await refreshPvState();
+    const key = normBarcode(barcode);
+    const line = (_pvState && _pvState.lines || []).find(l => normBarcode(l.barcode) === key);
+    showPvMsg({
+      kind: 'ok',
+      icon: (line && line.complete) ? '✅' : '✓',
+      title: res.name || res.sku || barcode,
+      sub: (res.sku ? `SKU ${res.sku}` : '') + ((line && line.complete) ? ' · 이 상품 완료' : ' · 확인됨'),
+      qty: line ? `${line.packed}/${line.effectiveReq}` : `+${(res.filled||0).toLocaleString()}`,
+    });
+    input.focus();
+    return; // refreshPvState는 이미 위에서 실행했으므로 아래로 내려가지 않음
   } else if(res.result === 'wrong'){
     flashPv('bad'); beepPv(false);
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
-    showPvMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → 실제로는 [${owners}] 것입니다. 상자에서 빼주세요.`, 'bad');
+    showPvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것 — 상자에서 빼주세요` });
   } else if(res.result === 'over'){
     flashPv('bad'); beepPv(false);
-    showPvMsg(res.note === 'excluded' ? '⚠ 이 상품은 이슈 처리되어 이제 필요수량이 없습니다' : '⚠ 이미 확인 완료된 상품입니다 (중복 스캔)', 'bad');
+    showPvMsg({
+      kind:'bad', icon:'⚠',
+      title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
+      sub: '중복 스캔입니다',
+    });
   }
   await refreshPvState();
   input.focus();
@@ -6236,12 +6314,33 @@ function flashPv(kind){
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.className = 'pv-flash'; }, 350);
 }
-function showPvMsg(msg, kind){
+// ★ 2026-09-01 재설계 — 예전엔 4초 후 자동으로 사라지는 단순 텍스트 토스트였음.
+//   제품이 많은 오더(100개 이상)에서는 아래 목록을 끝까지 스크롤해야만 방금
+//   스캔이 실제로 반영됐는지 확인할 수 있었던 문제(매니저 지적) 때문에, 이제
+//   "마지막 스캔 결과" 카드를 다음 스캔 전까지 계속 화면에 남겨두고, 그
+//   상품의 누적 진행량(예: "8/10")까지 같이 보여줘서 목록을 안 내려봐도
+//   바로 확인 가능하게 함. 문자열로 부르면(기존 호출부 그대로 호환) 간단한
+//   완료/경고 메시지로, 객체로 부르면(스캔 결과용) 아이콘/상품명/부가정보/
+//   수량까지 풍부하게 표시함.
+function showPvMsg(msgOrOpts, kind){
   const el = document.getElementById('pvMsg');
-  el.textContent = msg;
-  el.className = 'pv-msg ' + kind;
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.className = 'pv-msg'; el.style.display = 'none'; }, 4000);
+  let icon, title, sub, qty, k;
+  if(typeof msgOrOpts === 'string'){
+    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind;
+  } else {
+    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind;
+  }
+  document.getElementById('pvMsgIcon').textContent = icon;
+  document.getElementById('pvMsgTitle').textContent = title;
+  document.getElementById('pvMsgSub').textContent = sub;
+  document.getElementById('pvMsgQty').textContent = qty;
+  el.className = 'pv-msg pv-lastscan ' + k;
+  el.style.display = 'flex';
+  // 내용이 이전과 똑같아도(같은 상품 연속 스캔 등) "방금 갱신됐다"는 걸
+  // 알 수 있도록, 클래스를 뺐다 다시 붙여서 펄스 애니메이션을 매번 강제로 재생
+  el.classList.remove('pulse');
+  void el.offsetWidth; // 리플로우를 강제해서 애니메이션이 확실히 재시작되게 함
+  el.classList.add('pulse');
 }
 // ★ 외부 오디오 파일 없이 WebAudio로 즉석 생성 — 피킹 쪽과 소리도 다르게(더 높은 음)
 //   해서, 눈을 안 봐도 "이건 2차 검증 소리"라는 걸 구분할 수 있게 함.
