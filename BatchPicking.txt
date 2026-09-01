@@ -996,6 +996,9 @@ function addStandaloneOrder(data) {
     bi.getRange(startRow, 1, itemRows.length, 7).setValues(itemRows);
 
     bumpVersion_();
+    // ★ 2026-09-01 신규 — 이 인보이스의 BatchItems 캐시(20초)를 즉시 비움.
+    //   재업로드 직후에도 옛 상품 목록이 캐시에 남아있지 않도록.
+    clearInvoiceCache_(STANDALONE_BATCH_ID, invoice);
     return { ok: true, invoice: invoice, totalSku: totalSku, totalQty: totalQty };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1057,6 +1060,7 @@ function removeStandaloneOrder(data) {
       }
     }
     if (removed) bumpVersion_();
+    clearInvoiceCache_(STANDALONE_BATCH_ID, invoice); // ★ 2026-09-01 신규
     return { ok: true, removed: removed };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1349,6 +1353,83 @@ function setPackingMoved(data) {
  *   (data.qty는 이제 안 씀 — 혹시 옛 클라이언트가 보내도 무시됨).
  * 반환: { ok, result: 'pass'|'wrong'|'over', filled(이번 스캔으로 채워진 양),
  *         packed(누적), required, ownerInvoices(wrong일 때만) } */
+/* ===================== getInvoiceBatchItemsCached_ / getInvoiceIssueQtyCached_ (★ 2026-09-01 신규) =====================
+ * ★★★ "스캔했는데 15~20초씩 걸린다"는 현장 지적의 핵심 원인 수정 ★★★
+ *
+ * [원인] logPackScan은 스캔 1번마다 BatchItems 시트 전체(총량+단독 오더를
+ * 통틀어 지금까지 만들어진 모든 배치의 상품줄 — 아카이브가 실제로 한 번도
+ * 안 돌았다면 수만 행에 달할 수 있음)를 처음부터 끝까지 읽어서 이 인보이스에
+ * 해당하는 줄만 걸러내고 있었음. IssueLog도 마찬가지로 매번 전체를 읽었음.
+ * 스캔 1번마다 이 무거운 전체 시트 읽기를 반복하니, 연속으로 여러 개 스캔하면
+ * 그 지연이 그대로 누적됨.
+ *
+ * [해결] 같은 인보이스를 계속 스캔하는 동안은 "이 인보이스가 필요로 하는
+ * 상품줄"과 "이 인보이스의 이슈 수량"이 거의 안 바뀜(스캔 자체는 PackScanLog에만
+ * 기록되고 이 두 시트엔 영향 없음) — 그래서 짧게(20초) 캐싱해서, 같은 인보이스를
+ * 연속으로 스캔할 때는 두 번째 스캔부터 이 무거운 전체 시트 읽기를 건너뛰고
+ * 캐시를 바로 씀. 실제로 상품 구성이 바뀌는 경우(재업로드 등)는 극히 드물고,
+ * 20초면 충분히 짧아서 안전함(이 앱 다른 곳에서도 6~20초 캐시를 이미 광범위하게
+ * 씀 — 같은 원칙). "이미 스캔된 수량"(PackScanLog)은 스캔마다 반드시 바뀌므로
+ * 절대 캐싱하지 않고 항상 최신으로 읽음(정확성이 속도보다 우선).
+ * ================================================================================ */
+function getInvoiceBatchItemsCached_(batchId, invoice) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'biLines_v1_' + batchId + '_' + invoice;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
+  }
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const lines = [];
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[1]) !== String(invoice)) return;
+      lines.push({ sku: String(r[2]), name: String(r[3]), barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
+    });
+  }
+  try {
+    const payload = JSON.stringify(lines);
+    if (payload.length < 90000) cache.put(cacheKey, payload, 20); // 20초
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return lines;
+}
+function getInvoiceIssueQtyCached_(batchId, invoice) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'ilIssues_v1_' + batchId + '_' + invoice;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
+  }
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const issues = []; // { barcode, qty }
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[7]) !== String(invoice)) return;
+      if (r[12] === 'undone') return;
+      issues.push({ barcode: String(r[4]), qty: Number(r[10]) || 0 });
+    });
+  }
+  try {
+    const payload = JSON.stringify(issues);
+    if (payload.length < 90000) cache.put(cacheKey, payload, 20); // 20초
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return issues;
+}
+// ★ 이 인보이스에 새 스캔·이슈가 기록된 즉시 캐시를 지워서, 20초를 기다리지
+//   않고도 다음 조회부터 바로 최신 값을 쓰게 함(속도 이득은 유지하면서 오래된
+//   값을 보여줄 위험은 없앰).
+function clearInvoiceCache_(batchId, invoice) {
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove('biLines_v1_' + batchId + '_' + invoice);
+    cache.remove('ilIssues_v1_' + batchId + '_' + invoice);
+  } catch (e) { /* 무시 */ }
+}
+
 function logPackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -1359,23 +1440,24 @@ function logPackScan(data) {
     if (!barcode) return { ok: false, error: 'barcode required' };
     const normBc = normBarcode_(barcode);
 
-    // 이 인보이스가 필요로 하는 줄(들) 중 이 바코드와 일치하는 것 찾기
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    const matchLines = [];
-    const biRows = biLast >= 2 ? bi.getRange(2, 1, biLast - 1, 7).getValues() : [];
-    biRows.forEach(r => {
-      if (String(r[0]) !== String(data.batchId)) return;
-      if (String(r[1]) !== String(data.invoice)) return;
-      if (normBarcode_(r[4]) !== normBc) return;
-      matchLines.push({ sku: String(r[2]), name: String(r[3]), reqQty: Number(r[5]) || 0 });
-    });
+    // ★ 2026-09-01 수정(속도) — BatchItems 전체를 매번 읽는 대신, 이 인보이스
+    //   범위로 캐싱된(20초) 목록에서 바코드가 일치하는 줄만 찾음. 자세한 이유는
+    //   getInvoiceBatchItemsCached_ 주석 참고.
+    const invoiceLines = getInvoiceBatchItemsCached_(data.batchId, data.invoice);
+    const matchLines = invoiceLines
+      .filter(l => normBarcode_(l.barcode) === normBc)
+      .map(l => ({ sku: l.sku, name: l.name, reqQty: l.reqQty }));
 
     const pl = packscanSheet_();
 
     if (matchLines.length === 0) {
       // ★ 이 인보이스 것이 아님 — 배치 안 다른 고객사 중 실제로 이 바코드가
       //   필요한 곳을 찾아서 "이 물건은 어디 것인지" 바로 안내해줌(오배송 예방 핵심)
+      //   이 경로는 자주 안 일어나는 예외 상황이라, 여기서만 전체 시트를 읽음
+      //   (정상 스캔 경로는 위 캐시 덕분에 이 무거운 읽기를 안 탐).
+      const bi = bitemsSheet_();
+      const biLast = bi.getLastRow();
+      const biRows = biLast >= 2 ? bi.getRange(2, 1, biLast - 1, 7).getValues() : [];
       const owners = new Set();
       biRows.forEach(r => {
         if (String(r[0]) !== String(data.batchId)) return;
@@ -1396,6 +1478,7 @@ function logPackScan(data) {
     }
 
     // 이미 이 바코드로 채운 수량(같은 배치+인보이스, pass만, undone 제외)
+    // ★ 이 값은 스캔마다 반드시 바뀌므로 절대 캐싱하지 않고 항상 최신으로 읽음.
     const plLast = pl.getLastRow();
     let already = 0;
     if (plLast >= 2) {
@@ -1409,18 +1492,13 @@ function logPackScan(data) {
     }
     const totalReq = matchLines.reduce((a, l) => a + l.reqQty, 0);
     // 검수 단계에서 이미 EXP/OOS 등으로 이슈 처리된 수량만큼 필요수량에서 제외
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    // ★ 2026-09-01 수정(속도) — IssueLog 전체 대신 캐싱된 인보이스 범위 목록에서 계산.
+    const invoiceIssues = getInvoiceIssueQtyCached_(data.batchId, data.invoice);
     let issueQty = 0;
-    if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(data.batchId)) return;
-        if (String(r[7]) !== String(data.invoice)) return;
-        if (r[12] === 'undone') return;
-        if (normBarcode_(r[4]) !== normBc) return;
-        issueQty += Number(r[10]) || 0;
-      });
-    }
+    invoiceIssues.forEach(iss => {
+      if (normBarcode_(iss.barcode) !== normBc) return;
+      issueQty += iss.qty;
+    });
     const effectiveReq = Math.max(0, totalReq - issueQty);
     const sku = matchLines.length === 1 ? matchLines[0].sku : matchLines.map(l => l.sku).join('+');
     const name = matchLines[0].name;
@@ -1503,16 +1581,13 @@ function getPackScanState(batchId, invoice) {
     if (!batchId) return { ok: false, error: 'batchId required' };
     if (!invoice) return { ok: false, error: 'invoice required' };
 
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    const rawLines = [];
-    if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[1]) !== String(invoice)) return;
-        rawLines.push({ sku: String(r[2]), name: String(r[3]), barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
-      });
-    }
+    // ★ 2026-09-01 수정(속도) — logPackScan과 완전히 동일한 이유. 스캔 1번마다
+    //   화면이 곧바로 이 함수를 다시 불러서(진행률 카드 갱신용) BatchItems/IssueLog
+    //   전체를 또 한 번 읽고 있었음 — 사실상 스캔 1번에 무거운 전체 시트 읽기가
+    //   2번(logPackScan 안에서 1번 + 이 함수에서 1번) 일어나던 것. 같은 20초
+    //   캐시를 재사용하면, logPackScan이 이미 캐시를 채워둔 직후라 이 호출은
+    //   사실상 공짜(캐시 히트)가 됨.
+    const rawLines = getInvoiceBatchItemsCached_(batchId, invoice);
     // 패킹검증은 바코드 단위로 매칭하므로, 같은 바코드를 쓰는 줄들을 하나로 합침
     const linesByBarcode = {};
     rawLines.forEach(l => {
@@ -1523,18 +1598,12 @@ function getPackScanState(batchId, invoice) {
       linesByBarcode[k].reqQty += l.reqQty;
     });
 
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    const invoiceIssues = getInvoiceIssueQtyCached_(batchId, invoice);
     const issueQtyByBarcode = {};
-    if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[7]) !== String(invoice)) return;
-        if (r[12] === 'undone') return;
-        const k = normBarcode_(r[4]);
-        issueQtyByBarcode[k] = (issueQtyByBarcode[k] || 0) + (Number(r[10]) || 0);
-      });
-    }
+    invoiceIssues.forEach(iss => {
+      const k = normBarcode_(iss.barcode);
+      issueQtyByBarcode[k] = (issueQtyByBarcode[k] || 0) + iss.qty;
+    });
 
     const pl = packscanSheet_();
     const plLast = pl.getLastRow();
@@ -2070,6 +2139,9 @@ function logIssue(data) {
       data.invoice, 'pass', 'active', -qty
     ]]);
     bumpVersion_();
+    // ★ 2026-09-01 신규 — 이 인보이스의 이슈수량 캐시(20초)를 즉시 비움. 이슈
+    //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
+    clearInvoiceCache_(data.batchId, data.invoice);
     // ★ 2026-07-24 신규: 이슈 등록으로 필요수량이 줄어들어 방금 완료로 바뀌었을 수 있음
     try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
     return { ok: true, issueId: issueId };
@@ -2104,6 +2176,7 @@ function undoIssue(data) {
         // ★ 2026-07-24 신규: 이슈 취소로 필요수량이 다시 늘어나 완료 상태가
         //   풀릴 수도, 반대로(다른 이슈 겹침 등) 그대로 완료일 수도 있음 — 재확인
         const rowVals = sh.getRange(i + 2, 1, 1, 8).getValues()[0]; // A~H
+        clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         try { syncInspectionFromPicking_(rowVals[0], rowVals[7], rowVals[3]); } catch (e) { /* 무시 */ }
         bumpVersion_();
         return { ok: true };
@@ -2158,6 +2231,7 @@ function editIssue(data) {
         bumpVersion_();
         // ★ 2026-07-24 신규: 수량/사유를 고치면 완료 여부가 바뀔 수 있음 — 재확인
         const rowVals = sh.getRange(row, 1, 1, 8).getValues()[0]; // A~H
+        clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         try { syncInspectionFromPicking_(rowVals[0], rowVals[7], rowVals[3]); } catch (e) { /* 무시 */ }
         return { ok: true };
       }
