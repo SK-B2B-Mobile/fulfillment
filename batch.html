@@ -353,6 +353,22 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-scan-panel{display:none;}
 .pv-scan-panel.active{display:block;}
 .pv-scan-input-wrap{display:flex; align-items:center; gap:10px; background:var(--surface2); border:2.5px solid var(--purple); border-radius:10px; padding:16px 18px; box-shadow:0 0 0 4px var(--purple-bg); transition:box-shadow 0.15s, border-color 0.15s;}
+/* ★ 2026-09-01 신규(매니저 요청) — 04 단독 1차 검수 전용 "실제 수량 입력" 카드.
+   1차 검수는 P(2차 검증)와 목적이 달라서 스캔 즉시 자동으로 필요수량 전체를
+   채우면 안 됨(실제 개수를 세는 게 1차 검수의 핵심). 스캔하면 이 카드가 뜨고,
+   필요수량만큼이 기본값으로 미리 채워지지만 작업자가 실제로 확인한 개수로
+   고쳐서 저장할 수 있음. 숫자칸에 스캐너 포커스를 자동으로 주지 않음 — 러기드
+   스캐너는 포커스 있는 칸에 그대로 타이핑되기 때문에, 다음 상품을 무심코 먼저
+   스캔하면 바코드 숫자가 수량칸에 잘못 들어가는 사고를 방지하기 위함. */
+.pv-qty-confirm{display:flex; align-items:flex-start; gap:12px; margin:10px 0; padding:14px 16px; border-radius:10px; background:rgba(139,92,246,0.15); border:1.5px solid var(--purple);}
+.pv-qty-confirm-icon{font-size:24px; flex-shrink:0; line-height:1.2;}
+.pv-qty-confirm-body{flex:1; min-width:0;}
+.pv-qty-confirm-name{font-size:15px; font-weight:800; color:#C4B5FD; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-qty-confirm-sub{font-size:11.5px; color:var(--text-dim); margin-top:2px;}
+.pv-qty-confirm-row{display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap;}
+.pv-qty-step{width:40px; height:40px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:20px; font-weight:800; flex-shrink:0; cursor:pointer;}
+#ssQtyInput{width:80px; height:40px; text-align:center; font-size:20px; font-weight:800; font-family:var(--mono); border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); flex-shrink:0;}
+#ssQtyConfirmBtn{margin-left:auto;}
 /* ★ 2026-09-01 신규 — 스캔 인식 순간(네트워크 응답 전) 즉시 보여주는 시각 피드백.
    입력창 placeholder에 "인식됨 ✓ 바코드"가 잠깐 뜨는 것과 같이 border도 살짝
    밝아졌다 돌아와서, 스캔이 실제로 잡혔다는 걸 눈으로 바로 확인 가능하게 함.
@@ -1111,6 +1127,20 @@ select option:disabled{color:var(--text-dim2);}
           <input id="ssScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('ssScanInput', submitSsScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
+        <div class="pv-qty-confirm" id="ssQtyConfirm" style="display:none;">
+          <div class="pv-qty-confirm-icon">🔢</div>
+          <div class="pv-qty-confirm-body">
+            <div class="pv-qty-confirm-name" id="ssQtyName"></div>
+            <div class="pv-qty-confirm-sub" id="ssQtySub"></div>
+            <div class="pv-qty-confirm-row">
+              <button class="pv-qty-step" id="ssQtyMinus" type="button">−</button>
+              <input type="number" id="ssQtyInput" inputmode="numeric" min="1">
+              <button class="pv-qty-step" id="ssQtyPlus" type="button">+</button>
+              <button class="btn btn-ghost btn-sm" id="ssQtyCancelBtn" type="button">취소</button>
+              <button class="btn btn-primary btn-sm" id="ssQtyConfirmBtn" type="button">✓ 이 수량으로 저장</button>
+            </div>
+          </div>
+        </div>
         <div class="pv-msg" id="ssMsg">
           <div class="pv-lastscan-row1">
             <span class="pv-lastscan-icon" id="ssMsgIcon"></span>
@@ -1665,7 +1695,7 @@ async function syncSlotsToServer(){
   const assignments = state.slots.filter(s => s.assignedTo).map(s => ({
     invoice: s.assignedTo, slotNum: s.num, slotSize: s.size
   }));
-  await gasCall('assignSlots', { batchId: state.batchId, assignments });
+  await gasCallWithRetry('assignSlots', { batchId: state.batchId, assignments });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1789,7 +1819,7 @@ async function loadBatchWorkersFromServer(){
       state.workers = res.workers;
     } else {
       // 서버에 아직 아무것도 없음 → 지금 갖고 있는 기본 명단을 최초 1회 저장
-      await gasCall('setBatchWorkers', { workers: state.workers });
+      await gasCallWithRetry('setBatchWorkers', { workers: state.workers });
     }
     renderWorkers();
     populateWorkerSelect();
@@ -2233,7 +2263,7 @@ async function continueOpenBatch(batchId, viewOnly){
 // "완료 처리" — 매니저가 명시적으로 이 배치를 끝난 것으로 확정
 async function completeOpenBatch(batchId){
   if(!confirm(`배치 ${batchId}를 완료 처리하시겠습니까?\n\n(스캔 기록은 그대로 남고, 목록에서만 사라집니다. 되돌릴 수 없으니 정말 다 끝난 배치인지 확인해주세요.)`)) return;
-  const res = await gasCall('completeBatch', { batchId });
+  const res = await gasCallWithRetry('completeBatch', { batchId });
   if(!res.ok){ toast('완료 처리 실패: ' + (res.error||''), 'error'); return; }
   // ★ 2026-07-23 신규: 완료된 배치가 활성 배치로 남아서 다른 기기들이 계속
   //   자동으로 불러오는 일이 없도록, 이 배치가 활성 배치였다면 같이 정리
@@ -3133,7 +3163,7 @@ document.getElementById('startBatchBtn').onclick = async () => {
   }
 
   if(GAS_READY){
-    const created = await gasCall('createBatch', {
+    const created = await gasCallWithRetry('createBatch', {
       sumItems: state.sumFile.items,
       customers: state.custFiles.map(cf => ({ meta: cf.meta, items: cf.items })),
     });
@@ -3822,7 +3852,7 @@ function renderSlots(){
       e.stopPropagation();
       const invoice = clearBtn.dataset.clear;
       clearBtn.disabled = true; clearBtn.textContent = '처리 중...';
-      const res = await gasCall('clearSlot', { batchId: state.batchId, invoice, worker: state.currentWorker || '' });
+      const res = await gasCallWithRetry('clearSlot', { batchId: state.batchId, invoice, worker: state.currentWorker || '' });
       if(!res.ok){
         toast('슬롯 비우기 실패: ' + (res.error||'서버 오류'), 'error');
         clearBtn.disabled = false; clearBtn.textContent = '📦 패킹완료 처리';
@@ -3857,7 +3887,7 @@ function renderSlots(){
     // ★ 2026-08-07 — 서버 응답을 기다리는 동안 주기 갱신이 이 값을 되돌리지 않도록 표시
     _pendingPackToggle[invoice] = true;
     renderSlots(); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
-    const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice, moved: next });
+    const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice, moved: next });
     delete _pendingPackToggle[invoice];
     if(!res.ok){
       // 실패하면 원상복구
@@ -4771,7 +4801,7 @@ async function retryIssueSave(idx, barcode, reason, qty, note){
   const sku = _lastScanCtx.sku;
   const tag = document.getElementById(`targetItem-${idx}`)?.querySelector('.issue-tag');
   if(tag) tag.textContent = '⏳ 다시 저장 중...';
-  const res = await gasCall('logIssue', {
+  const res = await gasCallWithRetry('logIssue', {
     batchId: state.batchId, worker: state.currentWorker,
     barcode: barcode, sku: sku.sku, name: sku.name,
     invoice: r.invoice, customer: r.customer,
@@ -5098,7 +5128,7 @@ async function submitRetroIssue(){
 
 async function undoRetroIssue(issueId){
   if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어 완료 처리되지 않은 상태로 돌아갑니다.')) return;
-  const res = await gasCall('undoIssue', { issueId });
+  const res = await gasCallWithRetry('undoIssue', { issueId });
   if(!res.ok){ toast('⚠️ 취소 실패: ' + (res.error||''), 'error'); return; }
   toast('이슈가 취소되었습니다', 'success');
   await pollScanState();
@@ -5690,7 +5720,7 @@ async function renderStandaloneOrdersPanel(){
 
 async function removeStandaloneOrderClick(invoice){
   if(!confirm(invoice + ' 단독 오더 등록을 취소하시겠습니까?\n\n등록된 상품 목록·스캔 진행상황이 모두 삭제됩니다.')) return;
-  const res = await gasCall('removeStandaloneOrder', { invoice });
+  const res = await gasCallWithRetry('removeStandaloneOrder', { invoice });
   if(res.ok){ toast('등록 취소됨', 'success'); await renderStandaloneOrdersPanel(); }
   else alert('취소 실패: ' + (res.error||'알 수 없는 오류'));
 }
@@ -5756,6 +5786,10 @@ async function onSsInvoiceChange(){
   const sel = document.getElementById('ssInvoiceSelect');
   const invoice = sel.value;
   const panel = document.getElementById('ssScanPanel');
+  // ★ 2026-09-01 신규 — 수량 확인 카드가 열려있는 채로 다른 오더로 넘어가면
+  //   엉뚱한 오더에 그 수량이 저장될 위험이 있으므로, 오더를 바꾸는 순간 무조건
+  //   취소 처리(null)해서 안전하게 닫음.
+  if(typeof resolveSsQty === 'function') resolveSsQty(null);
   if(!invoice){ panel.classList.remove('active'); _ssInvoice = null; _ssState = null; return; }
   _ssInvoice = invoice;
   panel.classList.add('active');
@@ -5876,9 +5910,109 @@ async function processSsScanQueue(){
     if(input) input.focus();
   }
 }
+// ★ 2026-09-01 신규(매니저 요청) — 04 1차 검수 전용 "실제 수량 직접 입력" 확인창.
+// P(2차 검증)와 달리 04는 실물 수량을 처음 세는 단계라, 스캔 즉시 자동으로
+// 필요수량 전체를 채우면 검수 기능 자체가 무의미해짐(실제로 부족해도 시스템은
+// "완료"로 착각). 그래서 스캔하면 서버를 바로 부르지 않고, 필요수량이 기본값으로
+// 채워진 카드를 먼저 띄워서 작업자가 실제 확인한 개수로 고친 뒤 저장하게 함.
+let _ssQtyResolve = null;
+function askSsScanQty(line, remaining, barcode){
+  return new Promise(resolve => {
+    _ssQtyResolve = resolve;
+    document.getElementById('ssQtyName').textContent = line.name || line.sku || barcode;
+    document.getElementById('ssQtySub').textContent =
+      `SKU ${line.sku || ''} · 필요 ${line.effectiveReq}개 중 ${line.packed}개 확인됨 (남음 ${remaining}개) — 실제로 확인한 개수를 입력하세요`;
+    const input = document.getElementById('ssQtyInput');
+    input.value = remaining; // 맞으면 그대로 "저장"만 누르면 되도록 기본값 미리 채움
+    input.max = String(remaining);
+    document.getElementById('ssQtyConfirm').style.display = 'flex';
+    // ★ 스캐너 포커스를 여기로 자동으로 주지 않음(위 CSS 주석 참고) — 다음 상품을
+    //   무심코 먼저 스캔하면 바코드 숫자가 이 칸에 잘못 들어가는 사고 방지.
+    //   수정이 필요할 때만 작업자가 직접 탭해서 고치면 됨.
+  });
+}
+function resolveSsQty(v){
+  const el = document.getElementById('ssQtyConfirm');
+  if(el) el.style.display = 'none';
+  if(_ssQtyResolve){ const r = _ssQtyResolve; _ssQtyResolve = null; r(v); }
+}
+document.getElementById('ssQtyConfirmBtn').addEventListener('click', () => {
+  const input = document.getElementById('ssQtyInput');
+  const max = Number(input.max) || 999999;
+  const v = Math.min(max, Math.max(1, Math.round(Number(input.value) || 0)));
+  resolveSsQty(v);
+});
+document.getElementById('ssQtyCancelBtn').addEventListener('click', () => resolveSsQty(null));
+document.getElementById('ssQtyMinus').addEventListener('click', () => {
+  const input = document.getElementById('ssQtyInput');
+  input.value = Math.max(1, Math.round(Number(input.value) || 0) - 1);
+});
+document.getElementById('ssQtyPlus').addEventListener('click', () => {
+  const input = document.getElementById('ssQtyInput');
+  const max = Number(input.max) || 999999;
+  input.value = Math.min(max, Math.round(Number(input.value) || 0) + 1);
+});
+document.getElementById('ssQtyInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); document.getElementById('ssQtyConfirmBtn').click(); }
+});
+
 async function doSsScanOne(barcode){
   const worker = currentSsWorker();
   if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+
+  // ★ 2026-09-01 신규 — 이미 받아온 _ssState.lines에서 이 바코드가 이 인보이스
+  //   상품인지, 남은 필요수량이 있는지 먼저 클라이언트에서 확인. 매칭되고
+  //   남은 수량이 있으면, 서버를 아직 안 부르고 "실제 수량 입력" 카드를 띄워서
+  //   작업자 확인을 기다린 뒤에만 저장 요청을 보냄.
+  const key = normBarcode(barcode);
+  const line = (_ssState && _ssState.lines || []).find(l => normBarcode(l.barcode) === key);
+  const remaining = line ? (Number(line.effectiveReq) || 0) - (Number(line.packed) || 0) : 0;
+
+  if(line && remaining > 0){
+    const qty = await askSsScanQty(line, remaining, barcode);
+    if(qty === null) return; // 취소 — 아무 것도 저장하지 않고 다음 스캔으로
+
+    // ★ 2026-09-01 긴급 수정(아래 res.ok 체크와 동일한 이유) — 쓰기 요청에도
+    //   재시도를 붙여서 "TypeError: Failed to fetch" 같은 일시적 네트워크
+    //   문제로 스캔이 통째로 유실되지 않게 함(서버가 중복을 안전하게 걸러내므로
+    //   재시도 자체는 항상 안전함).
+    const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode, qty });
+    if(!res.ok){
+      showSsMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+      return;
+    }
+    if(res.result === 'pass'){
+      const required = Number(res.required) || 0;
+      const packed = Number(res.packed) || 0;
+      const complete = required > 0 && packed >= required;
+      showSsMsg({
+        kind: 'ok',
+        icon: complete ? '✅' : '✓',
+        title: res.name || res.sku || barcode,
+        sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ` · ${qty}개 입력됨`),
+        qty: `${packed}/${required}`,
+      });
+      refreshSsState(); // 백그라운드
+      return;
+    }
+    // 방어적 처리 — 위에서 이미 매칭 확인을 했으므로 이론상 거의 안 오지만,
+    // 그 사이 다른 기기가 먼저 채웠거나 이슈가 등록된 경우를 대비해 남겨둠.
+    if(res.result === 'wrong'){
+      const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
+      showSsMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
+    } else if(res.result === 'over'){
+      showSsMsg({
+        kind:'bad', icon:'⚠',
+        title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
+        sub: '중복 스캔입니다',
+      });
+    }
+    await refreshSsState();
+    return;
+  }
+
+  // 이 인보이스 상품이 아니거나(다른 고객사 물건일 수 있음) 이미 다 채워진
+  // 상품 — 서버가 직접 최종 판정(오배송 안내 등)하도록 그대로 넘김.
   // ★ 2026-09-01 긴급 수정 — "TypeError: Failed to fetch" 오류로 스캔 자체가
   //   먹통이 되는 사고 발견. 원인: 조회(읽기) 요청엔 fetch 실패 시 재시도+JSONP
   //   우회가 이미 있었는데(gasQuery), 스캔 저장 같은 쓰기 요청(gasCall)엔 그
@@ -5893,13 +6027,7 @@ async function doSsScanOne(barcode){
     return;
   }
   if(res.result === 'pass'){
-    // ★ 2026-09-01 재수정(속도 핵심) — 예전엔 카드를 그리기 전에 refreshSsState()를
-    //   한 번 더 기다렸음(=서버 왕복 2번: logPackScan + getPackScanState). 그런데
-    //   logPackScan 응답 자체에 이미 packed(누적)/required(필요수량)가 들어있어서
-    //   그걸 기다릴 필요가 전혀 없었음 — 이게 "바코드는 빨리 사라지는데 제품 정보는
-    //   늦게 뜬다"는 현장 지적의 진짜 원인. 이제 응답 하나로 카드를 즉시 그리고,
-    //   목록/SKU진행률 갱신(_ssState)은 화면에 카드가 이미 뜬 뒤 백그라운드에서
-    //   처리함(await 안 함 — 다음 스캔이 이걸 기다릴 필요 없음).
+    // (이론상 거의 안 옴 — _ssState가 아직 최신이 아니었던 경우의 안전망)
     const required = Number(res.required) || 0;
     const packed = Number(res.packed) || 0;
     const complete = required > 0 && packed >= required;
@@ -5910,7 +6038,7 @@ async function doSsScanOne(barcode){
       sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
     });
-    refreshSsState(); // 백그라운드 — 카드 표시를 기다리게 하지 않음
+    refreshSsState();
     return;
   } else if(res.result === 'wrong'){
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
@@ -5966,7 +6094,7 @@ async function completeSsInspection(){
   if(!_ssInvoice) return;
   const btn = document.getElementById('ssCompleteBtn');
   btn.disabled = true; btn.textContent = '처리 중...';
-  const res = await gasCall('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, stage: 'taken', worker: currentSsWorker() });
+  const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, stage: 'taken', worker: currentSsWorker() });
   if(res.ok){
     showSsMsg('✓ 1차 검수 완료 — 패킹존 이동으로 표시됐습니다. 이제 "단독 Pack Verify"에서 2차 검증할 수 있습니다.', 'ok');
     await populateSsInvoiceSelect();
@@ -6216,7 +6344,7 @@ function showPsvMsg(msgOrOpts, kind){
 
 async function undoPsvScanEntry(packScanId){
   if(!confirm('이 스캔을 취소하시겠습니까?')) return;
-  const res = await gasCall('undoPackScan', { packScanId });
+  const res = await gasCallWithRetry('undoPackScan', { packScanId });
   if(res.ok) await refreshPsvState();
   else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
 }
@@ -6225,7 +6353,7 @@ async function completePsvVerify(){
   if(!_psvInvoice) return;
   const btn = document.getElementById('psvCompleteBtn');
   btn.disabled = true; btn.textContent = '처리 중...';
-  const res = await gasCall('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified' });
+  const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified' });
   if(res.ok){
     showPsvMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
     // ★ 2026-09-01 버그 수정 — completePvVerify와 동일한 버그. 성공해도 버튼이
@@ -6244,7 +6372,7 @@ async function completePsvVerify(){
 async function forcePsvComplete(){
   if(!_psvInvoice) return;
   if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
-  const res = await gasCall('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
+  const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
   if(res.ok){
     showPsvMsg('⚠ 관리자 강제확정으로 처리됐습니다 — 실제 스캔은 되지 않았습니다', 'ok');
     _psvForceVerified = true;
@@ -6585,7 +6713,7 @@ function beepPv(ok){
 
 async function undoPvScanEntry(packScanId){
   if(!confirm('이 스캔을 취소하시겠습니까?')) return;
-  const res = await gasCall('undoPackScan', { packScanId });
+  const res = await gasCallWithRetry('undoPackScan', { packScanId });
   if(res.ok) await refreshPvState();
   else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
 }
@@ -6594,7 +6722,7 @@ async function completePvVerify(){
   if(!_pvInvoice) return;
   const btn = document.getElementById('pvCompleteBtn');
   btn.disabled = true; btn.textContent = '처리 중...';
-  const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified' });
+  const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified' });
   if(res.ok){
     showPvMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
     state.packVerifiedInvoices.add(_pvInvoice);
@@ -6619,7 +6747,7 @@ async function completePvVerify(){
 async function forcePvComplete(){
   if(!_pvInvoice) return;
   if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
-  const res = await gasCall('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
+  const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
   if(res.ok){
     showPvMsg('⚠ 관리자 강제확정으로 처리됐습니다 — 실제 스캔은 되지 않았습니다', 'ok');
     state.packVerifiedInvoices.add(_pvInvoice);
@@ -7069,7 +7197,7 @@ function renderWorkers(){
 async function saveBatchWorkersToServer(){
   if(!GAS_READY) return;
   try{
-    const res = await gasCall('setBatchWorkers', { workers: state.workers });
+    const res = await gasCallWithRetry('setBatchWorkers', { workers: state.workers });
     if(!res.ok) toast('⚠ 작업자 명단 서버 저장 실패 — 다시 시도해주세요', 'error');
   }catch(e){
     console.error('saveBatchWorkersToServer failed:', e);
