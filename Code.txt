@@ -217,6 +217,11 @@ function doGet(e) {
     const p = e.parameter || {};
     return json_(getInvoiceItemStatus(p.batchId || '', p.invoice || ''));
   }
+  // ★ 2026-09-01 신규 — 04 단독 1차 검수: 이 인보이스의 현재 활성 이슈 전체 조회(취소용)
+  if (op === 'getInvoiceIssues') {
+    const p2 = e.parameter || {};
+    return json_(getInvoiceIssues(p2.batchId || '', p2.invoice || ''));
+  }
   // ★ 2026-07-24 신규 — 스캔/이슈 액션 없이도, 특정 인보이스의 fulfillment
   //   대시보드 Inspection을 지금 당장 강제로 다시 계산해서 씀. 배포 직후 예전에
   //   저장된 오래된 값을 새 액션 없이 바로 고치고 싶을 때 씀(1회성 유틸리티).
