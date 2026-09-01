@@ -1746,18 +1746,42 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force) {
   //   Inspection 동기화 자체가 조용히 안 되는 사고로 이어졌음(예: 이슈 2건→1건
   //   취소했는데 구글시트엔 계속 2건으로 남음). SKU(바코드)별로 순 스캔량을
   //   먼저 구해서 0 밑으로 안 내려가게 고정한 뒤에 합산하도록 수정.
-  const sl = scanlogSheet_();
-  const slLast = sl.getLastRow();
+  // ★ 2026-08-31 긴급 수정 — 단독오더 1차 검수(04 Standalone Scan)는 logScan이
+  //   아니라 logPackScan(Pack Verify와 같은 스캔 엔진)을 재사용하므로 실제
+  //   스캔 기록이 ScanLog가 아니라 PackScanLog에 쌓임. 이 함수는 원래
+  //   ScanLog만 읽었기 때문에, 단독오더는 스캔을 100% 다 채워도 scanned가
+  //   항상 0으로 계산되어 isComplete가 절대 true가 될 수 없었고, 결과적으로
+  //   Jobs.Inspection이 영원히 갱신 안 되는 사고로 이어졌음(index.html/
+  //   sales.html에 검수 다 끝난 오더가 계속 "Not Inspected"/"Pending"으로
+  //   표시되는 증상). 총량피킹(ScanLog)과 단독오더(PackScanLog)는 기록되는
+  //   시트 자체가 다르므로, batchId로 분기해서 실제로 스캔이 쌓이는 시트를 읽는다.
   const scannedByKey = {}; // ★ 2026-07-28 수정: "바코드"만이 아니라 "바코드|SKU"로 키 변경
-  if (slLast >= 2) {
-    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
-      if (String(r[0]) !== String(batchId)) return;
-      if (String(r[8]) !== String(invoice)) return;
-      if (r[10] === 'undone') return;
-      if (r[9] !== 'pass') return;
-      const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_로 앞자리0 손실 방어
-      scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[11]) || 0);
-    });
+  if (batchId === STANDALONE_BATCH_ID) {
+    const pl = packscanSheet_();
+    const plLast = pl.getLastRow();
+    if (plLast >= 2) {
+      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[6]) !== String(invoice)) return; // PackScanLog: G=Invoice
+        if (r[8] === 'undone') return;                // Status
+        if (r[7] !== 'pass') return;                  // Result
+        const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku
+        scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[9]) || 0); // Qty
+      });
+    }
+  } else {
+    const sl = scanlogSheet_();
+    const slLast = sl.getLastRow();
+    if (slLast >= 2) {
+      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[8]) !== String(invoice)) return;
+        if (r[10] === 'undone') return;
+        if (r[9] !== 'pass') return;
+        const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_로 앞자리0 손실 방어
+        scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[11]) || 0);
+      });
+    }
   }
   let scanned = 0;
   Object.keys(scannedByKey).forEach(key => {
