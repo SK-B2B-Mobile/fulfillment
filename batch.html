@@ -1113,6 +1113,7 @@ select option:disabled{color:var(--text-dim2);}
 
       <div class="pv-invoice-picker">
         <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검수할 단독 오더 선택</label>
+        <input type="text" id="ssInvoiceSearch" placeholder="🔍 인보이스 번호 또는 고객사명 검색..." style="margin-top:8px; width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px;">
         <select id="ssInvoiceSelect" style="margin-top:8px;" onchange="onSsInvoiceChange()"></select>
         <div class="pv-worker-row">
           <label>작업자</label>
@@ -1404,9 +1405,14 @@ select option:disabled{color:var(--text-dim2);}
      단독은 고객사 1곳뿐이라 "여러 고객사에 자동분배"할 필요가 없어 훨씬 단순함. -->
 <div class="modal-bg" id="ssIssueModal">
   <div class="modal">
-    <h3>이슈 등록</h3>
+    <h3>이슈 관리</h3>
     <div id="ssIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
-    <div class="form-field">
+    <div id="ssExistingIssuesWrap" style="display:none; margin-bottom:16px;">
+      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이미 등록된 이슈 (잘못 등록했으면 취소할 수 있습니다)</label>
+      <div id="ssExistingIssuesList" style="margin-top:8px;"></div>
+    </div>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">새 이슈 등록</label>
+    <div class="form-field" style="margin-top:8px;">
       <label>사유</label>
       <select id="ssIssueReason"></select>
     </div>
@@ -1419,7 +1425,7 @@ select option:disabled{color:var(--text-dim2);}
       <input type="text" id="ssIssueNote" placeholder="추가 설명이 필요하면 입력">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" data-modal-close>취소</button>
+      <button class="btn btn-ghost" data-modal-close>닫기</button>
       <button class="btn btn-primary" id="ssIssueSubmitBtn" onclick="submitSsIssue()">이슈 등록</button>
     </div>
   </div>
@@ -5757,6 +5763,28 @@ document.getElementById('ssWorkerSelect').addEventListener('change', function(){
   pingWorkerPresenceNow(); // ★ 2026-09-01 신규 — 바꾸자마자 즉시 알려서 Workers 탭이 빨리 반영되게 함
 });
 
+// ★ 2026-09-01 신규(매니저 요청) — 단독 오더가 많아지면 드롭다운을 눈으로
+// 훑어서 찾기 번거로워서, 인보이스 번호·고객사명으로 검색해 좁힐 수 있게 함.
+// 후보 목록은 populateSsInvoiceSelect가 한 번 받아온(_ssCandidates) 걸 그대로
+// 재사용 — 검색어를 입력할 때마다 서버를 다시 부르지 않아 즉시 반응함.
+let _ssCandidates = [];
+function renderSsInvoiceOptions(filterText, keepSelected){
+  const sel = document.getElementById('ssInvoiceSelect');
+  if(!sel) return;
+  const q = (filterText || '').trim().toLowerCase();
+  const filtered = q
+    ? _ssCandidates.filter(o => (o.invoice||'').toLowerCase().includes(q) || (o.customer||'').toLowerCase().includes(q))
+    : _ssCandidates;
+  const prevSelected = keepSelected !== undefined ? keepSelected : sel.value;
+  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + filtered.map(o =>
+    `<option value="${o.invoice}">${o.invoice} · ${o.customer||''} (SKU ${o.totalSku})</option>`
+  ).join('');
+  if(prevSelected && filtered.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
+}
+document.getElementById('ssInvoiceSearch').addEventListener('input', function(){
+  renderSsInvoiceOptions(this.value);
+});
+
 async function populateSsInvoiceSelect(){
   const sel = document.getElementById('ssInvoiceSelect');
   const panel = document.getElementById('ssScanPanel');
@@ -5766,6 +5794,7 @@ async function populateSsInvoiceSelect(){
   await fetchStandaloneOrders();
   // 1차 검수 대상 = 아직 패킹존 이동(파랑) 표시 안 된 것들
   const candidates = _standaloneOrders.filter(o => !o.takenOut);
+  _ssCandidates = candidates; // 검색창이 재사용할 수 있게 저장해둠
   if(candidates.length === 0){
     if(picker) picker.style.display = 'none';
     if(panel) panel.classList.remove('active');
@@ -5775,11 +5804,11 @@ async function populateSsInvoiceSelect(){
   if(picker) picker.style.display = 'block';
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
-  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(o =>
-    `<option value="${o.invoice}">${o.invoice} · ${o.customer||''} (SKU ${o.totalSku})</option>`
-  ).join('');
-  if(prevSelected && candidates.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
-  else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
+  const searchEl = document.getElementById('ssInvoiceSearch');
+  renderSsInvoiceOptions(searchEl ? searchEl.value : '', prevSelected);
+  if(!prevSelected || !candidates.some(o => o.invoice === prevSelected)) {
+    if(!prevSelected && panel) panel.classList.remove('active');
+  }
 }
 
 async function onSsInvoiceChange(){
@@ -5838,14 +5867,14 @@ function renderSsBody(){
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
-        ${!l.complete ? `<button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이 상품에 문제가 있으면 이슈 등록">⚠ 이슈</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이슈 등록 / 이미 등록된 이슈 확인·취소">⚠ 이슈</button>
       </div>
     </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 }
 
 // ── 04 단독 1차 검수 — 이슈 등록 ──────────────────────────────
 let _ssIssueTarget = null; // { sku, barcode, name }
-function openSsIssueModal(sku, barcode, name){
+async function openSsIssueModal(sku, barcode, name){
   if(!_ssInvoice){ return; }
   _ssIssueTarget = { sku, barcode, name };
   document.getElementById('ssIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
@@ -5854,6 +5883,40 @@ function openSsIssueModal(sku, barcode, name){
   document.getElementById('ssIssueQty').value = 1;
   document.getElementById('ssIssueNote').value = '';
   document.getElementById('ssIssueModal').classList.add('open');
+  await refreshSsExistingIssues();
+}
+// ★ 2026-09-01 신규(매니저 요청) — "이슈를 잘못 등록했는데 고칠 방법이 없다"는
+// 현장 지적 해결. 이 상품(바코드)에 걸린 기존 활성 이슈를 서버에서 받아와서
+// 목록으로 보여주고, 각각 취소(다시 필요수량에 포함시킴) 버튼을 붙임.
+async function refreshSsExistingIssues(){
+  const wrap = document.getElementById('ssExistingIssuesWrap');
+  const list = document.getElementById('ssExistingIssuesList');
+  if(!_ssIssueTarget || !_ssInvoice){ wrap.style.display = 'none'; return; }
+  list.innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  wrap.style.display = 'block';
+  const res = await gasQueryWithRetry('getInvoiceIssues', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice });
+  if(!res.ok){ list.innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`; return; }
+  const mine = (res.issues || []).filter(iss => normBarcode(iss.barcode) === normBarcode(_ssIssueTarget.barcode));
+  if(!mine.length){ wrap.style.display = 'none'; return; }
+  const reasonLabel = v => (ISSUE_REASONS.find(r => r.v === v) || {}).label || v;
+  list.innerHTML = mine.map(iss => `
+    <div class="pv-line" style="margin-bottom:6px;">
+      <div class="pv-line-info">
+        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty}개</div>
+        <div class="pv-line-meta">${iss.time} · ${iss.worker || ''}${iss.note ? ` · ${iss.note}` : ''}</div>
+      </div>
+      <div class="pv-line-actions">
+        <button class="btn btn-ghost btn-sm" onclick="undoSsExistingIssue('${iss.issueId}')">취소</button>
+      </div>
+    </div>`).join('');
+}
+async function undoSsExistingIssue(issueId){
+  if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어, 완료 처리됐던 상품이 미완료로 돌아갈 수 있습니다.')) return;
+  const res = await gasCallWithRetry('undoIssue', { issueId });
+  if(!res.ok){ alert('취소 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast('이슈가 취소되었습니다', 'success');
+  await refreshSsExistingIssues();
+  await refreshSsState(); // 목록의 필요수량/완료 표시도 같이 갱신
 }
 async function submitSsIssue(){
   if(!_ssIssueTarget || !_ssInvoice) return;
