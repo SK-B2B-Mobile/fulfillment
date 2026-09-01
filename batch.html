@@ -6683,6 +6683,21 @@ function printPvSlip(format){
       <td style="text-align:center; font-weight:700;">${forcedVerify ? l.reqQty : l.packed}</td>
     </tr>`).join('');
 
+  // ★ 2026-09-01 신규(매니저 요청) — 외부(고객사)로 나가는 문서라, 표 맨 아래에
+  //   합계 줄(총 SKU 종류 수 · 총 Ordered/Issue/Packed 수량)을 추가해서 한눈에
+  //   확인 가능하게 함.
+  const totalSku = lines.length;
+  const totalOrdered = lines.reduce((a, l) => a + (Number(l.reqQty) || 0), 0);
+  const totalIssue = lines.reduce((a, l) => a + (Number(l.issueQty) || 0), 0);
+  const totalPacked = lines.reduce((a, l) => a + (Number(forcedVerify ? l.reqQty : l.packed) || 0), 0);
+  const totalRowHtml = lines.length ? `
+    <tr class="slip-total-row">
+      <td colspan="2"><b>TOTAL — ${totalSku} SKU${totalSku === 1 ? '' : 's'}</b></td>
+      <td style="text-align:center;"><b>${totalOrdered.toLocaleString()}</b></td>
+      <td style="text-align:center;"><b>${totalIssue.toLocaleString()}</b></td>
+      <td style="text-align:center;"><b>${totalPacked.toLocaleString()}</b></td>
+    </tr>` : '';
+
   const forcedNote = ''; // ★ 2026-08-24 수정(매니저 판단) — 이 슬립은 결국 고객이 보는 문서라, 내부 스캔 여부 각주는 불필요한 의심만 줌. 하단의 ADMIN OVERRIDE 배지 하나로 감사 목적은 충분히 유지됨.
 
   const issuesHtml = invoiceIssues.length ? `
@@ -6704,6 +6719,7 @@ function printPvSlip(format){
     table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
     table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
     table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .slip-total-row td{border-top:2px solid #111; border-bottom:none; padding-top:10px; background:#f7f7f7;}
     .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
@@ -6725,6 +6741,7 @@ function printPvSlip(format){
     table.slip-table{width:100%; border-collapse:collapse; font-size:8px; margin-top:4px;}
     table.slip-table th{background:#111; color:#fff; padding:2.5px 4px; text-align:left; font-size:6.5px; text-transform:uppercase;}
     table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
+    .slip-total-row td{border-top:1px solid #111; border-bottom:none; padding-top:4px; background:#f7f7f7;}
     .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
@@ -6755,12 +6772,14 @@ function printPvSlip(format){
       <div><b>Slot</b>${slotObj ? slotObj.num : '-'}</div>
     </div>
     <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
-    <tbody>${rowsHtml}</tbody></table>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>${totalRowHtml}</tfoot>
+    </table>
     ${issuesHtml}
     ${forcedNote}
     <div class="verify-badge ${badgeClass}">${badgeText}</div>
     <div class="slip-footer">
-      <span>Verified by: ${worker}</span>
+      <span>Verified by: ${worker}${verified ? ` &nbsp;·&nbsp; ${printedAt}` : ''}</span>
       <span>StyleKorean B2B Fulfillment System</span>
     </div>
   </body></html>`;
