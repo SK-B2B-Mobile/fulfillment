@@ -1261,7 +1261,8 @@ select option:disabled{color:var(--text-dim2);}
     <div class="view" id="v-workers">
       <div class="eyebrow">Manager · Team</div>
       <h2 class="h-page">작업자 관리</h2>
-      <p class="sub">작업자 추가, 이름 수정, 근무 상태 변경. 이 명단이 스캔 화면 로그인에 노출됩니다. (피킹·분류·검수는 고정 역할이 아니라 그때그때 배정되는 작업이라 역할 구분을 없앴습니다)</p>
+      <p class="sub">작업자 추가·이름 수정·재직 상태 변경. 이 명단이 스캔 화면 선택 목록에 노출됩니다. (피킹·분류·검수는 고정 역할이 아니라 그때그때 배정되는 작업이라 역할 구분을 없앴습니다)<br>
+      <span style="color:var(--text-dim2)">Status(실시간)는 사람이 켜고 끄는 값이 아니라, 02/03/04/Pack Verify 화면 중 어디서든 그 이름이 실제로 선택되어 있으면 자동으로 Active, 120초 넘게 신호가 없으면 자동으로 Off로 표시됩니다.</span></p>
 
       <div class="row" style="margin-bottom:12px;">
         <button class="btn btn-primary btn-sm" id="btnAddWorker">+ 작업자 추가</button>
@@ -1273,7 +1274,7 @@ select option:disabled{color:var(--text-dim2);}
             <tr>
               <th style="width:60px">Init.</th>
               <th>Name</th>
-              <th style="width:100px">Status</th>
+              <th style="width:130px" title="지금(120초 이내) 어느 화면에서든 실제로 이 이름으로 작업 중인지 자동 표시됩니다">Status (실시간)</th>
               <th style="width:180px"></th>
             </tr>
           </thead>
@@ -1370,10 +1371,10 @@ select option:disabled{color:var(--text-dim2);}
       <input type="text" id="workerModalName" placeholder="Hyeong Kim">
     </div>
     <div class="form-field">
-      <label>상태</label>
+      <label>재직 상태 <span style="font-weight:400; color:var(--text-dim2); font-size:11px;">(스캔 화면 드롭다운 표시용 — Workers 탭의 실시간 Active/Off와는 다른 값입니다)</span></label>
       <select id="workerModalStatus">
-        <option value="active" selected>Active (Duty)</option>
-        <option value="off">Off Duty</option>
+        <option value="active" selected>재직중</option>
+        <option value="off">휴직 · 퇴사</option>
       </select>
     </div>
     <div class="modal-actions">
@@ -3575,7 +3576,7 @@ function gotoView(vid){
   if(vid==='v-standalone-upload') renderStandaloneOrdersPanel();
   if(vid==='v-standalone-scan'){ populateSsWorkerSelect(); populateSsInvoiceSelect(); }
   if(vid==='v-pack-standalone'){ populatePsvWorkerSelect(); populatePsvInvoiceSelect(); }
-  if(vid==='v-workers') loadBatchWorkersFromServer(); // ★ 2026-07-16: 다른 기기 변경사항까지 최신으로
+  if(vid==='v-workers') { loadBatchWorkersFromServer(); pollActiveWorkersGlobal(); } // ★ 2026-07-16 / 2026-09-01: 명단 + 실시간 근무상태 최신으로
   // ★ 탭을 옮길 때마다 최신 스캔 현황을 즉시 한 번 더 당겨옴 (5초 폴링 사이 텀 줄이기)
   if(vid==='v-slots' || vid==='v-scan' || vid==='v-log') pollScanState();
 }
@@ -3987,7 +3988,7 @@ function onPickWorkerChange(userInitiated){
       localStorage.setItem('sk_scan_worker', wNow);
       const initEl = document.getElementById('workerInitial');
       if(initEl) initEl.textContent = wNow.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
-      pingScanWorkerHeartbeat(); // ★ 2026-08-25 신규 — 다른 기기가 빨리 인지하도록 즉시 알림
+      pingScanWorkerHeartbeat(); pingWorkerPresenceNow(); // ★ 2026-08-25 / 2026-09-01 — 다른 기기 및 Workers 탭에 빨리 반영
     }
   }
   if (state.pickTimerRunning) return;               // 이 기기에서 진행 중이면 그대로
@@ -4125,14 +4126,15 @@ async function startPickTimer(worker, pageRange, force){
     toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
   }
 
-  // ★ 2026-07-16 신규: 피킹 시작하면 그 작업자 Status를 자동으로 Active로 전환.
-  //   Off 상태로 남아있으면 다음번 드롭다운/작업자 관리 화면에서 헷갈리기 때문.
-  const w = state.workers.find(x => x.name === worker);
-  if(w && w.status !== 'active'){
-    w.status = 'active';
-    saveBatchWorkersToServer();
-    if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
-  }
+  // ★ 2026-09-01 삭제(중요 버그 예방) — 예전엔 여기서 피킹 시작 시 w.status를
+  //   자동으로 'active'로 바꿨음. 그런데 이제 w.status는 "재직 상태"(사람이
+  //   수동으로 관리하는 값)로 의미가 확정됐고, Workers 탭의 실시간 Active/Off는
+  //   별도의 하트비트(_globalActiveWorkers)로 계산됨. 이 코드를 그대로 뒀다면
+  //   "재직중"으로 수동 등록해둔 사람이 피킹을 한 번만 시작해도 그 필드는 이미
+  //   'active'라 아무 문제 없어 보이지만, 아래(피킹 종료) 쪽 코드가 종료 시
+  //   'off'로 되돌리는 게 진짜 문제였음 — 재직 상태가 피킹 세션 종료마다
+  //   저절로 "휴직·퇴사"로 바뀌는 사고가 남아있었을 것. 실시간 근무 상태는
+  //   이제 하트비트가 전담하므로, 재직 상태 필드는 여기서 더 이상 건드리지 않음.
   // ★ 2026-07-16: pickWorkerSelect는 피킹 중엔 disabled라 populateWorkerSelect()의
   //   재렌더링을 안 타므로(의도적으로 값이 안 바뀌게 막아둠), 지금 선택된 옵션의
   //   "(Off)" 표시글자를 지우고, 상태점도 글자 없이 바로 초록색으로 바꿔줌.
@@ -4153,7 +4155,7 @@ async function startPickTimer(worker, pageRange, force){
     localStorage.setItem('sk_scan_worker', worker);
     const initEl = document.getElementById('workerInitial');
     if(initEl) initEl.textContent = worker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
-    pingScanWorkerHeartbeat(); // ★ 2026-08-25 신규 — 다른 기기가 빨리 인지하도록 즉시 알림
+    pingScanWorkerHeartbeat(); pingWorkerPresenceNow(); // ★ 2026-08-25 / 2026-09-01 — 다른 기기 및 Workers 탭에 빨리 반영
   }
   pollActivePickers(); // 다른 기기 드롭다운에도 최대한 빨리 반영되도록 즉시 한 번 더
 }
@@ -4184,16 +4186,11 @@ document.getElementById('btnPickEnd').onclick = async () => {
   setPickBanner('done', worker, _erange ? (_erange + '페이지 · ' + _ecnt + '장') : '', realMins + '분');
   toast(`피킹 완료 · ${realMins}분 소요`, 'success');
 
-  // ★ 2026-07-17 신규: "피킹 시작 누른 사람만 Active" 원칙에 맞춰, 종료하면
-  //   자동으로 다시 Off로 되돌림. 예전 테스트로 눌러본 사람이 실제로 일 안 하는데
-  //   계속 Active로 남아 다른 화면(스캔 로그인 목록 등)에 잘못 노출되는 문제 방지.
-  //   다음에 다시 피킹 시작하면 그때 또 자동으로 Active가 되므로 수동 조작 불필요.
-  const w = state.workers.find(x => x.name === worker);
-  if(w && w.status !== 'off'){
-    w.status = 'off';
-    saveBatchWorkersToServer();
-    if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
-  }
+  // ★ 2026-09-01 삭제(중요 버그 예방) — 피킹 종료 시 w.status를 자동으로 'off'로
+  //   되돌리던 코드. 위 피킹 시작 쪽과 같은 이유로 제거함 — 이제 w.status는
+  //   "재직 상태"(사람이 관리)이고, 실시간 근무 상태는 하트비트가 전담함.
+  //   이 코드가 남아있었다면 재직중인 사람이 피킹을 끝낼 때마다 재직 상태가
+  //   "휴직·퇴사"로 저절로 바뀌는 사고로 이어졌을 것.
   const dot = document.getElementById('pickWorkerDot');
   if(dot) dot.style.background = 'var(--text-dim2)';
   const pickSel = document.getElementById('pickWorkerSelect');
@@ -5655,6 +5652,7 @@ document.getElementById('ssWorkerSelect').addEventListener('change', function(){
   ssCurrentWorker = this.value;
   localStorage.setItem('sk_standalone_scan_worker', this.value);
   document.getElementById('ssWorkerManual').style.display = (this.value === '__manual__') ? 'block' : 'none';
+  pingWorkerPresenceNow(); // ★ 2026-09-01 신규 — 바꾸자마자 즉시 알려서 Workers 탭이 빨리 반영되게 함
 });
 
 async function populateSsInvoiceSelect(){
@@ -5868,6 +5866,7 @@ document.getElementById('psvWorkerSelect').addEventListener('change', function()
   psvCurrentWorker = this.value;
   localStorage.setItem('sk_standalone_pack_verify_worker', this.value);
   document.getElementById('psvWorkerManual').style.display = (this.value === '__manual__') ? 'block' : 'none';
+  pingWorkerPresenceNow(); // ★ 2026-09-01 신규 — 바꾸자마자 즉시 알려서 Workers 탭이 빨리 반영되게 함
 });
 
 async function populatePsvInvoiceSelect(){
@@ -6110,6 +6109,7 @@ document.getElementById('pvWorkerSelect').addEventListener('change', function(){
   pvCurrentWorker = this.value;
   localStorage.setItem('sk_pack_verify_worker', this.value);
   document.getElementById('pvWorkerManual').style.display = (this.value === '__manual__') ? 'block' : 'none';
+  pingWorkerPresenceNow(); // ★ 2026-09-01 신규 — 바꾸자마자 즉시 알려서 Workers 탭이 빨리 반영되게 함
 });
 
 async function onPvInvoiceChange(){
@@ -6534,7 +6534,7 @@ function populateWorkerSelect(){
       else localStorage.removeItem('sk_scan_worker');
       document.getElementById('workerInitial').textContent = state.currentWorker
         ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
-      pingScanWorkerHeartbeat(); // ★ 2026-08-25 신규 — 바꾸자마자 즉시 알려서 다른 기기가 빨리 인지하게 함
+      pingScanWorkerHeartbeat(); pingWorkerPresenceNow(); // ★ 2026-08-25 / 2026-09-01 — 다른 기기 및 Workers 탭에 빨리 반영
     };
   }
 
@@ -6626,6 +6626,48 @@ async function pollActiveScanWorkers(){
 setInterval(pingScanWorkerHeartbeat, 30000);
 setInterval(pollActiveScanWorkers, 20000);
 
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-09-01 신규 — Workers 탭 실시간 근무 상태(전역, 배치 무관)
+// 03(state.currentWorker)/04(ssCurrentWorker)/P(pvCurrentWorker)/단독P
+// (psvCurrentWorker) 네 화면의 "지금 선택된 작업자"를 한 번의 요청으로
+// 묶어서 보고함(요청 수를 줄이기 위해 — 기존 getScanAndPickers와 같은 이유).
+// 어느 화면이 지금 보이는 화면인지와 무관하게(탭을 안 보고 있어도) 계속
+// 보고함 — 03의 기존 pingScanWorkerHeartbeat와 동일한 설계 원칙.
+// 임계값(120초)은 서버(WORKER_PRESENCE_THRESHOLD_MS)에서 관리 — 매니저
+// 확인 사항: 화면 잠금·탭 전환 같은 짧은 공백에 Workers 탭이 깜빡이지
+// 않도록, 기기 중복선택 감지용 60초보다 여유를 둔 값.
+// ═══════════════════════════════════════════════════════════
+async function pingWorkerPresenceAll(){
+  if(!GAS_READY) return;
+  try{
+    await gasCall('pingWorkerPresenceBatch', {
+      deviceId: DEVICE_ID,
+      entries: [
+        { screen: 'scan_sort',              worker: state.currentWorker || '' },
+        { screen: 'standalone_scan',        worker: currentSsWorker() || '' },
+        { screen: 'pack_verify',            worker: currentPvWorker() || '' },
+        { screen: 'standalone_pack_verify', worker: currentPsvWorker() || '' },
+      ]
+    });
+  }catch(e){ /* 하트비트 실패는 조용히 무시 — 다음 주기에 다시 시도됨 */ }
+}
+// ★ 이름을 바꾼 즉시 한 번만 빠르게 보고(다음 30초를 기다리지 않고) — 화면
+// 하나만 바뀌어도 4개를 통째로 다시 보내되, 부담이 크지 않아 단순하게 처리
+function pingWorkerPresenceNow(){ pingWorkerPresenceAll(); }
+
+let _globalActiveWorkers = {};
+async function pollActiveWorkersGlobal(){
+  if(!GAS_READY) return;
+  try{
+    const res = await gasQuery('getActiveWorkersGlobal', {});
+    if(!res || !res.ok) return;
+    _globalActiveWorkers = res.active || {};
+    if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
+  }catch(e){ /* 조용히 무시 */ }
+}
+setInterval(pingWorkerPresenceAll, 30000);
+setInterval(pollActiveWorkersGlobal, 20000);
+
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
 function isWorkerBusyElsewhere(name){
   const devices = _activeScanWorkers[name] || [];
@@ -6650,10 +6692,15 @@ function renderWorkers(){
   }
   el.innerHTML = state.workers.map(w => {
     const initial = w.name.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase();
+    // ★ 2026-09-01 신규 — STATUS 컬럼을 매니저가 수동으로 켜고 끄는 값(w.status)
+    //   대신, 실제로 지금(120초 이내) 어느 화면에서든 이 이름으로 스캔·검수 중인지를
+    //   보여주는 실시간 값(_globalActiveWorkers)으로 바꿈. w.status(재직 여부)는
+    //   삭제하지 않고 edit 모달에서만 별도로 관리(아래 workerModalStatus 참고).
+    const isWorking = !!_globalActiveWorkers[w.name];
     return `<tr>
       <td><div class="worker-avatar" style="width:28px; height:28px; font-size:9px">${initial}</div></td>
       <td><b>${w.name}</b></td>
-      <td>${w.status==='active' ? '<span style="color:var(--green)">● Active</span>' : '<span style="color:var(--text-dim2)">○ Off</span>'}</td>
+      <td>${isWorking ? '<span style="color:var(--green)">● Active</span>' : '<span style="color:var(--text-dim2)">○ Off</span>'}</td>
       <td>
         <button class="mini-btn" data-edit="${w.id}">edit</button>
         <button class="mini-btn danger" data-del="${w.id}">delete</button>
