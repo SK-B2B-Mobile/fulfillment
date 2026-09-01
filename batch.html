@@ -1088,7 +1088,14 @@ select option:disabled{color:var(--text-dim2);}
           <input id="ssScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('ssScanInput', submitSsScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
-        <div class="pv-msg" id="ssMsg"></div>
+        <div class="pv-msg" id="ssMsg">
+          <div class="pv-lastscan-icon" id="ssMsgIcon"></div>
+          <div class="pv-lastscan-body">
+            <div class="pv-lastscan-title" id="ssMsgTitle"></div>
+            <div class="pv-lastscan-sub" id="ssMsgSub"></div>
+          </div>
+          <div class="pv-lastscan-qty" id="ssMsgQty"></div>
+        </div>
         <div class="pv-progress">
           <span>진행률</span>
           <span class="n" id="ssProgressText">0 / 0 pcs</span>
@@ -5808,12 +5815,30 @@ async function submitSsScan(){
     return;
   }
   if(res.result === 'pass'){
-    showSsMsg(`✓ ${res.name || res.sku || barcode} ${(res.filled||0).toLocaleString()}개 확인됨`, 'ok');
+    // ★ 2026-09-01 신규 — P/PSV(Pack Verify)와 동일한 이유·동일한 방식.
+    //   서버 최신 상태를 먼저 받아온 뒤, 방금 스캔한 상품의 누적/필요수량을
+    //   찾아서 카드에 표시. 100개 넘는 오더도 목록을 스크롤할 필요 없음.
+    await refreshSsState();
+    const key = normBarcode(barcode);
+    const line = (_ssState && _ssState.lines || []).find(l => normBarcode(l.barcode) === key);
+    showSsMsg({
+      kind: 'ok',
+      icon: (line && line.complete) ? '✅' : '✓',
+      title: res.name || res.sku || barcode,
+      sub: (res.sku ? `SKU ${res.sku}` : '') + ((line && line.complete) ? ' · 이 상품 완료' : ' · 확인됨'),
+      qty: line ? `${line.packed}/${line.effectiveReq}` : `+${(res.filled||0).toLocaleString()}`,
+    });
+    input.focus();
+    return;
   } else if(res.result === 'wrong'){
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
-    showSsMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → [${owners}]`, 'bad');
+    showSsMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
   } else if(res.result === 'over'){
-    showSsMsg(res.note === 'excluded' ? '⚠ 이슈 처리되어 필요수량 없음' : '⚠ 이미 확인 완료 (중복 스캔)', 'bad');
+    showSsMsg({
+      kind:'bad', icon:'⚠',
+      title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
+      sub: '중복 스캔입니다',
+    });
   }
   await refreshSsState();
   input.focus();
@@ -5836,13 +5861,24 @@ document.getElementById('ssScanInput').addEventListener('input', function(){
     if(el.value.trim() === v && v.length >= 10) submitSsScan();
   }, 300);
 });
-function showSsMsg(msg, kind){
+// ★ 2026-09-01 재설계 — showPvMsg/showPsvMsg와 동일한 이유·동일한 구조로 변경.
+function showSsMsg(msgOrOpts, kind){
   const el = document.getElementById('ssMsg');
-  el.textContent = msg;
-  el.className = 'pv-msg ' + kind;
-  el.style.display = 'block';
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.className = 'pv-msg'; el.style.display = 'none'; }, 4000);
+  let icon, title, sub, qty, k;
+  if(typeof msgOrOpts === 'string'){
+    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind;
+  } else {
+    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind;
+  }
+  document.getElementById('ssMsgIcon').textContent = icon;
+  document.getElementById('ssMsgTitle').textContent = title;
+  document.getElementById('ssMsgSub').textContent = sub;
+  document.getElementById('ssMsgQty').textContent = qty;
+  el.className = 'pv-msg pv-lastscan ' + k;
+  el.style.display = 'flex';
+  el.classList.remove('pulse');
+  void el.offsetWidth;
+  el.classList.add('pulse');
 }
 
 async function completeSsInspection(){
