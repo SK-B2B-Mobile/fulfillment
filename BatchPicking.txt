@@ -1404,13 +1404,13 @@ function getInvoiceIssueQtyCached_(batchId, invoice) {
   }
   const il = issuelogSheet_();
   const ilLast = il.getLastRow();
-  const issues = []; // { barcode, qty }
+  const issues = []; // { barcode, qty, reason } — ★ 2026-09-01: reason 추가(syncInspectionFromPicking_도 재사용)
   if (ilLast >= 2) {
     il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       if (String(r[7]) !== String(invoice)) return;
       if (r[12] === 'undone') return;
-      issues.push({ barcode: String(r[4]), qty: Number(r[10]) || 0 });
+      issues.push({ barcode: String(r[4]), qty: Number(r[10]) || 0, reason: r[9] || 'ETC' });
     });
   }
   try {
@@ -1930,19 +1930,19 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force) {
   if (totalQty === null) return; // 이 배치에 없는 인보이스면 아무것도 안 함
 
   // 2) 활성 이슈 수량 합계 + 이슈 목록 (saveInspection의 issues 형식으로 변환)
-  const il = issuelogSheet_();
-  const ilLast = il.getLastRow();
+  // ★ 2026-09-01 수정(속도) — "04에서 1차 검수 완료 버튼을 눌렀는데 처리 중...이
+  //   너무 오래 걸린다"는 현장 지적 확인 후 발견 — 이 함수가 IssueLog 전체를
+  //   매번 직접 읽고 있었음. logPackScan/getPackScanState용으로 이미 만들어둔
+  //   20초 캐시(getInvoiceIssueQtyCached_)를 그대로 재사용 — 보통 완료 버튼은
+  //   마지막 스캔 직후에 누르므로, 방금 스캔 때 이미 채워진 캐시를 그대로 써서
+  //   이 무거운 읽기를 대부분 건너뛰게 됨.
+  const invoiceIssues2 = getInvoiceIssueQtyCached_(batchId, invoice);
   let issueQty = 0;
   const issues = [];
-  if (ilLast >= 2) {
-    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-      if (String(r[0]) !== String(batchId)) return;
-      if (String(r[7]) !== String(invoice)) return;
-      if (r[12] === 'undone') return;
-      issueQty += Number(r[10]) || 0;
-      issues.push({ type: r[9] || 'ETC', barcode: r[4] || '', qty: Number(r[10]) || 0 });
-    });
-  }
+  invoiceIssues2.forEach(iss => {
+    issueQty += iss.qty;
+    issues.push({ type: iss.reason || 'ETC', barcode: iss.barcode || '', qty: iss.qty });
+  });
   const effectiveTotal = Math.max(0, totalQty - issueQty);
 
   // 3) 실제 스캔 통과 수량 합계 (undone 제외, pass만) — 초과분도 그대로 인정
@@ -2164,6 +2164,44 @@ function logIssue(data) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/* ===================== getInvoiceIssues (★ 2026-09-01 신규) =====================
+ * 목적: 04 단독 1차 검수에서 "잘못 등록한 이슈를 취소/수정할 방법이 없다"는
+ * 현장 지적 해결. 총량피킹 쪽엔 이미 소급 이슈 등록/취소 모달(retroIssue)이
+ * 있지만, 단독오더 화면(04)엔 이슈를 한 번 등록하고 나면 그걸 다시 보거나
+ * 취소할 방법이 전혀 없었음(그 상품이 "완료"로 바뀌면 이슈 버튼 자체가
+ * 화면에서 사라져버림). 이 함수는 이 인보이스의 현재 활성 이슈 전체를
+ * issueId 포함 그대로 반환해서, 화면에서 목록으로 보여주고 각각 취소(undoIssue)
+ * 버튼을 붙일 수 있게 함.
+ * 입력: batchId, invoice / 출력: { ok, issues:[{issueId,time,worker,barcode,sku,name,reason,qty,note}] }
+ * ================================================================================ */
+function getInvoiceIssues(batchId, invoice) {
+  try {
+    if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
+    const issues = [];
+    if (ilLast >= 2) {
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[7]) !== String(invoice)) return;
+        if (r[12] === 'undone') return;
+        const ts = r[2];
+        const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
+          ? Utilities.formatDate(ts, batchTz_(), 'MM-dd HH:mm') : String(ts || '');
+        issues.push({
+          issueId: r[1], time: timeStr, worker: r[3], barcode: String(r[4] || ''),
+          sku: String(r[5] || ''), name: String(r[6] || ''), reason: r[9] || 'ETC',
+          qty: Number(r[10]) || 0, note: r[11] || '',
+        });
+      });
+    }
+    issues.sort((a, b) => String(b.time).localeCompare(String(a.time)));
+    return { ok: true, issues: issues };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
 
