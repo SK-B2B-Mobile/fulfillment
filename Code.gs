@@ -259,6 +259,10 @@ function doGet(e) {
   if (op === 'getActiveScanWorkers') {
     return json_(getActiveScanWorkers({ batchId: (e.parameter||{}).batchId||'' }));
   }
+  // ★ 2026-09-01 신규 — Workers 탭 실시간 근무 상태(배치 무관, 전역)
+  if (op === 'getActiveWorkersGlobal') {
+    return json_(getActiveWorkersGlobal());
+  }
   if (op === 'getScanState') {
     return json_(getScanState((e.parameter || {}).batchId || ''));
   }
@@ -480,6 +484,8 @@ function doPost(e) {
   if (op === 'undoPackScan')  return json_(undoPackScan(data));
   // ★ 2026-08-25 신규 — Scan & Sort 작업자 선택 하트비트(다른 기기 중복 선택 방지)
   if (op === 'pingScanWorker') return json_(pingScanWorker(data));
+  // ★ 2026-09-01 신규 — Workers 탭 실시간 근무 상태(배치 무관, 전역) 하트비트
+  if (op === 'pingWorkerPresenceBatch') return json_(pingWorkerPresenceBatch(data));
   // ★ 2026-08-31 신규 — 단독 오더 등록/삭제
   if (op === 'addStandaloneOrder')    return json_(addStandaloneOrder(data));
   if (op === 'removeStandaloneOrder') return json_(removeStandaloneOrder(data));
