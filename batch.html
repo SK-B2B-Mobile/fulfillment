@@ -395,11 +395,19 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 /* 내용이 똑같아도(예: 같은 상품 연속 스캔) "방금 갱신됐다"는 걸 알 수 있게 매번 살짝 튀는 애니메이션 */
 .pv-msg.pv-lastscan.pulse{animation: pvLastScanPulse 0.35s ease;}
 @keyframes pvLastScanPulse{ 0%{ transform:scale(1.025); box-shadow:0 0 0 3px rgba(139,92,246,0.35);} 100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(139,92,246,0);} }
-.pv-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02);}
+.pv-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02); gap:10px;}
 .pv-line.done{border-color:rgba(139,92,246,0.5); background:var(--purple-bg);}
-.pv-line-name{font-size:14px; font-weight:700;}
-.pv-line-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
-.pv-line-qty{font-family:var(--mono); font-size:16px; font-weight:800; white-space:nowrap;}
+/* ★ 2026-09-01 버그 수정 — "오른쪽 수량이 잘려서 손가락으로 밀어야 보인다"는
+   지적의 실제 원인. .pv-line은 flex 컨테이너인데 상품명+SKU를 감싸는 왼쪽 칸에
+   min-width:0이 없어서, 상품명이 길면(흔함) 그 칸이 절대 안 줄어들고 오른쪽
+   수량 배지를 화면 밖으로 밀어냈음(고전적인 flexbox 오버플로 버그). 왼쪽 칸엔
+   flex:1+min-width:0을 주고 텍스트는 한 줄 말줄임(…) 처리해서, 오른쪽 수량·
+   완료아이콘·이슈버튼은 항상 화면 안에 그대로 보이게 함.*/
+.pv-line-info{flex:1; min-width:0; overflow:hidden;}
+.pv-line-name{font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-line-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-line-qty{font-family:var(--mono); font-size:16px; font-weight:800; white-space:nowrap; flex-shrink:0;}
+.pv-line-actions{display:flex; align-items:center; gap:8px; flex-shrink:0;}
 .pv-line.done .pv-line-qty{color:var(--purple);}
 .pv-flash{position:fixed; inset:0; pointer-events:none; z-index:9999; opacity:0; transition:opacity 0.15s;}
 .pv-flash.show-ok{background:rgba(139,92,246,0.35); opacity:1;}
@@ -5789,11 +5797,11 @@ function renderSsBody(){
 
   document.getElementById('ssLines').innerHTML = (st.lines || []).map(l => `
     <div class="pv-line ${l.complete ? 'done' : ''}">
-      <div>
+      <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
         ${!l.complete ? `<button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이 상품에 문제가 있으면 이슈 등록">⚠ 이슈</button>` : ''}
@@ -5877,19 +5885,24 @@ async function doSsScanOne(barcode){
     return;
   }
   if(res.result === 'pass'){
-    // ★ P/PSV(Pack Verify)와 동일한 이유·동일한 방식. 서버 최신 상태를 먼저
-    //   받아온 뒤, 방금 스캔한 상품의 누적/필요수량을 찾아서 카드에 표시.
-    //   100개 넘는 오더도 목록을 스크롤할 필요 없음.
-    await refreshSsState();
-    const key = normBarcode(barcode);
-    const line = (_ssState && _ssState.lines || []).find(l => normBarcode(l.barcode) === key);
+    // ★ 2026-09-01 재수정(속도 핵심) — 예전엔 카드를 그리기 전에 refreshSsState()를
+    //   한 번 더 기다렸음(=서버 왕복 2번: logPackScan + getPackScanState). 그런데
+    //   logPackScan 응답 자체에 이미 packed(누적)/required(필요수량)가 들어있어서
+    //   그걸 기다릴 필요가 전혀 없었음 — 이게 "바코드는 빨리 사라지는데 제품 정보는
+    //   늦게 뜬다"는 현장 지적의 진짜 원인. 이제 응답 하나로 카드를 즉시 그리고,
+    //   목록/SKU진행률 갱신(_ssState)은 화면에 카드가 이미 뜬 뒤 백그라운드에서
+    //   처리함(await 안 함 — 다음 스캔이 이걸 기다릴 필요 없음).
+    const required = Number(res.required) || 0;
+    const packed = Number(res.packed) || 0;
+    const complete = required > 0 && packed >= required;
     showSsMsg({
       kind: 'ok',
-      icon: (line && line.complete) ? '✅' : '✓',
+      icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku}` : '') + ((line && line.complete) ? ' · 이 상품 완료' : ' · 확인됨'),
-      qty: line ? `${line.packed}/${line.effectiveReq}` : `+${(res.filled||0).toLocaleString()}`,
+      sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      qty: `${packed}/${required}`,
     });
+    refreshSsState(); // 백그라운드 — 카드 표시를 기다리게 하지 않음
     return;
   } else if(res.result === 'wrong'){
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
@@ -6070,11 +6083,11 @@ function renderPsvBody(){
 
   const linesHtml = (st.lines || []).map(l => `
     <div class="pv-line ${l.complete ? 'done' : ''}">
-      <div>
+      <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
       </div>
@@ -6131,17 +6144,19 @@ async function doPsvScanOne(barcode){
     return;
   }
   if(res.result === 'pass'){
-    // ★ 목록을 스크롤하지 않아도 이 상품의 누적 진행량을 바로 볼 수 있게 함.
-    await refreshPsvState();
-    const key = normBarcode(barcode);
-    const line = (_psvState && _psvState.lines || []).find(l => normBarcode(l.barcode) === key);
+    // ★ 2026-09-01 재수정(속도 핵심) — doSsScanOne과 동일한 이유. logPackScan
+    //   응답에 이미 packed/required가 있으므로 추가 서버 왕복 없이 즉시 표시.
+    const required = Number(res.required) || 0;
+    const packed = Number(res.packed) || 0;
+    const complete = required > 0 && packed >= required;
     showPsvMsg({
       kind: 'ok',
-      icon: (line && line.complete) ? '✅' : '✓',
+      icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku}` : '') + ((line && line.complete) ? ' · 이 상품 완료' : ' · 확인됨'),
-      qty: line ? `${line.packed}/${line.effectiveReq}` : `+${(res.filled||0).toLocaleString()}`,
+      sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      qty: `${packed}/${required}`,
     });
+    refreshPsvState(); // 백그라운드
     return;
   } else if(res.result === 'wrong'){
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
@@ -6349,11 +6364,11 @@ function renderPvBody(){
 
   const linesHtml = (st.lines || []).map(l => `
     <div class="pv-line ${l.complete ? 'done' : ''}">
-      <div>
+      <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
       </div>
@@ -6402,11 +6417,15 @@ function flashScannedIntoInput(inputEl, code){
   const wrap = inputEl.closest('.pv-scan-input-wrap');
   if(wrap) wrap.classList.add('pv-flash-capture');
   clearTimeout(inputEl._phTimer);
+  // ★ 2026-09-01 조정(매니저 요청) — 700ms → 1100ms. logPackScan 응답 하나로
+  //   바로 카드를 그리도록 고쳐서(아래 doPvScanOne 등) 이제 제품 정보가 훨씬
+  //   빨리 뜨지만, 그래도 이 placeholder가 너무 빨리 사라지면 "인식됨" 표시와
+  //   실제 카드 등장 사이에 눈에 보이는 공백이 생길 수 있어 살짝 더 여유를 둠.
   inputEl._phTimer = setTimeout(() => {
     inputEl.placeholder = original;
     inputEl.classList.remove('pv-input-flash');
     if(wrap) wrap.classList.remove('pv-flash-capture');
-  }, 700);
+  }, 1100);
 }
 function submitPvScan(){
   const input = document.getElementById('pvScanInput');
@@ -6451,20 +6470,22 @@ async function doPvScanOne(barcode){
   }
   if(res.result === 'pass'){
     flashPv('ok'); beepPv(true);
-    // ★ 서버 최신 상태를 먼저 받아온 뒤(누적 수량 정확히 반영하기 위해), 방금
-    //   스캔한 상품의 "지금까지 누적/필요수량"을 찾아서 카드에 표시. 목록을
-    //   스크롤해서 찾지 않아도 이 상품이 몇 개 남았는지 바로 보임.
-    await refreshPvState();
-    const key = normBarcode(barcode);
-    const line = (_pvState && _pvState.lines || []).find(l => normBarcode(l.barcode) === key);
+    // ★ 2026-09-01 재수정(속도 핵심) — doSsScanOne과 동일한 이유. logPackScan
+    //   응답에 이미 packed/required가 있으므로 추가 서버 왕복 없이 즉시 표시
+    //   (예전엔 refreshPvState() 완료를 기다렸다가 그려서, 바코드칸 표시는
+    //   빨리 사라지는데 정작 제품 정보는 늦게 뜨는 어긋남이 있었음).
+    const required = Number(res.required) || 0;
+    const packed = Number(res.packed) || 0;
+    const complete = required > 0 && packed >= required;
     showPvMsg({
       kind: 'ok',
-      icon: (line && line.complete) ? '✅' : '✓',
+      icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku}` : '') + ((line && line.complete) ? ' · 이 상품 완료' : ' · 확인됨'),
-      qty: line ? `${line.packed}/${line.effectiveReq}` : `+${(res.filled||0).toLocaleString()}`,
+      sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      qty: `${packed}/${required}`,
     });
-    return; // refreshPvState는 이미 위에서 실행했으므로 아래로 내려가지 않음
+    refreshPvState(); // 백그라운드 — 목록/진행률만 뒤이어 갱신, 카드 표시를 기다리게 하지 않음
+    return;
   } else if(res.result === 'wrong'){
     flashPv('bad'); beepPv(false);
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
