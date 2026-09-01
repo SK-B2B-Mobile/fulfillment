@@ -1503,7 +1503,7 @@ function logPackScan(data) {
     const sku = matchLines.length === 1 ? matchLines[0].sku : matchLines.map(l => l.sku).join('+');
     const name = matchLines[0].name;
 
-    // ★ 핵심 변경 — 남은 필요수량을 전부 채움. 이미 다 채워진 상태에서 또
+    // ★ 핵심 변경(2026-08-24) — 남은 필요수량을 전부 채움. 이미 다 채워진 상태에서 또
     //   스캔하면(중복 스캔) 채울 게 없으므로 'over'로 판정하고 기록만 남김.
     //   ★ 추가 보완 — "이미 다 채워서 남은 게 없는 경우"와 "애초에 이슈
     //   처리(EXP/OOS 등)로 필요수량 자체가 0이 된 경우"는 원인이 다르므로
@@ -1525,7 +1525,22 @@ function logPackScan(data) {
       };
     }
 
-    const fillQty = remaining; // 한 번 스캔에 남은 수량 전부
+    // ★ 2026-09-01 신규(매니저 요청) — 04 단독 1차 검수는 스캔 즉시 자동으로
+    //   필요수량 전체를 채우면 안 됨(실물 수량을 처음 세는 단계라, 자동채움이면
+    //   실제로 부족해도 시스템은 "완료"로 착각해서 검수 기능 자체가 무의미해짐).
+    //   그래서 04는 클라이언트가 작업자가 직접 입력한 실제 개수(data.qty)를
+    //   같이 보내고, 서버는 그 값을 "남은 필요수량 한도 안에서"만 채움. P/단독P
+    //   (2차 검증)는 이 필드를 전혀 안 보내므로(undefined) 기존 그대로 전량 자동
+    //   채움 — 이 분기는 04에만 영향을 주고 P/단독P의 기존 동작은 절대 안 바뀜.
+    const requestedQty = (data.qty !== undefined && data.qty !== null && data.qty !== '')
+      ? Math.max(0, Math.floor(Number(data.qty)) || 0)
+      : null;
+    const fillQty = (requestedQty !== null) ? Math.min(requestedQty, remaining) : remaining;
+    if (fillQty <= 0) {
+      // 작업자가 0을 입력한 경우(사실상 "확인했지만 이 스캔으로는 채울 게 없음") —
+      // 기록을 남기되 아무것도 채우지 않음(이슈 등록을 유도하는 게 맞는 케이스).
+      return { ok: true, result: 'over', note: 'zero', packScanId: null, sku: sku, name: name, filled: 0, packed: already, required: effectiveReq };
+    }
     const packScanId = Utilities.getUuid();
     const newRow2 = pl.getLastRow() + 1;
     ensureSheetRoom_(pl, newRow2);
