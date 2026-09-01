@@ -1183,6 +1183,20 @@ function setPackingMoved(data) {
           }
         }
         bc.getRange(row, 13).setValue(batchNow_());
+        // ★ 2026-08-31 긴급 수정(2차) — 단독오더는 04("1차 검수 완료")에서 스캔이
+        //   100% 안 끝난 채로도 완료 표시가 눌릴 수 있음(그땐 강제 조건이 없음 —
+        //   'verified' 단계만 완료를 검증함). 그래서 "04에서는 일부만 스캔 →
+        //   여기 P Pack Verify에서 나머지를 마저 스캔해 최종 확정"하는 흐름이면,
+        //   04 시점의 동기화 시도는 isComplete=false라 아무것도 못 쓰고, 그 뒤로는
+        //   'taken' 단계에만 동기화 호출이 있고 'verified' 단계엔 호출 자체가
+        //   없어서 영원히 Jobs.Inspection이 안 갱신되는 사고로 이어졌음(실제 발견:
+        //   IN00471224 — batch.html에선 [검증완료]인데 sales.html/index.html은
+        //   계속 "Not Inspected"). 여기서도 한 번 더 동기화를 시도해서, 04에서
+        //   놓친 경우를 이 시점에 확실히 잡아줌(이미 04에서 반영됐으면 currentVal
+        //   비교 로직 덕분에 중복 저장 없이 조용히 넘어감).
+        if (batchId === STANDALONE_BATCH_ID) {
+          try { syncInspectionFromPicking_(batchId, invoice, data.worker || ''); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+        }
       }
       found = true;
       break;
