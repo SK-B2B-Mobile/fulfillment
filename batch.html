@@ -5879,7 +5879,15 @@ async function processSsScanQueue(){
 async function doSsScanOne(barcode){
   const worker = currentSsWorker();
   if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
-  const res = await gasCall('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode });
+  // ★ 2026-09-01 긴급 수정 — "TypeError: Failed to fetch" 오류로 스캔 자체가
+  //   먹통이 되는 사고 발견. 원인: 조회(읽기) 요청엔 fetch 실패 시 재시도+JSONP
+  //   우회가 이미 있었는데(gasQuery), 스캔 저장 같은 쓰기 요청(gasCall)엔 그
+  //   방어가 전혀 없어서 창고 와이파이가 순간적으로만 끊겨도 그 스캔이 그대로
+  //   실패 처리됐음. 재시도해도 안전한 이유: logPackScan은 서버가 "이미 그
+  //   바코드로 필요수량을 다 채웠으면 무조건 over(중복)로만 처리"하는 구조라,
+  //   첫 시도가 실제로는 서버에 반영됐는데 응답만 못 받은 경우라도 재시도가
+  //   또 채워버리는(이중 반영) 사고로 이어지지 않음 — 재시도가 항상 안전함.
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode });
   if(!res.ok){
     showSsMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
     return;
@@ -6138,7 +6146,9 @@ async function processPsvScanQueue(){
 async function doPsvScanOne(barcode){
   const worker = currentPsvWorker();
   if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
-  const res = await gasCall('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode });
+  // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
+  //   안전하게 걸러내므로 재시도가 항상 안전함).
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode });
   if(!res.ok){
     showPsvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
     return;
@@ -6462,7 +6472,10 @@ async function doPvScanOne(barcode){
   // ★ 2026-08-24 재설계 — qty를 더 이상 클라이언트가 보내지 않음. 서버가
   //   "이 바코드에 남은 필요수량 전체"를 알아서 계산해서 한 번에 채움
   //   (스캔 1번 = 그 상품 전체 수량 확인, 실제 물류 현장 표준 방식).
-  const res = await gasCall('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode });
+  // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
+  //   안전하게 걸러내므로 재시도가 항상 안전함). "TypeError: Failed to fetch"로
+  //   스캔이 먹통되던 사고의 핵심 수정.
+  const res = await gasCallWithRetry('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode });
   if(!res.ok){
     flashPv('bad'); beepPv(false);
     showPvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
