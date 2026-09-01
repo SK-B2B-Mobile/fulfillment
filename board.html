@@ -627,6 +627,27 @@ async function togglePackingMoved(invoice){
     res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
   }
   if(!res.ok){
+    // ★ 2026-09-01 긴급 수정 — "블루로 바뀌었다가 잠시 후 다시 핑크로 돌아간다"는
+    //   현장 사고의 진짜 원인. gasCall(POST)이 실패로 보여도(TypeError: Failed to
+    //   fetch 등, CORS/네트워크 문제로 응답만 못 받은 경우 포함) 실제로는 서버에
+    //   이미 저장이 끝났을 수 있음 — 이 경우 저장은 성공했는데 클라이언트만 실패로
+    //   착각해서 화면을 되돌리면, 다음 폴링에서 서버의 진짜 값(taken)이 다시
+    //   와도 이미 되돌려진 화면과 안 맞아 깜빡이거나(이번 경우처럼) 신뢰가 깨짐.
+    //   그래서 진짜로 되돌리기 전에, 조회(GET — JSONP 우회가 이미 있어 POST보다
+    //   훨씬 안정적)로 서버의 실제 현재 상태를 한 번 더 직접 확인함. 이미
+    //   반영돼 있으면 절대 되돌리지 않고 성공으로 인정하고 끝냄.
+    let actuallySucceeded = false;
+    try{
+      const check = await gasQuery('getSlotProgress', { batchId: currentBatchId });
+      const checkSlot = check && check.ok && (check.slots || []).find(s => s.invoice === invoice);
+      const checkStage = checkSlot ? (checkSlot.takenOut ? 'taken' : checkSlot.movedToPacking ? 'moved' : 'none') : null;
+      actuallySucceeded = (checkStage === next);
+    }catch(e){ /* 확인 자체도 실패하면 안전하게 아래에서 되돌림 */ }
+    if(actuallySucceeded){
+      console.warn('⚠ setPackingMoved 응답은 실패였지만 서버 확인 결과 이미 정상 반영되어 있어 되돌리지 않음:', invoice);
+      // _pendingPackMoves는 그대로 둠 — 다음 정상 폴링이 확인하고 스스로 정리함
+      return;
+    }
     console.warn('⚠ setPackingMoved 재시도 후에도 실패:', invoice, res.error);
     delete _pendingPackMoves[invoice]; // 실패 시 보류 해제하고 원상복구
     slot.movedToPacking = prevMoved;
