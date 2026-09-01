@@ -723,6 +723,117 @@ function getActiveScanWorkers(data) {
   }
 }
 
+/* ===================== 작업자 실시간 근무 상태 (★ 2026-09-01 신규) =====================
+ * ★★★ Workers 탭의 Active/Off를 "매니저가 수동으로 켜고 끄는 값"에서 "지금 실제로
+ * 그 이름으로 작업 중인지"로 바꾸기 위한 전역(배치 무관) 하트비트 ★★★
+ *
+ * 기존 ScanWorkerHeartbeat(pingScanWorker/getActiveScanWorkers)와 이 기능이 다른 점:
+ *  - ScanWorkerHeartbeat: batchId로 스코프됨(03 Scan & Sort에서 "같은 배치를 다른
+ *    기기가 동시에 쓰는지" 충돌 감지가 목적). 04/P/단독P처럼 배치가 없거나(단독은
+ *    STANDALONE_ORDERS 고정) 서로 다른 배치를 오가는 화면들을 하나로 묶어서
+ *    "이 사람이 지금 시스템 어딘가에서 일하고 있는지"를 보려면 배치 스코프가 방해가 됨.
+ *  - WorkerPresence(이 블록): 배치와 완전히 무관. "기기+화면" 단위로 하트비트를
+ *    남기고, Workers 탭은 이름 기준으로 전체를 합쳐서 "지금 어디서든 활성인지"만 봄.
+ *
+ * 임계값 120초(★ 매니저 확인/확정) — 03의 60초(기기 중복선택 감지 전용, 짧아도
+ * 무방)와 목적이 다름. 이건 사람이 눈으로 보는 상태 표시라, 화면 잠금·탭 전환 같은
+ * 짧은 하트비트 공백에 화면이 깜빡이지 않도록 여유를 더 둠.
+ * ================================================================================ */
+const WORKER_PRESENCE_THRESHOLD_MS = 120000; // ★ 2026-09-01: 매니저 확정값(120초)
+
+function workerPresenceSheet_() { return ensureBatchSheet_('WorkerPresence', ['DeviceId','Screen','Worker','LastSeen']); }
+
+/* pingWorkerPresenceBatch — 기기 하나가 여러 화면(03/04/P/단독P)의 현재 선택
+ * 작업자를 한 번의 요청으로 같이 보고함(요청 수를 줄이기 위해 배열로 묶음 —
+ * getScanAndPickers/getSalesOverviewAndToday와 같은 이유).
+ * 입력: { deviceId, entries:[{screen, worker}, ...] } */
+function pingWorkerPresenceBatch(data) {
+  // ★ pingScanWorker와 동일한 이유 — 이 하트비트가 진짜 중요한 작업(스캔/검수
+  //   확정 등)의 락 대기시간을 늘리면 안 되므로, 락을 짧게(1초)만 시도하고
+  //   못 잡으면 조용히 포기함(다음 30초 주기에 다시 시도되므로 한 번 놓쳐도 무해).
+  const lock = LockService.getDocumentLock();
+  const gotLock = lock.tryLock(1000);
+  if (!gotLock) return { ok: true, skipped: true };
+  try {
+    const deviceId = String((data && data.deviceId) || '').trim();
+    const entries = Array.isArray(data && data.entries) ? data.entries : [];
+    if (!deviceId || !entries.length) return { ok: true };
+
+    const sh = workerPresenceSheet_();
+    const last = sh.getLastRow();
+    const now = batchNow_();
+
+    // (deviceId|screen) → 행번호로 미리 인덱싱해서, 화면마다 시트를 다시 훑지 않게 함
+    const rowIndex = {};
+    if (last >= 2) {
+      sh.getRange(2, 1, last - 1, 2).getValues().forEach((r, i) => {
+        rowIndex[String(r[0]) + '|' + String(r[1])] = i + 2;
+      });
+    }
+
+    const toAppend = [];
+    entries.forEach(e => {
+      const screen = String((e && e.screen) || '').trim();
+      if (!screen) return;
+      const worker = String((e && e.worker) || '').trim();
+      const key = deviceId + '|' + screen;
+      const rowNum = rowIndex[key];
+      if (rowNum) {
+        // worker가 빈 문자열이면(선택 해제) LastSeen도 같이 비워서 즉시 비활성 처리
+        sh.getRange(rowNum, 3, 1, 2).setValues([[worker, worker ? now : '']]);
+      } else if (worker) {
+        toAppend.push([deviceId, screen, worker, now]);
+      }
+    });
+    if (toAppend.length) {
+      const startRow = sh.getLastRow() + 1;
+      ensureSheetRoom_(sh, startRow + toAppend.length - 1);
+      sh.getRange(startRow, 1, toAppend.length, 4).setValues(toAppend);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* getActiveWorkersGlobal — Workers 탭 전용 조회. 배치·화면과 무관하게, 지금
+ * 120초 이내에 "이 이름으로 일하고 있다"는 신호가 있었던 사람 전체를 반환.
+ * 반환: { active: { "작업자명": true, ... } } */
+function getActiveWorkersGlobal() {
+  try {
+    // 여러 기기가 Workers 탭을 동시에 열어도 서버 부담이 적도록 10초 캐시
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = 'activeWorkersGlobal_v1';
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
+    const sh = workerPresenceSheet_();
+    const last = sh.getLastRow();
+    const active = {};
+    if (last >= 2) {
+      const rows = sh.getRange(2, 1, last - 1, 4).getValues();
+      const nowMs = Date.now();
+      rows.forEach(r => {
+        const worker = String(r[2] || '').trim();
+        if (!worker) return;
+        const ts = parseBatchTs_(r[3]);
+        if (isNaN(ts) || (nowMs - ts) > WORKER_PRESENCE_THRESHOLD_MS) return;
+        active[worker] = true;
+      });
+    }
+    const _result = { ok: true, active: active };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 10);
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 // ★ 2026-08-24 재설계(매니저 요청) — 예전엔 날짜 뒤에 무작위 6자리(예: D03E5E)를
 // 붙여서, 같은 날 배치가 여러 개 생겨도 작업자가 몇 번째·몇 시 배치인지 전혀
 // 구분할 수 없었음. 이제 그 자리에 "생성 시각(HHmm) + 오늘 몇 번째인지(알파벳)"를
