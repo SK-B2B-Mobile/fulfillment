@@ -486,6 +486,8 @@ function doPost(e) {
   if (op === 'setPackingMoved') return json_(setPackingMoved(data)); // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용)
   // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 스캔 기록/취소
   if (op === 'logPackScan')   return json_(logPackScan(data));
+  // ★ 2026-09-01 신규 — 관리자 강제확정 시 남은 수량을 실제로 채워서, 화면/슬립이 항상 일치하게 함
+  if (op === 'forceCompletePackScan') return json_(forceCompletePackScan(data));
   if (op === 'undoPackScan')  return json_(undoPackScan(data));
   // ★ 2026-08-25 신규 — Scan & Sort 작업자 선택 하트비트(다른 기기 중복 선택 방지)
   if (op === 'pingScanWorker') return json_(pingScanWorker(data));
