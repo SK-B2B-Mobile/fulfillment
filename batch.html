@@ -353,6 +353,43 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-scan-panel{display:none;}
 .pv-scan-panel.active{display:block;}
 .pv-scan-input-wrap{display:flex; align-items:center; gap:10px; background:var(--surface2); border:2.5px solid var(--purple); border-radius:10px; padding:16px 18px; box-shadow:0 0 0 4px var(--purple-bg); transition:box-shadow 0.15s, border-color 0.15s;}
+/* ★ 2026-09-02 신규(매니저 요청) — 01-S 단독 오더 목록 UI. 예전엔 카드가 그냥
+   세로로 쭉 나열돼서 오더가 많아지면 훑어보기 번거로웠음. 통계 카드가 필터를
+   겸하게 해서 별도 필터탭을 안 만들고(무겁다는 지적 반영), 정렬은 드롭다운
+   대신 표 헤더 클릭으로, 페이지네이션으로 화면에 한 번에 그리는 행 수를 줄임.
+   검색창(#soSearchInput)만은 이 안에서 절대 다시 안 그려지는 고정 요소로
+   둬서 — 타이핑할 때마다 매번 새로 그리면 포커스가 계속 풀리는 문제를 피함. */
+.so-stats{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:14px;}
+.so-stat-card{background:var(--surface); border:1px solid var(--border2); border-radius:9px; padding:10px 14px; cursor:pointer; transition:border-color .15s;}
+.so-stat-card.active{border-color:var(--purple); background:var(--purple-bg);}
+.so-stat-num{font-family:var(--mono); font-size:19px; font-weight:800; color:var(--text);}
+.so-stat-num.so-stat-waiting1{color:var(--amber);}
+.so-stat-num.so-stat-waiting2{color:var(--blue);}
+.so-stat-num.so-stat-done{color:var(--purple);}
+.so-stat-label{font-size:10.5px; color:var(--text-dim); margin-top:2px;}
+.so-search{width:100%; padding:10px 14px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px; font-family:var(--sans); margin-bottom:12px; box-sizing:border-box;}
+.so-search:focus{outline:none; border-color:var(--purple);}
+.so-list-head{display:grid; grid-template-columns:118px 1fr 55px 55px 65px 132px 118px 36px; gap:8px; padding:7px 14px; font-size:10px; color:var(--text-dim2); font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
+.so-list-head span{cursor:pointer; user-select:none;}
+.so-list-head span:hover{color:var(--text-dim);}
+.so-list-head span.so-sort-active{color:var(--purple);}
+.so-list-body{border:1px solid var(--border2); border-radius:10px; overflow:hidden;}
+.so-row{display:grid; grid-template-columns:118px 1fr 55px 55px 65px 132px 118px 36px; gap:8px; align-items:center; padding:10px 14px; background:var(--surface); border-bottom:1px solid var(--border);}
+.so-row:last-child{border-bottom:none;}
+.so-row:hover{background:var(--surface3);}
+.so-inv{font-family:var(--mono); font-weight:700; font-size:12.5px;}
+.so-cust{font-size:12.5px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.so-mono{font-family:var(--mono); font-size:12px; color:var(--text-dim); text-align:center;}
+.so-created{font-family:var(--mono); font-size:11px; color:var(--text-dim2);}
+.so-badge{font-family:var(--mono); font-size:10px; font-weight:700; padding:3px 8px; border-radius:6px; display:inline-block; white-space:nowrap;}
+.so-b-amber{background:var(--amber-bg); color:var(--amber); border:1px solid rgba(245,158,11,0.4);}
+.so-b-blue{background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.4);}
+.so-b-purple{background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.4);}
+.so-pager{display:flex; justify-content:space-between; align-items:center; margin-top:12px; font-size:12px; color:var(--text-dim);}
+.so-pager-btns{display:flex; gap:6px;}
+.so-page-btn{padding:5px 11px; border-radius:6px; border:1px solid var(--border2); background:var(--surface); color:var(--text); font-size:12px; cursor:pointer; font-family:var(--mono);}
+.so-page-btn:disabled{opacity:.35; cursor:default;}
+.so-page-btn.current{background:var(--purple); border-color:var(--purple); color:#fff;}
 /* ★ 2026-09-01 신규(매니저 요청) — 04 단독 1차 검수 전용 "실제 수량 입력" 카드.
    1차 검수는 P(2차 검증)와 목적이 달라서 스캔 즉시 자동으로 필요수량 전체를
    채우면 안 됨(실제 개수를 세는 게 1차 검수의 핵심). 스캔하면 이 카드가 뜨고,
@@ -5684,6 +5721,32 @@ setupDropZone('dropStandalone', 'standaloneFile', true, async files => {
 // 그걸 먼저 즉시 보여주고, 뒤에서 최신 데이터로 조용히 갱신함 — 진짜 처음
 // 여는 경우에만 "불러오는 중..."이 보임.
 let _standaloneOrdersFetchedOnce = false;
+// ★ 2026-09-02 신규 — 필터/검색/정렬/페이지 상태를 모듈 전역에 둠(패널을 다시
+//   그릴 때마다 초기화되지 않고 유지됨).
+let _soFilter = 'all';
+let _soSearch = '';
+let _soSortKey = 'createdAt';
+let _soSortDir = 'desc'; // 기본: 최근 등록순
+let _soPage = 1;
+const SO_PAGE_SIZE = 10;
+const SO_STATUS_META = {
+  waiting1: { label: '1차 검수 대기', cls: 'so-b-amber', icon: '⏳' },
+  waiting2: { label: '2차 검증 대기', cls: 'so-b-blue', icon: '🔵' },
+  done:     { label: '2차 검증완료', cls: 'so-b-purple', icon: '🟣' },
+};
+function soOrderStatus(o){
+  if(o.packVerified) return 'done';
+  if(o.takenOut) return 'waiting2';
+  return 'waiting1';
+}
+// 서버가 주는 'yyyy-MM-dd HH:mm:ss' → 'M/D HH:mm'로 짧게 표시(옛날 등록건은
+// CreatedAt이 비어있을 수 있음 — 이 기능 추가 이전에 등록된 것들, 정상)
+function soFmtCreatedAt(s){
+  if(!s) return '-';
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if(!m) return s;
+  return `${Number(m[2])}/${Number(m[3])} ${m[4]}:${m[5]}`;
+}
 function renderStandaloneOrdersList_(){
   const panel = document.getElementById('standaloneOrdersPanel');
   if(!panel) return;
@@ -5691,26 +5754,119 @@ function renderStandaloneOrdersList_(){
     panel.innerHTML = '<div class="empty-log">아직 등록된 단독 오더가 없습니다</div>';
     return;
   }
-  const sorted = [..._standaloneOrders].sort((a,b) => String(a.invoice||'').localeCompare(String(b.invoice||'')));
-  panel.innerHTML = '<div style="font-size:12px; color:var(--text-dim); margin-bottom:8px; font-family:var(--mono);">등록된 단독 오더 ' + sorted.length + '건</div>' +
-    sorted.map(o => {
-      const statusTag = o.packVerified
-        ? '<span style="font-family:var(--mono); font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.4);">🟣 2차 검증완료</span>'
-        : o.takenOut
-        ? '<span style="font-family:var(--mono); font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.4);">🔵 2차 검증 대기</span>'
-        : '<span style="font-family:var(--mono); font-size:10.5px; font-weight:700; padding:3px 9px; border-radius:6px; background:var(--amber-bg); color:var(--amber); border:1px solid rgba(245,158,11,0.4);">⏳ 1차 검수 대기</span>';
-      return `<div style="background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:12px 16px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          <div style="font-family:var(--mono); font-weight:700;">${o.invoice}</div>
-          <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">${o.customer||''} · ${o.shipVia||'-'} · SKU ${o.totalSku} · Qty ${o.totalQty}</div>
-        </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          ${statusTag}
-          <button class="btn btn-ghost btn-sm" onclick="removeStandaloneOrderClick('${o.invoice}')" title="등록 취소">✕</button>
-        </div>
-      </div>`;
-    }).join('');
+  // ★ 검색창을 포함한 뼈대는 딱 한 번만 만들고, 필터/정렬/검색/페이지가 바뀔
+  //   때는 그 안의 하위 영역(통계·표머리·행·페이지버튼)만 다시 그림 — 검색창
+  //   자체를 매번 새로 그리면 타이핑 중 포커스가 계속 풀리는 문제가 있어서 분리함.
+  if(!document.getElementById('soSearchInput')){
+    panel.innerHTML =
+      '<div id="soStatsRow" class="so-stats"></div>' +
+      '<input type="text" id="soSearchInput" class="so-search" placeholder="🔍 인보이스 번호 또는 고객사명 검색..." value="' + _soSearch.replace(/"/g,'&quot;') + '" oninput="soOnSearch(this.value)">' +
+      '<div id="soListHead" class="so-list-head"></div>' +
+      '<div id="soListBody" class="so-list-body"></div>' +
+      '<div class="so-pager"><div id="soPagerInfo"></div><div id="soPagerBtns" class="so-pager-btns"></div></div>';
+  }
+  renderStandaloneOrdersBody_();
 }
+function renderStandaloneOrdersBody_(){
+  const list = _standaloneOrders.map(o => { o._status = soOrderStatus(o); return o; });
+
+  const statsEl = document.getElementById('soStatsRow');
+  if(statsEl){
+    const c1 = list.filter(o=>o._status==='waiting1').length;
+    const c2 = list.filter(o=>o._status==='waiting2').length;
+    const c3 = list.filter(o=>o._status==='done').length;
+    const cards = [
+      {f:'all', label:'전체', num:list.length},
+      {f:'waiting1', label:'1차 검수 대기', num:c1},
+      {f:'waiting2', label:'2차 검증 대기', num:c2},
+      {f:'done', label:'2차 검증완료', num:c3},
+    ];
+    statsEl.innerHTML = cards.map(c =>
+      `<div class="so-stat-card${_soFilter===c.f?' active':''}" onclick="soSetFilter('${c.f}')">
+        <div class="so-stat-num${c.f!=='all'?' so-stat-'+c.f:''}">${c.num}</div>
+        <div class="so-stat-label">${c.label}</div>
+      </div>`
+    ).join('');
+  }
+
+  let filtered = list;
+  if(_soFilter !== 'all') filtered = filtered.filter(o => o._status === _soFilter);
+  if(_soSearch.trim()){
+    const q = _soSearch.trim().toLowerCase();
+    filtered = filtered.filter(o => (o.invoice||'').toLowerCase().includes(q) || (o.customer||'').toLowerCase().includes(q));
+  }
+  filtered = filtered.slice().sort((a,b) => {
+    let av = a[_soSortKey], bv = b[_soSortKey];
+    if(_soSortKey === 'totalSku' || _soSortKey === 'totalQty'){ av = Number(av)||0; bv = Number(bv)||0; }
+    else { av = String(av||'').toLowerCase(); bv = String(bv||'').toLowerCase(); }
+    if(av < bv) return _soSortDir==='asc' ? -1 : 1;
+    if(av > bv) return _soSortDir==='asc' ? 1 : -1;
+    return 0;
+  });
+
+  const headEl = document.getElementById('soListHead');
+  if(headEl){
+    const cols = [
+      {k:'invoice', label:'인보이스'}, {k:'customer', label:'고객사'}, {k:'shipVia', label:'배송'},
+      {k:'totalSku', label:'SKU'}, {k:'totalQty', label:'수량'}, {k:null, label:'상태'},
+      {k:'createdAt', label:'등록일시'}, {k:null, label:''},
+    ];
+    headEl.innerHTML = cols.map(c => {
+      if(!c.k) return `<span>${c.label}</span>`;
+      const arrow = _soSortKey===c.k ? (_soSortDir==='asc'?' ▲':' ▼') : '';
+      return `<span class="${_soSortKey===c.k?'so-sort-active':''}" onclick="soSetSort('${c.k}')">${c.label}${arrow}</span>`;
+    }).join('');
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / SO_PAGE_SIZE));
+  if(_soPage > totalPages) _soPage = totalPages;
+  const start = (_soPage-1)*SO_PAGE_SIZE;
+  const pageItems = filtered.slice(start, start+SO_PAGE_SIZE);
+
+  const bodyEl = document.getElementById('soListBody');
+  if(bodyEl){
+    bodyEl.innerHTML = !pageItems.length
+      ? '<div class="empty-log">조건에 맞는 단독 오더가 없습니다</div>'
+      : pageItems.map(o => {
+          const m = SO_STATUS_META[o._status];
+          return `<div class="so-row">
+            <div class="so-inv">${o.invoice}</div>
+            <div class="so-cust">${o.customer||''}</div>
+            <div class="so-mono">${o.shipVia||'-'}</div>
+            <div class="so-mono">${o.totalSku}</div>
+            <div class="so-mono">${o.totalQty}</div>
+            <div><span class="so-badge ${m.cls}">${m.icon} ${m.label}</span></div>
+            <div class="so-created">${soFmtCreatedAt(o.createdAt)}</div>
+            <div><button class="btn btn-ghost btn-sm" onclick="removeStandaloneOrderClick('${o.invoice}')" title="등록 취소">✕</button></div>
+          </div>`;
+        }).join('');
+  }
+
+  const infoEl = document.getElementById('soPagerInfo');
+  if(infoEl) infoEl.textContent = filtered.length ? `${start+1}–${Math.min(start+SO_PAGE_SIZE, filtered.length)} / 전체 ${filtered.length}건` : '';
+
+  const btnsEl = document.getElementById('soPagerBtns');
+  if(btnsEl){
+    let btns = `<button class="so-page-btn" ${_soPage<=1?'disabled':''} onclick="soGoPage(${_soPage-1})">‹</button>`;
+    for(let p=1;p<=totalPages;p++){
+      if(totalPages > 7 && Math.abs(p-_soPage) > 2 && p!==1 && p!==totalPages){
+        if(p === 2 || p === totalPages-1) btns += `<span style="padding:5px 4px;">…</span>`;
+        continue;
+      }
+      btns += `<button class="so-page-btn ${p===_soPage?'current':''}" onclick="soGoPage(${p})">${p}</button>`;
+    }
+    btns += `<button class="so-page-btn" ${_soPage>=totalPages?'disabled':''} onclick="soGoPage(${_soPage+1})">›</button>`;
+    btnsEl.innerHTML = btns;
+  }
+}
+function soSetFilter(f){ _soFilter = f; _soPage = 1; renderStandaloneOrdersBody_(); }
+function soSetSort(key){
+  if(_soSortKey === key) _soSortDir = _soSortDir === 'asc' ? 'desc' : 'asc';
+  else { _soSortKey = key; _soSortDir = 'asc'; }
+  renderStandaloneOrdersBody_();
+}
+function soGoPage(p){ _soPage = p; renderStandaloneOrdersBody_(); }
+function soOnSearch(v){ _soSearch = v; _soPage = 1; renderStandaloneOrdersBody_(); }
 async function renderStandaloneOrdersPanel(){
   const panel = document.getElementById('standaloneOrdersPanel');
   if(!panel) return;
