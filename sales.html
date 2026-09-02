@@ -316,6 +316,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .method-edit-row button{font-family:var(--sans); font-size:11.5px; font-weight:700; padding:5px 10px; border-radius:6px; cursor:pointer; white-space:nowrap;}
 .method-save-btn{background:var(--purple-bg); border:1px solid var(--purple); color:#C4B0FF;}
 .method-cancel-btn{background:var(--surface2); border:1px solid var(--border2); color:var(--text-dim);}
+/* ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용). Recently Completed
+   목록은 절대 안 건드림(METHOD 컬럼 폭 제약) — 매니저 확인 사항. */
+.pay-badge{cursor:pointer; border:none; font-family:var(--mono); font-size:12px; font-weight:800; padding:4px 9px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;}
+.pay-badge.unpaid{background:var(--red-bg); color:#FF7A7A; border:1px solid rgba(239,68,68,0.4);}
+.pay-badge.paid{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.4);}
+.pay-locked{font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--gray-bg); border:1px solid var(--border2); padding:5px 9px; border-radius:6px; display:inline-block;}
 .manual-moved-btn:hover{background:var(--purple); color:#fff;}
 .manual-moved-undo{background:none; border:none; color:var(--text-dim); font-family:var(--sans); font-size:10.5px; cursor:pointer; text-decoration:underline; padding:2px 0;}
 .manual-moved-undo:hover{color:var(--red);}
@@ -1892,6 +1898,34 @@ function renderDetail(res){
 
   const dimsHtml = (status==='pending') ? '' : renderDimsSection(res);
 
+  // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인. Recently Completed 목록은
+  //   METHOD 컬럼 폭이 좁아서(PU/TK/UPS 세 글자 전용) 배지를 더 넣으면
+  //   레이아웃이 깨짐 — 그래서 목록은 전혀 안 건드리고, 여기(Order Detail
+  //   Lookup, 개별 오더 상세)에서만 표시·편집함. 검수 전이면 필드 자체를 아예
+  //   안 보여주고(기존 Shipping Method 편집과 같은 원칙), 검수는 됐지만 아직
+  //   패킹존 이동 전이면 편집 불가 안내만 보여줌 — 너무 이른 시점에 실수로
+  //   입력되는 걸 서버뿐 아니라 화면에서도 막음.
+  let paymentMetaHtml = '';
+  if (res.method === 'PU' && status !== 'pending') {
+    if (res.movedToPacking) {
+      const isPaid = !!res.paymentPaid;
+      paymentMetaHtml = `
+        <div class="meta-item">
+          <div class="k">Payment Status</div>
+          <div class="v">
+            <span class="pay-badge ${isPaid?'paid':'unpaid'}" id="paymentBadge">${isPaid?'✓ PAID':'⚠ UNPAID'}</span>
+            <button class="method-edit-btn" onclick="savePaymentStatus('${res.invoice}', ${!isPaid})" title="Change payment status">✎ Edit</button>
+          </div>
+        </div>`;
+    } else {
+      paymentMetaHtml = `
+        <div class="meta-item">
+          <div class="k">Payment Status</div>
+          <div class="v"><span class="pay-locked">🔒 Available after Moved to Packing</span></div>
+        </div>`;
+    }
+  }
+
   card.innerHTML = `
     <div class="detail-head">
       <div>
@@ -1917,6 +1951,7 @@ function renderDetail(res){
               <button class="method-cancel-btn" onclick="toggleMethodEdit()">Cancel</button>
             </div>` : ''}
           </div>
+          ${paymentMetaHtml}
           <div class="meta-item"><div class="k">Amount</div><div class="v">${fmtMoney(res.amount)}</div></div>
           <div class="meta-item"><div class="k">Inspector</div><div class="v">${res.inspector||'-'}</div></div>
           <div class="meta-item"><div class="k">Inspection Completed</div><div class="v">${res.inspEnd||'-'}</div></div>
@@ -2005,6 +2040,22 @@ async function saveMethodChange(invoice){
   }
   await openInvoice(invoice); // 최신 상태로 다시 불러와서 화면 갱신
   loadToday();
+}
+
+// ★ 2026-09-02 신규(매니저 요청) — PU 결제확인 저장. Order Detail Lookup에서만
+// 호출됨(목록엔 이 함수 자체가 연결돼 있지 않음). 실수 클릭 방지를 위해 반드시
+// confirm()을 거쳐야만 실제로 서버에 반영됨.
+async function savePaymentStatus(invoice, willBePaid){
+  const nextLabel = willBePaid ? 'PAID' : 'UNPAID';
+  const warn = `Change payment status to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
+  if (!confirm(warn)) return;
+
+  const res = await gasPost('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: 'Sales (Order Detail Lookup)' });
+  if (!res || !res.ok){
+    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
+    return;
+  }
+  await openInvoice(invoice); // 최신 상태로 다시 불러와서 화면 갱신
 }
 
 function showScreen(name){
