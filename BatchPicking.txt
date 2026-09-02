@@ -4206,6 +4206,13 @@ function getSalesInvoiceDetail(invoice) {
     const inspectionRaw = String(jv('inspection') || '').trim();
     const inspector = String(jv('inspector') || '').trim();
     const inspEndRaw = String(jv('insp end') || '');
+    // ★ 2026-09-02 신규 — PU 결제확인. 값이 없으면(옛날 오더, 또는 아직 아무도
+    //   입력 안 한 경우) 반드시 'unpaid'로 안전하게 취급 — "확인 안 됐으면
+    //   미납으로 간주"하는 원칙(빈 값을 결제완료로 착각하면 안 되므로).
+    const paymentStatusRaw = String(jv('paymentstatus') || '').trim().toLowerCase();
+    const paymentPaid = paymentStatusRaw === 'paid';
+    const paymentUpdatedAt = String(jv('paymentstatusupdatedat') || '').trim();
+    const paymentUpdatedBy = String(jv('paymentstatusupdatedby') || '').trim();
     // ★ 2026-07-28 신규 — 작업(피킹) 시작일. StartAtISO의 날짜 부분만 추출.
     const startISORaw = jv('startatiso');
     let pickStart = '';
@@ -4392,6 +4399,10 @@ function getSalesInvoiceDetail(invoice) {
       hasBatchRecord: hasBatchRecord, // ★ 2026-08-06 신규 — false면 단독 오더(수동 버튼 노출 대상)
       manualMovedAt: manualMovedAt,
       manualMovedBy: manualMovedBy,
+      // ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용 표시·수정)
+      paymentPaid: paymentPaid,
+      paymentUpdatedAt: paymentUpdatedAt,
+      paymentUpdatedBy: paymentUpdatedBy,
       items: items,
       dims: dimsResult.dims,
       dimsBy: dimsResult.enteredBy,
