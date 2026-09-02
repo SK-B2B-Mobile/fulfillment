@@ -525,6 +525,13 @@ function bcustSheetSafe_() {
   // ★ 2026-08-24 신규 — "최종 2차 검증완료"(주황, 파랑 다음 마지막 단계) 시각.
   //   K(핑크)/L(파랑)의 기존 의미는 절대 안 바꾸고, 그 뒤에 한 단계만 얹음.
   if (!bc.getRange(1, 13).getValue()) bc.getRange(1, 13).setValue('PackVerified');
+  // ★ 2026-09-02 신규(매니저 요청) — 01-S 단독 오더 목록 UI 개선의 일부로
+  //   "언제 등록했는지"를 보여달라는 요청. 지금까지는 등록 시각을 아예 기록
+  //   안 하고 있었음(총량피킹 배치는 Batches 시트에 CreatedAt이 있지만, 단독
+  //   오더는 BatchCustomers에 직접 꽂혀서 그 컬럼이 없었음). K/L/M과 같은
+  //   패턴으로 안전하게 14번째 컬럼만 새로 추가 — 기존 총량피킹 행은 이 값이
+  //   비어있어도 전혀 문제 없음(단독오더 목록에서만 사용).
+  if (!bc.getRange(1, 14).getValue()) bc.getRange(1, 14).setValue('CreatedAt');
   return bc;
 }
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
@@ -986,9 +993,14 @@ function addStandaloneOrder(data) {
     const totalSku = items.length;
 
     // BatchCustomers: SlotNum/SlotSize/Cleared는 해당없음(빈 값) — 단독은 랙 슬롯 개념이 없음
-    bc.getRange(bc.getLastRow() + 1, 1, 1, 10).setValues([[
+    // ★ 2026-09-02 신규 — 14번째 컬럼(CreatedAt)에 지금 등록 시각을 같이 기록.
+    //   재업로드도 위에서 기존 행을 완전히 지우고 새로 쓰므로, 자연스럽게
+    //   "가장 최근 등록/재등록 시각"이 항상 정확하게 남음.
+    const bcNewRow = bc.getLastRow() + 1;
+    bc.getRange(bcNewRow, 1, 1, 10).setValues([[
       STANDALONE_BATCH_ID, invoice, customer, shipDate, shipVia, totalQty, totalSku, '', '', ''
     ]]);
+    bc.getRange(bcNewRow, 14).setValue(batchNow_());
 
     const itemRows = items.map(it => [STANDALONE_BATCH_ID, invoice, it.sku || '', it.name || '', it.barcode || '', Number(it.req_qty) || 0, it.rack || '']);
     const startRow = bi.getLastRow() + 1;
@@ -1013,10 +1025,14 @@ function getStandaloneOrders() {
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     if (bcLast < 2) return { ok: true, orders: [] };
-    const rows = bc.getRange(2, 1, bcLast - 1, 13).getValues();
+    const rows = bc.getRange(2, 1, bcLast - 1, 14).getValues(); // ★ 2026-09-02: 14번째(CreatedAt) 포함
     const orders = [];
     rows.forEach(r => {
       if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+      const createdRaw = r[13];
+      const createdAt = createdRaw
+        ? (createdRaw instanceof Date ? Utilities.formatDate(createdRaw, batchTz_(), 'yyyy-MM-dd HH:mm:ss') : String(createdRaw))
+        : '';
       orders.push({
         invoice: String(r[1] || ''),
         customer: String(r[2] || ''),
@@ -1027,6 +1043,7 @@ function getStandaloneOrders() {
         movedToPacking: !!r[10],
         takenOut: !!r[11],
         packVerified: !!r[12],
+        createdAt: createdAt, // ★ 2026-09-02 신규 — 등록 시각(옛날 등록건은 이 값이 비어있을 수 있음, 정상)
       });
     });
     return { ok: true, orders: orders };
