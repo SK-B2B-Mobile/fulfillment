@@ -957,11 +957,14 @@ select option:disabled{color:var(--text-dim2);}
     <!-- ─── VIEW 01-S: 단독 오더 등록 (★ 2026-08-31 신규) ─── -->
     <div class="view" id="v-standalone-upload">
       <div class="eyebrow" style="color:#B39DDB;">Step 01-S · Standalone order setup</div>
-      <h2 class="h-page" style="color:#B39DDB;">단독 오더 등록</h2>
-      <p class="sub">sk-worker 앱으로 개별 처리하던 단독 오더를, 여기서 <b>고객사 피킹 리스트 PDF</b>로 등록하면 총량피킹과 완전히 같은 방식(스캔 기반 1차 검수 + Pack Verify)으로 관리할 수 있습니다. <b style="color:#B39DDB">여기서 등록한 오더는 총량 배치와 절대 섞이지 않고, &quot;04 단독 1차 검수&quot;와 &quot;단독 Pack Verify&quot;에서만 보입니다.</b></p>
+      <h2 class="h-page" style="color:#B39DDB; margin-bottom:6px;">단독 오더 등록</h2>
+      <!-- ★ 2026-09-02 수정(매니저 요청) — 설명글이 3줄이나 차지해서 화면 아래
+           내용(업로드 칸·목록)이 필요 이상으로 밀려 내려갔음. 핵심(총량 배치와
+           분리된다는 것)만 한 줄로 압축. -->
+      <p class="sub" style="margin-bottom:14px;">고객사 피킹 리스트 PDF를 올리면 스캔 기반 1차 검수·2차 검증으로 관리됩니다 — 총량 배치와 분리되어 "04"·"Pack Verify"에서만 보입니다.</p>
 
-      <div class="drop-row">
-        <label class="drop" id="dropStandalone" style="border-color:rgba(139,92,246,0.35);">
+      <div class="drop-row" style="grid-template-columns:1fr; margin-bottom:14px;">
+        <label class="drop" id="dropStandalone" style="border-color:rgba(139,92,246,0.35); padding:16px 20px;">
           <div class="drop-icon">DROP · 단독 오더 피킹 리스트 (여러 개 동시 가능)</div>
           <div class="drop-title">단독 오더 PDF</div>
           <div class="drop-hint">고객사별 피킹 리스트와 같은 형식 · 여러 장 동시 선택 가능</div>
@@ -969,7 +972,7 @@ select option:disabled{color:var(--text-dim2);}
         </label>
       </div>
 
-      <div id="standaloneOrdersPanel" style="margin-top:20px;"></div>
+      <div id="standaloneOrdersPanel" style="margin-top:10px;"></div>
     </div>
 
     <!-- ─── VIEW 2: Slot Layout ─── -->
