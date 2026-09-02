@@ -512,6 +512,8 @@ function doPost(e) {
   if (op === 'setManualPackingMoved') return json_(setManualPackingMoved(data));
   // ★ 2026-08-31 신규 — Order Detail Lookup에서 검수완료 오더의 배송방법 수정
   if (op === 'updateOrderMethod') return json_(updateOrderMethod(data));
+  // ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용)
+  if (op === 'updatePaymentStatus') return json_(updatePaymentStatus(data));
   // ★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더). BatchPicking.gs에 구현됨.
   if (op === 'linkDimensions')   return json_(linkDimensions(data));
   if (op === 'unlinkDimensions') return json_(unlinkDimensions(data));
@@ -704,6 +706,89 @@ function updateOrderMethod(data) {
     //   그 캐시 키를 여기서 바로 지워서, 수정하자마자 항상 최신값이 보이게 함.
     try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
     return { ok: true, method: method, oldMethod: oldMethod };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ★ 2026-09-02 신규(매니저 요청) — PU(직접 픽업) 결제확인 컬럼.
+ * [배경] PU 오더는 결제가 끝나야만 물건을 내줄 수 있는데, 이 정보를 영업팀만
+ * 알고 창고는 알 방법이 없어서 미납 상태로 픽업이 나가는 사고가 실제로 있었음.
+ * [범위] Order Detail Lookup(개별 오더 검색 화면)에서만 표시·수정 가능 —
+ * "Recently Completed" 목록은 METHOD 컬럼 폭이 PU/TK/UPS 세 글자에 딱 맞춰져
+ * 있어서 배지를 더 넣으면 잘리거나 레이아웃이 깨짐(매니저 확인 사항) — 그래서
+ * 목록 쪽은 전혀 안 건드림. */
+function ensurePaymentStatusCol_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return;
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const hasStatus = headers.some(h => String(h).trim().toLowerCase() === 'paymentstatus');
+  const hasAt = headers.some(h => String(h).trim().toLowerCase() === 'paymentstatusupdatedat');
+  const hasBy = headers.some(h => String(h).trim().toLowerCase() === 'paymentstatusupdatedby');
+  const add = [];
+  if (!hasStatus) add.push('PaymentStatus');
+  if (!hasAt) add.push('PaymentStatusUpdatedAt');
+  if (!hasBy) add.push('PaymentStatusUpdatedBy');
+  if (add.length) {
+    const curLastCol = sh.getLastColumn();
+    sh.insertColumnsAfter(curLastCol, add.length);
+    sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
+    __HDR_CACHE = null;
+  }
+}
+
+/* updatePaymentStatus — Order Detail Lookup에서만 호출되는 걸 전제로 함
+ * (클라이언트가 PU + 검수완료 + 패킹존 이동완료 조건을 만족할 때만 편집
+ * 버튼을 보여줌). 서버에서도 이 세 조건을 그대로 다시 검증해서, 혹시
+ * 다른 경로로 요청이 와도 이르거나 잘못된 시점에 실수로 입력되지 않게 막음.
+ * 입력: { invoice, paid(true|false), by } */
+function updatePaymentStatus(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const paid = !!(data && data.paid);
+    const by = String((data && data.by) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    const sh = SHEET_();
+    ensurePaymentStatusCol_(sh);
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const row = findRowByKey_('invoice', invoice);
+    if (!row) return { ok: false, error: 'invoice not found' };
+
+    const iTruck = hdr[norm('Trucking')];
+    const method = iTruck ? String(sh.getRange(row, iTruck).getValue() || '').trim().toUpperCase() : '';
+    if (method !== 'PU') return { ok: false, error: 'PU(직접 픽업) 오더만 결제 상태를 관리합니다' };
+
+    const iInsp = hdr[norm('Inspection')];
+    const insp = iInsp ? String(sh.getRange(row, iInsp).getValue() || '').trim() : '';
+    if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
+
+    // ★ 2026-09-02 — 패킹존 이동 여부는 반드시 getSalesInvoiceDetail()이 클라이언트에
+    //   내려주는 값과 "완전히 같은 계산"으로 판정해야 함. 처음엔 buildMovedToPackingMap_()을
+    //   따로 불렀는데, getSalesInvoiceDetail은 그 외에도 디멘션 저장 여부·수동표시
+    //   등을 추가로 반영해서 최종 movedToPacking을 결정하기 때문에 두 값이 어긋날 수
+    //   있었음(화면엔 편집 버튼이 보이는데 저장하면 서버가 거부하는 혼란 발생 가능).
+    //   그래서 아예 같은 함수를 그대로 호출해서 "화면이 본 것과 서버가 검증하는 것"을
+    //   항상 100% 일치시킴.
+    const detail = getSalesInvoiceDetail(invoice);
+    if (!detail || !detail.ok) return { ok: false, error: '오더 정보를 확인하지 못했습니다' };
+    if (!detail.movedToPacking) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
+
+    const iStatus = hdr[norm('PaymentStatus')];
+    const iAt = hdr[norm('PaymentStatusUpdatedAt')];
+    const iBy = hdr[norm('PaymentStatusUpdatedBy')];
+    if (iStatus) sh.getRange(row, iStatus).setValue(paid ? 'paid' : 'unpaid');
+    if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
+    if (iBy) sh.getRange(row, iBy).setValue(by);
+
+    bumpVersion_();
+    try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
+    return { ok: true, paid: paid };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
