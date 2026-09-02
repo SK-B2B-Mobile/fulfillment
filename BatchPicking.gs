@@ -1591,6 +1591,87 @@ function undoPackScan(data) {
 /* getPackScanState — 패킹 검증 모달을 열 때(그리고 몇 초마다) 호출.
  * 이 인보이스가 필요로 하는 바코드별 체크리스트 + 진행률 + 최근 스캔 이력 반환.
  * 입력: batchId, invoice (둘 다 문자열) */
+/* ===================== forceCompletePackScan (★ 2026-09-01 신규) =====================
+ * ★★★ "관리자 강제확정" 시 화면 데이터와 패킹슬립이 서로 안 맞던 문제 해결 ★★★
+ *
+ * [문제] 예전엔 강제확정을 누르면 BatchCustomers의 최종 상태(M열) 플래그만
+ * 켜졌음. 그래서 패킹슬립은 별도 클라이언트 로직(forcedVerify)으로 "전량
+ * 확인됨"처럼 찍어줬지만, 정작 화면(상품 목록·진행률)이 참조하는 실제 데이터
+ * (PackScanLog)는 하나도 안 바뀌어서 계속 0/10으로 남아있었음 — 같은 오더인데
+ * 슬립엔 100%, 화면엔 0%로 서로 안 맞는 사고.
+ *
+ * [해결] 강제확정 버튼을 누르면, 이 인보이스에 남아있는 모든 미완료 줄에 대해
+ * "필요수량 전체가 확인된 것"으로 PackScanLog에 실제로 기록함(스캔을 대신
+ * 해주는 것과 동일한 결과). 이후로는 화면 어디를 봐도(목록·진행률·패킹슬립)
+ * 항상 일관되게 100%로 보임 — 강제확정이 "숫자만 속이는 것"이 아니라 "관리자가
+ * 책임지고 나머지를 한 번에 확인 처리하는 것"이 되도록 의미 자체를 정확하게 함.
+ * 입력: { batchId, invoice, worker } */
+function forceCompletePackScan(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const batchId = data.batchId, invoice = data.invoice;
+    if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
+    const worker = String(data.worker || '').trim() || '관리자(강제확정)';
+
+    const invoiceLines = getInvoiceBatchItemsCached_(batchId, invoice);
+    if (!invoiceLines.length) return { ok: true, filledLines: 0 };
+
+    // 바코드별 필요수량 합산(같은 바코드가 여러 SKU 줄에 걸쳐 있을 수 있음)
+    const reqByBarcode = {};
+    const skuByBarcode = {};
+    invoiceLines.forEach(l => {
+      const k = normBarcode_(l.barcode);
+      reqByBarcode[k] = (reqByBarcode[k] || 0) + l.reqQty;
+      if (!skuByBarcode[k]) skuByBarcode[k] = { sku: l.sku, barcodeOrig: l.barcode };
+    });
+
+    const invoiceIssues = getInvoiceIssueQtyCached_(batchId, invoice);
+    const issueByBarcode = {};
+    invoiceIssues.forEach(iss => {
+      const k = normBarcode_(iss.barcode);
+      issueByBarcode[k] = (issueByBarcode[k] || 0) + iss.qty;
+    });
+
+    const pl = packscanSheet_();
+    const plLast = pl.getLastRow();
+    const alreadyByBarcode = {};
+    if (plLast >= 2) {
+      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+        if (String(r[0]) !== String(batchId)) return;
+        if (String(r[6]) !== String(invoice)) return;
+        if (r[7] !== 'pass' || r[8] === 'undone') return;
+        const k = normBarcode_(r[4]);
+        alreadyByBarcode[k] = (alreadyByBarcode[k] || 0) + (Number(r[9]) || 0);
+      });
+    }
+
+    const now = batchNow_();
+    const rows = [];
+    Object.keys(reqByBarcode).forEach(k => {
+      const effReq = Math.max(0, reqByBarcode[k] - (issueByBarcode[k] || 0));
+      const already = alreadyByBarcode[k] || 0;
+      const remaining = effReq - already;
+      if (remaining <= 0) return;
+      const info = skuByBarcode[k] || {};
+      rows.push([batchId, Utilities.getUuid(), now, worker, info.barcodeOrig || k, info.sku || '', invoice, 'pass', 'active', remaining]);
+    });
+
+    if (rows.length) {
+      const startRow = pl.getLastRow() + 1;
+      ensureSheetRoom_(pl, startRow + rows.length - 1);
+      pl.getRange(startRow, 5, rows.length, 2).setNumberFormat('@'); // Barcode, SKU 텍스트 고정
+      pl.getRange(startRow, 1, rows.length, 10).setValues(rows);
+      bumpVersion_();
+    }
+    return { ok: true, filledLines: rows.length };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function getPackScanState(batchId, invoice) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
