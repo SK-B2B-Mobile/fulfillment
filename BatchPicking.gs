@@ -4225,6 +4225,10 @@ function getSalesInvoiceDetail(invoice) {
     //   (모든 행 × 모든 컬럼)를 통째로 읽었음. 시트가 계속 커지면서 이게
     //   느려져서 상세조회가 무한 로딩처럼 보이는 원인이 됐음. 이제 인보이스
     //   컬럼 하나만 먼저 좁게 읽어서 행 위치를 찾고, 그 한 행만 읽도록 변경.
+    // ★ 2026-09-03 재수정(획기적 속도 개선) — 그래도 매번 컬럼 전체를 훑는 건
+    //   여전히 무거웠음. Code.gs의 getJobsInvoiceRowIndex_()(30초 캐시된
+    //   인보이스→행번호 인덱스)를 그대로 재사용해서, 반복 조회 시 전체 스캔
+    //   자체를 건너뜀 — "상세창 열기 30초" 지연의 핵심 원인.
     const sh = SHEET_();
     const hm = headerMapCached_();
     const lastRow = sh.getLastRow();
@@ -4232,10 +4236,16 @@ function getSalesInvoiceDetail(invoice) {
     const invCol = hm['invoice'];
     if (!invCol) return { ok: false, error: 'invoice column not found' };
 
-    const invColVals = sh.getRange(2, invCol, lastRow - 1, 1).getValues();
     let jobRowIndex = -1;
-    for (let i = 0; i < invColVals.length; i++) {
-      if (String(invColVals[i][0]).trim() === invoice) { jobRowIndex = i + 2; break; }
+    const _invIdx = getJobsInvoiceRowIndex_();
+    if (_invIdx[invoice]) {
+      jobRowIndex = _invIdx[invoice];
+    } else {
+      // 인덱스에 없으면(캐시가 아직 못 따라간 경우) 안전하게 전체 스캔으로 한 번 더 확인
+      const invColVals = sh.getRange(2, invCol, lastRow - 1, 1).getValues();
+      for (let i = 0; i < invColVals.length; i++) {
+        if (String(invColVals[i][0]).trim() === invoice) { jobRowIndex = i + 2; break; }
+      }
     }
     if (jobRowIndex < 0) return { ok: false, error: 'Invoice not found: ' + invoice };
     const jobRow = sh.getRange(jobRowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
@@ -4485,7 +4495,11 @@ function getSalesInvoiceDetail(invoice) {
     };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+      // ★ 2026-09-03 신규 — 6초 → 20초로 늘림. 쓰기(updatePaymentStatus 등)가
+      //   저장 즉시 이 캐시를 직접 지우도록 이미 돼 있어서(정확성은 보장됨),
+      //   TTL을 늘려도 "수정했는데 옛날 값이 보이는" 문제는 안 생기고, 대신
+      //   "열었다 닫고 다시 여는" 반복 조회가 훨씬 빨라짐.
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 20);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
