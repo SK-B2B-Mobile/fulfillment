@@ -773,16 +773,32 @@ function updatePaymentStatus(data) {
     const insp = iInsp ? String(sh.getRange(row, iInsp).getValue() || '').trim() : '';
     if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
-    // ★ 2026-09-02 재수정(속도) — getSalesInvoiceDetail()을 검증용으로 통째로
-    //   다시 부르는 건 너무 무거웠음(BatchCustomers·IssueLog·Dimensions·DimLinks
-    //   등을 전부 다시 계산). 저장 1번에 이 무거운 함수가 2번(검증용 1번 + 저장
-    //   후 새로고침용 1번) 실행되면서 전체 처리 시간이 길어지고, 그로 인한
-    //   타임아웃·재시도가 겹쳐 "로딩만 계속되다 결국 예전 값을 보여주는" 증상으로
-    //   이어졌을 가능성이 높음. PU 오더는 디멘션을 안 쓰므로(TK/UPS만 해당),
-    //   패킹존 이동 여부는 buildMovedToPackingMap_()만으로도 getSalesInvoiceDetail과
-    //   결과가 동일하면서 훨씬 가벼움 — 이걸로 대체.
-    let moved = false;
-    try { moved = !!buildMovedToPackingMap_()[invoice]; } catch (e) { moved = false; }
+    // ★ 2026-09-02 재수정(획기적 속도 개선) — buildMovedToPackingMap_()는 원래
+    //   "전체 인보이스 목록"을 한 번에 계산하려고 만든 함수라(BatchCustomers
+    //   전체 + Jobs.PackingMovedManual 전체 컬럼을 통째로 읽음), 오더 1건만
+    //   확인하는 데 쓰기엔 훨씬 무거웠음 — 이게 15초 지연의 핵심 원인. 지금 이미
+    //   손에 있는 것(이 인보이스의 Jobs 행 = row, hdr)을 그대로 활용해서 딱
+    //   필요한 값 2개만 좁게 읽는 방식으로 교체:
+    //   1) Jobs.PackingMovedManual — 이미 열어둔 행(row)에서 셀 1개만 읽음
+    //   2) BatchCustomers.TakenOut — 인보이스 컬럼(B)만 좁게 읽어 행을 찾고
+    //      그 행의 L열(TakenOut) 셀 1개만 읽음(전체 13개 컬럼을 안 읽음)
+    const iManualFlag = hdr[norm('PackingMovedManual')];
+    let moved = iManualFlag ? !!sh.getRange(row, iManualFlag).getValue() : false;
+    if (!moved) {
+      try {
+        const bc = bcustSheetSafe_();
+        const bcLast = bc.getLastRow();
+        if (bcLast >= 2) {
+          const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
+          for (let i = bcInvVals.length - 1; i >= 0; i--) {
+            if (String(bcInvVals[i][0]).trim() === invoice) {
+              moved = !!bc.getRange(i + 2, 12).getValue(); // L열: TakenOut
+              break;
+            }
+          }
+        }
+      } catch (e) { /* best-effort */ }
+    }
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
     // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
