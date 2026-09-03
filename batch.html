@@ -3557,7 +3557,7 @@ function startScanPolling(){
   //   줌 — sales.html이 느려지는 진짜 원인이 이 폴링들의 누적이었음(실행
   //   기록으로 확인됨). 15초면 작업자가 여전히 "거의 실시간"으로 느끼면서도
   //   서버 부담은 거의 절반으로 줄어듦.
-  __scanPollTimer = setInterval(pollScanAndPickers, 15000+jitter);
+  __scanPollTimer = setInterval(pollScanAndPickers, 25000+jitter); // ★ 2026-09-03 재수정 — 15초→25초(최종 완화)
   pollScanAndPickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
 }
 let __activePickersTimer = null;
@@ -3594,7 +3594,7 @@ document.addEventListener('visibilitychange', () => {
 // ★ 2026-08-14 신규 — 위와 같은 이유로, 화면을 계속 켜놓고 있는 경우에도
 //   "완료된 배치" 목록이 스스로 낡지 않도록 60초마다 자체 갱신.
 // ★ 2026-09-03 신규(매니저 확정) — 60초→90초로 완화(전체 서버 부담 경감)
-setInterval(() => { if(GAS_READY) checkOpenBatches(); }, 90000);
+setInterval(() => { if(GAS_READY) checkOpenBatches(); }, 120000); // ★ 2026-09-03 재수정 — 90초→120초
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-09 신규 — "고객사·상품 배정 구조" 자체도 주기적으로 재동기화
@@ -3699,7 +3699,7 @@ function startStructurePolling(){
   const jitter = Math.floor(Math.random()*6000); // ★ 2026-07-14 신규: 기기간 폴링 충돌 방지
   // ★ 2026-08-19 수정 — 서버 부담 완화를 위해 30초→45초로 완화(현장 확인된 서버 혼잡 대응)
   // ★ 2026-09-03 신규(매니저 확정) — 45초→60초로 완화(전체 서버 부담 경감)
-  __structPollTimer = setInterval(() => refreshBatchStructure(true), 60000+jitter);
+  __structPollTimer = setInterval(() => refreshBatchStructure(true), 90000+jitter); // ★ 2026-09-03 재수정 — 60초→90초
 }
 
 
@@ -7447,8 +7447,8 @@ async function pollActiveScanWorkers(){
 //   전체를 느리게 만드는 게 실제로 확인됨(sales.html 지연의 진짜 원인).
 //   활성 판정 임계값(120초)에 비하면 여전히 3번 이상 여유가 있어서 "활성" 표시
 //   정확도에는 실질적 영향이 없음.
-setInterval(pingScanWorkerHeartbeat, 45000);
-setInterval(pollActiveScanWorkers, 35000);
+setInterval(pingScanWorkerHeartbeat, 60000); // ★ 2026-09-03 재수정 — 45초→60초
+setInterval(pollActiveScanWorkers, 50000); // ★ 2026-09-03 재수정 — 35초→50초
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-09-01 신규 — Workers 탭 실시간 근무 상태(전역, 배치 무관)
@@ -7492,8 +7492,8 @@ async function pollActiveWorkersGlobal(){
 // ★ 2026-09-03 신규(매니저 확정) — pollActiveScanWorkers와 동일한 이유로
 //   30초→45초 / 20초→35초로 완화. Workers 탭 Active/Off 표시는 실시간성이
 //   덜 중요한 화면이라 이 정도 여유는 체감상 거의 차이 없음.
-setInterval(pingWorkerPresenceAll, 45000);
-setInterval(pollActiveWorkersGlobal, 35000);
+setInterval(pingWorkerPresenceAll, 60000); // ★ 2026-09-03 재수정 — 45초→60초
+setInterval(pollActiveWorkersGlobal, 50000); // ★ 2026-09-03 재수정 — 35초→50초
 
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
 function isWorkerBusyElsewhere(name){
