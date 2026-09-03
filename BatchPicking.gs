@@ -2555,6 +2555,85 @@ function undoScan(data) {
 /* ===================== ⑥ completeBatch =====================
  * 입력: { batchId }
  * ============================================================ */
+/* ===================== deleteBatchIfEmpty (★ 2026-09-03 신규) =====================
+ * 목적: 실수로 잘못 만든 배치를 "완료 처리"(목록에서만 안 보이게)가 아니라
+ * 진짜로 지워서, 다른 작업자가 실수로 그 배치를 열어 작업하는 사고(오늘 실제로
+ * 발생한 B20260903-0937A 사고)를 애초에 막기 위함.
+ *
+ * 안전 원칙: ScanLog·IssueLog·PickTiming 중 단 1건이라도 이 배치로 기록된 게
+ * 있으면 절대 삭제하지 않고 거부함 — "정말 아무도 손 안 댄" 배치만 지울 수 있음.
+ * 이미 스캔이 조금이라도 있는 배치는 실제 작업 흔적(감사 기록)이라 지우면 안 되므로,
+ * 그런 경우엔 completeBatch(완료 처리)를 쓰도록 안내함.
+ *
+ * 통과하면 Batches / BatchCustomers / BatchItems 세 시트에서 이 배치의 행을
+ * 전부 제거하고, 이 배치가 활성 배치로 지정돼 있었다면 그것도 같이 해제함.
+ * 입력: { batchId } */
+function deleteBatchIfEmpty(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const batchId = data.batchId;
+    if (!batchId) return { ok: false, error: 'batchId required' };
+
+    const row = _findBatchRow_(batchId);
+    if (!row) return { ok: false, error: '배치를 찾을 수 없습니다' };
+
+    // 1) 안전 검사 — ScanLog / IssueLog / PickTiming 중 하나라도 흔적이 있으면 거부
+    const checks = [
+      { name: 'ScanLog', sh: scanlogSheet_() },
+      { name: 'IssueLog', sh: issuelogSheet_() },
+      { name: 'PickTiming', sh: picktimeSheetSafe_() },
+    ];
+    for (const c of checks) {
+      const last = c.sh.getLastRow();
+      if (last < 2) continue;
+      const col1 = c.sh.getRange(2, 1, last - 1, 1).getValues();
+      const hasAny = col1.some(r => String(r[0]) === String(batchId));
+      if (hasAny) {
+        return {
+          ok: false, blocked: true,
+          error: c.name + '에 이미 기록이 있어 삭제할 수 없습니다(실제 작업 흔적). "완료 처리"를 사용해주세요.',
+        };
+      }
+    }
+
+    // 2) Batches / BatchCustomers / BatchItems 에서 이 배치의 행 전부 제거
+    const sheetsToClean = [
+      { get: batchesSheet_ },
+      { get: bcustSheet_ },
+      { get: bitemsSheet_ },
+    ];
+    let totalRemoved = 0;
+    sheetsToClean.forEach(({ get }) => {
+      const sh = get();
+      const last = sh.getLastRow();
+      if (last < 2) return;
+      const lastCol = sh.getLastColumn();
+      const rows = sh.getRange(2, 1, last - 1, lastCol).getValues();
+      const kept = rows.filter(r => String(r[0]) !== String(batchId));
+      totalRemoved += rows.length - kept.length;
+      sh.getRange(2, 1, last - 1, lastCol).clear();
+      if (kept.length > 0) sh.getRange(2, 1, kept.length, lastCol).setValues(kept);
+    });
+
+    // 3) 이 배치가 "활성 배치"로 지정돼 있었다면 같이 해제(다른 기기가 계속 이 배치를 자동으로 불러오지 않게)
+    try {
+      const activeId = PropertiesService.getScriptProperties().getProperty('activeBatchId');
+      if (String(activeId) === String(batchId)) {
+        PropertiesService.getScriptProperties().deleteProperty('activeBatchId');
+      }
+    } catch (e) { /* 무시 */ }
+
+    bumpVersion_();
+    Logger.log('✅ deleteBatchIfEmpty: ' + batchId + ' 완전 삭제됨 (행 ' + totalRemoved + '개 제거)');
+    return { ok: true, deleted: true, rowsRemoved: totalRemoved };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function completeBatch(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
