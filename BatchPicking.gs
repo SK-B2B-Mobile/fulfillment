@@ -655,6 +655,19 @@ function bworkersSheet_() { return ensureBatchSheet_(BWORKERS_SHEET, ['Id','Name
 // "그때 뭘 잘못 스캔했는지" 감사 추적이 가능하게 함.
 function packscanSheet_() { return ensureBatchSheet_(PACKSCAN_SHEET, ['BatchId','PackScanId','Timestamp','Worker','Barcode','SKU','Invoice','Result','Status','Qty']); }
 
+// ★ 2026-09-03 신규 — 단독 오더 1차(04 Standalone Scan)와 2차(Pack Verify 단독)가
+//   똑같은 PackScanLog를 batchId=STANDALONE_ORDERS+invoice로만 구분해서 써서,
+//   1차 스캔을 다 채우면 2차 검증이 시작하자마자 "이미 완료됨"으로 보여버리는
+//   사고가 있었음(2차 검수자가 실물을 다시 스캔하지 않아도 되는 심각한 버그).
+//   11번째 컬럼(Round: 1=1차, 2=2차)을 추가해서 완전히 분리함. 기존 시트는
+//   이미 10개 컬럼으로 만들어져 있어서 헤더가 자동으로 안 생기므로, 다른
+//   *SheetSafe_ 함수들과 동일한 패턴으로 한 번만 채워주는 안전장치.
+function packscanSheetSafe_() {
+  const pl = packscanSheet_();
+  if (!pl.getRange(1, 11).getValue()) pl.getRange(1, 11).setValue('Round');
+  return pl;
+}
+
 // ★ 2026-08-25 신규 — Scan & Sort "작업자 선택" 중복 방지용 가벼운 하트비트.
 // 피킹(PickTiming)은 시작/종료가 명확한 이벤트라 activePickers로 잠금이 가능했지만,
 // 스캔 작업자 선택은 그런 이벤트가 없이 그냥 "지금 드롭다운에 뭐가 선택돼있나"뿐임.
@@ -1345,7 +1358,9 @@ function setPackingMoved(data) {
         //   총량피킹 호출 경로는 이 줄 자체를 아예 안 타서 예전과 완전히 동일한
         //   속도를 유지함.
         if (batchId === STANDALONE_BATCH_ID) {
-          syncArgs = [batchId, invoice, data.worker || ''];
+          // ★ 2026-09-03 신규 — round=1(1차) 스캔 기록만으로 동기화. 04에서
+          //   기록한 것만 반영하고, 2차(Pack Verify) 기록과는 절대 안 섞임.
+          syncArgs = [batchId, invoice, data.worker || '', 1];
         }
       } else { // 'verified' — ★ 2026-08-24 신규: 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
         if (!bc.getRange(row, 12).getValue()) {
@@ -1374,7 +1389,8 @@ function setPackingMoved(data) {
         //   놓친 경우를 이 시점에 확실히 잡아줌(이미 04에서 반영됐으면 currentVal
         //   비교 로직 덕분에 중복 저장 없이 조용히 넘어감).
         if (batchId === STANDALONE_BATCH_ID) {
-          syncArgs = [batchId, invoice, data.worker || ''];
+          // ★ 2026-09-03 신규 — round=2(2차) 스캔 기록만으로 동기화.
+          syncArgs = [batchId, invoice, data.worker || '', 2];
         }
       }
       found = true;
@@ -1393,7 +1409,7 @@ function setPackingMoved(data) {
   //   여러 시트를 통째로 다시 읽는 무거운 함수라 락 밖으로 옮김. TV 현황판에서
   //   슬롯 여러 개가 짧은 시간에 연달아 눌리는 상황(배치 막바지)에 특히 효과가 큼.
   if (syncArgs) {
-    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2]); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], false, syncArgs[3]); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
   }
   return result;
 }
@@ -1510,6 +1526,13 @@ function logPackScan(data) {
     const barcode = String(data.barcode || '').trim();
     if (!barcode) return { ok: false, error: 'barcode required' };
     const normBc = normBarcode_(barcode);
+    // ★ 2026-09-03 긴급 신규 — 단독 오더 1차(04 Standalone Scan)와 2차(Pack Verify
+    //   단독)가 같은 PackScanLog를 공유해서, 1차 스캔만으로 2차가 "이미 완료됨"
+    //   으로 잘못 보이던 버그 수정. round=1(1차)/2(2차, 기본값)로 완전히 분리함.
+    //   총량피킹 Pack Verify는 원래부터 round를 안 보내므로 기본값 2를 그대로
+    //   쓰고, 기존에 이미 쌓인 데이터(Round 컬럼 없음)도 2로 취급되어 예전과
+    //   동일하게 동작함 — 총량피킹 쪽은 이 수정으로 전혀 영향받지 않음.
+    const round = Number(data.round) || 2;
 
     // ★ 2026-09-01 수정(속도) — BatchItems 전체를 매번 읽는 대신, 이 인보이스
     //   범위로 캐싱된(20초) 목록에서 바코드가 일치하는 줄만 찾음. 자세한 이유는
@@ -1519,7 +1542,7 @@ function logPackScan(data) {
       .filter(l => normBarcode_(l.barcode) === normBc)
       .map(l => ({ sku: l.sku, name: l.name, reqQty: l.reqQty }));
 
-    const pl = packscanSheet_();
+    const pl = packscanSheetSafe_();
 
     if (matchLines.length === 0) {
       // ★ 이 인보이스 것이 아님 — 배치 안 다른 고객사 중 실제로 이 바코드가
@@ -1541,9 +1564,9 @@ function logPackScan(data) {
       const newRow = pl.getLastRow() + 1;
       ensureSheetRoom_(pl, newRow);
       pl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
-      pl.getRange(newRow, 1, 1, 10).setValues([[
+      pl.getRange(newRow, 1, 1, 11).setValues([[
         data.batchId, packScanId, batchNow_(), data.worker || '', barcode, '',
-        data.invoice, 'wrong', 'active', 0,
+        data.invoice, 'wrong', 'active', 0, round,
       ]]);
       return { ok: true, result: 'wrong', packScanId: packScanId, ownerInvoices: Array.from(owners) };
     }
@@ -1553,11 +1576,12 @@ function logPackScan(data) {
     const plLast = pl.getLastRow();
     let already = 0;
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
         if (String(r[0]) !== String(data.batchId)) return;
         if (String(r[6]) !== String(data.invoice)) return;
         if (r[7] !== 'pass' || r[8] === 'undone') return;
         if (normBarcode_(r[4]) !== normBc) return;
+        if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
         already += Number(r[9]) || 0;
       });
     }
@@ -1586,9 +1610,9 @@ function logPackScan(data) {
       const newRow0 = pl.getLastRow() + 1;
       ensureSheetRoom_(pl, newRow0);
       pl.getRange(newRow0, 5, 1, 2).setNumberFormat('@');
-      pl.getRange(newRow0, 1, 1, 10).setValues([[
+      pl.getRange(newRow0, 1, 1, 11).setValues([[
         data.batchId, packScanId0, batchNow_(), data.worker || '', barcode, sku,
-        data.invoice, 'over', 'active', 0,
+        data.invoice, 'over', 'active', 0, round,
       ]]);
       return {
         ok: true, result: 'over', note: note, packScanId: packScanId0, sku: sku, name: name,
@@ -1616,9 +1640,9 @@ function logPackScan(data) {
     const newRow2 = pl.getLastRow() + 1;
     ensureSheetRoom_(pl, newRow2);
     pl.getRange(newRow2, 5, 1, 2).setNumberFormat('@');
-    pl.getRange(newRow2, 1, 1, 10).setValues([[
+    pl.getRange(newRow2, 1, 1, 11).setValues([[
       data.batchId, packScanId, batchNow_(), data.worker || '', barcode, sku,
-      data.invoice, 'pass', 'active', fillQty,
+      data.invoice, 'pass', 'active', fillQty, round,
     ]]);
     bumpVersion_();
     return {
@@ -1684,6 +1708,8 @@ function forceCompletePackScan(data) {
     const batchId = data.batchId, invoice = data.invoice;
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
     const worker = String(data.worker || '').trim() || '관리자(강제확정)';
+    // ★ 2026-09-03 신규 — logPackScan/getPackScanState와 동일한 1차/2차 분리(Round).
+    const round = Number(data.round) || 2;
 
     const invoiceLines = getInvoiceBatchItemsCached_(batchId, invoice);
     if (!invoiceLines.length) return { ok: true, filledLines: 0 };
@@ -1704,14 +1730,15 @@ function forceCompletePackScan(data) {
       issueByBarcode[k] = (issueByBarcode[k] || 0) + iss.qty;
     });
 
-    const pl = packscanSheet_();
+    const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
     const alreadyByBarcode = {};
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[6]) !== String(invoice)) return;
         if (r[7] !== 'pass' || r[8] === 'undone') return;
+        if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
         const k = normBarcode_(r[4]);
         alreadyByBarcode[k] = (alreadyByBarcode[k] || 0) + (Number(r[9]) || 0);
       });
@@ -1725,14 +1752,14 @@ function forceCompletePackScan(data) {
       const remaining = effReq - already;
       if (remaining <= 0) return;
       const info = skuByBarcode[k] || {};
-      rows.push([batchId, Utilities.getUuid(), now, worker, info.barcodeOrig || k, info.sku || '', invoice, 'pass', 'active', remaining]);
+      rows.push([batchId, Utilities.getUuid(), now, worker, info.barcodeOrig || k, info.sku || '', invoice, 'pass', 'active', remaining, round]);
     });
 
     if (rows.length) {
       const startRow = pl.getLastRow() + 1;
       ensureSheetRoom_(pl, startRow + rows.length - 1);
       pl.getRange(startRow, 5, rows.length, 2).setNumberFormat('@'); // Barcode, SKU 텍스트 고정
-      pl.getRange(startRow, 1, rows.length, 10).setValues(rows);
+      pl.getRange(startRow, 1, rows.length, 11).setValues(rows);
       bumpVersion_();
     }
     return { ok: true, filledLines: rows.length };
@@ -1743,10 +1770,13 @@ function forceCompletePackScan(data) {
   }
 }
 
-function getPackScanState(batchId, invoice) {
+function getPackScanState(batchId, invoice, round) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
     if (!invoice) return { ok: false, error: 'invoice required' };
+    // ★ 2026-09-03 신규 — logPackScan과 동일한 1차/2차 분리(Round). round를 안 넘기면
+    //   기존과 동일하게 2(2차/총량 Pack Verify 기본값)로 취급되어 총량피킹은 영향 없음.
+    round = Number(round) || 2;
 
     // ★ 2026-09-01 수정(속도) — logPackScan과 완전히 동일한 이유. 스캔 1번마다
     //   화면이 곧바로 이 함수를 다시 불러서(진행률 카드 갱신용) BatchItems/IssueLog
@@ -1772,14 +1802,15 @@ function getPackScanState(batchId, invoice) {
       issueQtyByBarcode[k] = (issueQtyByBarcode[k] || 0) + iss.qty;
     });
 
-    const pl = packscanSheet_();
+    const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
     const packedByBarcode = {};
     const history = [];
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[6]) !== String(invoice)) return;
+        if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리 — 다른 라운드 기록은 아예 안 보여줌
         const entry = { packScanId: r[1], time: String(r[2]), worker: r[3], barcode: String(r[4]), sku: String(r[5]), result: r[7], status: r[8], qty: Number(r[9]) || 0 };
         history.push(entry);
         if (r[8] === 'undone') return;
@@ -2064,8 +2095,12 @@ function autoClearStaleDoneSlots() {
  * 자체는 절대 실패하면 안 되므로, 호출부에서 항상 try/catch로 감싸서 씀.
  * 입력: { batchId, invoice, worker }
  * ================================================================================ */
-function syncInspectionFromPicking_(batchId, invoice, worker, force) {
+function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   if (!batchId || !invoice) return;
+  // ★ 2026-09-03 신규 — 단독 오더 1차(taken)/2차(verified) 스캔 기록을 완전히
+  //   분리해서 반영하기 위한 round. 안 넘기면(=logScan/logIssue/undoIssue 등
+  //   기존 호출부) 예전과 동일하게 모든 라운드를 합쳐서 계산함 — 그 호출부들은
+  //   이 수정으로 전혀 영향받지 않음.
 
   // 1) 이 인보이스의 총 필요수량(BatchCustomers) 찾기
   const bc = bcustSheetSafe_();
@@ -2118,14 +2153,17 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force) {
   //   시트 자체가 다르므로, batchId로 분기해서 실제로 스캔이 쌓이는 시트를 읽는다.
   const scannedByKey = {}; // ★ 2026-07-28 수정: "바코드"만이 아니라 "바코드|SKU"로 키 변경
   if (batchId === STANDALONE_BATCH_ID) {
-    const pl = packscanSheet_();
+    const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[6]) !== String(invoice)) return; // PackScanLog: G=Invoice
         if (r[8] === 'undone') return;                // Status
         if (r[7] !== 'pass') return;                  // Result
+        // ★ 2026-09-03 신규 — round가 명시된 경우(1차 taken / 2차 verified 호출)만
+        //   그 라운드의 기록만 집계. round 미지정(기존 호출부)이면 예전처럼 전체 합산.
+        if (round && (Number(r[10]) || 2) !== Number(round)) return;
         const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku
         scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[9]) || 0); // Qty
       });
