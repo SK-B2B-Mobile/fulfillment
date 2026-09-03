@@ -411,7 +411,11 @@ const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
 // ★ 2026-08-19 수정(현장 확인) — 서버(Apps Script)에 여러 기기의 요청이
 //   몰려 간헐적으로 응답 실패하는 게 확인돼서, 8초→12초로 완화. TV는 실시간성이
 //   더 중요하긴 하지만, 12초 정도는 체감 차이가 크지 않고 서버 부담은 확실히 줄어듦.
-const POLL_MS = 12000;
+// ★ 2026-09-03 신규(매니저 확정) — 12초→20초로 완화. TV 현황판은 사람이
+// 계속 쳐다보는 화면이 아니라 가끔 확인하는 용도라, 8초 늦어져도 체감상
+// "실시간"으로 계속 느껴짐. batch.html/sales.html과 서버를 같이 쓰는데 이
+// 화면도 계속 폴링하고 있었던 게 전체 부담에 한몫했음.
+const POLL_MS = 20000;
 
 /* ★ 2026-08-11 신규 — TV를 새로고침했을 때 즉시 화면이 뜨도록,
  * 마지막으로 보던 배치 번호를 이 기기에 기억해둠. 데이터가 아니라
@@ -1729,7 +1733,7 @@ document.getElementById('unfulfilledModalOverlay').addEventListener('click', (e)
   if(e.target.id === 'unfulfilledModalOverlay') document.getElementById('unfulfilledModalOverlay').classList.remove('show');
 });
 setTimeout(pollUnfulfilledAlerts, 2000); // 배치ID가 확정될 시간을 조금 준 뒤 첫 조회
-setInterval(pollUnfulfilledAlerts, 45000); // ★ 2026-08-19 수정: 30초→45초(서버 부담 완화)
+setInterval(pollUnfulfilledAlerts, 60000); // ★ 2026-09-03 수정: 45초→60초(서버 부담 추가 완화)
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-23 신규 — TV "다른 배치 조회" 드롭다운
