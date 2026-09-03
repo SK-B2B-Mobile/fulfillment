@@ -4243,9 +4243,10 @@ function getSalesInvoiceDetail(invoice) {
           // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
           //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
           //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
-          movedToPacking = !!bc.getRange(i + 2, 12).getValue();
-          const kVal = bc.getRange(i + 2, 11).getValue();
-          const mVal = bc.getRange(i + 2, 13).getValue(); // ★ 2026-08-24 신규: PackVerified(주황, 최종 2차 검증완료)
+          // ★ 2026-09-02 소소한 성능수정 — K/L/M을 각각 따로 부르던 것 3번을 1번으로.
+          const klm = bc.getRange(i + 2, 11, 1, 3).getValues()[0];
+          const kVal = klm[0], mVal = klm[2];
+          movedToPacking = !!klm[1];
           if (mVal) packStage = 'verified';
           else if (movedToPacking) packStage = 'taken';
           else if (kVal) packStage = 'moved';
@@ -4267,11 +4268,17 @@ function getSalesInvoiceDetail(invoice) {
       const sl = scanlogSheet_();
       const slLast = sl.getLastRow();
       if (slLast >= 2) {
-        const slInvCol = sl.getRange(2, 9, slLast - 1, 1).getValues(); // I열: Invoice
-        for (let i = 0; i < slInvCol.length; i++) {
-          if (String(slInvCol[i][0]).trim() !== invoice) continue;
-          const rowFull = sl.getRange(i + 2, 1, 1, 11).getValues()[0]; // Result(J,10), Status(K,11)
-          if (rowFull[9] === 'pass' && rowFull[10] !== 'undone') { hasBatchRecord = true; break; }
+        // ★ 2026-09-02 긴급 성능수정 — "상세창 열기 10초" 지연의 핵심 원인.
+        //   예전엔 인보이스가 일치하는 행을 찾을 때마다 그 행 하나를 다시
+        //   getRange().getValues()로 따로 불러왔음(N+1 패턴) — 스캔 기록이
+        //   많이 쌓인 인보이스는 이게 수십 번씩 반복되며 서버 호출이 크게
+        //   누적됨. 이제 필요한 3개 컬럼(Invoice/Result/Status)을 한 번에만
+        //   통째로 읽어서 메모리 안에서만 비교 — API 호출 횟수를 수십 번에서
+        //   1번으로 줄임.
+        const slRange = sl.getRange(2, 9, slLast - 1, 3).getValues(); // I:Invoice, J:Result, K:Status
+        for (let i = 0; i < slRange.length; i++) {
+          if (String(slRange[i][0]).trim() !== invoice) continue;
+          if (slRange[i][1] === 'pass' && slRange[i][2] !== 'undone') { hasBatchRecord = true; break; }
         }
       }
     } catch (e) { /* best-effort */ }
@@ -4306,16 +4313,18 @@ function getSalesInvoiceDetail(invoice) {
     const ilLast = il.getLastRow();
     const items = [];
     if (ilLast >= 2) {
-      const ilInvVals = il.getRange(2, 8, ilLast - 1, 1).getValues();
-      for (let i = 0; i < ilInvVals.length; i++) {
-        if (String(ilInvVals[i][0]).trim() !== invoice) continue;
-        const r = il.getRange(i + 2, 1, 1, 13).getValues()[0];
-        if (r[12] === 'undone') continue;
+      // ★ 2026-09-02 긴급 성능수정 — hasBatchRecord와 완전히 같은 문제(N+1
+      //   패턴)가 여기도 있었음. 매칭 행마다 따로 API를 부르는 대신, 전체
+      //   13개 컬럼 범위를 한 번만 읽어서 메모리 안에서 필터링 — 이슈가 많이
+      //   쌓인 인보이스일수록 효과가 큼.
+      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+        if (String(r[7]).trim() !== invoice) return;
+        if (r[12] === 'undone') return;
         items.push({
           sku: r[5] || '', name: r[6] || '', barcode: r[4] || '',
           reason: r[9] || '', qty: Number(r[10]) || 0, note: r[11] || ''
         });
-      }
+      });
     }
     // ★ 2026-07-28 신규 — IssueLog에서 못 찾았는데 검수결과는 "⚠ ISSUES"인 경우
     //   (archiveOldBatches로 오래된 배치의 IssueLog가 Archive_IssueLog로 옮겨진
