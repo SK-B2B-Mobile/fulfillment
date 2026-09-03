@@ -773,13 +773,17 @@ function updatePaymentStatus(data) {
     const insp = iInsp ? String(sh.getRange(row, iInsp).getValue() || '').trim() : '';
     if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
-    // ★ 패킹존 이동 여부는 반드시 getSalesInvoiceDetail()이 클라이언트에 내려주는
-    //   값과 "완전히 같은 계산"으로 판정해야 함(화면이 본 것과 서버가 검증하는
-    //   것을 항상 일치시키기 위해 같은 함수를 그대로 재사용) — 이 호출 자체는
-    //   읽기 전용이라 락이 필요 없음, 락 밖에서 실행.
-    const detail = getSalesInvoiceDetail(invoice);
-    if (!detail || !detail.ok) return { ok: false, error: '오더 정보를 확인하지 못했습니다' };
-    if (!detail.movedToPacking) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
+    // ★ 2026-09-02 재수정(속도) — getSalesInvoiceDetail()을 검증용으로 통째로
+    //   다시 부르는 건 너무 무거웠음(BatchCustomers·IssueLog·Dimensions·DimLinks
+    //   등을 전부 다시 계산). 저장 1번에 이 무거운 함수가 2번(검증용 1번 + 저장
+    //   후 새로고침용 1번) 실행되면서 전체 처리 시간이 길어지고, 그로 인한
+    //   타임아웃·재시도가 겹쳐 "로딩만 계속되다 결국 예전 값을 보여주는" 증상으로
+    //   이어졌을 가능성이 높음. PU 오더는 디멘션을 안 쓰므로(TK/UPS만 해당),
+    //   패킹존 이동 여부는 buildMovedToPackingMap_()만으로도 getSalesInvoiceDetail과
+    //   결과가 동일하면서 훨씬 가벼움 — 이걸로 대체.
+    let moved = false;
+    try { moved = !!buildMovedToPackingMap_()[invoice]; } catch (e) { moved = false; }
+    if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
     // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
     const lock = LockService.getDocumentLock();
