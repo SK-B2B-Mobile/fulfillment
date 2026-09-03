@@ -2092,6 +2092,7 @@ function renderOpenBatchesPanel(batches){
         <div class="openb-meta">${statsLine}</div>
         <div class="openb-actions">
           <button class="btn btn-ghost btn-sm" data-complete="${b.batchId}">완료 처리</button>
+          <button class="btn btn-ghost btn-sm" data-delete-empty="${b.batchId}" style="color:var(--red);">🗑 빈 배치 삭제</button>
         </div>
       </div>`;
     }).join('')}
@@ -2112,6 +2113,12 @@ function renderOpenBatchesPanel(batches){
   `;
   panel.querySelectorAll('[data-complete]').forEach(btn => {
     btn.onclick = () => completeOpenBatch(btn.dataset.complete);
+  });
+  // ★ 2026-09-03 신규 — 스캔 기록이 전혀 없는(실수로 만든) 배치를 즉시 완전삭제.
+  //   서버가 ScanLog/IssueLog/PickTiming에 흔적이 하나라도 있으면 거부하므로,
+  //   실제로 작업이 조금이라도 진행된 배치는 여기서 절대 안 지워짐(안전).
+  panel.querySelectorAll('[data-delete-empty]').forEach(btn => {
+    btn.onclick = () => deleteEmptyBatch(btn.dataset.deleteEmpty);
   });
   // ★ 2026-08-07 신규(현장 지적) — 배치가 완료되면 서버의 "현재 배치" 표시가
   //   지워져서 화면이 "배치 없음"이 되고, 방금 끝낸 배치의 스캔 로그·KPI를
@@ -2322,6 +2329,26 @@ async function completeOpenBatch(batchId){
   if(GAS_READY && state.batchId === batchId) gasCall('clearActiveBatch', {});
   if(state.batchId === batchId) clearBatchCache(); // ★ 2026-08-04 신규: 완료된 배치가 다음 새로고침 때 캐시로 되살아나지 않게
   toast(`배치 ${batchId} 완료 처리됨`, 'success');
+  checkOpenBatches();
+}
+
+// ★ 2026-09-03 신규 — 실수로 만든, 스캔 기록이 전혀 없는 배치를 완전히 삭제.
+//   서버(deleteBatchIfEmpty)가 ScanLog/IssueLog/PickTiming을 다시 한번 확인해서,
+//   조금이라도 작업 흔적이 있으면 거부하고 안내 메시지를 돌려줌 — 이중 안전장치.
+async function deleteEmptyBatch(batchId){
+  if(!confirm(`배치 ${batchId}를 완전히 삭제하시겠습니까?\n\n⚠ 이 작업은 되돌릴 수 없습니다.\n스캔 기록이 조금이라도 있으면 자동으로 거부됩니다(안전).\n정말 실수로 잘못 만든 빈 배치일 때만 사용하세요.`)) return;
+  const res = await gasCallWithRetry('deleteBatchIfEmpty', { batchId });
+  if(!res.ok){
+    if(res.blocked){
+      alert('삭제할 수 없습니다:\n\n' + res.error);
+    } else {
+      toast('삭제 실패: ' + (res.error||''), 'error');
+    }
+    return;
+  }
+  if(GAS_READY && state.batchId === batchId) gasCall('clearActiveBatch', {});
+  if(state.batchId === batchId) clearBatchCache();
+  toast(`배치 ${batchId} 완전 삭제됨`, 'success');
   checkOpenBatches();
 }
 
