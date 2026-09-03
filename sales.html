@@ -750,6 +750,23 @@ async function gasPost(op, data){
     return { ok:false, error: timedOut ? 'Request timed out (25s) — please try again' : String(e && e.message || e) };
   }
 }
+// ★ 2026-09-02 긴급 수정 — gasGet(읽기)엔 이미 fetch 실패 시 JSONP 재시도가
+// 있었는데, gasPost(쓰기)엔 그 방어가 전혀 없었음. POST는 원리상 JSONP로 우회가
+// 안 되지만(JSONP는 GET 전용 기법), 창고 와이파이가 순간적으로만 끊겨도 저장이
+// 그대로 실패해버리는 문제는 재시도로 해결 가능 — batch.html에서 이미 검증된
+// 동일한 패턴(gasCallWithRetry)을 여기도 그대로 적용함. 여기서 재시도하는
+// 모든 동작(결제상태/배송방법/디멘션/수동이동표시)은 전부 "값을 그대로
+// 덮어쓰는" 방식이라, 같은 요청이 두 번 가도 결과가 달라지지 않아 항상 안전함.
+async function gasPostWithRetry(op, data, retries){
+  const maxRetries = (retries === undefined) ? 2 : retries;
+  let res = await gasPost(op, data);
+  for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
+    const jitter = Math.floor(Math.random() * 1000);
+    await new Promise(r => setTimeout(r, 1200 * attempt + jitter));
+    res = await gasPost(op, data);
+  }
+  return res;
+}
 
 function needsDims(order){ return order.method==='TRUCKING' || order.method==='TK' || order.method==='UPS'; }
 function dimUnitLabel(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallet' : 'Box'; }
@@ -1660,7 +1677,7 @@ function renderDimsPanel(order, editing){
 /* ---- 디멘션 그룹 조작 (서버 반영 후 현재 오더를 다시 불러옴) ---- */
 async function dimGroupCall(op, payload, confirmMsg){
   if (confirmMsg && !confirm(confirmMsg)) return;
-  const res = await gasPost(op, payload);
+  const res = await gasPostWithRetry(op, payload);
   if (res && res.ok){
     const inv = (CURRENT_ORDER && CURRENT_ORDER.invoice) || '';
     if (inv) await openInvoice(inv);
@@ -1752,7 +1769,7 @@ async function saveDimsReal(){
   btn.innerHTML = '<span class="spinner"></span>Saving...';
   errFlash.classList.remove('show');
 
-  const res = await gasPost('saveDimensions', { invoice: CURRENT_ORDER.invoice, dims, enteredBy: 'Packing (tablet)' });
+  const res = await gasPostWithRetry('saveDimensions', { invoice: CURRENT_ORDER.invoice, dims, enteredBy: 'Packing (tablet)' });
 
   if (res && res.ok){
     CURRENT_ORDER.dims = dims;
@@ -2002,7 +2019,7 @@ async function markManualMoved(invoice, moved){
     : `"${invoice}" Undo the packing-zone move for this order?\n\nUse this only if it was clicked by mistake.`;
   if (!confirm(msg)) return;
 
-  const res = await gasPost('setManualPackingMoved', { invoice: invoice, moved: moved, by: 'Packing (Sales page)' });
+  const res = await gasPostWithRetry('setManualPackingMoved', { invoice: invoice, moved: moved, by: 'Packing (Sales page)' });
   if (!res || !res.ok){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
@@ -2033,7 +2050,7 @@ async function saveMethodChange(invoice){
     : `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} orders don't need shipping dimensions.`;
   if (!confirm(warn)) return;
 
-  const res = await gasPost('updateOrderMethod', { invoice: invoice, method: newMethod, by: 'Packing (Sales page)' });
+  const res = await gasPostWithRetry('updateOrderMethod', { invoice: invoice, method: newMethod, by: 'Packing (Sales page)' });
   if (!res || !res.ok){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
@@ -2050,7 +2067,7 @@ async function savePaymentStatus(invoice, willBePaid){
   const warn = `Change payment status to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
   if (!confirm(warn)) return;
 
-  const res = await gasPost('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: 'Sales (Order Detail Lookup)' });
+  const res = await gasPostWithRetry('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: 'Sales (Order Detail Lookup)' });
   if (!res || !res.ok){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
