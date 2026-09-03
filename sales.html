@@ -227,7 +227,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .today-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 /* ★ 고객명 길이에 따라 Ship 날짜 위치가 들쭉날쭉하던 것을 고쳐서, 모든 컬럼이
    표처럼 항상 같은 x 위치에서 시작하도록 grid로 전면 개편 */
-.today-row{display:grid; grid-template-columns:minmax(102px,1.44fr) minmax(150px,2.82fr) minmax(118px,1.67fr) minmax(56px,0.82fr) minmax(130px,1.77fr) minmax(90px,1.3fr) minmax(134px,1.74fr) minmax(152px,0.5fr); gap:20px; align-items:center; padding:13px 24px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; white-space:nowrap; min-width:1120px;}
+.today-row{display:grid; grid-template-columns:minmax(100px,1.3fr) minmax(120px,2.1fr) minmax(105px,1.4fr) minmax(110px,1.5fr) minmax(120px,1.6fr) minmax(90px,1.2fr) minmax(120px,1.55fr) minmax(140px,0.5fr); gap:14px; align-items:center; padding:13px 24px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; white-space:nowrap; min-width:1120px;}
 /* ★ 2026-08-06 수정(매니저 지적) — DIMS 칸의 '🔗 IN00462789'가 옆 칸(Inspected At)을
    침범해서 글자가 겹쳐 보이던 문제. 원인 두 가지를 같이 고침:
    (1) DIMS 칸 폭이 85px로 고정이라 내용보다 좁았음 → 폭을 넓히고 fr(비율)로 바꿔서
@@ -246,7 +246,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 /* ★ Completed Today 목록 헤더 — 1번 시트 미리보기 테이블 헤더(thead th)와 같은
    글꼴/색/스타일을 쓰되, 아래 행들과 정확히 같은 grid-template-columns을 써서
    각 항목이 컬럼별로 줄이 맞게 함. */
-.today-header{display:grid; grid-template-columns:minmax(102px,1.44fr) minmax(150px,2.82fr) minmax(118px,1.67fr) minmax(56px,0.82fr) minmax(130px,1.77fr) minmax(90px,1.3fr) minmax(134px,1.74fr) minmax(152px,0.5fr); gap:20px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1120px;}
+.today-header{display:grid; grid-template-columns:minmax(100px,1.3fr) minmax(120px,2.1fr) minmax(105px,1.4fr) minmax(110px,1.5fr) minmax(120px,1.6fr) minmax(90px,1.2fr) minmax(120px,1.55fr) minmax(140px,0.5fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1120px;}
 .today-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
 .today-cust{font-size:12.5px; color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
@@ -322,6 +322,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .pay-badge.unpaid{background:var(--red-bg); color:#FF7A7A; border:1px solid rgba(239,68,68,0.4);}
 .pay-badge.paid{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.4);}
 .pay-locked{font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--gray-bg); border:1px solid var(--border2); padding:5px 9px; border-radius:6px; display:inline-block;}
+/* ★ 2026-09-02 신규 — Recently Completed 목록의 Method 칸 안에서 PU일 때만
+   같이 보여주는 결제상태 미니 배지(읽기 전용 — 여기서는 클릭 안 됨). */
+.method-cell-wrap{display:flex; align-items:center; gap:6px;}
+.pay-mini{font-family:var(--mono); font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:5px; white-space:nowrap;}
+.pay-mini.unpaid{background:var(--red-bg); color:#FF7A7A;}
+.pay-mini.paid{background:var(--green-bg); color:var(--green);}
 .manual-moved-btn:hover{background:var(--purple); color:#fff;}
 .manual-moved-undo{background:none; border:none; color:var(--text-dim); font-family:var(--sans); font-size:10.5px; cursor:pointer; text-decoration:underline; padding:2px 0;}
 .manual-moved-undo:hover{color:var(--red);}
@@ -1319,7 +1325,14 @@ function renderToday(){
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="plain-tag issue">'+insp+' →</span>';
     else badge = '<span class="plain-tag pending">'+insp+'</span>';
     const movedBadge = packStageBadgeHtml(j, 'plain-tag');
-    const methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
+    // ★ 2026-09-02 신규(매니저 요청) — PU 오더에만 Method 옆에 결제상태를 같이
+    //   표시. 새 컬럼을 만들지 않고 Method 칸 안에서 같이 보여줘서(폭을
+    //   넓혀뒀으므로 잘리지 않음) 표 전체 구조는 그대로 유지.
+    let methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
+    if (String(j.method||'').trim().toUpperCase() === 'PU') {
+      const payMini = j.paymentPaid ? '<span class="pay-mini paid">PAID</span>' : '<span class="pay-mini unpaid">UNPAID</span>';
+      methodBadge = `<span class="method-cell-wrap">${methodBadge}${payMini}</span>`;
+    }
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>')) : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
@@ -1926,12 +1939,24 @@ function renderDetail(res){
   if (res.method === 'PU' && status !== 'pending') {
     if (res.movedToPacking) {
       const isPaid = !!res.paymentPaid;
+      // ★ 2026-09-02 재설계(매니저 요청) — 클릭 즉시 토글 방식이 반영 확인이
+      //   불안정해서, Shipping Method와 완전히 동일한 "선택 → Save" 방식으로
+      //   바꿈. 인터랙션이 명확한 한 지점(Save 클릭)에 몰려있어 확인·디버깅이
+      //   쉽고, 이미 안정적으로 동작 검증된 패턴을 그대로 재사용.
       paymentMetaHtml = `
         <div class="meta-item">
           <div class="k">Payment Status</div>
           <div class="v">
             <span class="pay-badge ${isPaid?'paid':'unpaid'}" id="paymentBadge">${isPaid?'✓ PAID':'⚠ UNPAID'}</span>
-            <button class="method-edit-btn" onclick="savePaymentStatus('${res.invoice}', ${!isPaid})" title="Change payment status">✎ Edit</button>
+            <button class="method-edit-btn" onclick="togglePaymentEdit()" title="Change payment status">✎ Edit</button>
+          </div>
+          <div class="method-edit-row" id="paymentEditRow" style="display:none;">
+            <select id="paymentSelect">
+              <option value="paid" ${isPaid?'selected':''}>PAID</option>
+              <option value="unpaid" ${!isPaid?'selected':''}>UNPAID</option>
+            </select>
+            <button class="method-save-btn" onclick="savePaymentStatus('${res.invoice}')">Save</button>
+            <button class="method-cancel-btn" onclick="togglePaymentEdit()">Cancel</button>
           </div>
         </div>`;
     } else {
@@ -2062,7 +2087,20 @@ async function saveMethodChange(invoice){
 // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인 저장. Order Detail Lookup에서만
 // 호출됨(목록엔 이 함수 자체가 연결돼 있지 않음). 실수 클릭 방지를 위해 반드시
 // confirm()을 거쳐야만 실제로 서버에 반영됨.
-async function savePaymentStatus(invoice, willBePaid){
+// ★ 2026-09-02 재설계 — Shipping Method와 동일한 "선택 → Save" 방식으로 전환
+// (클릭 즉시 토글 방식이 여러 차례 반영 확인 문제를 겪어서, 이미 안정적으로
+// 검증된 패턴으로 통일). 인터랙션이 Save 클릭 한 지점에 몰려있어 확인이 쉬움.
+function togglePaymentEdit(){
+  const row = document.getElementById('paymentEditRow');
+  if (row) row.style.display = (row.style.display === 'none' ? 'flex' : 'none');
+}
+async function savePaymentStatus(invoice){
+  const sel = document.getElementById('paymentSelect');
+  const willBePaid = sel ? (sel.value === 'paid') : null;
+  if (willBePaid === null) return;
+  const oldPaid = !!(CURRENT_ORDER && CURRENT_ORDER.paymentPaid);
+  if (willBePaid === oldPaid){ togglePaymentEdit(); return; }
+
   const nextLabel = willBePaid ? 'PAID' : 'UNPAID';
   const warn = `Change payment status to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
   if (!confirm(warn)) return;
@@ -2072,27 +2110,13 @@ async function savePaymentStatus(invoice, willBePaid){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  // ★ 2026-09-02 재수정(속도) — 저장 성공 직후 openInvoice()로 오더 전체를 다시
-  //   통째로 불러오면, 그 안에서 또 무거운 getSalesInvoiceDetail이 실행됨 —
-  //   결국 클릭 1번에 이 무거운 함수가 서버(검증용)+클라이언트(새로고침용) 해서
-  //   2번 도는 셈이라, 처리 시간이 늘어지고 그 사이 타임아웃·재시도가 겹쳐
-  //   "로딩만 계속되다 결국 예전 값을 보여주는" 증상으로 이어졌을 가능성이 큼.
-  //   저장이 이미 성공했다고 서버가 확인해줬으니, 화면(배지)만 그 결과대로
-  //   바로 바꾸면 되고 서버를 다시 조회할 필요가 없음.
-  // ★ 2026-09-02 긴급 수정 — 서버가 이제 "요청한 값"이 아니라 "실제로 저장 확인된
-  //   값"(res.paid)을 돌려줌. 클라이언트는 그 확인된 값을 그대로 화면에 반영해야
-  //   함(willBePaid를 그대로 믿으면, 혹시 서버 쓰기가 실패해도 화면은 성공한 것처럼
-  //   보이는 사고가 재발할 수 있음).
-  const confirmedPaid = !!res.paid;
-  const badge = document.getElementById('paymentBadge');
-  if (badge){
-    badge.className = 'pay-badge ' + (confirmedPaid ? 'paid' : 'unpaid');
-    badge.textContent = confirmedPaid ? '✓ PAID' : '⚠ UNPAID';
-    const editBtn = badge.nextElementSibling;
-    if (editBtn) editBtn.setAttribute('onclick', `savePaymentStatus('${invoice}', ${!confirmedPaid})`);
-  }
-  if (CURRENT_ORDER) CURRENT_ORDER.paymentPaid = confirmedPaid;
+  // ★ 2026-09-02 — 서버가 "요청한 값"이 아니라 "실제로 저장 확인된 값"(res.paid)을
+  //   돌려줌. 화면은 항상 이 확인된 값을 그대로 반영함(요청값을 그냥 믿지 않음).
+  //   여기서는 다시 서버 전체 조회(openInvoice) 없이 카드만 새로 그려서 확인된
+  //   값을 정확히 보여줌 — 무거운 재조회를 피하면서도 항상 서버 확인값 기준.
+  await openInvoice(invoice);
 }
+
 
 function showScreen(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
