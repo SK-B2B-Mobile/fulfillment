@@ -1330,12 +1330,12 @@ function renderToday(){
     //   넓혀뒀으므로 잘리지 않음) 표 전체 구조는 그대로 유지.
     let methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
     if (String(j.method||'').trim().toUpperCase() === 'PU') {
-      const payMini = j.paymentPaid ? '<span class="pay-mini paid">PAID</span>' : '<span class="pay-mini unpaid">UNPAID</span>';
+      const payMini = j.paymentPaid ? '<span class="pay-mini paid" data-pay-badge="1">PAID</span>' : '<span class="pay-mini unpaid" data-pay-badge="1">UNPAID</span>';
       methodBadge = `<span class="method-cell-wrap">${methodBadge}${payMini}</span>`;
     }
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>')) : '<span class="plain-tag na">N/A</span>';
-    return `<div class="today-row" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
+    return `<div class="today-row" data-invoice="${j.invoice}" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
       <span class="today-inv">${j.invoice||''}</span>
       <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
       <span class="today-time">Ship ${j.shipDate||'-'}</span>
@@ -2129,6 +2129,19 @@ async function savePaymentStatus(invoice){
   if (badge){
     badge.className = 'pay-badge ' + (confirmedPaid ? 'paid' : 'unpaid');
     badge.textContent = confirmedPaid ? '✓ PAID' : '⚠ UNPAID';
+  }
+  // ★ 2026-09-03 신규(매니저 요청) — 팝업에서 바뀐 걸 "Recently Completed"
+  //   목록에도 즉시 반영. 예전엔 목록 쪽은 별도로 다시 불러와야만(느린 전체
+  //   재조회) 새 상태가 보였음 — 지금은 이미 화면에 그려져 있는 그 행을 직접
+  //   찾아서(data-invoice로 식별) 배지만 바로 바꿔치기함. 서버를 다시 안 부르니
+  //   지연이 전혀 없음 — 팝업을 닫기도 전에 목록이 이미 맞는 상태가 되어 있음.
+  const listRow = document.querySelector(`.today-row[data-invoice="${invoice}"]`);
+  if (listRow){
+    const listBadge = listRow.querySelector('[data-pay-badge]');
+    if (listBadge){
+      listBadge.className = 'pay-mini ' + (confirmedPaid ? 'paid' : 'unpaid');
+      listBadge.textContent = confirmedPaid ? 'PAID' : 'UNPAID';
+    }
   }
   // ★ 신규 — 드롭다운 자체도 최신 확인값으로 맞춰둠(다시 Edit을 눌렀을 때
   //   예전 값이 기본 선택되어 있는 걸 방지)
