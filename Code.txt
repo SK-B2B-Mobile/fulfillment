@@ -3357,6 +3357,106 @@ function buildPackStageMap_() {
  * 실제로 일어나게 만듦. 규칙 자체(영업일 3일, TK/UPS는 디멘션 저장 후
  * 기준)는 전혀 안 바뀜 — 실행 주체만 "브라우저"에서 "서버 트리거"로 옮김.
  * ===================================================================== */
+/* ===================== archiveOldJobs (★ 2026-09-03 신규) =====================
+ * 목적: Jobs 시트(모든 오더의 핵심 기록)가 계속 쌓여서 sales.html 조회가
+ * 느려지는 걸 막기 위해, "검수 완료된 지 daysOld일이 지난" 오더의 행을
+ * Archive_Jobs 시트로 옮김. archiveOldBatches(다른 6개 시트)와 완전히 같은
+ * 원칙 — 기록은 하나도 안 지워지고(Archive_Jobs에 그대로 있음) 옮겨질 뿐.
+ * 검수 진행중인(Inspection 값이 비어있는) 오더는 절대 안 건드림.
+ * 이 함수가 옮긴 것도 getSalesInvoiceDetail이 자동으로 Archive_Jobs까지
+ * 같이 찾아보므로, sales.html 검색에서 계속 정상적으로 찾을 수 있음.
+ *
+ * 사용법 1) 수동 실행: Apps Script 에디터에서 함수 목록 archiveOldJobs 선택
+ *          → ▶ 실행 (기본 30일 지난 검수완료건을 옮김)
+ * 사용법 2) 자동 실행(매일 새벽): 함수 목록에서 setupArchiveJobsTrigger 선택
+ *          → ▶ 실행 (한 번만 하면 그 뒤로 매일 새벽 자동으로 정리됨)
+ *          끄고 싶으면 removeArchiveJobsTrigger 실행
+ * ===================================================================== */
+function archiveOldJobs(daysOld) {
+  daysOld = daysOld || 30; // 기본값: 검수완료 후 30일
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const last = sh.getLastRow();
+    const lastCol = sh.getLastColumn();
+    if (last < 2) { Logger.log('Jobs: 데이터 없음'); return { ok: true, archived: 0 }; }
+
+    const iInsp = hdr[norm('Inspection')];
+    const iInspEnd = hdr[norm('Insp End')];
+    if (!iInsp || !iInspEnd) { Logger.log('archiveOldJobs: 필요 컬럼(Inspection/Insp End)을 찾지 못함'); return { ok: false, error: '필요 컬럼 없음' }; }
+
+    // ★ 현재 시점의 헤더를 그대로 스냅샷 — 나중에 Jobs에 컬럼이 더 늘어나도
+    //   (예: PaymentStatus처럼) 지금 만드는 Archive_Jobs는 "지금 있는 컬럼
+    //   그대로"로 만들어져서 문제 없음(archiveOldBatches와 동일한 원칙).
+    const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    const allRows = sh.getRange(2, 1, last - 1, lastCol).getValues();
+
+    const toArchive = [];
+    const toKeep = [];
+    allRows.forEach(r => {
+      const insp = String(r[iInsp - 1] || '').trim();
+      if (!insp) { toKeep.push(r); return; } // 검수 진행중이면 절대 안 건드림
+      const inspEndRaw = r[iInspEnd - 1];
+      let inspEndMs = null;
+      if (inspEndRaw instanceof Date && !isNaN(inspEndRaw)) {
+        inspEndMs = inspEndRaw.getTime();
+      } else {
+        const parsed = new Date(String(inspEndRaw || ''));
+        if (!isNaN(parsed)) inspEndMs = parsed.getTime();
+      }
+      // 날짜를 못 읽으면(비어있거나 형식이상) 안전하게 보관 안 함(유지 쪽으로)
+      if (inspEndMs !== null && inspEndMs < cutoffMs) {
+        toArchive.push(r);
+      } else {
+        toKeep.push(r);
+      }
+    });
+
+    if (toArchive.length > 0) {
+      const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + JOBS_SHEET, headers);
+      archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
+    }
+    sh.getRange(2, 1, last - 1, lastCol).clearContent();
+    if (toKeep.length > 0) sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep);
+
+    if (toArchive.length > 0) bumpVersion_();
+    Logger.log('✅ archiveOldJobs: ' + toArchive.length + '건 보관 이동(검수완료 후 ' + daysOld + '일 경과), ' + toKeep.length + '건 유지');
+    return { ok: true, archived: toArchive.length, kept: toKeep.length };
+  } catch (e) {
+    Logger.log('❌ archiveOldJobs 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 트리거는 인자를 못 넘기므로, 기본값(30일)으로 실행하는 래퍼 함수
+function archiveOldJobsDaily() {
+  archiveOldJobs(30);
+}
+
+function setupArchiveJobsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'archiveOldJobsDaily') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('archiveOldJobsDaily')
+    .timeBased()
+    .atHour(2) // 새벽 2시경 — 다른 보관 트리거들(1시대)과 겹치지 않게
+    .everyDays(1)
+    .create();
+  Logger.log('✅ 트리거 설정 완료 — 매일 새벽 2시경, 검수완료 후 30일 지난 오더를 Archive_Jobs로 자동 이동합니다(삭제 아님).');
+}
+function removeArchiveJobsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === 'archiveOldJobsDaily') ScriptApp.deleteTrigger(t);
+  });
+  Logger.log('트리거 삭제 완료');
+}
+
 function autoDeleteOldJobs() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
