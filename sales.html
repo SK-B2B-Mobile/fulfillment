@@ -2072,7 +2072,21 @@ async function savePaymentStatus(invoice, willBePaid){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  await openInvoice(invoice); // 최신 상태로 다시 불러와서 화면 갱신
+  // ★ 2026-09-02 재수정(속도) — 저장 성공 직후 openInvoice()로 오더 전체를 다시
+  //   통째로 불러오면, 그 안에서 또 무거운 getSalesInvoiceDetail이 실행됨 —
+  //   결국 클릭 1번에 이 무거운 함수가 서버(검증용)+클라이언트(새로고침용) 해서
+  //   2번 도는 셈이라, 처리 시간이 늘어지고 그 사이 타임아웃·재시도가 겹쳐
+  //   "로딩만 계속되다 결국 예전 값을 보여주는" 증상으로 이어졌을 가능성이 큼.
+  //   저장이 이미 성공했다고 서버가 확인해줬으니, 화면(배지)만 그 결과대로
+  //   바로 바꾸면 되고 서버를 다시 조회할 필요가 없음.
+  const badge = document.getElementById('paymentBadge');
+  if (badge){
+    badge.className = 'pay-badge ' + (willBePaid ? 'paid' : 'unpaid');
+    badge.textContent = willBePaid ? '✓ PAID' : '⚠ UNPAID';
+    const editBtn = badge.nextElementSibling;
+    if (editBtn) editBtn.setAttribute('onclick', `savePaymentStatus('${invoice}', ${!willBePaid})`);
+  }
+  if (CURRENT_ORDER) CURRENT_ORDER.paymentPaid = willBePaid;
 }
 
 function showScreen(name){
