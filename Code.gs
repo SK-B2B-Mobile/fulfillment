@@ -44,6 +44,9 @@ function bumpVersion_() {
   //   짧은 캐시(속도용)와 즉시반영(정확성)을 둘 다 챙길 수 있음.
   try { CacheService.getScriptCache().remove('salesOverview_cache_v1'); } catch (e) {}
   try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) {}
+  // ★ 2026-09-03 신규 — 위 인보이스→행번호 인덱스 캐시도 같이 지움. 새 행이
+  //   추가되거나 삭제되면(행 번호가 밀림) 즉시 무효화해야 정확함.
+  try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1'); } catch (e) {}
   // ★ 2026-08-25 신규(안전 확인) — getOpenBatches("다른 배치" 목록) 캐시를 6초→20초로
   //   늘리면서(속도 개선), 방금 2차 검증을 끝냈는데도 목록엔 최대 20초간 예전
   //   숫자("검증 대기 N건")가 보일 위험이 새로 생겼음. 데이터가 실제로 바뀌는
@@ -881,7 +884,52 @@ function headerMap_() {
   return m;
 }
 
+/* ★ 2026-09-03 신규(획기적 속도 개선) — Jobs 시트에서 인보이스로 행을 찾을
+ * 때마다 매번 인보이스 컬럼 전체를 처음부터 끝까지 훑고 있었음. 이 세션에서
+ * 오랫동안 테스트가 누적되면서 Jobs 시트가 커질수록 이게 점점 느려짐 —
+ * "상세창 열기 30초, 저장 15초" 지연의 핵심 원인. 인보이스→행번호 매핑을
+ * 짧게(30초) 캐싱해서, 같은 시간대에 반복 조회할 때는 전체를 다시 안 훑고
+ * 즉시 찾음. 캐시 용량 제한(100KB) 때문에, 매핑이 너무 커지면(초대형 시트)
+ * 캐싱을 조용히 건너뛰고 원래 방식(느리지만 항상 정확함)으로 자동 대체됨 —
+ * 크래시 위험 없음. 저장(쓰기)이 한 번이라도 일어나면 bumpVersion_()이 이
+ * 캐시도 같이 지워서, 방금 새로 추가된 행을 30초씩 못 찾는 사고도 없음. */
+function getJobsInvoiceRowIndex_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'jobsInvRowIdx_v1';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
+  }
+  const sh = SHEET_();
+  const hdr = headerMapCached_();
+  const invCol = hdr[normalizeHeaderName_('invoice')];
+  const idx = {};
+  if (invCol) {
+    const last = sh.getLastRow();
+    if (last >= 2) {
+      const vals = sh.getRange(2, invCol, last - 1, 1).getValues();
+      for (let i = 0; i < vals.length; i++) {
+        const inv = String(vals[i][0]).trim();
+        if (inv) idx[inv] = i + 2;
+      }
+    }
+  }
+  try {
+    const payload = JSON.stringify(idx);
+    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // 30초
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return idx;
+}
+
 function findRowByKey_(keyName, keyValue) {
+  const target = String(keyValue);
+  // ★ 2026-09-03 신규 — invoice 조회는 위 캐시 인덱스를 먼저 확인(훨씬 빠름).
+  //   인덱스에 없으면(방금 막 추가된 행 등 캐시가 아직 못 따라간 경우) 아래
+  //   원래 방식(전체 스캔)으로 안전하게 한 번 더 확인 — 못 찾는 사고는 없음.
+  if (normalizeHeaderName_(keyName) === normalizeHeaderName_('invoice')) {
+    const idx = getJobsInvoiceRowIndex_();
+    if (idx[target]) return idx[target];
+  }
   const sh = SHEET_();
   const hdr = headerMapCached_();
   const key = normalizeHeaderName_(keyName);
@@ -892,7 +940,6 @@ function findRowByKey_(keyName, keyValue) {
   if (last < 2) return 0;
 
   const vals = sh.getRange(2, col, last - 1, 1).getValues();
-  const target = String(keyValue);
   for (let i = 0; i < vals.length; i++) {
     if (String(vals[i][0]) === target) return 2 + i;
   }
