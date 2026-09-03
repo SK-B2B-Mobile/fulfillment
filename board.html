@@ -415,7 +415,7 @@ const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
 // 계속 쳐다보는 화면이 아니라 가끔 확인하는 용도라, 8초 늦어져도 체감상
 // "실시간"으로 계속 느껴짐. batch.html/sales.html과 서버를 같이 쓰는데 이
 // 화면도 계속 폴링하고 있었던 게 전체 부담에 한몫했음.
-const POLL_MS = 20000;
+const POLL_MS = 30000; // ★ 2026-09-03 재수정 — 20초→30초(최종 완화)
 
 /* ★ 2026-08-11 신규 — TV를 새로고침했을 때 즉시 화면이 뜨도록,
  * 마지막으로 보던 배치 번호를 이 기기에 기억해둠. 데이터가 아니라
@@ -564,7 +564,7 @@ let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상
 //   기록하고, PENDING_MAX_MS(30초)가 지나도록 서버가 못 따라오면 더는 우기지
 //   않고 서버의 실제 값을 그대로 인정한다(+콘솔에 경고 남김, 진단용).
 let _pendingPackMoves = {}; // invoice -> { stage:'moved'|'taken', ts:Number }
-const PENDING_PACK_MAX_MS = 30000; // 이 시간 넘도록 서버가 확인 안 해주면 서버 값을 신뢰
+const PENDING_PACK_MAX_MS = 50000; // ★ 2026-09-03 재수정 — POLL_MS를 30초로 늘리면서 여유가 없어져(30초=30초) 함께 50초로 늘림(1.5배 이상 여유 유지). 이 시간 넘도록 서버가 확인 안 해주면 서버 값을 신뢰
 
 // ★ 2026-08-14 신규 — 패킹존 이동 상태가 서버와 30초 넘게 안 맞을 때 눈에 보이게 알림.
 //   콘솔 경고만으로는 창고 TV 앞에서 아무도 못 봄.
@@ -1733,7 +1733,7 @@ document.getElementById('unfulfilledModalOverlay').addEventListener('click', (e)
   if(e.target.id === 'unfulfilledModalOverlay') document.getElementById('unfulfilledModalOverlay').classList.remove('show');
 });
 setTimeout(pollUnfulfilledAlerts, 2000); // 배치ID가 확정될 시간을 조금 준 뒤 첫 조회
-setInterval(pollUnfulfilledAlerts, 60000); // ★ 2026-09-03 수정: 45초→60초(서버 부담 추가 완화)
+setInterval(pollUnfulfilledAlerts, 90000); // ★ 2026-09-03 재수정: 60초→90초(최종 완화)
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-23 신규 — TV "다른 배치 조회" 드롭다운
