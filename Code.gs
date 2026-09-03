@@ -745,14 +745,19 @@ function ensurePaymentStatusCol_(sh) {
  * 다른 경로로 요청이 와도 이르거나 잘못된 시점에 실수로 입력되지 않게 막음.
  * 입력: { invoice, paid(true|false), by } */
 function updatePaymentStatus(data) {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(15000);
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const paid = !!(data && data.paid);
     const by = String((data && data.by) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
 
+    // ★ 2026-09-02 긴급 수정 — 예전엔 이 함수 전체(무거운 검증 포함)를 락 안에
+    //   넣고 있었음. 이 스프레드시트는 batch.html/board.html/sales.html이 동시에
+    //   공유해서 쓰는 문서라, 락을 오래 붙잡으면 그동안 다른 모든 저장 작업
+    //   (스캔 기록·이슈 등록·슬롯 상태변경 등)이 줄줄이 밀려서, 심하면 읽기
+    //   요청까지 전부 타임아웃되는 연쇄 장애로 이어질 수 있음(실제 발생 확인됨).
+    //   그래서 읽기·검증(PU 여부, 검수완료 여부, 패킹존 이동 여부 확인)은 전부
+    //   락 밖에서 먼저 끝내고, 락은 아래 "실제 값 쓰기" 그 몇 줄만 최소한으로 잡음.
     const sh = SHEET_();
     ensurePaymentStatusCol_(sh);
     const hdr = headerMapCached_();
@@ -768,31 +773,33 @@ function updatePaymentStatus(data) {
     const insp = iInsp ? String(sh.getRange(row, iInsp).getValue() || '').trim() : '';
     if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
-    // ★ 2026-09-02 — 패킹존 이동 여부는 반드시 getSalesInvoiceDetail()이 클라이언트에
-    //   내려주는 값과 "완전히 같은 계산"으로 판정해야 함. 처음엔 buildMovedToPackingMap_()을
-    //   따로 불렀는데, getSalesInvoiceDetail은 그 외에도 디멘션 저장 여부·수동표시
-    //   등을 추가로 반영해서 최종 movedToPacking을 결정하기 때문에 두 값이 어긋날 수
-    //   있었음(화면엔 편집 버튼이 보이는데 저장하면 서버가 거부하는 혼란 발생 가능).
-    //   그래서 아예 같은 함수를 그대로 호출해서 "화면이 본 것과 서버가 검증하는 것"을
-    //   항상 100% 일치시킴.
+    // ★ 패킹존 이동 여부는 반드시 getSalesInvoiceDetail()이 클라이언트에 내려주는
+    //   값과 "완전히 같은 계산"으로 판정해야 함(화면이 본 것과 서버가 검증하는
+    //   것을 항상 일치시키기 위해 같은 함수를 그대로 재사용) — 이 호출 자체는
+    //   읽기 전용이라 락이 필요 없음, 락 밖에서 실행.
     const detail = getSalesInvoiceDetail(invoice);
     if (!detail || !detail.ok) return { ok: false, error: '오더 정보를 확인하지 못했습니다' };
     if (!detail.movedToPacking) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
-    const iStatus = hdr[norm('PaymentStatus')];
-    const iAt = hdr[norm('PaymentStatusUpdatedAt')];
-    const iBy = hdr[norm('PaymentStatusUpdatedBy')];
-    if (iStatus) sh.getRange(row, iStatus).setValue(paid ? 'paid' : 'unpaid');
-    if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
-    if (iBy) sh.getRange(row, iBy).setValue(by);
+    // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(10000);
+    try {
+      const iStatus = hdr[norm('PaymentStatus')];
+      const iAt = hdr[norm('PaymentStatusUpdatedAt')];
+      const iBy = hdr[norm('PaymentStatusUpdatedBy')];
+      if (iStatus) sh.getRange(row, iStatus).setValue(paid ? 'paid' : 'unpaid');
+      if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
+      if (iBy) sh.getRange(row, iBy).setValue(by);
+      bumpVersion_();
+    } finally {
+      lock.releaseLock();
+    }
 
-    bumpVersion_();
     try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
     return { ok: true, paid: paid };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
-  } finally {
-    lock.releaseLock();
   }
 }
 
