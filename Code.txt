@@ -47,6 +47,11 @@ function bumpVersion_() {
   // ★ 2026-09-03 신규 — 위 인보이스→행번호 인덱스 캐시도 같이 지움. 새 행이
   //   추가되거나 삭제되면(행 번호가 밀림) 즉시 무효화해야 정확함.
   try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1'); } catch (e) {}
+  // ★ 2026-09-03 신규 — BatchCustomers 인보이스→행번호 인덱스 캐시도 같이 지움
+  //   (getBatchCustomersInvoiceRowIndex_, BatchPicking.gs). 단독오더 등록·삭제처럼
+  //   BatchCustomers에 행이 추가·삭제되는 모든 경로가 결국 이 함수를 거치므로,
+  //   여기서 같이 지워주면 별도로 신경 쓸 곳 없이 항상 정확함.
+  try { CacheService.getScriptCache().remove('bcInvRowIdx_v1'); } catch (e) {}
   // ★ 2026-08-25 신규(안전 확인) — getOpenBatches("다른 배치" 목록) 캐시를 6초→20초로
   //   늘리면서(속도 개선), 방금 2차 검증을 끝냈는데도 목록엔 최대 20초간 예전
   //   숫자("검증 대기 N건")가 보일 위험이 새로 생겼음. 데이터가 실제로 바뀌는
