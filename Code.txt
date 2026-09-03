@@ -4259,3 +4259,37 @@ function repairCorruptedInspectionFormatting() {
     Logger.log('DRY_RUN 모드라 실제로는 아무것도 안 바꿈. 위 목록 확인 후 DRY_RUN=false로 바꿔서 재실행하세요.');
   }
 }
+
+
+/* ===================== diagnoseOrphanedRow (★ 2026-09-03 신규 — 진단용) =====================
+ * 목적: cleanupOrphanedJobsFormatting을 여러 번 돌렸는데도 화면(구글시트 UI)에
+ * 메모가 계속 보인다는 보고가 있어서, "실제로 서버(API)에 아직 남아있는 것"인지
+ * 아니면 "브라우저 화면 캐시가 안 갱신된 것"인지 구분하기 위한 진단 함수.
+ * 특정 행의 모든 칸을 값/메모/배경색까지 직접 읽어서 로그로 그대로 보여줌.
+ * 사용법: ROW_TO_CHECK을 확인하려는 실제 행 번호로 바꿔서 실행(예: 3572)
+ * ===================================================================== */
+function diagnoseOrphanedRow() {
+  const ROW_TO_CHECK = 3572; // ← 확인하려는 행 번호로 바꿔서 실행
+
+  const sh = SHEET_();
+  const lastCol = sh.getMaxColumns();
+  const range = sh.getRange(ROW_TO_CHECK, 1, 1, lastCol);
+  const values = range.getValues()[0];
+  const notes = range.getNotes()[0];
+  const bgs = range.getBackgrounds()[0];
+
+  const nonEmptyValues = [];
+  values.forEach((v, i) => { if (v !== '' && v !== null) nonEmptyValues.push({ col: i + 1, val: String(v) }); });
+
+  const nonEmptyNotes = [];
+  notes.forEach((n, i) => { if (n) nonEmptyNotes.push({ col: i + 1, note: n.slice(0, 150) }); });
+
+  const nonWhiteBgs = [];
+  bgs.forEach((b, i) => { if (b && b !== '#ffffff' && b !== null) nonWhiteBgs.push({ col: i + 1, bg: b }); });
+
+  Logger.log('=== 행 ' + ROW_TO_CHECK + ' 실제 서버(API) 상태 ===');
+  Logger.log('값이 있는 칸: ' + JSON.stringify(nonEmptyValues));
+  Logger.log('메모가 있는 칸: ' + JSON.stringify(nonEmptyNotes));
+  Logger.log('흰색이 아닌 배경색이 있는 칸: ' + JSON.stringify(nonWhiteBgs));
+  Logger.log('시트 getLastRow(): ' + sh.getLastRow() + ' / getMaxRows(): ' + sh.getMaxRows());
+}
