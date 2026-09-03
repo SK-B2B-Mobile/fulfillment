@@ -1086,6 +1086,51 @@ function removeStandaloneOrder(data) {
   }
 }
 
+/* ===================== removeStandaloneOrdersBulk (★ 2026-09-03 신규) =====================
+ * 01-S 목록에서 체크박스로 여러 건을 선택해서 한 번에 삭제하는 "일괄삭제" 기능.
+ * removeStandaloneOrder를 여러 번 호출하는 대신(호출마다 락을 새로 잡고
+ * BatchCustomers/BatchItems 전체를 매번 다시 읽어야 함), 시트를 딱 한 번씩만
+ * 읽어서 요청받은 인보이스들을 한 번의 락 안에서 전부 처리 — 선택 건수가
+ * 많아져도 서버 부담이 거의 늘지 않음.
+ * 입력: { invoices: [invoice, ...] } */
+function removeStandaloneOrdersBulk(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    const invoices = Array.isArray(data && data.invoices)
+      ? data.invoices.map(v => String(v || '').trim()).filter(Boolean)
+      : [];
+    if (!invoices.length) return { ok: false, error: 'invoices required' };
+    const invoiceSet = {};
+    invoices.forEach(inv => { invoiceSet[inv] = true; });
+
+    let removedCount = 0;
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    if (bcLast >= 2) {
+      const rows = bc.getRange(2, 1, bcLast - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === STANDALONE_BATCH_ID && invoiceSet[String(rows[i][1])]) { bc.deleteRow(i + 2); removedCount++; }
+      }
+    }
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    if (biLast >= 2) {
+      const rows = bi.getRange(2, 1, biLast - 1, 2).getValues();
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (String(rows[i][0]) === STANDALONE_BATCH_ID && invoiceSet[String(rows[i][1])]) bi.deleteRow(i + 2);
+      }
+    }
+    if (removedCount) bumpVersion_();
+    invoices.forEach(inv => { try { clearInvoiceCache_(STANDALONE_BATCH_ID, inv); } catch (e) { /* 무시 */ } });
+    return { ok: true, removed: removedCount, requested: invoices.length };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ===================== ② getBatch =====================
  * batchId 없이 호출하면 → 오늘자 진행중(active) 배치 자동 탐색
  * (새로고침해도 이어서 작업 가능하게 하는 핵심 op)
