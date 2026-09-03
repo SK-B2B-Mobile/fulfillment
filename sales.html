@@ -2196,7 +2196,7 @@ function showScreen(name){
  *    갑자기 새로 그려져서 입력값이 날아가는 일을 막기 위함.
  *  - 검색어와 목록 페이지는 그대로 유지됨(데이터만 새로 받고 다시 그림).
  */
-const AUTO_SYNC_MS = 30000;
+const AUTO_SYNC_MS = 45000; // ★ 2026-09-03 재수정 — 30초→45초(최종 완화)
 let AUTO_SYNC_TIMER = null;
 
 function isBusyEditing(){
