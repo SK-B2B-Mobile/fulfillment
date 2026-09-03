@@ -948,7 +948,7 @@ function getJobsInvoiceRowIndex_() {
   }
   try {
     const payload = JSON.stringify(idx);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // 30초
+    if (payload.length < 95000) cache.put(cacheKey, payload, 45); // ★ 2026-09-03 30초→45초
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return idx;
 }
