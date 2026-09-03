@@ -3551,7 +3551,13 @@ function startScanPolling(){
   //   10초→8초로 더 빨라짐(느려지는 부분 없음). 기기마다 소폭 어긋나도록
   //   지터도 유지.
   const jitter = Math.floor(Math.random()*1500);
-  __scanPollTimer = setInterval(pollScanAndPickers, 8000+jitter);
+  // ★ 2026-09-03 신규(매니저 확정) — 8초→15초로 완화. 이 시스템 전체(batch.html
+  //   /board.html/sales.html)가 같은 서버 하나를 같이 쓰는데, 스캔 기기가 여러
+  //   대 동시에 켜져 있으면 이 타이머가 기기 수만큼 곱해져서 서버에 부담을
+  //   줌 — sales.html이 느려지는 진짜 원인이 이 폴링들의 누적이었음(실행
+  //   기록으로 확인됨). 15초면 작업자가 여전히 "거의 실시간"으로 느끼면서도
+  //   서버 부담은 거의 절반으로 줄어듦.
+  __scanPollTimer = setInterval(pollScanAndPickers, 15000+jitter);
   pollScanAndPickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
 }
 let __activePickersTimer = null;
@@ -3587,7 +3593,8 @@ document.addEventListener('visibilitychange', () => {
 
 // ★ 2026-08-14 신규 — 위와 같은 이유로, 화면을 계속 켜놓고 있는 경우에도
 //   "완료된 배치" 목록이 스스로 낡지 않도록 60초마다 자체 갱신.
-setInterval(() => { if(GAS_READY) checkOpenBatches(); }, 60000);
+// ★ 2026-09-03 신규(매니저 확정) — 60초→90초로 완화(전체 서버 부담 경감)
+setInterval(() => { if(GAS_READY) checkOpenBatches(); }, 90000);
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-09 신규 — "고객사·상품 배정 구조" 자체도 주기적으로 재동기화
@@ -3691,7 +3698,8 @@ function startStructurePolling(){
   if(__structPollTimer) return;
   const jitter = Math.floor(Math.random()*6000); // ★ 2026-07-14 신규: 기기간 폴링 충돌 방지
   // ★ 2026-08-19 수정 — 서버 부담 완화를 위해 30초→45초로 완화(현장 확인된 서버 혼잡 대응)
-  __structPollTimer = setInterval(() => refreshBatchStructure(true), 45000+jitter);
+  // ★ 2026-09-03 신규(매니저 확정) — 45초→60초로 완화(전체 서버 부담 경감)
+  __structPollTimer = setInterval(() => refreshBatchStructure(true), 60000+jitter);
 }
 
 
@@ -7433,8 +7441,14 @@ async function pollActiveScanWorkers(){
 //   경고"는 이름 바꿀 때/배치 열 때 등 주요 시점마다 즉시 별도로도 호출되므로
 //   (아래 다른 pingScanWorkerHeartbeat() 호출부 참고), 이 주기적 하트비트가
 //   10초 늦어져도 실질적인 감지 지연은 미미함.
-setInterval(pingScanWorkerHeartbeat, 30000);
-setInterval(pollActiveScanWorkers, 20000);
+// ★ 2026-09-03 재수정(매니저 확정) — 30초→45초 / 20초→35초로 한 번 더 완화.
+//   batch.html/board.html/sales.html이 서버 하나를 같이 쓰는데, 스캔 기기가
+//   여러 대 동시에 켜져 있으면 이 타이머들이 기기 수만큼 곱해져서 서버
+//   전체를 느리게 만드는 게 실제로 확인됨(sales.html 지연의 진짜 원인).
+//   활성 판정 임계값(120초)에 비하면 여전히 3번 이상 여유가 있어서 "활성" 표시
+//   정확도에는 실질적 영향이 없음.
+setInterval(pingScanWorkerHeartbeat, 45000);
+setInterval(pollActiveScanWorkers, 35000);
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-09-01 신규 — Workers 탭 실시간 근무 상태(전역, 배치 무관)
@@ -7475,8 +7489,11 @@ async function pollActiveWorkersGlobal(){
     if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
   }catch(e){ /* 조용히 무시 */ }
 }
-setInterval(pingWorkerPresenceAll, 30000);
-setInterval(pollActiveWorkersGlobal, 20000);
+// ★ 2026-09-03 신규(매니저 확정) — pollActiveScanWorkers와 동일한 이유로
+//   30초→45초 / 20초→35초로 완화. Workers 탭 Active/Off 표시는 실시간성이
+//   덜 중요한 화면이라 이 정도 여유는 체감상 거의 차이 없음.
+setInterval(pingWorkerPresenceAll, 45000);
+setInterval(pollActiveWorkersGlobal, 35000);
 
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
 function isWorkerBusyElsewhere(name){
