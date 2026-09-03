@@ -6083,7 +6083,7 @@ async function onSsInvoiceChange(){
 
 async function refreshSsState(){
   if(!_ssInvoice) return;
-  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice });
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, round: 1 });
   if(!res.ok){
     document.getElementById('ssLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
     return;
@@ -6287,7 +6287,7 @@ async function doSsScanOne(barcode){
     //   재시도를 붙여서 "TypeError: Failed to fetch" 같은 일시적 네트워크
     //   문제로 스캔이 통째로 유실되지 않게 함(서버가 중복을 안전하게 걸러내므로
     //   재시도 자체는 항상 안전함).
-    const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode, qty });
+    const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode, qty, round: 1 });
     if(!res.ok){
       showSsMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
       return;
@@ -6332,7 +6332,7 @@ async function doSsScanOne(barcode){
   //   바코드로 필요수량을 다 채웠으면 무조건 over(중복)로만 처리"하는 구조라,
   //   첫 시도가 실제로는 서버에 반영됐는데 응답만 못 받은 경우라도 재시도가
   //   또 채워버리는(이중 반영) 사고로 이어지지 않음 — 재시도가 항상 안전함.
-  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode });
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, worker, barcode, round: 1 });
   if(!res.ok){
     showSsMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
     return;
@@ -6510,7 +6510,7 @@ async function onPsvInvoiceChange(){
 
 async function refreshPsvState(){
   if(!_psvInvoice) return;
-  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice });
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2 });
   if(!res.ok){
     document.getElementById('psvLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
     return;
@@ -6592,7 +6592,7 @@ async function doPsvScanOne(barcode){
   if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함).
-  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode });
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2 });
   if(!res.ok){
     showPsvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
     return;
@@ -6693,7 +6693,7 @@ async function forcePsvComplete(){
   const forceBtn = document.getElementById('psvForceBtn');
   if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '처리 중...'; }
   // ★ 2026-09-01 신규 — forcePvComplete와 동일한 이유(화면·슬립 불일치 해결).
-  await gasCallWithRetry('forceCompletePackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker });
+  await gasCallWithRetry('forceCompletePackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, round: 2 });
   const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
   if(res.ok){
     showPsvMsg('⚠ 관리자 강제확정 — 남은 수량은 전량 확인된 것으로 기록됐습니다', 'ok');
