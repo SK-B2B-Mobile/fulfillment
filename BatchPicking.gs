@@ -1292,6 +1292,8 @@ function setPackingMoved(data) {
   //   확정" 판정을 내리기까지 기다려주는 시간이 30초(PENDING_PACK_MAX_MS)라,
   //   서버도 그 안에서 최대한 순서를 기다려 실제로 저장에 성공할 기회를 늘림.
   lock.waitLock(25000);
+  let result;
+  let syncArgs = null; // ★ 2026-09-03 — 락 밖에서 처리(logScan과 동일한 이유)
   try {
     const batchId = data.batchId, invoice = data.invoice;
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
@@ -1343,7 +1345,7 @@ function setPackingMoved(data) {
         //   총량피킹 호출 경로는 이 줄 자체를 아예 안 타서 예전과 완전히 동일한
         //   속도를 유지함.
         if (batchId === STANDALONE_BATCH_ID) {
-          try { syncInspectionFromPicking_(batchId, invoice, data.worker || ''); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+          syncArgs = [batchId, invoice, data.worker || ''];
         }
       } else { // 'verified' — ★ 2026-08-24 신규: 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
         if (!bc.getRange(row, 12).getValue()) {
@@ -1372,7 +1374,7 @@ function setPackingMoved(data) {
         //   놓친 경우를 이 시점에 확실히 잡아줌(이미 04에서 반영됐으면 currentVal
         //   비교 로직 덕분에 중복 저장 없이 조용히 넘어감).
         if (batchId === STANDALONE_BATCH_ID) {
-          try { syncInspectionFromPicking_(batchId, invoice, data.worker || ''); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+          syncArgs = [batchId, invoice, data.worker || ''];
         }
       }
       found = true;
@@ -1381,12 +1383,19 @@ function setPackingMoved(data) {
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
 
     bumpVersion_();
-    return { ok: true, stage: stage, moved: stage !== 'none' };
+    result = { ok: true, stage: stage, moved: stage !== 'none' };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 2026-09-03 긴급 성능수정 — logScan과 동일한 이유. syncInspectionFromPicking_은
+  //   여러 시트를 통째로 다시 읽는 무거운 함수라 락 밖으로 옮김. TV 현황판에서
+  //   슬롯 여러 개가 짧은 시간에 연달아 눌리는 상황(배치 막바지)에 특히 효과가 큼.
+  if (syncArgs) {
+    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2]); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+  }
+  return result;
 }
 
 /* ===================== ③c logPackScan / undoPackScan / getPackScanState (★ 2026-08-24 신규) =====================
@@ -2179,6 +2188,7 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force) {
 function logScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
     const scanId = Utilities.getUuid();
@@ -2201,16 +2211,26 @@ function logScan(data) {
       //   어느 고객사로 보낼지 분류"하는 것이므로, 스캔 1번에 여러 개가 한번에
       //   해당 고객사 몫으로 카운트되어야 함.
     ]]);
-    // ★ 2026-07-24 신규 — 원래 sk-worker 앱에서 하던 "검수"를 총량피킹 스캔이
-    //   대신하고 있으므로, 이 스캔으로 그 고객사가 방금 완료됐다면 Jobs 시트
-    //   Inspection에도 자동 반영. best-effort라 실패해도 스캔 자체는 성공 처리.
-    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
-    return { ok: true, scanId: scanId };
+    result = { ok: true, scanId: scanId };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 2026-09-03 긴급 성능수정(가장 중요한 발견) — syncInspectionFromPicking_은
+  //   BatchCustomers 전체 + ScanLog 전체(!) + Jobs 인보이스 컬럼을 매번 통째로
+  //   다시 읽는 무거운 함수인데, 예전엔 이걸 위 락 안에서(스캔 저장이 끝나기도
+  //   전에) 실행하고 있었음. 스캔은 창고에서 초당 여러 번 일어나는 가장 빈번한
+  //   동작이라, 스캔 1번마다 이 무거운 계산이 "문서 전체 락"을 붙잡고 있어서
+  //   다른 모든 저장 작업(다른 작업자의 스캔·이슈 등록 등)이 전부 그 뒤에서
+  //   줄 서서 기다려야 했음 — sales.html을 포함한 시스템 전체가 느려지던
+  //   근본 원인. 이제 스캔 기록 저장(락 필요)과 동기화 계산(락 불필요, 읽기
+  //   위주)이 분리돼서, 락은 스캔 저장이 끝나는 즉시 풀리고 동기화는 그 이후에
+  //   진행됨 — 다른 작업자의 요청이 이걸 기다릴 필요가 없어짐.
+  if (result.ok) {
+    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 — best-effort, 스캔 자체는 이미 성공 처리됨 */ }
+  }
+  return result;
 }
 
 /* ===================== ④-2 logIssue (★ 2026-07-16 신규) =====================
@@ -2226,6 +2246,8 @@ function logScan(data) {
 function logIssue(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let needsSync = false;
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
     if (!data.invoice) return { ok: false, error: 'invoice required' };
@@ -2300,14 +2322,20 @@ function logIssue(data) {
     // ★ 2026-09-01 신규 — 이 인보이스의 이슈수량 캐시(20초)를 즉시 비움. 이슈
     //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
     clearInvoiceCache_(data.batchId, data.invoice);
-    // ★ 2026-07-24 신규: 이슈 등록으로 필요수량이 줄어들어 방금 완료로 바뀌었을 수 있음
-    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
-    return { ok: true, issueId: issueId };
+    needsSync = true; // ★ 2026-09-03 — 락 밖에서 처리(아래 설명)
+    result = { ok: true, issueId: issueId };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 2026-09-03 긴급 성능수정 — logScan과 동일한 이유. syncInspectionFromPicking_은
+  //   여러 시트를 통째로 다시 읽는 무거운 함수라, 락 안에서 실행하면 이슈 등록
+  //   1건마다 다른 모든 저장 작업이 그 뒤에서 기다려야 함. 락 해제 후로 옮김.
+  if (needsSync) {
+    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
+  }
+  return result;
 }
 
 /* ===================== getInvoiceIssues (★ 2026-09-01 신규) =====================
@@ -2359,6 +2387,8 @@ function getInvoiceIssues(batchId, invoice) {
 function undoIssue(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let syncArgs = null;
   try {
     const issueId = data.issueId;
     if (!issueId) return { ok: false, error: 'issueId required' };
@@ -2366,6 +2396,7 @@ function undoIssue(data) {
     const last = sh.getLastRow();
     if (last < 2) return { ok: false, error: 'no issues' };
     const ids = sh.getRange(2, 2, last - 1, 1).getValues();
+    let found = false;
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(issueId)) {
         sh.getRange(i + 2, 13).setValue('undone');
@@ -2373,17 +2404,23 @@ function undoIssue(data) {
         //   풀릴 수도, 반대로(다른 이슈 겹침 등) 그대로 완료일 수도 있음 — 재확인
         const rowVals = sh.getRange(i + 2, 1, 1, 8).getValues()[0]; // A~H
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
-        try { syncInspectionFromPicking_(rowVals[0], rowVals[7], rowVals[3]); } catch (e) { /* 무시 */ }
+        syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
         bumpVersion_();
-        return { ok: true };
+        found = true;
+        break;
       }
     }
-    return { ok: false, error: 'issue not found' };
+    result = found ? { ok: true } : { ok: false, error: 'issue not found' };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 2026-09-03 긴급 성능수정 — logScan/logIssue와 동일한 이유로 락 밖에서 처리
+  if (syncArgs) {
+    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2]); } catch (e) { /* 무시 */ }
+  }
+  return result;
 }
 
 /* ===================== ④-4 editIssue (★ 2026-07-22 신규) =====================
@@ -2395,6 +2432,8 @@ function undoIssue(data) {
 function editIssue(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let syncArgs = null;
   try {
     const issueId = data.issueId;
     if (!issueId) return { ok: false, error: 'issueId required' };
@@ -2404,6 +2443,7 @@ function editIssue(data) {
     const last = sh.getLastRow();
     if (last < 2) return { ok: false, error: 'no issues' };
     const ids = sh.getRange(2, 2, last - 1, 1).getValues();
+    let found = false;
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(issueId)) {
         const row = i + 2;
@@ -2428,16 +2468,22 @@ function editIssue(data) {
         // ★ 2026-07-24 신규: 수량/사유를 고치면 완료 여부가 바뀔 수 있음 — 재확인
         const rowVals = sh.getRange(row, 1, 1, 8).getValues()[0]; // A~H
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
-        try { syncInspectionFromPicking_(rowVals[0], rowVals[7], rowVals[3]); } catch (e) { /* 무시 */ }
-        return { ok: true };
+        syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
+        found = true;
+        break;
       }
     }
-    return { ok: false, error: 'issue not found' };
+    result = found ? { ok: true } : { ok: false, error: 'issue not found' };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 2026-09-03 긴급 성능수정 — logScan/logIssue/undoIssue와 동일한 이유로 락 밖에서 처리
+  if (syncArgs) {
+    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2]); } catch (e) { /* 무시 */ }
+  }
+  return result;
 }
 
 /* ===================== ⑤ undoScan =====================
