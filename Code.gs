@@ -495,6 +495,8 @@ function doPost(e) {
   if (op === 'logScan')        return json_(logScan(data));
   if (op === 'undoScan')       return json_(undoScan(data));
   if (op === 'completeBatch')  return json_(completeBatch(data));
+  // ★ 2026-09-03 신규 — 스캔 기록이 전혀 없는 배치만 안전하게 완전삭제
+  if (op === 'deleteBatchIfEmpty') return json_(deleteBatchIfEmpty(data));
   if (op === 'logPickTiming')  return json_(logPickTiming(data));
   // ★ 2026-07-14 신규 — "패킹완료·슬롯비우기" 버튼
   if (op === 'clearSlot')      return json_(clearSlot(data));
