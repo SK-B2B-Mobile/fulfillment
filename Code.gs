@@ -3393,14 +3393,26 @@ function archiveOldJobs(daysOld) {
     //   (예: PaymentStatus처럼) 지금 만드는 Archive_Jobs는 "지금 있는 컬럼
     //   그대로"로 만들어져서 문제 없음(archiveOldBatches와 동일한 원칙).
     const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
-    const allRows = sh.getRange(2, 1, last - 1, lastCol).getValues();
+    const dataRange = sh.getRange(2, 1, last - 1, lastCol);
+    const allRows = dataRange.getValues();
+    // ★ 2026-09-03 재수정(긴급) — 이전 수정(clear() 후 값만 setValues)은
+    //   "빈 줄에 예전 메모가 눌러붙는" 문제는 고쳤지만, 대신 압축될 때마다
+    //   남는 행들의 PASS/ISSUES 배경색·메모가 통째로 날아가는 새 문제를
+    //   만들었음(실제로 색이 전부 사라지는 사고 발생, 2026-09-03 확인).
+    //   그래서 값뿐 아니라 배경색·폰트색·메모까지 "그 값의 원래 주인 행"과
+    //   함께 통째로 옮기도록 재수정 — 이제 압축돼도 PASS(초록)/ISSUES(빨강)
+    //   색상과 메모가 데이터와 함께 정확히 이동함.
+    const allBgs = dataRange.getBackgrounds();
+    const allFontColors = dataRange.getFontColors();
+    const allNotes = dataRange.getNotes();
 
-    const toArchive = [];
-    const toKeep = [];
-    allRows.forEach(r => {
-      const insp = String(r[iInsp - 1] || '').trim();
-      if (!insp) { toKeep.push(r); return; } // 검수 진행중이면 절대 안 건드림
-      const inspEndRaw = r[iInspEnd - 1];
+    const iInspEndIdx = iInspEnd - 1, iInspIdx = iInsp - 1;
+    const keepIdx = [];
+    const archiveIdx = [];
+    allRows.forEach((r, i) => {
+      const insp = String(r[iInspIdx] || '').trim();
+      if (!insp) { keepIdx.push(i); return; } // 검수 진행중이면 절대 안 건드림
+      const inspEndRaw = r[iInspEndIdx];
       let inspEndMs = null;
       if (inspEndRaw instanceof Date && !isNaN(inspEndRaw)) {
         inspEndMs = inspEndRaw.getTime();
@@ -3410,27 +3422,43 @@ function archiveOldJobs(daysOld) {
       }
       // 날짜를 못 읽으면(비어있거나 형식이상) 안전하게 보관 안 함(유지 쪽으로)
       if (inspEndMs !== null && inspEndMs < cutoffMs) {
-        toArchive.push(r);
+        archiveIdx.push(i);
       } else {
-        toKeep.push(r);
+        keepIdx.push(i);
       }
     });
 
-    if (toArchive.length > 0) {
+    if (archiveIdx.length > 0) {
       const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + JOBS_SHEET, headers);
-      archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
+      const toArchiveRows = archiveIdx.map(i => allRows[i]);
+      const archStartRow = archiveSh.getLastRow() + 1;
+      archiveSh.getRange(archStartRow, 1, toArchiveRows.length, lastCol).setValues(toArchiveRows);
+      // 보관본에도 Inspection 메모는 같이 옮겨줌(감사기록 목적 — 배경색은 보관 시트라 생략)
+      archiveIdx.forEach((srcI, k) => {
+        const note = allNotes[srcI][iInspIdx];
+        if (note) archiveSh.getRange(archStartRow + k, iInsp).setNote(note);
+      });
     }
-    // ★ 2026-09-03 긴급 버그 수정 — clearContent()는 셀의 "글자"만 지우고
-    //   메모(노트)·배경색 서식은 그대로 남겨둠. 그래서 6,916건→3,556건으로
-    //   줄인 뒤, 남는 빈 줄들에 예전 검수 메모("✓ PASS Completed: ... Inspector: ...")와
-    //   줄무늬 배경색이 그대로 남아 "빈 줄에 뭔가 계속 복사되는 것처럼" 보였음.
-    //   clear()로 값+서식+메모를 한 번에 완전히 정리하도록 수정.
-    sh.getRange(2, 1, last - 1, lastCol).clear();
-    if (toKeep.length > 0) sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep);
 
-    if (toArchive.length > 0) bumpVersion_();
-    Logger.log('✅ archiveOldJobs: ' + toArchive.length + '건 보관 이동(검수완료 후 ' + daysOld + '일 경과), ' + toKeep.length + '건 유지');
-    return { ok: true, archived: toArchive.length, kept: toKeep.length };
+    // 값+배경색+메모 전체를 한 번에 비운 뒤, "남길 행"만 값·배경색·폰트색·메모를
+    // 다 같이 묶어서 다시 씀 — 이 네 가지가 서로 다른 행으로 어긋나는 일이 없음.
+    dataRange.clear();
+
+    if (keepIdx.length > 0) {
+      const keptRows = keepIdx.map(i => allRows[i]);
+      const keptBgs = keepIdx.map(i => allBgs[i]);
+      const keptFontColors = keepIdx.map(i => allFontColors[i]);
+      const keptNotes = keepIdx.map(i => allNotes[i]);
+      const targetRange = sh.getRange(2, 1, keptRows.length, lastCol);
+      targetRange.setValues(keptRows);
+      targetRange.setBackgrounds(keptBgs);
+      targetRange.setFontColors(keptFontColors);
+      targetRange.setNotes(keptNotes);
+    }
+
+    if (archiveIdx.length > 0) bumpVersion_();
+    Logger.log('✅ archiveOldJobs: ' + archiveIdx.length + '건 보관 이동(검수완료 후 ' + daysOld + '일 경과), ' + keepIdx.length + '건 유지 (배경색·메모도 값과 함께 정상 이동)');
+    return { ok: true, archived: archiveIdx.length, kept: keepIdx.length };
   } catch (e) {
     Logger.log('❌ archiveOldJobs 오류: ' + String(e && e.message || e));
     return { ok: false, error: String(e && e.message || e) };
@@ -4101,5 +4129,133 @@ function restoreWronglyArchived(fromYmd, toYmd) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+  }
+}
+
+
+/* ===================== repairCorruptedInspectionFormatting (★ 2026-09-03 긴급 신규) =====================
+ * 목적: 예전 archiveOldJobs가 clearContent()만 써서(값만 지우고 배경색·메모는 그 "행 위치"에
+ * 그대로 남아있던) 시절에 반복적으로 압축(compaction)이 일어나면서, 서로 다른 시점의
+ * 오더 데이터가 같은 행 번호를 거쳐가며 값(텍스트)은 최신으로 갱신됐지만 배경색·메모는
+ * 예전에 그 행에 있었던 완전히 다른(보통 훨씬 오래된) 오더의 것이 그대로 눌러붙어 있는
+ * 상태가 생겼음. 증상: Inspection 칸 글자는 "✓ PASS"인데 배경은 빨간색(ISSUES 색)이고
+ * 메모를 열면 몇 달 전 다른 인보이스의 이슈 내용이 나옴.
+ * (★ 2026-09-03 추가 확인 — archiveOldJobs의 중간 수정판(clear() 후 값만 재기록)이
+ * 실행되면서 PASS/ISSUES 색상 자체가 전부 사라지는 사고도 발생함. 이 함수는 그 경우도
+ * 똑같이 "글자에 맞게 색을 다시 칠하는" 방식으로 함께 복구함.)
+ *
+ * 복구 원칙: "글자"를 가장 신뢰할 수 있는 진실로 보고 그에 맞는 배경색으로 다시 칠하고,
+ * 메모도 다시 만듦:
+ *   - "✓ PASS" 행 → 초록 배경 + Inspector/Insp.End 컬럼(압축 때도 값이라 정확히 같이
+ *     이동함)을 이용해 saveInspection과 동일한 형식으로 메모 재생성
+ *   - "⚠ ISSUES(N)" 행 → 빨간 배경 + IssueLog에서 그 인보이스의 현재 살아있는(undone
+ *     아닌) 이슈를 다시 조회해서 정확한 내용으로 메모 재생성
+ *   - 배경색이 이미 글자와 일치하는(정상) 행은 전혀 건드리지 않음
+ * 사용법: DRY_RUN=true로 먼저 실행 → 로그에서 몇 건이 고쳐질지 확인 → 문제없으면
+ * DRY_RUN=false로 바꿔서 다시 실행(실제 적용)
+ * ===================================================================== */
+function repairCorruptedInspectionFormatting() {
+  const DRY_RUN = true; // ← 로그 확인 후 false로 바꿔서 재실행
+
+  const sh = SHEET_();
+  const hdr = headerMapCached_();
+  const norm = normalizeHeaderName_;
+  const iInv = hdr[norm('Invoice')];
+  const iInsp = hdr[norm('Inspection')];
+  const iInspector = hdr[norm('Inspector')];
+  const iInspEnd = hdr[norm('Insp. End')];
+  if (!iInv || !iInsp) { Logger.log('❌ 필요 컬럼을 찾지 못함'); return; }
+
+  const last = sh.getLastRow();
+  if (last < 2) { Logger.log('데이터 없음'); return; }
+
+  const n = last - 1;
+  const invCol = sh.getRange(2, iInv, n, 1).getValues();
+  const inspRange = sh.getRange(2, iInsp, n, 1);
+  const texts = inspRange.getValues();
+  const bgs = inspRange.getBackgrounds();
+  const notes = inspRange.getNotes();
+  const inspectorCol = iInspector ? sh.getRange(2, iInspector, n, 1).getValues() : null;
+  const inspEndCol = iInspEnd ? sh.getRange(2, iInspEnd, n, 1).getValues() : null;
+
+  // IssueLog 전체를 한 번만 읽어서 인보이스별로 미리 그룹핑(속도)
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const issuesByInvoice = {};
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      const inv = String(r[7] || '');
+      if (!inv) return;
+      if (String(r[12]) === 'undone') return; // 취소된 이슈 제외
+      if (!issuesByInvoice[inv]) issuesByInvoice[inv] = [];
+      issuesByInvoice[inv].push({ type: String(r[9] || 'ETC'), barcode: String(r[4] || ''), qty: Number(r[10]) || 0 });
+    });
+  }
+
+  const GREEN_BG = '#0d2e1a', GREEN_FONT = '#10b981';
+  const RED_BG = '#2e0d0d', RED_FONT = '#ef4444';
+
+  const newBgs = [];
+  const newNotes = [];
+  const fixList = [];
+
+  for (let i = 0; i < n; i++) {
+    const val = String(texts[i][0] || '').trim();
+    const curBg = String(bgs[i][0] || '').toLowerCase();
+    let expectedBg = null, noteToSet = null;
+
+    if (val === '✓ PASS') {
+      expectedBg = GREEN_BG;
+      if (curBg !== GREEN_BG) {
+        const inspector = inspectorCol ? String(inspectorCol[i][0] || '') : '';
+        const inspEnd = inspEndCol ? String(inspEndCol[i][0] || '') : '';
+        noteToSet = '✓ PASS\nCompleted: ' + inspEnd + (inspector ? '\nInspector: ' + inspector : '');
+      }
+    } else if (val.indexOf('⚠ ISSUES') === 0) {
+      expectedBg = RED_BG;
+      if (curBg !== RED_BG) {
+        const inv = String(invCol[i][0] || '');
+        const inspector = inspectorCol ? String(inspectorCol[i][0] || '') : '';
+        const inspEnd = inspEndCol ? String(inspEndCol[i][0] || '') : '';
+        const activeIssues = issuesByInvoice[inv] || [];
+        const noteLines = ['=== Inspection Issues ==='];
+        if (activeIssues.length) {
+          activeIssues.forEach(iss => noteLines.push(iss.type + ': Barcode ' + iss.barcode + ' x ' + iss.qty + ' pcs'));
+        } else {
+          noteLines.push('(주의: IssueLog에서 현재 활성 이슈를 찾지 못함 — 원본 메모가 유실된 것으로 보임)');
+        }
+        noteLines.push('');
+        noteLines.push('Completed: ' + inspEnd);
+        if (inspector) noteLines.push('Inspector: ' + inspector);
+        noteToSet = noteLines.join('\n');
+      }
+    } else {
+      newBgs.push([bgs[i][0]]);
+      newNotes.push([notes[i][0]]);
+      continue;
+    }
+
+    if (expectedBg && curBg !== expectedBg) {
+      fixList.push({ row: i + 2, invoice: String(invCol[i][0] || ''), text: val, oldBg: curBg, oldNoteSnippet: String(notes[i][0] || '').slice(0, 60) });
+      newBgs.push([expectedBg]);
+      newNotes.push([noteToSet]);
+    } else {
+      newBgs.push([bgs[i][0]]);
+      newNotes.push([notes[i][0]]);
+    }
+  }
+
+  Logger.log('=== repairCorruptedInspectionFormatting: ' + fixList.length + '건 발견 (DRY_RUN=' + DRY_RUN + ') ===');
+  Logger.log(JSON.stringify(fixList.slice(0, 50), null, 2));
+  if (fixList.length > 50) Logger.log('... 외 ' + (fixList.length - 50) + '건 더 있음(로그 50건만 표시)');
+
+  if (!DRY_RUN && fixList.length > 0) {
+    inspRange.setBackgrounds(newBgs);
+    const newFontColors = newBgs.map(b => b[0] === GREEN_BG ? [GREEN_FONT] : (b[0] === RED_BG ? [RED_FONT] : ['']));
+    inspRange.setFontColors(newFontColors);
+    inspRange.setNotes(newNotes);
+    Logger.log('✅ ' + fixList.length + '건 실제 수정 완료');
+  } else if (DRY_RUN) {
+    Logger.log('DRY_RUN 모드라 실제로는 아무것도 안 바꿈. 위 목록 확인 후 DRY_RUN=false로 바꿔서 재실행하세요.');
   }
 }
