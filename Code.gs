@@ -3443,6 +3443,12 @@ function archiveOldJobs(daysOld) {
     // 값+배경색+메모 전체를 한 번에 비운 뒤, "남길 행"만 값·배경색·폰트색·메모를
     // 다 같이 묶어서 다시 씀 — 이 네 가지가 서로 다른 행으로 어긋나는 일이 없음.
     dataRange.clear();
+    // ★ 2026-09-03 재긴급수정 — clear()는 메모(note)를 지우지 않는다는 게 실제로
+    //   확인됨(diagnoseOrphanedRow로 직접 검증). 그래서 clear() 직후에도 이 범위의
+    //   메모가 그대로 남아있을 수 있음 — 아래에서 keptNotes로 다시 채우기 전에,
+    //   먼저 전체 범위의 메모를 명시적으로 빈 값으로 지워서 확실하게 정리함.
+    const emptyNotesFull = Array.from({ length: last - 1 }, () => new Array(lastCol).fill(''));
+    dataRange.setNotes(emptyNotesFull);
 
     if (keepIdx.length > 0) {
       const keptRows = keepIdx.map(i => allRows[i]);
@@ -3485,8 +3491,20 @@ function cleanupOrphanedJobsFormatting() {
   if (maxRow > lastDataRow) {
     const startRow = lastDataRow + 1;
     const numRows = maxRow - lastDataRow;
-    sh.getRange(startRow, 1, numRows, lastCol).clear();
-    Logger.log('✅ cleanupOrphanedJobsFormatting: ' + numRows + '행 정리 완료 (행 ' + startRow + '~' + maxRow + ')');
+    const range = sh.getRange(startRow, 1, numRows, lastCol);
+    range.clear(); // 값 + 서식(배경색 등) 정리
+
+    // ★ 2026-09-03 재긴급수정 — diagnoseOrphanedRow로 직접 서버(API) 상태를 찍어본 결과,
+    //   range.clear()가 "메모(note)"는 전혀 지우지 않는다는 게 실제로 확인됨(문서화가
+    //   명확하지 않은 부분). 그래서 여태 "정리 완료" 로그가 떴어도 메모는 계속 남아있었음.
+    //   확실하게 지워지는 것이 검증된 setNotes()로 명시적으로 빈 값을 채워서 메모를 지움
+    //   (repairCorruptedInspectionFormatting에서 이미 검증된 방식과 동일).
+    //   행 수가 많을 수 있어(수만 행) 배열 생성 비용이 있지만, 빈 문자열만 채우는
+    //   가벼운 작업이라 충분히 처리 가능함.
+    const emptyNotes = Array.from({ length: numRows }, () => new Array(lastCol).fill(''));
+    range.setNotes(emptyNotes);
+
+    Logger.log('✅ cleanupOrphanedJobsFormatting: ' + numRows + '행 정리 완료 (행 ' + startRow + '~' + maxRow + ') — 값/서식/메모 모두 명시적으로 정리');
   } else {
     Logger.log('cleanupOrphanedJobsFormatting: 정리할 것 없음(흔적 없음)');
   }
