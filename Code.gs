@@ -802,22 +802,40 @@ function updatePaymentStatus(data) {
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
     // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
+    const iStatus = hdr[norm('PaymentStatus')];
+    const iAt = hdr[norm('PaymentStatusUpdatedAt')];
+    const iBy = hdr[norm('PaymentStatusUpdatedBy')];
+    // ★ 2026-09-02 긴급 수정 — "저장 성공했다고 떴는데 다시 열어보면 미납으로
+    //   돌아가 있다"는 사고의 진짜 원인 후보. 컬럼을 못 찾았는데도(iStatus가
+    //   비어있음) 그냥 아무것도 안 쓰고 조용히 {ok:true}를 돌려주고 있었음 —
+    //   화면은 성공한 줄 알고 낙관적으로 바로 PAID를 보여줬지만, 실제 시트엔
+    //   아무 값도 안 써졌던 것. 이제 컬럼을 못 찾으면 명확한 오류로 실패 처리함.
+    if (!iStatus) return { ok: false, error: 'PaymentStatus 컬럼을 찾지 못했습니다(서버 설정 오류) — 관리자에게 문의하세요' };
+
     const lock = LockService.getDocumentLock();
     lock.waitLock(10000);
     try {
-      const iStatus = hdr[norm('PaymentStatus')];
-      const iAt = hdr[norm('PaymentStatusUpdatedAt')];
-      const iBy = hdr[norm('PaymentStatusUpdatedBy')];
-      if (iStatus) sh.getRange(row, iStatus).setValue(paid ? 'paid' : 'unpaid');
+      sh.getRange(row, iStatus).setValue(paid ? 'paid' : 'unpaid');
       if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
       if (iBy) sh.getRange(row, iBy).setValue(by);
+      SpreadsheetApp.flush(); // ★ 신규 — 쓰기가 실제로 반영된 뒤에 읽도록 강제로 커밋시킴
       bumpVersion_();
     } finally {
       lock.releaseLock();
     }
 
+    // ★ 신규 — 방금 쓴 값을 곧바로 다시 읽어서 "진짜로 저장됐는지" 확인 후,
+    //   그 확인된 값을 그대로 돌려줌(요청한 값을 무조건 믿고 돌려주지 않음).
+    //   이러면 위 쓰기가 어떤 이유로든 실패해도 화면에 거짓 성공이 뜨는 일이
+    //   없음 — 대신 여기서 바로 명확한 오류로 알려줌.
+    const verifyRaw = String(sh.getRange(row, iStatus).getValue() || '').trim().toLowerCase();
+    const verifiedPaid = verifyRaw === 'paid';
+    if (verifiedPaid !== paid) {
+      return { ok: false, error: '저장이 반영되지 않았습니다(확인 실패) — 다시 시도해주세요' };
+    }
+
     try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
-    return { ok: true, paid: paid };
+    return { ok: true, paid: verifiedPaid };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
