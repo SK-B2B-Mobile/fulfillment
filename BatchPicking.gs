@@ -4206,20 +4206,26 @@ function getSalesInvoiceDetail(invoice) {
     const inspectionRaw = String(jv('inspection') || '').trim();
     const inspector = String(jv('inspector') || '').trim();
     const inspEndRaw = String(jv('insp end') || '');
-    // ★ 2026-09-02 신규 — PU 결제확인. 값이 없으면(옛날 오더, 또는 아직 아무도
-    //   입력 안 한 경우) 반드시 'unpaid'로 안전하게 취급 — "확인 안 됐으면
-    //   미납으로 간주"하는 원칙(빈 값을 결제완료로 착각하면 안 되므로).
-    const paymentStatusRaw = String(jv('paymentstatus') || '').trim().toLowerCase();
+    // ★ 2026-09-02 최종 수정 — hm(캐시)이 아니라 시트에서 매번 직접 새로 찾은
+    //   컬럼 위치로 읽음. updatePaymentStatus(Code.gs)의 쓰기·getSalesTodayList의
+    //   읽기와 전부 같은 함수(getFreshColIndex_)로 통일해서, "쓰기와 읽기가
+    //   서로 다른 컬럼을 본다"는 사고 가능성을 구조적으로 없앰. 값이 없으면
+    //   (옛날 오더, 또는 아직 아무도 입력 안 한 경우) 반드시 'unpaid'로 안전하게
+    //   취급 — "확인 안 됐으면 미납으로 간주"하는 원칙.
+    const iPayStatus = getFreshColIndex_(sh, 'PaymentStatus');
+    const iPayAt = getFreshColIndex_(sh, 'PaymentStatusUpdatedAt');
+    const iPayBy = getFreshColIndex_(sh, 'PaymentStatusUpdatedBy');
+    const paymentStatusRaw = iPayStatus ? String(jobRow[iPayStatus - 1] || '').trim().toLowerCase() : '';
     const paymentPaid = paymentStatusRaw === 'paid';
-    const paymentUpdatedAt = String(jv('paymentstatusupdatedat') || '').trim();
-    const paymentUpdatedBy = String(jv('paymentstatusupdatedby') || '').trim();
+    const paymentUpdatedAt = iPayAt ? String(jobRow[iPayAt - 1] || '').trim() : '';
+    const paymentUpdatedBy = iPayBy ? String(jobRow[iPayBy - 1] || '').trim() : '';
     // ★ 2026-09-02 진단용 로그 — updatePaymentStatus(Code.gs)가 남기는
     //   [PaymentStatus WRITE] 로그와 이 [PaymentStatus READ] 로그를 Apps
     //   Script 실행 기록에서 나란히 비교하면, 쓰기와 읽기가 서로 다른
     //   row/컬럼을 보고 있는지(예: 같은 인보이스가 여러 행에 중복 존재하는
     //   경우) 바로 확인 가능.
     Logger.log('[PaymentStatus READ] invoice=%s jobRowIndex=%s col=%s rawValue=%s sheetName=%s',
-      invoice, jobRowIndex, hm['paymentstatus'], paymentStatusRaw, sh.getName());
+      invoice, jobRowIndex, iPayStatus, paymentStatusRaw, sh.getName());
     // ★ 2026-07-28 신규 — 작업(피킹) 시작일. StartAtISO의 날짜 부분만 추출.
     const startISORaw = jv('startatiso');
     let pickStart = '';
