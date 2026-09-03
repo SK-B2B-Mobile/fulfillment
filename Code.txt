@@ -830,6 +830,13 @@ function updatePaymentStatus(data) {
     //   없음 — 대신 여기서 바로 명확한 오류로 알려줌.
     const verifyRaw = String(sh.getRange(row, iStatus).getValue() || '').trim().toLowerCase();
     const verifiedPaid = verifyRaw === 'paid';
+    // ★ 2026-09-02 진단용 로그 — "저장은 성공했다는데 나중에 다시 열면 되돌아가
+    //   있다"는 문제가 여러 번 재발해서, 다음에도 재발하면 Apps Script 실행
+    //   기록(왼쪽 시계 아이콘)에서 이 값을 직접 비교할 수 있게 남겨둠. 여기서
+    //   기록한 row/col과, getSalesInvoiceDetail이 읽을 때 쓰는 row/col이
+    //   서로 다르면(예: 같은 인보이스가 여러 행에 중복 존재) 바로 원인이 드러남.
+    Logger.log('[PaymentStatus WRITE] invoice=%s row=%s col=%s wroteValue=%s verifyRaw=%s sheetName=%s',
+      invoice, row, iStatus, (paid ? 'paid' : 'unpaid'), verifyRaw, sh.getName());
     if (verifiedPaid !== paid) {
       return { ok: false, error: '저장이 반영되지 않았습니다(확인 실패) — 다시 시도해주세요' };
     }
@@ -3354,6 +3361,7 @@ function getSalesTodayList() {
     const iInsp      = hdr[norm('Inspection')];
     const iInspEnd   = hdr[norm('Insp. End')];
     const iArch      = hdr[norm('archived')]; // ★ 2026-08-06 신규
+    const iPayStatus = hdr[norm('PaymentStatus')]; // ★ 2026-09-02 신규 — PU 결제확인
     if (!iInv || !iInsp || !iInspEnd) return { ok: true, jobs: [] };
 
     const tz = Session.getScriptTimeZone();
@@ -3366,6 +3374,7 @@ function getSalesTodayList() {
     const inspVals    = sh.getRange(2, iInsp, lastRow - 1, 1).getValues();
     const inspEndVals = sh.getRange(2, iInspEnd, lastRow - 1, 1).getValues();
     const archVals    = iArch ? sh.getRange(2, iArch, lastRow - 1, 1).getValues() : null; // ★ 2026-08-06 신규
+    const payVals     = iPayStatus ? sh.getRange(2, iPayStatus, lastRow - 1, 1).getValues() : null; // ★ 2026-09-02 신규
 
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
@@ -3406,6 +3415,9 @@ function getSalesTodayList() {
         // ★ 2026-08-24 신규 — 오출고 방지: 핑크(moved)/파랑(taken)/주황(verified, 최종 2차 검증완료) 4단계.
         //   디멘션이 이미 저장된 건(수기 배송 준비 완료로 간주) taken(파랑)으로 승격.
         packStage: ((dimsMap[invoice] || {}).count || 0) > 0 ? 'taken' : (packStageMap[invoice] || 'none'),
+        // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인을 목록에도 표시. 값이
+        //   없으면(옛날 오더·미입력) 안전하게 false(미납)로 취급.
+        paymentPaid: payVals ? (String(payVals[i][0] || '').trim().toLowerCase() === 'paid') : false,
       });
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
