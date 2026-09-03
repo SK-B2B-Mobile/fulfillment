@@ -4207,6 +4207,35 @@ function removeDimensionsCleanupTrigger() {
  * (작업자 실적, 다른 배치 현황 등)는 애초에 응답에 포함하지 않음.
  * ★ 2026-07-28 추가 — pickStart(작업/피킹 시작일) 필드 추가.
  * ------------------------------------------------------------------- */
+/* ★ 2026-09-03 신규(획기적 속도 개선) — getJobsInvoiceRowIndex_(Code.gs)와
+ * 완전히 같은 이유·같은 방식. BatchCustomers에서 인보이스로 행을 찾을 때마다
+ * 매번 인보이스 컬럼 전체를 훑던 것을, 30초 캐시된 인덱스로 대체. 앞에서부터
+ * 순서대로 채워서(뒤에 오는 값이 덮어씀) "가장 최근(마지막) 행"이 자연스럽게
+ * 남게 함 — 기존 로직(뒤에서부터 찾아 첫 매치 사용)과 결과가 동일. */
+function getBatchCustomersInvoiceRowIndex_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'bcInvRowIdx_v1';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
+  }
+  const bc = bcustSheetSafe_();
+  const bcLast = bc.getLastRow();
+  const idx = {};
+  if (bcLast >= 2) {
+    const vals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
+    for (let i = 0; i < vals.length; i++) {
+      const inv = String(vals[i][0]).trim();
+      if (inv) idx[inv] = i + 2;
+    }
+  }
+  try {
+    const payload = JSON.stringify(idx);
+    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // 30초
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return idx;
+}
+
 function getSalesInvoiceDetail(invoice) {
   try {
     invoice = String(invoice || '').trim();
@@ -4293,27 +4322,35 @@ function getSalesInvoiceDetail(invoice) {
 
     // 2) BatchCustomers에서 패킹존 이동 여부 (가장 최근 매치를 사용)
     // ★ 2026-08-03 성능 개선 — 11개 컬럼 전체 대신 인보이스 컬럼만 먼저 좁게 읽음
+    // ★ 2026-09-03 재수정(획기적 속도 개선) — Jobs와 동일한 이유로, 인보이스
+    //   컬럼 전체를 매번 다시 훑는 대신 30초 캐시된 인덱스를 먼저 확인함.
+    //   앞에서부터 순서대로 덮어쓰며 인덱스를 만들어서, 같은 인보이스가 여러
+    //   행에 걸쳐 있어도 "가장 마지막(최근) 행"이 자연스럽게 남음 — 기존
+    //   "뒤에서부터 찾아서 첫 매치 사용"과 결과가 동일함.
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
     let movedToPacking = false;
     let packStage = 'none'; // ★ 2026-08-24 신규 — none/moved/taken/verified (K/L/M 컬럼을 그대로 신뢰)
-    if (bcLast >= 2) {
+    const _bcIdx = getBatchCustomersInvoiceRowIndex_();
+    let bcRow = _bcIdx[invoice] || 0;
+    if (!bcRow && bcLast >= 2) {
+      // 인덱스에 없으면(캐시가 아직 못 따라간 경우) 안전하게 전체 스캔으로 한 번 더 확인
       const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
       for (let i = bcInvVals.length - 1; i >= 0; i--) {
-        if (String(bcInvVals[i][0]).trim() === invoice) {
-          // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
-          //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
-          //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
-          // ★ 2026-09-02 소소한 성능수정 — K/L/M을 각각 따로 부르던 것 3번을 1번으로.
-          const klm = bc.getRange(i + 2, 11, 1, 3).getValues()[0];
-          const kVal = klm[0], mVal = klm[2];
-          movedToPacking = !!klm[1];
-          if (mVal) packStage = 'verified';
-          else if (movedToPacking) packStage = 'taken';
-          else if (kVal) packStage = 'moved';
-          break;
-        }
+        if (String(bcInvVals[i][0]).trim() === invoice) { bcRow = i + 2; break; }
       }
+    }
+    if (bcRow) {
+      // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
+      //   L컬럼(TakenOut, 파랑 "이동 완료" 시각)을 기준으로 판단. 검수팀이
+      //   핑크로 바꿔도 출고팀이 실제로 가져가기 전까지는 "이동 완료"가 아님.
+      // ★ 2026-09-02 소소한 성능수정 — K/L/M을 각각 따로 부르던 것 3번을 1번으로.
+      const klm = bc.getRange(bcRow, 11, 1, 3).getValues()[0];
+      const kVal = klm[0], mVal = klm[2];
+      movedToPacking = !!klm[1];
+      if (mVal) packStage = 'verified';
+      else if (movedToPacking) packStage = 'taken';
+      else if (kVal) packStage = 'moved';
     }
 
     // ★ 2026-08-06 긴급 수정 — 예전엔 "BatchCustomers 고객사 명단에 이름이
