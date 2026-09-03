@@ -2079,14 +2079,19 @@ async function savePaymentStatus(invoice, willBePaid){
   //   "로딩만 계속되다 결국 예전 값을 보여주는" 증상으로 이어졌을 가능성이 큼.
   //   저장이 이미 성공했다고 서버가 확인해줬으니, 화면(배지)만 그 결과대로
   //   바로 바꾸면 되고 서버를 다시 조회할 필요가 없음.
+  // ★ 2026-09-02 긴급 수정 — 서버가 이제 "요청한 값"이 아니라 "실제로 저장 확인된
+  //   값"(res.paid)을 돌려줌. 클라이언트는 그 확인된 값을 그대로 화면에 반영해야
+  //   함(willBePaid를 그대로 믿으면, 혹시 서버 쓰기가 실패해도 화면은 성공한 것처럼
+  //   보이는 사고가 재발할 수 있음).
+  const confirmedPaid = !!res.paid;
   const badge = document.getElementById('paymentBadge');
   if (badge){
-    badge.className = 'pay-badge ' + (willBePaid ? 'paid' : 'unpaid');
-    badge.textContent = willBePaid ? '✓ PAID' : '⚠ UNPAID';
+    badge.className = 'pay-badge ' + (confirmedPaid ? 'paid' : 'unpaid');
+    badge.textContent = confirmedPaid ? '✓ PAID' : '⚠ UNPAID';
     const editBtn = badge.nextElementSibling;
-    if (editBtn) editBtn.setAttribute('onclick', `savePaymentStatus('${invoice}', ${!willBePaid})`);
+    if (editBtn) editBtn.setAttribute('onclick', `savePaymentStatus('${invoice}', ${!confirmedPaid})`);
   }
-  if (CURRENT_ORDER) CURRENT_ORDER.paymentPaid = willBePaid;
+  if (CURRENT_ORDER) CURRENT_ORDER.paymentPaid = confirmedPaid;
 }
 
 function showScreen(name){
