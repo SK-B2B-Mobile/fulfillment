@@ -1462,7 +1462,7 @@ function getInvoiceBatchItemsCached_(batchId, invoice) {
   }
   try {
     const payload = JSON.stringify(lines);
-    if (payload.length < 90000) cache.put(cacheKey, payload, 20); // 20초
+    if (payload.length < 90000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return lines;
 }
@@ -1486,7 +1486,7 @@ function getInvoiceIssueQtyCached_(batchId, invoice) {
   }
   try {
     const payload = JSON.stringify(issues);
-    if (payload.length < 90000) cache.put(cacheKey, payload, 20); // 20초
+    if (payload.length < 90000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return issues;
 }
@@ -4091,7 +4091,7 @@ function getAllDimensionsRowsCached_() {
   const rows = last >= 2 ? sh.getRange(2, 1, last - 1, 8).getValues() : [];
   try {
     const payload = JSON.stringify(rows);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 20); // 20초
+    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return rows;
 }
@@ -4294,7 +4294,7 @@ function getBatchCustomersInvoiceRowIndex_() {
   }
   try {
     const payload = JSON.stringify(idx);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // 30초
+    if (payload.length < 95000) cache.put(cacheKey, payload, 45); // ★ 2026-09-03 30초→45초
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return idx;
 }
@@ -4330,9 +4330,9 @@ function getScanLogInvResultStatusCached_() {
     const CHUNK = 1500; // 3개 컬럼 기준 — 샤드 1개가 대략 50~60KB 이내로 유지되는 크기
     const shardCount = Math.max(1, Math.ceil(rows.length / CHUNK));
     for (let s = 0; s < shardCount; s++) {
-      cache.put('scanLogIRS_v2_' + s, JSON.stringify(rows.slice(s * CHUNK, (s + 1) * CHUNK)), 15);
+      cache.put('scanLogIRS_v2_' + s, JSON.stringify(rows.slice(s * CHUNK, (s + 1) * CHUNK)), 20); // ★ 2026-09-03 15초→20초
     }
-    cache.put(metaKey, JSON.stringify({ shards: shardCount }), 15);
+    cache.put(metaKey, JSON.stringify({ shards: shardCount }), 20); // ★ 2026-09-03 15초→20초
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return rows;
 }
@@ -4360,9 +4360,9 @@ function getIssueLogRowsCached_() {
     const CHUNK = 400; // 13개 컬럼(사유·메모 등 텍스트 포함)이라 행이 커서 더 작게 나눔
     const shardCount = Math.max(1, Math.ceil(rows.length / CHUNK));
     for (let s = 0; s < shardCount; s++) {
-      cache.put('issueLogRows_v2_' + s, JSON.stringify(rows.slice(s * CHUNK, (s + 1) * CHUNK)), 15);
+      cache.put('issueLogRows_v2_' + s, JSON.stringify(rows.slice(s * CHUNK, (s + 1) * CHUNK)), 20); // ★ 2026-09-03 15초→20초
     }
-    cache.put(metaKey, JSON.stringify({ shards: shardCount }), 15);
+    cache.put(metaKey, JSON.stringify({ shards: shardCount }), 20); // ★ 2026-09-03 15초→20초
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return rows;
 }
@@ -4687,7 +4687,7 @@ function getSalesInvoiceDetail(invoice) {
       //   저장 즉시 이 캐시를 직접 지우도록 이미 돼 있어서(정확성은 보장됨),
       //   TTL을 늘려도 "수정했는데 옛날 값이 보이는" 문제는 안 생기고, 대신
       //   "열었다 닫고 다시 여는" 반복 조회가 훨씬 빨라짐.
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 20);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 30); // ★ 2026-09-03 20초→30초
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -4772,7 +4772,7 @@ function buildDimLinksMap_() {
   const result = { childToPrimary: childToPrimary, primaryToChildren: primaryToChildren };
   try {
     const payload = JSON.stringify(result);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 20); // 20초
+    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return result;
 }
