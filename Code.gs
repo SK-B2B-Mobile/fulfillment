@@ -3464,6 +3464,61 @@ function cleanupOrphanedJobsFormatting() {
   }
 }
 
+/* ===================== cleanupStaleInspectionNotes (★ 2026-09-03 긴급 신규) =====================
+ * 목적: 위 cleanupOrphanedJobsFormatting은 "완전히 빈 줄"만 정리함. 그런데
+ * 예전(고치기 전) archiveOldJobs가 clearContent()만 써서, "실제 최근 데이터가
+ * 들어있는 줄인데 검수결과(Inspection) 칸에는 몇 달 전 다른 오더의 메모가
+ * 그대로 남아있는" 흔적이 별도로 있었음(실제 데이터 있는 행이라 위 함수가
+ * 건드리지 못함).
+ * 안전 원칙: Inspection 칸의 "글자"가 비어있는데(=아직 검수 안 됨/검수결과
+ * 없음) 메모만 붙어있는 경우만 그 메모를 지움. PASS/ISSUES 같은 실제
+ * 검수결과가 있는 칸은 절대 안 건드림(그런 칸의 메모는 진짜 데이터임).
+ * 사용법: Apps Script 에디터에서 함수 목록 cleanupStaleInspectionNotes 선택
+ *         → ▶ 실행 (한 번만 돌리면 됨)
+ * ===================================================================== */
+function cleanupStaleInspectionNotes() {
+  const sh = SHEET_();
+  const hdr = headerMapCached_();
+  const norm = normalizeHeaderName_;
+  const iInsp = hdr[norm('Inspection')];
+  if (!iInsp) { Logger.log('❌ Inspection 컬럼을 찾지 못함'); return; }
+
+  const last = sh.getLastRow();
+  if (last < 2) { Logger.log('데이터 없음'); return; }
+
+  const n = last - 1;
+  const range = sh.getRange(2, iInsp, n, 1);
+  const values = range.getValues();
+  const notes = range.getNotes();
+
+  let cleaned = 0;
+  const newNotes = notes.map((row, i) => {
+    const val = String(values[i][0] || '').trim();
+    const note = row[0];
+    if (!val && note) { cleaned++; return ['']; } // 검수결과 없는데 메모만 있으면 → 지움
+    return row; // 그 외(검수결과 있거나, 애초에 메모도 없거나)는 그대로 둠
+  });
+
+  if (cleaned > 0) {
+    range.setNotes(newNotes);
+  }
+
+  // ★ 같은 원칙으로 배경색 줄무늬도 정리 — 검수결과가 비어있는 칸만 배경색을
+  //   지움(하얀색/기본값으로). 실제 PASS(초록)/ISSUES(빨강) 배경은 절대 안 건드림.
+  const bgs = range.getBackgrounds();
+  let bgCleaned = 0;
+  const newBgs = bgs.map((row, i) => {
+    const val = String(values[i][0] || '').trim();
+    if (!val && row[0] && row[0] !== '#ffffff' && row[0] !== null) { bgCleaned++; return [null]; }
+    return row;
+  });
+  if (bgCleaned > 0) {
+    range.setBackgrounds(newBgs);
+  }
+
+  Logger.log('✅ cleanupStaleInspectionNotes: 메모 ' + cleaned + '개, 배경색 ' + bgCleaned + '개 흔적 정리 완료 (검수결과 없는 칸만 — 실제 검수결과 있는 칸은 전혀 안 건드림)');
+}
+
 function archiveOldJobsDaily() {
   archiveOldJobs(30);
 }
