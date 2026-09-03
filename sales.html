@@ -1246,6 +1246,15 @@ function gotoPage(p){ SHEET_PAGE = p; renderSheet(); }
 let TODAY_JOBS = [];
 let TODAY_PAGE = 1;
 let TODAY_PAGE_SIZE = 10;
+// ★ 2026-09-03 신규(매니저 확인) — "팝업에서 PAID로 저장했는데, 잠시 후
+// 목록이 다시 UNPAID로 돌아왔다가 한참 뒤에야 PAID로 바뀐다"는 현상 확인됨.
+// 원인: 서버가 혼잡한 상황에서 autoSync()의 목록 재조회가 아주 드물게
+// "저장 직후"의 살짝 지연된(아직 옛 값을 담은) 응답을 돌려받을 수 있음 —
+// 그러면 즉시 반영해둔 화면을 그 오래된 응답이 통째로 덮어써버림. 저장이
+// 실제로 서버에서 확인된 직후 60초간은, 그 인보이스의 결제상태만큼은 새로
+// 받아온 목록 데이터보다 "방금 확인된 값"을 우선하도록 함 — 버그가 아니라
+// 서버 혼잡 상황에서의 방어적 안전장치.
+let _recentPaymentOverrides = {}; // { invoice: { paid: bool, until: timestamp } }
 
 async function loadToday(){
   const res = await gasGet({ op:'getSalesTodayList' });
@@ -1278,6 +1287,14 @@ function applyTodayResult(res){
     return;
   }
   TODAY_JOBS = res.jobs || [];
+  // ★ 2026-09-03 신규 — 방금 확인된 결제상태 우선 적용(위 설명 참고)
+  const now = Date.now();
+  Object.keys(_recentPaymentOverrides).forEach(inv => {
+    const ov = _recentPaymentOverrides[inv];
+    if (ov.until < now) { delete _recentPaymentOverrides[inv]; return; }
+    const job = TODAY_JOBS.find(j => j.invoice === inv);
+    if (job) job.paymentPaid = ov.paid;
+  });
   saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
   document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
@@ -2125,6 +2142,10 @@ async function savePaymentStatus(invoice){
   //   서버 왕복 1번으로 끝나서 훨씬 빠르고, 재조회 관련 사고 가능성 자체가 없음.
   const confirmedPaid = !!res.paid;
   if (CURRENT_ORDER) CURRENT_ORDER.paymentPaid = confirmedPaid;
+  // ★ 2026-09-03 신규 — 60초간 이 인보이스의 결제상태는 이 값을 우선시함
+  //   (applyTodayResult 참고 — 서버 혼잡 시 목록 재조회가 살짝 지연된 옛 값을
+  //   돌려받아 방금 반영한 화면을 덮어쓰는 사고 방지).
+  _recentPaymentOverrides[invoice] = { paid: confirmedPaid, until: Date.now() + 60000 };
   const badge = document.getElementById('paymentBadge');
   if (badge){
     badge.className = 'pay-badge ' + (confirmedPaid ? 'paid' : 'unpaid');
