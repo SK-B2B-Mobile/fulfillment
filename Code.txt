@@ -713,6 +713,24 @@ function updateOrderMethod(data) {
   }
 }
 
+/* ★ 2026-09-02 최종 수정 — "쓰기는 항상 성공하는데 읽기만 계속 예전 값을
+ * 보여준다"는 패턴이 반복돼서, headerMapCached_()의 캐시(__HDR_CACHE)가 실행
+ * 환경(Apps Script의 "웜 컨테이너" 재사용)에 따라 예전 상태로 고정돼 있을
+ * 가능성을 의심함. 이 함수는 그 공유 캐시를 절대 안 믿고, 매번 시트 헤더
+ * 행을 직접 새로 읽어서 정확한 컬럼 위치를 찾음 — PaymentStatus 관련 3개
+ * 컬럼은 이제 전부 이 함수로만 위치를 찾음(읽기·쓰기 전부 동일 함수 사용 →
+ * 서로 다른 곳을 보는 사고 자체가 구조적으로 불가능해짐). */
+function getFreshColIndex_(sh, headerName) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return 0;
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const target = String(headerName).trim().toLowerCase();
+  for (let c = 0; c < headers.length; c++) {
+    if (String(headers[c]).trim().toLowerCase() === target) return c + 1;
+  }
+  return 0;
+}
+
 /* ★ 2026-09-02 신규(매니저 요청) — PU(직접 픽업) 결제확인 컬럼.
  * [배경] PU 오더는 결제가 끝나야만 물건을 내줄 수 있는데, 이 정보를 영업팀만
  * 알고 창고는 알 방법이 없어서 미납 상태로 픽업이 나가는 사고가 실제로 있었음.
@@ -802,9 +820,13 @@ function updatePaymentStatus(data) {
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
     // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
-    const iStatus = hdr[norm('PaymentStatus')];
-    const iAt = hdr[norm('PaymentStatusUpdatedAt')];
-    const iBy = hdr[norm('PaymentStatusUpdatedBy')];
+    // ★ 2026-09-02 최종 수정 — hdr(캐시)이 아니라 getFreshColIndex_로 매번
+    //   직접 다시 찾음. 읽기(getSalesTodayList/getSalesInvoiceDetail)도 전부
+    //   같은 함수로 통일해서, "쓰기와 읽기가 서로 다른 컬럼을 본다"는 사고
+    //   가능성을 구조적으로 없앰.
+    const iStatus = getFreshColIndex_(sh, 'PaymentStatus');
+    const iAt = getFreshColIndex_(sh, 'PaymentStatusUpdatedAt');
+    const iBy = getFreshColIndex_(sh, 'PaymentStatusUpdatedBy');
     // ★ 2026-09-02 긴급 수정 — "저장 성공했다고 떴는데 다시 열어보면 미납으로
     //   돌아가 있다"는 사고의 진짜 원인 후보. 컬럼을 못 찾았는데도(iStatus가
     //   비어있음) 그냥 아무것도 안 쓰고 조용히 {ok:true}를 돌려주고 있었음 —
@@ -3361,7 +3383,9 @@ function getSalesTodayList() {
     const iInsp      = hdr[norm('Inspection')];
     const iInspEnd   = hdr[norm('Insp. End')];
     const iArch      = hdr[norm('archived')]; // ★ 2026-08-06 신규
-    const iPayStatus = hdr[norm('PaymentStatus')]; // ★ 2026-09-02 신규 — PU 결제확인
+    // ★ 2026-09-02 최종 수정 — hdr 캐시가 아니라 getFreshColIndex_로 매번
+    //   직접 다시 찾음(updatePaymentStatus의 쓰기와 완전히 같은 방식으로 통일).
+    const iPayStatus = getFreshColIndex_(sh, 'PaymentStatus'); // ★ 2026-09-02 신규 — PU 결제확인
     if (!iInv || !iInsp || !iInspEnd) return { ok: true, jobs: [] };
 
     const tz = Session.getScriptTimeZone();
