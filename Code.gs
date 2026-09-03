@@ -3420,7 +3420,12 @@ function archiveOldJobs(daysOld) {
       const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + JOBS_SHEET, headers);
       archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
     }
-    sh.getRange(2, 1, last - 1, lastCol).clearContent();
+    // ★ 2026-09-03 긴급 버그 수정 — clearContent()는 셀의 "글자"만 지우고
+    //   메모(노트)·배경색 서식은 그대로 남겨둠. 그래서 6,916건→3,556건으로
+    //   줄인 뒤, 남는 빈 줄들에 예전 검수 메모("✓ PASS Completed: ... Inspector: ...")와
+    //   줄무늬 배경색이 그대로 남아 "빈 줄에 뭔가 계속 복사되는 것처럼" 보였음.
+    //   clear()로 값+서식+메모를 한 번에 완전히 정리하도록 수정.
+    sh.getRange(2, 1, last - 1, lastCol).clear();
     if (toKeep.length > 0) sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep);
 
     if (toArchive.length > 0) bumpVersion_();
@@ -3435,6 +3440,30 @@ function archiveOldJobs(daysOld) {
 }
 
 // 트리거는 인자를 못 넘기므로, 기본값(30일)으로 실행하는 래퍼 함수
+/* ===================== cleanupOrphanedJobsFormatting (★ 2026-09-03 긴급 신규) =====================
+ * 목적: archiveOldJobs가 clearContent()만 써서(글자만 지우고 메모·서식은 안 지움)
+ * 이미 남겨놓은 "빈 줄인데 예전 검수 메모와 줄무늬 배경색이 남아있는" 흔적을
+ * 한 번에 완전히 정리함. 실제 데이터가 있는 행은 절대 안 건드림(getLastRow()는
+ * "글자가 있는" 마지막 행까지만 보므로, 그 다음 행부터 시트 끝까지만 정리 대상).
+ * 데이터 손실 위험 없음 — 어차피 이 범위엔 지울 "글자"가 이미 없는 상태임.
+ * 사용법: Apps Script 에디터에서 함수 목록 cleanupOrphanedJobsFormatting 선택
+ *         → ▶ 실행 (한 번만 돌리면 됨)
+ * ===================================================================== */
+function cleanupOrphanedJobsFormatting() {
+  const sh = SHEET_();
+  const lastDataRow = sh.getLastRow(); // 실제 글자가 있는 마지막 행
+  const maxRow = sh.getMaxRows();      // 시트에 존재하는 전체 행(서식·메모만 남은 행 포함)
+  const lastCol = sh.getMaxColumns();
+  if (maxRow > lastDataRow) {
+    const startRow = lastDataRow + 1;
+    const numRows = maxRow - lastDataRow;
+    sh.getRange(startRow, 1, numRows, lastCol).clear();
+    Logger.log('✅ cleanupOrphanedJobsFormatting: ' + numRows + '행 정리 완료 (행 ' + startRow + '~' + maxRow + ')');
+  } else {
+    Logger.log('cleanupOrphanedJobsFormatting: 정리할 것 없음(흔적 없음)');
+  }
+}
+
 function archiveOldJobsDaily() {
   archiveOldJobs(30);
 }
