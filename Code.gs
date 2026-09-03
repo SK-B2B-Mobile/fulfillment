@@ -496,6 +496,8 @@ function doPost(e) {
   // ★ 2026-08-31 신규 — 단독 오더 등록/삭제
   if (op === 'addStandaloneOrder')    return json_(addStandaloneOrder(data));
   if (op === 'removeStandaloneOrder') return json_(removeStandaloneOrder(data));
+  // ★ 2026-09-03 신규 — 01-S 목록 일괄삭제
+  if (op === 'removeStandaloneOrdersBulk') return json_(removeStandaloneOrdersBulk(data));
   // ★ 2026-07-16 신규 — EXP/NF/Damaged/OOS 등 고객사별 이슈 등록
   if (op === 'logIssue')       return json_(logIssue(data));
   if (op === 'undoIssue')      return json_(undoIssue(data));
