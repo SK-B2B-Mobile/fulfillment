@@ -4253,6 +4253,74 @@ function getBatchCustomersInvoiceRowIndex_() {
   return idx;
 }
 
+/* ★ 2026-09-03 신규(획기적 속도 개선) — Dimensions/DimLinks와 동일한 이유·
+ * 동일한 패턴. ScanLog(hasBatchRecord 판정용 3개 컬럼)와 IssueLog(이슈 상세)를
+ * 매번 통째로 다시 읽던 걸 15초 캐싱해서, 같은 화면에서 여러 오더를 연달아
+ * 열어볼 때 반복해서 안 읽게 함. ScanLog/IssueLog는 이 세션 동안 스캔·이슈가
+ * 계속 누적된 시트라 특히 효과가 큼. ★ CacheService는 값 1개당 100KB 제한이
+ * 있어서, 이 두 시트가 커지면 그냥 한 덩어리로 캐싱하면 조용히 실패(캐싱
+ * 자체가 무효화)할 수 있음 — 그래서 여러 조각(샤드)으로 나눠서 저장함. */
+function getScanLogInvResultStatusCached_() {
+  const cache = CacheService.getScriptCache();
+  const metaKey = 'scanLogIRS_v2_meta';
+  const meta = cache.get(metaKey);
+  if (meta) {
+    try {
+      const shardCount = JSON.parse(meta).shards;
+      let rows = [];
+      let ok = true;
+      for (let s = 0; s < shardCount; s++) {
+        const shard = cache.get('scanLogIRS_v2_' + s);
+        if (shard === null) { ok = false; break; } // 샤드 하나라도 만료됐으면 전체를 무효로 취급
+        rows = rows.concat(JSON.parse(shard));
+      }
+      if (ok) return rows;
+    } catch (e) { /* 손상 시 새로 만듦 */ }
+  }
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  const rows = slLast >= 2 ? sl.getRange(2, 9, slLast - 1, 3).getValues() : []; // I:Invoice, J:Result, K:Status
+  try {
+    const CHUNK = 1500; // 3개 컬럼 기준 — 샤드 1개가 대략 50~60KB 이내로 유지되는 크기
+    const shardCount = Math.max(1, Math.ceil(rows.length / CHUNK));
+    for (let s = 0; s < shardCount; s++) {
+      cache.put('scanLogIRS_v2_' + s, JSON.stringify(rows.slice(s * CHUNK, (s + 1) * CHUNK)), 15);
+    }
+    cache.put(metaKey, JSON.stringify({ shards: shardCount }), 15);
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return rows;
+}
+function getIssueLogRowsCached_() {
+  const cache = CacheService.getScriptCache();
+  const metaKey = 'issueLogRows_v2_meta';
+  const meta = cache.get(metaKey);
+  if (meta) {
+    try {
+      const shardCount = JSON.parse(meta).shards;
+      let rows = [];
+      let ok = true;
+      for (let s = 0; s < shardCount; s++) {
+        const shard = cache.get('issueLogRows_v2_' + s);
+        if (shard === null) { ok = false; break; }
+        rows = rows.concat(JSON.parse(shard));
+      }
+      if (ok) return rows;
+    } catch (e) { /* 손상 시 새로 만듦 */ }
+  }
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const rows = ilLast >= 2 ? il.getRange(2, 1, ilLast - 1, 13).getValues() : [];
+  try {
+    const CHUNK = 400; // 13개 컬럼(사유·메모 등 텍스트 포함)이라 행이 커서 더 작게 나눔
+    const shardCount = Math.max(1, Math.ceil(rows.length / CHUNK));
+    for (let s = 0; s < shardCount; s++) {
+      cache.put('issueLogRows_v2_' + s, JSON.stringify(rows.slice(s * CHUNK, (s + 1) * CHUNK)), 15);
+    }
+    cache.put(metaKey, JSON.stringify({ shards: shardCount }), 15);
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return rows;
+}
+
 function getSalesInvoiceDetail(invoice) {
   try {
     invoice = String(invoice || '').trim();
@@ -4275,9 +4343,9 @@ function getSalesInvoiceDetail(invoice) {
     //   여전히 무거웠음. Code.gs의 getJobsInvoiceRowIndex_()(30초 캐시된
     //   인보이스→행번호 인덱스)를 그대로 재사용해서, 반복 조회 시 전체 스캔
     //   자체를 건너뜀 — "상세창 열기 30초" 지연의 핵심 원인.
-    const sh = SHEET_();
-    const hm = headerMapCached_();
-    const lastRow = sh.getLastRow();
+    let sh = SHEET_();
+    let hm = headerMapCached_();
+    let lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: false, error: 'no jobs data' };
     const invCol = hm['invoice'];
     if (!invCol) return { ok: false, error: 'invoice column not found' };
@@ -4292,6 +4360,38 @@ function getSalesInvoiceDetail(invoice) {
       for (let i = 0; i < invColVals.length; i++) {
         if (String(invColVals[i][0]).trim() === invoice) { jobRowIndex = i + 2; break; }
       }
+    }
+    // ★ 2026-09-03 신규(매니저 요청) — 라이브 Jobs에서 못 찾으면(검수완료 후
+    //   30일이 지나 Archive_Jobs로 옮겨졌을 수 있음) 보관함까지 자동으로 이어서
+    //   확인함. sales.html 검색창에서 "옛날 오더는 못 찾는다"는 불편이 없도록,
+    //   보관 기준(archiveOldJobs)을 짧게 잡아 속도를 확보하면서도 검색은 항상
+    //   그대로 되게 함. Archive_Jobs는 archiveOldJobs가 만든 시점의 헤더를 그대로
+    //   쓰므로, 라이브 헤더맵(hm)을 그대로 재사용하지 않고 보관함 자체 헤더를
+    //   다시 읽어서 정확하게 매칭함.
+    if (jobRowIndex < 0) {
+      try {
+        const archSh = ss_().getSheetByName(ARCHIVE_PREFIX + JOBS_SHEET);
+        if (archSh) {
+          const archLast = archSh.getLastRow();
+          if (archLast >= 2) {
+            const archHeaders = archSh.getRange(1, 1, 1, archSh.getLastColumn()).getValues()[0];
+            const archHm = {};
+            archHeaders.forEach((h, i) => { archHm[normalizeHeaderName_(String(h))] = i + 1; });
+            const archInvCol = archHm['invoice'];
+            if (archInvCol) {
+              const archInvVals = archSh.getRange(2, archInvCol, archLast - 1, 1).getValues();
+              for (let i = 0; i < archInvVals.length; i++) {
+                if (String(archInvVals[i][0]).trim() === invoice) {
+                  jobRowIndex = i + 2;
+                  sh = archSh;
+                  hm = archHm;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) { /* best-effort — 보관함 조회 실패해도 아래에서 "찾을 수 없음"으로 안전하게 처리 */ }
     }
     if (jobRowIndex < 0) return { ok: false, error: 'Invoice not found: ' + invoice };
     const jobRow = sh.getRange(jobRowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
@@ -4380,21 +4480,14 @@ function getSalesInvoiceDetail(invoice) {
     //   TV 전용으로 분류하고, 나머지는 전부 수동 버튼을 볼 수 있게 함.
     let hasBatchRecord = false;
     try {
-      const sl = scanlogSheet_();
-      const slLast = sl.getLastRow();
-      if (slLast >= 2) {
-        // ★ 2026-09-02 긴급 성능수정 — "상세창 열기 10초" 지연의 핵심 원인.
-        //   예전엔 인보이스가 일치하는 행을 찾을 때마다 그 행 하나를 다시
-        //   getRange().getValues()로 따로 불러왔음(N+1 패턴) — 스캔 기록이
-        //   많이 쌓인 인보이스는 이게 수십 번씩 반복되며 서버 호출이 크게
-        //   누적됨. 이제 필요한 3개 컬럼(Invoice/Result/Status)을 한 번에만
-        //   통째로 읽어서 메모리 안에서만 비교 — API 호출 횟수를 수십 번에서
-        //   1번으로 줄임.
-        const slRange = sl.getRange(2, 9, slLast - 1, 3).getValues(); // I:Invoice, J:Result, K:Status
-        for (let i = 0; i < slRange.length; i++) {
-          if (String(slRange[i][0]).trim() !== invoice) continue;
-          if (slRange[i][1] === 'pass' && slRange[i][2] !== 'undone') { hasBatchRecord = true; break; }
-        }
+      // ★ 2026-09-03 재수정(획기적 속도 개선) — 3개 컬럼으로 줄여도 매번 ScanLog
+      //   전체를 다시 읽는 건 여전히 무거웠음(이 세션 동안 스캔이 많이 누적된
+      //   시트라 더더욱). 15초 짧은 캐시로 원본 데이터를 담아두고, 반복 조회
+      //   시(같은 화면에서 여러 오더를 연달아 열어볼 때 등) 다시 안 읽음.
+      const slRange = getScanLogInvResultStatusCached_();
+      for (let i = 0; i < slRange.length; i++) {
+        if (String(slRange[i][0]).trim() !== invoice) continue;
+        if (slRange[i][1] === 'pass' && slRange[i][2] !== 'undone') { hasBatchRecord = true; break; }
       }
     } catch (e) { /* best-effort */ }
 
@@ -4424,23 +4517,18 @@ function getSalesInvoiceDetail(invoice) {
     // ★ 2026-08-03 성능 개선 — 13개 컬럼 전체를 모든 행에서 읽던 것을, 인보이스
     //   컬럼(H, 8번째)만 먼저 좁게 스캔해서 매칭 행 위치를 찾고, 그 몇 안 되는
     //   매칭 행만 전체 컬럼으로 읽도록 변경 (보통 한 인보이스당 이슈는 몇 건 안 됨).
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    // ★ 2026-09-03 재수정(획기적 속도 개선) — 매칭 행만 전체 컬럼으로 읽어도
+    //   여전히 IssueLog 전체를 매번 다시 훑고 있었음. 15초 짧은 캐시로 원본
+    //   데이터를 담아두고, 반복 조회 시 다시 안 읽음.
     const items = [];
-    if (ilLast >= 2) {
-      // ★ 2026-09-02 긴급 성능수정 — hasBatchRecord와 완전히 같은 문제(N+1
-      //   패턴)가 여기도 있었음. 매칭 행마다 따로 API를 부르는 대신, 전체
-      //   13개 컬럼 범위를 한 번만 읽어서 메모리 안에서 필터링 — 이슈가 많이
-      //   쌓인 인보이스일수록 효과가 큼.
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[7]).trim() !== invoice) return;
-        if (r[12] === 'undone') return;
-        items.push({
-          sku: r[5] || '', name: r[6] || '', barcode: r[4] || '',
-          reason: r[9] || '', qty: Number(r[10]) || 0, note: r[11] || ''
-        });
+    getIssueLogRowsCached_().forEach(r => {
+      if (String(r[7]).trim() !== invoice) return;
+      if (r[12] === 'undone') return;
+      items.push({
+        sku: r[5] || '', name: r[6] || '', barcode: r[4] || '',
+        reason: r[9] || '', qty: Number(r[10]) || 0, note: r[11] || ''
       });
-    }
+    });
     // ★ 2026-07-28 신규 — IssueLog에서 못 찾았는데 검수결과는 "⚠ ISSUES"인 경우
     //   (archiveOldBatches로 오래된 배치의 IssueLog가 Archive_IssueLog로 옮겨진
     //   경우 등) — Jobs 시트 검수결과 셀에 남아있는 메모(saveInspection이 검수
