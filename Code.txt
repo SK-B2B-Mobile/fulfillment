@@ -52,6 +52,11 @@ function bumpVersion_() {
   //   BatchCustomers에 행이 추가·삭제되는 모든 경로가 결국 이 함수를 거치므로,
   //   여기서 같이 지워주면 별도로 신경 쓸 곳 없이 항상 정확함.
   try { CacheService.getScriptCache().remove('bcInvRowIdx_v1'); } catch (e) {}
+  // ★ 2026-09-03 신규 — Dimensions/DimLinks 캐시(BatchPicking.gs)도 같이 지움.
+  //   디멘션 저장·그룹 연결/해제처럼 이 데이터가 바뀌는 모든 경로가 결국
+  //   이 함수를 거치므로, 여기서 같이 지워주면 항상 정확함.
+  try { CacheService.getScriptCache().remove('allDimsRows_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('dimLinksMap_v1'); } catch (e) {}
   // ★ 2026-08-25 신규(안전 확인) — getOpenBatches("다른 배치" 목록) 캐시를 6초→20초로
   //   늘리면서(속도 개선), 방금 2차 검증을 끝냈는데도 목록엔 최대 20초간 예전
   //   숫자("검증 대기 N건")가 보일 위험이 새로 생겼음. 데이터가 실제로 바뀌는
@@ -748,23 +753,38 @@ function getFreshColIndex_(sh, headerName) {
  * "Recently Completed" 목록은 METHOD 컬럼 폭이 PU/TK/UPS 세 글자에 딱 맞춰져
  * 있어서 배지를 더 넣으면 잘리거나 레이아웃이 깨짐(매니저 확인 사항) — 그래서
  * 목록 쪽은 전혀 안 건드림. */
+// ★ 2026-09-03 소소한 성능수정 — 이미 헤더 행을 읽은 김에 3개 컬럼 위치를
+// 바로 계산해서 반환함(updatePaymentStatus가 곧바로 이어서 getFreshColIndex_를
+// 3번 또 부르며 헤더 행을 또 읽던 걸 없앰 — 헤더 행 읽기 4번→1번).
 function ensurePaymentStatusCol_(sh) {
   const lastCol = sh.getLastColumn();
-  if (lastCol === 0) return;
+  if (lastCol === 0) return { iStatus: 0, iAt: 0, iBy: 0 };
   const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
-  const hasStatus = headers.some(h => String(h).trim().toLowerCase() === 'paymentstatus');
-  const hasAt = headers.some(h => String(h).trim().toLowerCase() === 'paymentstatusupdatedat');
-  const hasBy = headers.some(h => String(h).trim().toLowerCase() === 'paymentstatusupdatedby');
+  let iStatus = 0, iAt = 0, iBy = 0;
+  headers.forEach((h, i) => {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'paymentstatus') iStatus = i + 1;
+    else if (v === 'paymentstatusupdatedat') iAt = i + 1;
+    else if (v === 'paymentstatusupdatedby') iBy = i + 1;
+  });
   const add = [];
-  if (!hasStatus) add.push('PaymentStatus');
-  if (!hasAt) add.push('PaymentStatusUpdatedAt');
-  if (!hasBy) add.push('PaymentStatusUpdatedBy');
+  if (!iStatus) add.push('PaymentStatus');
+  if (!iAt) add.push('PaymentStatusUpdatedAt');
+  if (!iBy) add.push('PaymentStatusUpdatedBy');
   if (add.length) {
     const curLastCol = sh.getLastColumn();
     sh.insertColumnsAfter(curLastCol, add.length);
     sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
     __HDR_CACHE = null;
+    let nextCol = curLastCol + 1;
+    add.forEach(name => {
+      if (name === 'PaymentStatus') iStatus = nextCol;
+      else if (name === 'PaymentStatusUpdatedAt') iAt = nextCol;
+      else if (name === 'PaymentStatusUpdatedBy') iBy = nextCol;
+      nextCol++;
+    });
   }
+  return { iStatus: iStatus, iAt: iAt, iBy: iBy };
 }
 
 /* updatePaymentStatus — Order Detail Lookup에서만 호출되는 걸 전제로 함
@@ -787,7 +807,7 @@ function updatePaymentStatus(data) {
     //   그래서 읽기·검증(PU 여부, 검수완료 여부, 패킹존 이동 여부 확인)은 전부
     //   락 밖에서 먼저 끝내고, 락은 아래 "실제 값 쓰기" 그 몇 줄만 최소한으로 잡음.
     const sh = SHEET_();
-    ensurePaymentStatusCol_(sh);
+    const _payCols = ensurePaymentStatusCol_(sh); // ★ 2026-09-03 — {iStatus, iAt, iBy}를 여기서 한 번에 확보
     const hdr = headerMapCached_();
     const norm = normalizeHeaderName_;
     const row = findRowByKey_('invoice', invoice);
@@ -810,33 +830,40 @@ function updatePaymentStatus(data) {
     //   1) Jobs.PackingMovedManual — 이미 열어둔 행(row)에서 셀 1개만 읽음
     //   2) BatchCustomers.TakenOut — 인보이스 컬럼(B)만 좁게 읽어 행을 찾고
     //      그 행의 L열(TakenOut) 셀 1개만 읽음(전체 13개 컬럼을 안 읽음)
+    // ★ 2026-09-03 재수정 — 이 함수만 예전 방식(BatchCustomers 전체 스캔)이
+    //   그대로 남아있었음. getSalesInvoiceDetail(BatchPicking.gs)에 새로 만든
+    //   30초 캐시 인덱스(getBatchCustomersInvoiceRowIndex_)를 그대로 재사용 —
+    //   같은 인보이스를 반복 저장할 때(실수로 되돌리는 경우 등) 매번 전체를
+    //   다시 안 훑음.
     const iManualFlag = hdr[norm('PackingMovedManual')];
     let moved = iManualFlag ? !!sh.getRange(row, iManualFlag).getValue() : false;
     if (!moved) {
       try {
         const bc = bcustSheetSafe_();
-        const bcLast = bc.getLastRow();
-        if (bcLast >= 2) {
-          const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
-          for (let i = bcInvVals.length - 1; i >= 0; i--) {
-            if (String(bcInvVals[i][0]).trim() === invoice) {
-              moved = !!bc.getRange(i + 2, 12).getValue(); // L열: TakenOut
-              break;
+        const _bcIdx = getBatchCustomersInvoiceRowIndex_();
+        let bcRow = _bcIdx[invoice] || 0;
+        if (!bcRow) {
+          const bcLast = bc.getLastRow();
+          if (bcLast >= 2) {
+            const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
+            for (let i = bcInvVals.length - 1; i >= 0; i--) {
+              if (String(bcInvVals[i][0]).trim() === invoice) { bcRow = i + 2; break; }
             }
           }
         }
+        if (bcRow) moved = !!bc.getRange(bcRow, 12).getValue(); // L열: TakenOut
       } catch (e) { /* best-effort */ }
     }
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
     // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
-    // ★ 2026-09-02 최종 수정 — hdr(캐시)이 아니라 getFreshColIndex_로 매번
-    //   직접 다시 찾음. 읽기(getSalesTodayList/getSalesInvoiceDetail)도 전부
-    //   같은 함수로 통일해서, "쓰기와 읽기가 서로 다른 컬럼을 본다"는 사고
-    //   가능성을 구조적으로 없앰.
-    const iStatus = getFreshColIndex_(sh, 'PaymentStatus');
-    const iAt = getFreshColIndex_(sh, 'PaymentStatusUpdatedAt');
-    const iBy = getFreshColIndex_(sh, 'PaymentStatusUpdatedBy');
+    // ★ 2026-09-03 재수정(속도) — 위에서 ensurePaymentStatusCol_이 이미 헤더
+    //   행을 읽으면서 컬럼 위치까지 같이 계산해뒀으므로, 여기서 getFreshColIndex_를
+    //   3번 또 불러서 헤더 행을 또 읽지 않고 그 결과를 그대로 재사용함
+    //   (헤더 행 읽기 4번 → 1번으로 감소).
+    const iStatus = _payCols.iStatus;
+    const iAt = _payCols.iAt;
+    const iBy = _payCols.iBy;
     // ★ 2026-09-02 긴급 수정 — "저장 성공했다고 떴는데 다시 열어보면 미납으로
     //   돌아가 있다"는 사고의 진짜 원인 후보. 컬럼을 못 찾았는데도(iStatus가
     //   비어있음) 그냥 아무것도 안 쓰고 조용히 {ok:true}를 돌려주고 있었음 —
