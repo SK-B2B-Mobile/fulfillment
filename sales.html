@@ -2098,8 +2098,14 @@ async function savePaymentStatus(invoice){
   const sel = document.getElementById('paymentSelect');
   const willBePaid = sel ? (sel.value === 'paid') : null;
   if (willBePaid === null) return;
-  const oldPaid = !!(CURRENT_ORDER && CURRENT_ORDER.paymentPaid);
-  if (willBePaid === oldPaid){ togglePaymentEdit(); return; }
+  // ★ 2026-09-02 긴급 수정 — "한번 PAID로 바꾸면 다시 UNPAID로 못 바꾼다"는
+  //   사고의 진짜 원인. 여기서 "이미 같은 값이면 요청 생략"을 CURRENT_ORDER의
+  //   옛 값과 비교해서 판단했는데, 그 값이 최신으로 안 갱신되는 경우가 있어서
+  //   실제로는 값이 다른데도 "이미 같다"고 착각해 서버에 요청 자체를 안 보내고
+  //   조용히 넘어가버렸음(구글시트에 두 번째 시도가 아예 안 남았던 이유).
+  //   이제 이 생략 로직을 아예 없애고, 사용자가 Save를 누르면 무조건 서버로
+  //   보냄 — 어차피 서버가 실제로 값이 같으면 그냥 같은 값을 다시 쓸 뿐이라
+  //   안전함.
 
   const nextLabel = willBePaid ? 'PAID' : 'UNPAID';
   const warn = `Change payment status to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
@@ -2110,11 +2116,24 @@ async function savePaymentStatus(invoice){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  // ★ 2026-09-02 — 서버가 "요청한 값"이 아니라 "실제로 저장 확인된 값"(res.paid)을
-  //   돌려줌. 화면은 항상 이 확인된 값을 그대로 반영함(요청값을 그냥 믿지 않음).
-  //   여기서는 다시 서버 전체 조회(openInvoice) 없이 카드만 새로 그려서 확인된
-  //   값을 정확히 보여줌 — 무거운 재조회를 피하면서도 항상 서버 확인값 기준.
-  await openInvoice(invoice);
+  // ★ 2026-09-02 긴급 수정(속도+정확성) — 예전엔 여기서 openInvoice()로 오더
+  //   전체를 다시 통째로 불러왔음. 그런데 그 재조회가 캐시·타이밍 문제로 방금
+  //   저장한 값을 정확히 못 따라오는 사고가 있었음("팝업 안에서는 여전히
+  //   Unpaid로 고정" 현상의 원인) — 게다가 무거운 조회를 한 번 더 하니 느리기도
+  //   했음. 서버 응답(res.paid)에 이미 "실제로 저장 확인된 값"이 들어있으므로,
+  //   다시 조회하지 않고 이 값을 그대로 화면(배지)과 CURRENT_ORDER에 반영함 —
+  //   서버 왕복 1번으로 끝나서 훨씬 빠르고, 재조회 관련 사고 가능성 자체가 없음.
+  const confirmedPaid = !!res.paid;
+  if (CURRENT_ORDER) CURRENT_ORDER.paymentPaid = confirmedPaid;
+  const badge = document.getElementById('paymentBadge');
+  if (badge){
+    badge.className = 'pay-badge ' + (confirmedPaid ? 'paid' : 'unpaid');
+    badge.textContent = confirmedPaid ? '✓ PAID' : '⚠ UNPAID';
+  }
+  // ★ 신규 — 드롭다운 자체도 최신 확인값으로 맞춰둠(다시 Edit을 눌렀을 때
+  //   예전 값이 기본 선택되어 있는 걸 방지)
+  if (sel) sel.value = confirmedPaid ? 'paid' : 'unpaid';
+  togglePaymentEdit(); // 편집 행 닫기
 }
 
 
