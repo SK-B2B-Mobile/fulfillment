@@ -4155,7 +4155,7 @@ function restoreWronglyArchived(fromYmd, toYmd) {
  * DRY_RUN=false로 바꿔서 다시 실행(실제 적용)
  * ===================================================================== */
 function repairCorruptedInspectionFormatting() {
-  const DRY_RUN = true; // ← 로그 확인 후 false로 바꿔서 재실행
+  const DRY_RUN = false; // ← 실제 적용 모드
 
   const sh = SHEET_();
   const hdr = headerMapCached_();
