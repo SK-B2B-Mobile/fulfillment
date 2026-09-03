@@ -267,7 +267,9 @@ function doGet(e) {
   // ★ 2026-07-09 신규 — 기기간 실시간 스캔 동기화용
   // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 진행 상태 조회
   if (op === 'getPackScanState') {
-    return json_(getPackScanState((e.parameter||{}).batchId||'', (e.parameter||{}).invoice||''));
+    // ★ 2026-09-03 신규 — 단독 오더 1차/2차 스캔 기록 분리(Round). round를 안 보내면
+    //   기존과 동일하게 2(총량 Pack Verify 기본값)로 취급되어 총량피킹은 영향 없음.
+    return json_(getPackScanState((e.parameter||{}).batchId||'', (e.parameter||{}).invoice||'', (e.parameter||{}).round||''));
   }
   // ★ 2026-08-31 신규 — 단독 오더 목록 조회
   if (op === 'getStandaloneOrders') {
