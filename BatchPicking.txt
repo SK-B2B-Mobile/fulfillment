@@ -4213,6 +4213,13 @@ function getSalesInvoiceDetail(invoice) {
     const paymentPaid = paymentStatusRaw === 'paid';
     const paymentUpdatedAt = String(jv('paymentstatusupdatedat') || '').trim();
     const paymentUpdatedBy = String(jv('paymentstatusupdatedby') || '').trim();
+    // ★ 2026-09-02 진단용 로그 — updatePaymentStatus(Code.gs)가 남기는
+    //   [PaymentStatus WRITE] 로그와 이 [PaymentStatus READ] 로그를 Apps
+    //   Script 실행 기록에서 나란히 비교하면, 쓰기와 읽기가 서로 다른
+    //   row/컬럼을 보고 있는지(예: 같은 인보이스가 여러 행에 중복 존재하는
+    //   경우) 바로 확인 가능.
+    Logger.log('[PaymentStatus READ] invoice=%s jobRowIndex=%s col=%s rawValue=%s sheetName=%s',
+      invoice, jobRowIndex, hm['paymentstatus'], paymentStatusRaw, sh.getName());
     // ★ 2026-07-28 신규 — 작업(피킹) 시작일. StartAtISO의 날짜 부분만 추출.
     const startISORaw = jv('startatiso');
     let pickStart = '';
