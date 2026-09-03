@@ -4030,20 +4030,37 @@ function buildDimsExistsMap_() {
 /* ---------------------------------------------------------------------
  * getDimensions_(invoice) — 내부 헬퍼. 인보이스 하나의 팔렛/박스 목록 조회.
  * ------------------------------------------------------------------- */
-function getDimensions_(invoice) {
+/* ★ 2026-09-03 신규(획기적 속도 개선) — Dimensions 시트도 인보이스 상세조회
+ * 열 때마다 매번 전체(8컬럼 × 전체 행)를 다시 읽고 있었음. dimJobsSnapshot_와
+ * 동일한 패턴으로 원본 행 전체를 20초 캐싱해서, 반복 조회 시 다시 안 읽음. */
+function getAllDimensionsRowsCached_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'allDimsRows_v1';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
+  }
   const sh = dimensionsSheet_();
   const last = sh.getLastRow();
+  const rows = last >= 2 ? sh.getRange(2, 1, last - 1, 8).getValues() : [];
+  try {
+    const payload = JSON.stringify(rows);
+    if (payload.length < 95000) cache.put(cacheKey, payload, 20); // 20초
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return rows;
+}
+
+function getDimensions_(invoice) {
+  const rows = getAllDimensionsRowsCached_();
   const dims = [];
   let enteredBy = '', enteredAt = '';
-  if (last >= 2) {
-    sh.getRange(2, 1, last - 1, 8).getValues().forEach(r => {
-      if (String(r[0]).trim() !== String(invoice).trim()) return;
-      dims.push({ idx: Number(r[1]) || 0, l: r[2] || null, w: r[3] || null, h: r[4] || null, wt: Number(r[5]) || 0 });
-      if (r[6]) enteredBy = String(r[6]);
-      if (r[7]) enteredAt = String(r[7]);
-    });
-    dims.sort((a, b) => a.idx - b.idx);
-  }
+  rows.forEach(r => {
+    if (String(r[0]).trim() !== String(invoice).trim()) return;
+    dims.push({ idx: Number(r[1]) || 0, l: r[2] || null, w: r[3] || null, h: r[4] || null, wt: Number(r[5]) || 0 });
+    if (r[6]) enteredBy = String(r[6]);
+    if (r[7]) enteredAt = String(r[7]);
+  });
+  dims.sort((a, b) => a.idx - b.idx);
   return { dims: dims, enteredBy: enteredBy, enteredAt: enteredAt };
 }
 
@@ -4594,7 +4611,14 @@ function dimCustomerKey_(name) {
  * childToPrimary: { 추가오더: 대표오더 }
  * primaryToChildren: { 대표오더: [추가오더, ...] }
  * ------------------------------------------------------------------- */
+// ★ 2026-09-03 신규(획기적 속도 개선) — DimLinks 전체를 매번 다시 훑는 대신 20초 캐싱
 function buildDimLinksMap_() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'dimLinksMap_v1';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
+  }
   const childToPrimary = {};
   const primaryToChildren = {};
   try {
@@ -4611,7 +4635,12 @@ function buildDimLinksMap_() {
       });
     }
   } catch (e) { /* best-effort */ }
-  return { childToPrimary: childToPrimary, primaryToChildren: primaryToChildren };
+  const result = { childToPrimary: childToPrimary, primaryToChildren: primaryToChildren };
+  try {
+    const payload = JSON.stringify(result);
+    if (payload.length < 95000) cache.put(cacheKey, payload, 20); // 20초
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return result;
 }
 
 /* ---------------------------------------------------------------------
