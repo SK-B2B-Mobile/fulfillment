@@ -344,6 +344,20 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-banner-text b{color:var(--purple); font-size:14px;}
 .pv-banner-text div{font-size:12px; color:var(--text-dim); margin-top:2px;}
 .pv-invoice-picker{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:16px;}
+/* ★ 2026-09-04 신규 — 네이티브 select는 모바일 브라우저(안드로이드 스캐너 기기)에서
+   OS가 통째로 자기 스타일로 그려버려서(큰 글씨·줄바꿈·라디오버튼) CSS로 손댈 수
+   없었음. 오더 선택 목록을 직접 그리는 커스텀 드롭다운으로 교체 — 인보이스 번호는
+   크고 굵게, 고객명·SKU는 작고 흐리게, 한 줄로 정리. */
+.pv-opt-trigger{margin-top:8px; width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px; text-align:left; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.pv-opt-trigger .ph{color:var(--text-dim);}
+.pv-opt-list{margin-top:6px; max-height:280px; overflow-y:auto; border:1.5px solid var(--border2); border-radius:8px; background:var(--surface2);}
+.pv-opt-row{display:flex; align-items:baseline; gap:8px; padding:11px 12px; border-bottom:1px solid var(--border2); cursor:pointer; overflow:hidden;}
+.pv-opt-row:last-child{border-bottom:none;}
+.pv-opt-row:hover, .pv-opt-row:active{background:var(--surface3);}
+.pv-opt-row .inv{font-size:15px; font-weight:800; white-space:nowrap; flex-shrink:0;}
+.pv-opt-row .sub{font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-opt-row .badge{font-size:11px; font-weight:700; color:#8B5CF6; white-space:nowrap; flex-shrink:0;}
+.pv-opt-empty{padding:14px 12px; font-size:13px; color:var(--text-dim); text-align:center;}
 .pv-invoice-picker select{width:100%; padding:12px 14px; background:var(--surface2); border:2px solid var(--purple); border-radius:10px; color:var(--text); font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer;}
 .pv-worker-row{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:12px;}
 .pv-worker-row select{flex:1 1 160px; min-width:120px;}
@@ -6095,6 +6109,9 @@ let _ssCandidates = [];
 function renderSsInvoiceOptions(filterText, keepSelected){
   const sel = document.getElementById('ssInvoiceSelect');
   if(!sel) return;
+  // ★ 2026-09-04 신규 — 네이티브 select를 숨기고 값 저장용으로만 씀(onSsInvoiceChange
+  //   등 기존 로직은 손대지 않고 그대로 재사용). 화면엔 커스텀 목록을 대신 그림.
+  sel.style.display = 'none';
   const q = (filterText || '').trim().toLowerCase();
   const filtered = q
     ? _ssCandidates.filter(o => (o.invoice||'').toLowerCase().includes(q) || (o.customer||'').toLowerCase().includes(q))
@@ -6104,10 +6121,88 @@ function renderSsInvoiceOptions(filterText, keepSelected){
     `<option value="${o.invoice}">${o.invoice} · ${o.customer||''} (SKU ${o.totalSku})</option>`
   ).join('');
   if(prevSelected && filtered.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
+
+  let list = document.getElementById('ssInvoiceList');
+  if(!list){
+    list = document.createElement('div');
+    list.id = 'ssInvoiceList';
+    list.className = 'pv-opt-list';
+    list.style.display = 'none';
+    sel.insertAdjacentElement('afterend', list);
+  }
+  list.innerHTML = filtered.length
+    ? filtered.map(o => `<div class="pv-opt-row" data-value="${o.invoice}"><span class="inv">${o.invoice}</span><span class="sub">${(o.customer||'').replace(/</g,'&lt;')} · SKU ${o.totalSku}</span></div>`).join('')
+    : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`;
+  list.querySelectorAll('[data-value]').forEach(row => {
+    row.onclick = () => {
+      const picked = filtered.find(o => o.invoice === row.dataset.value);
+      sel.value = row.dataset.value;
+      const search = document.getElementById('ssInvoiceSearch');
+      if(search && picked) search.value = `${picked.invoice} · ${picked.customer||''} (SKU ${picked.totalSku})`;
+      list.style.display = 'none';
+      sel.dispatchEvent(new Event('change'));
+    };
+  });
 }
 document.getElementById('ssInvoiceSearch').addEventListener('input', function(){
   renderSsInvoiceOptions(this.value);
+  document.getElementById('ssInvoiceList').style.display = 'block';
 });
+document.getElementById('ssInvoiceSearch').addEventListener('focus', function(){
+  const list = document.getElementById('ssInvoiceList');
+  if(list) list.style.display = 'block';
+});
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('.pv-opt-trigger') && !e.target.closest('.pv-opt-list') && !e.target.closest('#ssInvoiceSearch')){
+    document.querySelectorAll('.pv-opt-list').forEach(l => l.style.display = 'none');
+  }
+});
+// ★ 2026-09-04 신규 — 검색창이 없는 Psv/Pv 오더 선택용 공용 커스텀 드롭다운.
+//   rows: [{value, invHtml, subHtml, badgeHtml}]
+function renderTriggerOptList(selId, rows, placeholderText){
+  const sel = document.getElementById(selId);
+  if(!sel) return;
+  sel.style.display = 'none';
+  const triggerId = selId + 'Trigger';
+  const listId = selId + 'List';
+  let trigger = document.getElementById(triggerId);
+  let list = document.getElementById(listId);
+  if(!trigger){
+    trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.id = triggerId;
+    trigger.className = 'pv-opt-trigger';
+    sel.insertAdjacentElement('afterend', trigger);
+  }
+  if(!list){
+    list = document.createElement('div');
+    list.id = listId;
+    list.className = 'pv-opt-list';
+    list.style.display = 'none';
+    trigger.insertAdjacentElement('afterend', list);
+  }
+  const selectedRow = rows.find(r => r.value === sel.value);
+  trigger.innerHTML = selectedRow
+    ? `<span class="inv">${selectedRow.invHtml}</span><span class="sub">${selectedRow.subHtml}</span>${selectedRow.badgeHtml || ''}`
+    : `<span class="ph">${placeholderText}</span>`;
+  list.innerHTML = rows.length
+    ? rows.map(r => `<div class="pv-opt-row" data-value="${r.value}"><span class="inv">${r.invHtml}</span><span class="sub">${r.subHtml}</span>${r.badgeHtml || ''}</div>`).join('')
+    : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`;
+  trigger.onclick = (e) => {
+    e.stopPropagation();
+    const isOpen = list.style.display !== 'none';
+    document.querySelectorAll('.pv-opt-list').forEach(l => l.style.display = 'none');
+    list.style.display = isOpen ? 'none' : 'block';
+  };
+  list.querySelectorAll('[data-value]').forEach(row => {
+    row.onclick = () => {
+      sel.value = row.dataset.value;
+      list.style.display = 'none';
+      renderTriggerOptList(selId, rows, placeholderText);
+      sel.dispatchEvent(new Event('change'));
+    };
+  });
+}
 
 async function populateSsInvoiceSelect(){
   const sel = document.getElementById('ssInvoiceSelect');
@@ -6552,11 +6647,15 @@ async function populatePsvInvoiceSelect(){
   if(picker) picker.style.display = 'block';
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
-  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(o =>
-    `<option value="${o.invoice}">${o.packVerified ? '🟣 [검증완료] ' : ''}${o.invoice} · ${o.customer||''}</option>`
-  ).join('');
   if(prevSelected && candidates.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
   else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
+  const psvRows = candidates.map(o => ({
+    value: o.invoice,
+    invHtml: o.invoice,
+    subHtml: (o.customer||'').replace(/</g,'&lt;'),
+    badgeHtml: o.packVerified ? '<span class="badge">🟣 검증완료</span>' : '',
+  }));
+  renderTriggerOptList('psvInvoiceSelect', psvRows, '— 오더를 선택하세요 —');
 }
 
 async function onPsvInvoiceChange(){
@@ -6829,11 +6928,15 @@ function populatePvInvoiceSelect(){
   if(picker) picker.style.display = 'block';
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
-  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(c =>
-    `<option value="${c.invoice}">${c.verified ? '🟣 [검증완료] ' : ''}SLOT ${c.slotNum} · ${c.invoice} · ${c.customer||''}</option>`
-  ).join('');
   if(prevSelected && candidates.some(c => c.invoice === prevSelected)) sel.value = prevSelected;
   else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
+  const pvRows = candidates.map(c => ({
+    value: c.invoice,
+    invHtml: c.invoice,
+    subHtml: `SLOT ${c.slotNum} · ${(c.customer||'').replace(/</g,'&lt;')}`,
+    badgeHtml: c.verified ? '<span class="badge">🟣 검증완료</span>' : '',
+  }));
+  renderTriggerOptList('pvInvoiceSelect', pvRows, '— 오더를 선택하세요 —');
 }
 
 function populatePvWorkerSelect(){
