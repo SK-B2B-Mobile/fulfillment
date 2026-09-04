@@ -1351,7 +1351,7 @@ select option:disabled{color:var(--text-dim2);}
               <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(1)">+</button>
             </div>
           </div>
-          <div class="pv-boxpallet-field">
+          <div class="pv-boxpallet-field" id="pvPalletField">
             <label>팔렛</label>
             <div class="pv-boxpallet-stepper">
               <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(-1)">−</button>
@@ -1392,14 +1392,7 @@ select option:disabled{color:var(--text-dim2);}
         <div id="pvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
           <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ 관리자 강제확정</button>
-          <div class="pv-print-group">
-            <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 패킹슬립 인쇄 (Letter)</button>
-            <button class="pv-print-toggle" onclick="event.stopPropagation(); document.getElementById('pvPrintMenu').classList.toggle('open');" title="다른 용지 크기">▾</button>
-            <div class="pv-print-menu" id="pvPrintMenu">
-              <button onclick="document.getElementById('pvPrintMenu').classList.remove('open'); printPvSlip('letter');">📄 Letter (일반 A4/레터 용지)</button>
-              <button onclick="document.getElementById('pvPrintMenu').classList.remove('open'); printPvSlip('label');">🏷 4×6 라벨 (라벨 프린터)</button>
-            </div>
-          </div>
+          <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 패킹슬립 인쇄</button>
           <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 최종 2차 검증완료 확정</button>
         </div>
       </div>
@@ -1434,7 +1427,7 @@ select option:disabled{color:var(--text-dim2);}
               <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(1)">+</button>
             </div>
           </div>
-          <div class="pv-boxpallet-field">
+          <div class="pv-boxpallet-field" id="psvPalletField">
             <label>팔렛</label>
             <div class="pv-boxpallet-stepper">
               <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(-1)">−</button>
@@ -1475,14 +1468,7 @@ select option:disabled{color:var(--text-dim2);}
         <div id="psvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
           <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ 관리자 강제확정</button>
-          <div class="pv-print-group">
-            <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 패킹슬립 인쇄 (Letter)</button>
-            <button class="pv-print-toggle" onclick="event.stopPropagation(); document.getElementById('psvPrintMenu').classList.toggle('open');" title="다른 용지 크기">▾</button>
-            <div class="pv-print-menu" id="psvPrintMenu">
-              <button onclick="document.getElementById('psvPrintMenu').classList.remove('open'); printPsvSlip('letter');">📄 Letter (일반 A4/레터 용지)</button>
-              <button onclick="document.getElementById('psvPrintMenu').classList.remove('open'); printPsvSlip('label');">🏷 4×6 라벨 (라벨 프린터)</button>
-            </div>
-          </div>
+          <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 패킹슬립 인쇄</button>
           <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 최종 2차 검증완료 확정</button>
         </div>
       </div>
@@ -6886,6 +6872,14 @@ async function onPsvInvoiceChange(){
   _psvCurrentBox = 1; _psvCurrentPallet = 1;
   document.getElementById('psvBoxNum').textContent = '1';
   document.getElementById('psvPalletNum').textContent = '1';
+  // ★ 2026-09-04 신규(현장 지적) — UPS/PU는 팔렛 개념이 없으니 팔렛 스텝퍼
+  //   자체를 숨기고 박스만 보여줌. TK만 팔렛도 같이 씀(박스는 TK도 필요 —
+  //   한 팔렛 안에 여러 박스가 있을 수 있어서 패킹슬립에 "Box N ·" 로 표시됨).
+  {
+    const ordForShip = _standaloneOrders.find(o => o.invoice === invoice);
+    const isTk = ordForShip && String(ordForShip.shipVia || '').trim().toUpperCase() === 'TK';
+    document.getElementById('psvPalletField').style.display = isTk ? 'flex' : 'none';
+  }
   panel.classList.add('active');
   document.getElementById('psvMsg').style.display = 'none';
   const input = document.getElementById('psvScanInput');
@@ -7205,6 +7199,12 @@ async function onPvInvoiceChange(){
   _pvCurrentBox = 1; _pvCurrentPallet = 1;
   document.getElementById('pvBoxNum').textContent = '1';
   document.getElementById('pvPalletNum').textContent = '1';
+  // ★ 2026-09-04 신규(현장 지적) — psv와 동일한 이유. UPS/PU는 팔렛 스텝퍼 숨김.
+  {
+    const cfForShip = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
+    const isTk = cfForShip && String(cfForShip.meta.ship_via || '').trim().toUpperCase() === 'TK';
+    document.getElementById('pvPalletField').style.display = isTk ? 'flex' : 'none';
+  }
   panel.classList.add('active');
   document.getElementById('pvMsg').style.display = 'none';
   const input = document.getElementById('pvScanInput');
