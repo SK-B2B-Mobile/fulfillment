@@ -1506,6 +1506,37 @@ select option:disabled{color:var(--text-dim2);}
   </div>
 </div>
 
+<!-- ★ 2026-09-04 신규(현장 지적) — 1차(04)에서 놓친 이슈를 2차(Pack Verify 단독)에서
+     발견했을 때 등록할 방법이 아예 없었음(1차 완료되면 그 오더가 04 목록에서 사라져서
+     되돌아갈 수도 없었음). 위 04용 모달과 완전히 동일한 구조로 2차 전용 모달 신규 추가. -->
+<div class="modal-bg" id="psvIssueModal">
+  <div class="modal">
+    <h3>이슈 관리 (2차 검수)</h3>
+    <div id="psvIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
+    <div id="psvExistingIssuesWrap" style="display:none; margin-bottom:16px;">
+      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이미 등록된 이슈 (잘못 등록했으면 취소할 수 있습니다)</label>
+      <div id="psvExistingIssuesList" style="margin-top:8px;"></div>
+    </div>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">새 이슈 등록</label>
+    <div class="form-field" style="margin-top:8px;">
+      <label>사유</label>
+      <select id="psvIssueReason"></select>
+    </div>
+    <div class="form-field">
+      <label>수량</label>
+      <input type="number" id="psvIssueQty" min="1" value="1">
+    </div>
+    <div class="form-field">
+      <label>메모 (선택)</label>
+      <input type="text" id="psvIssueNote" placeholder="추가 설명이 필요하면 입력">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-modal-close>닫기</button>
+      <button class="btn btn-primary" id="psvIssueSubmitBtn" onclick="submitPsvIssue()">이슈 등록</button>
+    </div>
+  </div>
+</div>
+
 <!-- ★ 2026-08-31 신규 — 04/Pack Verify/단독 Pack Verify 공용 바코드 수동 입력 모달.
      스캐너가 못 읽는 바코드를 사람이 직접 숫자로 입력해서, 실제 스캔과 완전히
      동일한 경로로 처리함(어느 패널에서 열렸는지에 따라 그 패널의 제출 함수로 연결). -->
@@ -6418,6 +6449,78 @@ async function submitSsIssue(){
   }
 }
 
+// ★ 2026-09-04 신규 — 위 04용 이슈 등록 함수들과 완전히 동일한 구조의 2차(Pack
+//   Verify 단독) 전용 버전. _psvInvoice/currentPsvWorker/showPsvMsg/refreshPsvState를
+//   씀. 이슈는 라운드(1차/2차) 구분 없이 필요수량에서 똑같이 차감되므로, 2차에서
+//   등록해도 정확히 동일하게 작동함.
+let _psvIssueTarget = null;
+async function openPsvIssueModal(sku, barcode, name){
+  if(!_psvInvoice){ return; }
+  _psvIssueTarget = { sku, barcode, name };
+  document.getElementById('psvIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
+  const reasonSel = document.getElementById('psvIssueReason');
+  reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
+  document.getElementById('psvIssueQty').value = 1;
+  document.getElementById('psvIssueNote').value = '';
+  document.getElementById('psvIssueModal').classList.add('open');
+  await refreshPsvExistingIssues();
+}
+async function refreshPsvExistingIssues(){
+  const wrap = document.getElementById('psvExistingIssuesWrap');
+  const list = document.getElementById('psvExistingIssuesList');
+  if(!_psvIssueTarget || !_psvInvoice){ wrap.style.display = 'none'; return; }
+  list.innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  wrap.style.display = 'block';
+  const res = await gasQueryWithRetry('getInvoiceIssues', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice });
+  if(!res.ok){ list.innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`; return; }
+  const mine = (res.issues || []).filter(iss => normBarcode(iss.barcode) === normBarcode(_psvIssueTarget.barcode));
+  if(!mine.length){ wrap.style.display = 'none'; return; }
+  const reasonLabel = v => (ISSUE_REASONS.find(r => r.v === v) || {}).label || v;
+  list.innerHTML = mine.map(iss => `
+    <div class="pv-line" style="margin-bottom:6px;">
+      <div class="pv-line-info">
+        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty}개</div>
+        <div class="pv-line-meta">${iss.time} · ${iss.worker || ''}${iss.note ? ` · ${iss.note}` : ''}</div>
+      </div>
+      <div class="pv-line-actions">
+        <button class="btn btn-ghost btn-sm" onclick="undoPsvExistingIssue('${iss.issueId}')">취소</button>
+      </div>
+    </div>`).join('');
+}
+async function undoPsvExistingIssue(issueId){
+  if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어, 완료 처리됐던 상품이 미완료로 돌아갈 수 있습니다.')) return;
+  const res = await gasCallWithRetry('undoIssue', { issueId });
+  if(!res.ok){ alert('취소 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast('이슈가 취소되었습니다', 'success');
+  await refreshPsvExistingIssues();
+  await refreshPsvState();
+}
+async function submitPsvIssue(){
+  if(!_psvIssueTarget || !_psvInvoice) return;
+  const worker = currentPsvWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  const reason = document.getElementById('psvIssueReason').value;
+  const qty = Number(document.getElementById('psvIssueQty').value) || 0;
+  if(qty <= 0){ alert('수량을 1 이상 입력하세요'); return; }
+  const note = document.getElementById('psvIssueNote').value.trim();
+  const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
+  const btn = document.getElementById('psvIssueSubmitBtn');
+  btn.disabled = true; btn.textContent = '등록 중...';
+  const res = await gasCallWithRetry('logIssue', {
+    batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker,
+    barcode: _psvIssueTarget.barcode, sku: _psvIssueTarget.sku, name: _psvIssueTarget.name,
+    customer: ord ? ord.customer : '', reason, qty, note
+  });
+  btn.disabled = false; btn.textContent = '이슈 등록';
+  if(res && res.ok){
+    closeAllModals();
+    showPsvMsg(`⚠ 이슈 등록됨 — ${_psvIssueTarget.name || _psvIssueTarget.sku} ${qty}개`, 'ok');
+    await refreshPsvState();
+  } else {
+    alert('이슈 등록 실패: ' + ((res && res.error) || '알 수 없는 오류'));
+  }
+}
+
 
 // ★ 2026-09-01 신규 — submitPvScan과 동일한 이유·동일한 구조(직렬 큐 + 즉시 피드백).
 let _ssScanQueue = [];
@@ -6787,6 +6890,7 @@ function renderPsvBody(){
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
+        <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">⚠ 이슈</button>
       </div>
     </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 
