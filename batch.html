@@ -1361,7 +1361,8 @@ select option:disabled{color:var(--text-dim2);}
           </div>
         </div>
         <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요.</div>
+        <button type="button" class="btn btn-primary btn-sm" id="pvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
+        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, cf ? cf.meta.ship_via : '', _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
@@ -1438,7 +1439,8 @@ select option:disabled{color:var(--text-dim2);}
           </div>
         </div>
         <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요.</div>
+        <button type="button" class="btn btn-primary btn-sm" id="psvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
+        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, ord ? ord.shipVia : '', _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
@@ -6881,6 +6883,7 @@ async function onPsvInvoiceChange(){
     const ordForShip = _standaloneOrders.find(o => o.invoice === invoice);
     const isTk = ordForShip && String(ordForShip.shipVia || '').trim().toUpperCase() === 'TK';
     document.getElementById('psvPalletField').style.display = isTk ? 'flex' : 'none';
+    document.getElementById('psvPalletCompleteBtn').style.display = isTk ? 'block' : 'none';
   }
   panel.classList.add('active');
   document.getElementById('psvMsg').style.display = 'none';
@@ -7206,6 +7209,7 @@ async function onPvInvoiceChange(){
     const cfForShip = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
     const isTk = cfForShip && String(cfForShip.meta.ship_via || '').trim().toUpperCase() === 'TK';
     document.getElementById('pvPalletField').style.display = isTk ? 'flex' : 'none';
+    document.getElementById('pvPalletCompleteBtn').style.display = isTk ? 'block' : 'none';
   }
   panel.classList.add('active');
   document.getElementById('pvMsg').style.display = 'none';
@@ -7620,12 +7624,12 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice){
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Labels · ${totalCount}장</title>
   <style>
-    @page{ size: 4in 6in; margin: 0.1in; }
+    @page{ size: 6in 4in; margin: 0.1in; }
     html,body{ margin:0; padding:0; }
     .label-page{
       font-family:'Helvetica Neue',Arial,sans-serif; color:#111; text-align:center;
-      width:3.8in; height:5.8in; display:flex; flex-direction:column;
-      align-items:center; justify-content:center; gap:0.25in; box-sizing:border-box;
+      width:5.8in; height:3.8in; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:0.15in; box-sizing:border-box;
       position:relative;
     }
     .label-brand{ font-size:30pt; font-weight:800; letter-spacing:0.03em; white-space:nowrap; }
@@ -7646,9 +7650,9 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice){
         }
       }
       window.onload = function(){
-        document.querySelectorAll('.lbl-brand').forEach(el => fitOneLine(el, 3.6));
-        document.querySelectorAll('.lbl-pallet').forEach(el => fitOneLine(el, 3.6));
-        document.querySelectorAll('.lbl-customer').forEach(el => fitOneLine(el, 3.6));
+        document.querySelectorAll('.lbl-brand').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-pallet').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-customer').forEach(el => fitOneLine(el, 5.6));
       };
     <\/script>
   </body></html>`;
