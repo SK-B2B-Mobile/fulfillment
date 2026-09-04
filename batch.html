@@ -2128,9 +2128,9 @@ function renderOpenBatchesPanel(batches){
       </div>`;
     }).join('')}
     ${recentlyDone.length ? `
-    <button id="btnToggleRecentlyDone" style="display:flex; justify-content:space-between; align-items:center; width:100%; padding:10px 12px; text-align:left; margin-top:${needsAttention.length ? '4px' : '0'};">
-      <span style="font-size:13px; font-weight:700;">2차 검수 대기 (${recentlyDone.length}건) 펼쳐보기</span>
-      <span id="recentlyDoneToggleIcon" style="font-size:13px; transition:transform 0.15s;">▾</span>
+    <button id="btnToggleRecentlyDone" style="display:flex; justify-content:space-between; align-items:center; width:100%; padding:12px 14px; text-align:left; margin-top:${needsAttention.length ? '4px' : '0'}; background:#fff; border:none; border-radius:10px; cursor:pointer;">
+      <span style="font-size:13px; font-weight:800; color:#3C3489;">2차 검수 대기 (${recentlyDone.length}건) 펼쳐보기</span>
+      <span id="recentlyDoneToggleIcon" style="font-size:13px; color:#3C3489; transition:transform 0.15s;">▾</span>
     </button>
     <div id="recentlyDoneBox" style="display:none; flex-direction:column; gap:8px;">
     ${recentlyDone.map(b => `
