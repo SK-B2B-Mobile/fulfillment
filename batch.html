@@ -425,7 +425,7 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-qty-confirm-row{display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap;}
 .pv-qty-step{width:40px; height:40px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:20px; font-weight:800; flex-shrink:0; cursor:pointer;}
 #ssQtyInput{width:80px; height:40px; text-align:center; font-size:20px; font-weight:800; font-family:var(--mono); border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); flex-shrink:0;}
-#ssQtyConfirmBtn{margin-left:auto;}
+#ssQtyConfirmBtn{margin-left:0;}
 /* ★ 2026-09-01 신규 — 스캔 인식 순간(네트워크 응답 전) 즉시 보여주는 시각 피드백.
    입력창 placeholder에 "인식됨 ✓ 바코드"가 잠깐 뜨는 것과 같이 border도 살짝
    밝아졌다 돌아와서, 스캔이 실제로 잡혔다는 걸 눈으로 바로 확인 가능하게 함.
@@ -1169,17 +1169,23 @@ select option:disabled{color:var(--text-dim2);}
     <!-- ─── VIEW 04: 단독 1차 검수 (★ 2026-08-31 신규) ─── -->
     <div class="view" id="v-standalone-scan">
       <div class="eyebrow" style="color:#B39DDB;">Step 04 · Standalone Inspection (1st)</div>
-      <h2 class="h-page" style="color:#B39DDB;">단독 스캔 · 1차 검수</h2>
-      <p class="sub">01-S에서 등록한 단독 오더를 골라 <b>바코드를 실제로 스캔</b>하며 1차 검수합니다. 총량 &quot;Scan &amp; Sort&quot;와 별개로, 단독 오더만 대상입니다.</p>
+      <!-- ★ 2026-09-04 신규(현장 지적) — 5.5인치 기기에서 화면 키보드까지 뜨면
+           스캔 확인 박스가 화면 밖으로 잘려서 손가락으로 스크롤해야 보였음.
+           제목 밑에 따로 한 줄 차지하던 설명문을 제목 옆으로 붙이고 짧게 줄여서
+           세로 공간 한 줄 확보 — 그만큼 아래 내용이 위로 올라옴. -->
+      <div style="display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <h2 class="h-page" style="color:#B39DDB; margin-bottom:0;">단독 스캔 · 1차 검수</h2>
+        <span style="font-size:11px; color:var(--text-dim);">단독 오더 전용 · 실제 바코드 스캔 필수</span>
+      </div>
 
       <div class="pv-invoice-picker">
         <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검수할 단독 오더 선택</label>
-        <input type="text" id="ssInvoiceSearch" placeholder="🔍 인보이스 번호 또는 고객사명 검색..." style="margin-top:8px; width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px;">
+        <input type="text" id="ssInvoiceSearch" placeholder="🔍 인보이스 번호 또는 고객사명 검색..." autocomplete="off" style="margin-top:8px; width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px;">
         <select id="ssInvoiceSelect" style="margin-top:8px;" onchange="onSsInvoiceChange()"></select>
         <div class="pv-worker-row">
           <label>작업자</label>
           <select id="ssWorkerSelect" onchange="document.getElementById('ssWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
-          <input type="text" id="ssWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+          <input type="text" id="ssWorkerManual" placeholder="이름 직접 입력" autocomplete="off" style="display:none;">
         </div>
       </div>
 
@@ -1196,7 +1202,7 @@ select option:disabled{color:var(--text-dim2);}
             <div class="pv-qty-confirm-sub" id="ssQtySub"></div>
             <div class="pv-qty-confirm-row">
               <button class="pv-qty-step" id="ssQtyMinus" type="button">−</button>
-              <input type="number" id="ssQtyInput" inputmode="numeric" min="1">
+              <input type="number" id="ssQtyInput" inputmode="numeric" min="1" autocomplete="off">
               <button class="pv-qty-step" id="ssQtyPlus" type="button">+</button>
               <button class="btn btn-ghost btn-sm" id="ssQtyCancelBtn" type="button">취소</button>
               <button class="btn btn-primary btn-sm" id="ssQtyConfirmBtn" type="button">✓ 이 수량으로 저장</button>
