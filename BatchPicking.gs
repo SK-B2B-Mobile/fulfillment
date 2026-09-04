@@ -3620,7 +3620,18 @@ function getBatchHistoryList(data) {
         return dStr >= cutoffStr;
       });
     }
-    list.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    // ★ 2026-09-04 긴급 버그 수정 — createdAt이 시트에 따라 실제 Date 객체가 아니라
+    //   텍스트로 저장된 행이 섞여 있어서(예: 예전 수동 입력·재시딩), 단순 문자열
+    //   비교(localeCompare)로는 최신순 정렬이 뒤죽박죽이 됐음(실제 현장에서 확인됨).
+    //   new Date()로 실제 시각값으로 변환해서 비교 — 파싱 안 되면(NaN) date 칸으로
+    //   대체해서 최소한 날짜 단위로는 정확히 정렬되게 함.
+    list.sort((a, b) => {
+      let ta = new Date(a.createdAt).getTime();
+      if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+      let tb = new Date(b.createdAt).getTime();
+      if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+      return tb - ta;
+    });
     return { ok: true, batches: list.slice(0, 90), days: days };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
