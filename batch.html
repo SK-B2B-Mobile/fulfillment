@@ -2030,6 +2030,13 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   const res = await gasQueryWithRetry('getOpenBatches', {});
   if(!res.ok){ dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`; return; }
   const list = (res.batches || []).filter(b => b.batchId !== state.batchId);
+  // ★ 2026-09-04 신규(현장 지적) — 정렬 기준이 없어 뒤죽박죽으로 보이던 문제.
+  //   최근 생성된 배치가 위로 오게 정렬.
+  list.sort((a, b) => {
+    const ta = new Date(a.createdAt).getTime() || 0;
+    const tb = new Date(b.createdAt).getTime() || 0;
+    return tb - ta;
+  });
   if(!list.length){
     dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">전환할 다른 미완료 배치가 없습니다</div>`;
     return;
@@ -2085,8 +2092,17 @@ function renderOpenBatchesPanel(batches){
   //   상세 목록은 기본으로 접어서 클릭해야 펼쳐지게 함. 전부 이미 한 번에 받아온
   //   getOpenBatches 응답(scannedPass 포함)을 화면에서 다시 나누는 것뿐이라
   //   서버를 추가로 부르지 않음 — 속도에 전혀 영향 없음.
-  const waitingBatches = needsAttention.filter(b => !b.scannedPass);
-  const inProgressBatches = needsAttention.filter(b => b.scannedPass > 0);
+  // ★ 2026-09-04 버그 수정 — 대시보드의 "진행중"이 지금 이 기기에서 작업 중인
+  //   배치(state.batchId)를 빼고 계산돼서, 실제로 진행 중인데도 0으로 뜨는
+  //   문제가 있었음. 상세 경고 카드(needsAttention)는 여전히 현재 배치를 빼고
+  //   보여주되(중복 경고 방지), 대시보드 집계만은 필터링 전 원본 batches에서
+  //   현재 배치까지 포함해서 계산.
+  const currentBatchEntry = batches.find(b => b.batchId === state.batchId);
+  const dashboardSource = currentBatchEntry && !currentBatchEntry.recentlyCompleted
+    ? [...needsAttention, currentBatchEntry]
+    : needsAttention;
+  const waitingBatches = dashboardSource.filter(b => !b.scannedPass);
+  const inProgressBatches = dashboardSource.filter(b => b.scannedPass > 0);
   const pendingVerifyCount = recentlyDone.filter(b => b.pendingTakeOut > 0).length;
 
   const dashboardHtml = `
