@@ -2066,8 +2066,38 @@ function renderOpenBatchesPanel(batches){
   const _hidden = getHiddenBatches();
   const recentlyDone = list.filter(b => b.recentlyCompleted && !_hidden[b.batchId]);
 
+  // ★ 2026-09-04 신규(매니저 요청) — 목록이 계속 쌓여 지저분해 보인다는 지적으로,
+  //   위에 요약 대시보드(진행 대기/진행중/2차 검수 대기)를 추가하고, 2차 검수 대기
+  //   상세 목록은 기본으로 접어서 클릭해야 펼쳐지게 함. 전부 이미 한 번에 받아온
+  //   getOpenBatches 응답(scannedPass 포함)을 화면에서 다시 나누는 것뿐이라
+  //   서버를 추가로 부르지 않음 — 속도에 전혀 영향 없음.
+  const waitingBatches = needsAttention.filter(b => !b.scannedPass);
+  const inProgressBatches = needsAttention.filter(b => b.scannedPass > 0);
+  const pendingVerifyCount = recentlyDone.filter(b => b.pendingTakeOut > 0).length;
+
+  const dashboardHtml = `
+    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:12px;">
+      <div style="background:var(--surface-2); border:1px solid var(--border2); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">진행 대기</div>
+        <div style="font-family:var(--mono); font-size:20px; font-weight:800;">${waitingBatches.length}</div>
+      </div>
+      <div style="background:var(--surface-2); border:1px solid var(--border2); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">진행중</div>
+        <div style="display:flex; gap:5px; flex-wrap:wrap;">
+          ${inProgressBatches.length
+            ? inProgressBatches.map(b => `<span style="font-family:var(--mono); font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; background:rgba(255,177,66,0.15); color:var(--amber); border:1px solid rgba(255,177,66,0.4);">${b.batchId}</span>`).join('')
+            : `<span style="font-family:var(--mono); font-size:20px; font-weight:800;">0</span>`}
+        </div>
+      </div>
+      <div style="background:var(--surface-2); border:1px solid var(--border2); border-radius:10px; padding:10px 12px;">
+        <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">2차 검수 대기</div>
+        <div style="font-family:var(--mono); font-size:20px; font-weight:800; color:#8B5CF6;">${pendingVerifyCount}</div>
+      </div>
+    </div>`;
+
   panel.style.display = 'block';
   panel.innerHTML = `
+    ${dashboardHtml}
     ${needsAttention.length ? `<div style="font-size:12px; font-weight:700; color:var(--amber); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">
       ⚠ 완료 처리 안 된 배치 ${needsAttention.length}건 — 확인이 필요합니다
     </div>` : ''}
@@ -2097,6 +2127,12 @@ function renderOpenBatchesPanel(batches){
         </div>
       </div>`;
     }).join('')}
+    ${recentlyDone.length ? `
+    <button id="btnToggleRecentlyDone" style="display:flex; justify-content:space-between; align-items:center; width:100%; padding:10px 12px; text-align:left; margin-top:${needsAttention.length ? '4px' : '0'};">
+      <span style="font-size:13px; font-weight:700;">2차 검수 대기 (${recentlyDone.length}건) 펼쳐보기</span>
+      <span id="recentlyDoneToggleIcon" style="font-size:13px; transition:transform 0.15s;">▾</span>
+    </button>
+    <div id="recentlyDoneBox" style="display:none; flex-direction:column; gap:8px;">
     ${recentlyDone.map(b => `
       <div class="openb-card" style="border-color:var(--green);">
         <div class="openb-head">
@@ -2111,7 +2147,19 @@ function renderOpenBatchesPanel(batches){
           <button class="btn btn-ghost btn-sm" data-hide="${b.batchId}">✕ 목록에서 숨기기</button>
         </div>
       </div>`).join('')}
+    </div>` : ''}
   `;
+  // ★ 2026-09-04 신규 — 접힌 "2차 검수 대기" 목록을 클릭 시 펼침/접음. 기본은 접힌 상태.
+  const toggleBtn = document.getElementById('btnToggleRecentlyDone');
+  if(toggleBtn){
+    toggleBtn.onclick = () => {
+      const box = document.getElementById('recentlyDoneBox');
+      const icon = document.getElementById('recentlyDoneToggleIcon');
+      const open = box.style.display !== 'none';
+      box.style.display = open ? 'none' : 'flex';
+      icon.style.transform = open ? 'rotate(0deg)' : 'rotate(180deg)';
+    };
+  }
   panel.querySelectorAll('[data-complete]').forEach(btn => {
     btn.onclick = () => completeOpenBatch(btn.dataset.complete);
   });
