@@ -6160,11 +6160,19 @@ function renderSsInvoiceOptions(filterText, keepSelected){
     list.style.display = 'none';
     sel.insertAdjacentElement('afterend', list);
   }
-  list.innerHTML = filtered.length
+  list.innerHTML = (sel.value ? `<div class="pv-opt-row" data-value="" style="color:var(--text-dim);">← 선택 안 함 (목록으로 돌아가기)</div>` : '') + (filtered.length
     ? filtered.map(o => `<div class="pv-opt-row" data-value="${o.invoice}"><span class="inv">${o.invoice}</span><span class="sub">${(o.customer||'').replace(/</g,'&lt;')} · SKU ${o.totalSku}</span></div>`).join('')
-    : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`;
+    : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`);
   list.querySelectorAll('[data-value]').forEach(row => {
     row.onclick = () => {
+      if(row.dataset.value === ''){
+        sel.value = '';
+        const search = document.getElementById('ssInvoiceSearch');
+        if(search) search.value = '';
+        list.style.display = 'none';
+        sel.dispatchEvent(new Event('change'));
+        return;
+      }
       const picked = filtered.find(o => o.invoice === row.dataset.value);
       sel.value = row.dataset.value;
       const search = document.getElementById('ssInvoiceSearch');
@@ -6215,9 +6223,16 @@ function renderTriggerOptList(selId, rows, placeholderText){
   trigger.innerHTML = selectedRow
     ? `<span class="inv">${selectedRow.invHtml}</span><span class="sub">${selectedRow.subHtml}</span>${selectedRow.badgeHtml || ''}`
     : `<span class="ph">${placeholderText}</span>`;
-  list.innerHTML = rows.length
+  // ★ 2026-09-04 긴급 버그 수정 — 네이티브 select엔 "— 오더를 선택하세요 —"
+  //   옵션을 다시 눌러서 선택을 취소(빠져나오기)할 수 있었는데, 커스텀 목록엔
+  //   그 항목이 아예 없어서 한 번 선택하면 검증 패널에서 빠져나올 방법이
+  //   없었음. 목록 맨 위에 "선택 안 함"을 항상 추가.
+  const clearRowHtml = sel.value
+    ? `<div class="pv-opt-row" data-value="" style="color:var(--text-dim);">← 선택 안 함 (목록으로 돌아가기)</div>`
+    : '';
+  list.innerHTML = clearRowHtml + (rows.length
     ? rows.map(r => `<div class="pv-opt-row" data-value="${r.value}"><span class="inv">${r.invHtml}</span><span class="sub">${r.subHtml}</span>${r.badgeHtml || ''}</div>`).join('')
-    : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`;
+    : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`);
   trigger.onclick = (e) => {
     e.stopPropagation();
     const isOpen = list.style.display !== 'none';
