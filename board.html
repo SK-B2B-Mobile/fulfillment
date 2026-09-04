@@ -57,6 +57,22 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .tb-switch-row .tb-sw-tag{font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; white-space:nowrap;}
 .tb-switch-empty{padding:12px 8px; font-size:12px; color:var(--text-dim);}
 .tb-switch-more{padding:10px 8px; margin-top:4px; border-top:1px solid var(--border); font-size:12px; color:#3EB8F5; text-align:center; cursor:pointer;}
+/* ★ 2026-09-04 신규(현장 요청) — "1년 전체"를 끝없이 스크롤하는 목록 대신
+   달력으로. 데이터는 지금과 완전히 동일하게 한 번만 받아오고(getBatchHistoryList
+   days=365), 화면에서 날짜별로 묶어서 그리는 것뿐이라 서버 호출·속도엔 영향 없음. */
+.tb-cal-header{display:flex; align-items:center; justify-content:space-between; padding:2px 2px 8px;}
+.tb-cal-nav{background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); padding:4px 10px; cursor:pointer; font-size:12px;}
+.tb-cal-nav:hover{border-color:#3EB8F5; color:#3EB8F5;}
+.tb-cal-title{font-size:13px; font-weight:700;}
+.tb-cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px;}
+.tb-cal-wd{font-size:10px; color:var(--text-dim); text-align:center; padding:2px 0;}
+.tb-cal-cell{position:relative; aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:6px; font-size:12px; color:var(--text-dim2);}
+.tb-cal-cell.tb-cal-empty{visibility:hidden;}
+.tb-cal-cell.has-batch{background:rgba(62,184,245,0.12); color:var(--text); cursor:pointer; font-weight:700;}
+.tb-cal-cell.has-batch:hover{background:rgba(62,184,245,0.22);}
+.tb-cal-cell.is-today{box-shadow:inset 0 0 0 1px var(--amber);}
+.tb-cal-cell.is-selected{background:#3EB8F5; color:#04283B;}
+.tb-cal-dot{font-size:9px; margin-top:1px; line-height:1;}
 .tb-switch-more:hover{text-decoration:underline;}
 .manual-banner{display:none; align-items:center; flex-wrap:wrap; row-gap:6px; gap:10px; background:var(--amber-bg); border:1px solid var(--amber); color:var(--amber); font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px;}
 .manual-banner.show{display:flex;}
@@ -1821,6 +1837,50 @@ document.getElementById('btnBatchHistoryTV').onclick = async (e) => {
   if(dd.classList.contains('open')){ dd.classList.remove('open'); return; }
   loadBatchHistoryList(14);
 };
+let _tvHistoryFullList = [];
+let _tvCalendarMonth = null;
+let _tvCalendarSelectedDate = null;
+
+function tvHistoryDateKey_(b){ return String(b.date).slice(0, 10); }
+function tvTodayKey_(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function tvHistoryRowHtml_(b){
+  const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+  const tag = isCurrent
+    ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+    : b.status === 'completed'
+    ? `<span class="tb-sw-tag" style="background:var(--gray-bg); color:var(--text-dim)">완료됨</span>`
+    : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">진행중</span>`;
+  return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
+    <div>
+      <div class="tb-sw-id">${b.batchId}</div>
+      <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs</div>
+    </div>
+    ${tag}
+  </div>`;
+}
+function tvHistoryWireRows_(container){
+  container.querySelectorAll('[data-batch]').forEach(row => {
+    row.onclick = () => {
+      // ★ 2026-08-25 신규(버그 수정) — 위 "다른 배치"와 동일한 이유. "지난 배치"
+      //   목록에서 골라도, 그게 사실 지금 실제로 작업 중인 배치라면 override로
+      //   들어가지 않고 실시간 모드를 그대로 유지함.
+      if(row.dataset.batch === liveBatchId){
+        backToLiveNow();
+        document.getElementById('batchHistoryDropdownTV').classList.remove('open');
+        return;
+      }
+      manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
+      document.getElementById('manualBanner').classList.add('show');
+      document.getElementById('batchHistoryDropdownTV').classList.remove('open');
+      startViewOnlyTimer(); // ★ 10분 뒤 자동 복귀 카운트다운 시작(계속 보기로 고정도 가능)
+      pollOnce(); // 고른 배치로 즉시 갱신
+    };
+  });
+}
+
 async function loadBatchHistoryList(days){
   const dd = document.getElementById('batchHistoryDropdownTV');
   dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
@@ -1829,50 +1889,105 @@ async function loadBatchHistoryList(days){
   const res = await gasQueryWithRetry('getBatchHistoryList', { days });
   if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
   const list = res.batches || [];
+  // ★ 2026-09-04 신규 — 서버가 이미 최신순 정렬해서 주지만(재배포 전 기기 대비)
+  //   클라이언트에서도 한 번 더 실제 시각값으로 방어적 재정렬.
+  list.sort((a, b) => {
+    let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+    let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+    return tb - ta;
+  });
+
+  if(days >= 365){
+    // ★ 2026-09-04 신규(현장 요청) — 1년치를 끝없이 스크롤하는 목록 대신 달력으로
+    //   보여줌. 서버 호출은 지금(days=365)과 완전히 동일하게 딱 한 번만 하고,
+    //   그 결과를 화면에서 날짜별로 묶어서 달력으로 그리는 것뿐이라 속도엔
+    //   전혀 영향 없음.
+    _tvHistoryFullList = list;
+    const mostRecentKey = list.length ? tvHistoryDateKey_(list[0]) : tvTodayKey_();
+    _tvCalendarMonth = new Date(mostRecentKey + 'T00:00:00');
+    _tvCalendarSelectedDate = null;
+    renderTvHistoryCalendar();
+    return;
+  }
+
   // ★ 2026-08-25 신규(매니저 요청) — 계속 쌓이면 지저분하니 기본은 최근 14일치만.
   //   그래도 더 예전 것이 필요한 드문 경우를 위해 맨 아래에 "더 예전 배치 찾기"를
-  //   달아둠(누르면 1년치까지 넓혀서 다시 조회).
-  const moreBtn = days < 365
-    ? `<div class="tb-switch-more" id="tbHistoryMoreBtn">🔍 더 예전 배치 찾기 (최근 1년 전체)</div>`
-    : '';
+  //   달아둠(누르면 달력으로 전환).
+  const moreBtn = `<div class="tb-switch-more" id="tbHistoryMoreBtn">🔍 더 예전 배치 찾기 (달력에서 날짜로 찾기)</div>`;
   if(!list.length){
     dd.innerHTML = `<div class="tb-switch-empty">최근 ${days}일 안에 배치 기록이 없습니다</div>${moreBtn}`;
   } else {
-    dd.innerHTML = list.map(b => {
-      const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
-      const tag = isCurrent
-        ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
-        : b.status === 'completed'
-        ? `<span class="tb-sw-tag" style="background:var(--gray-bg); color:var(--text-dim)">완료됨</span>`
-        : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">진행중</span>`;
-      return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
-        <div>
-          <div class="tb-sw-id">${b.batchId}</div>
-          <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs</div>
-        </div>
-        ${tag}
-      </div>`;
-    }).join('') + moreBtn;
+    dd.innerHTML = list.map(b => tvHistoryRowHtml_(b)).join('') + moreBtn;
   }
-  dd.querySelectorAll('[data-batch]').forEach(row => {
-    row.onclick = () => {
-      // ★ 2026-08-25 신규(버그 수정) — 위 "다른 배치"와 동일한 이유. "지난 배치"
-      //   목록에서 골라도, 그게 사실 지금 실제로 작업 중인 배치라면 override로
-      //   들어가지 않고 실시간 모드를 그대로 유지함.
-      if(row.dataset.batch === liveBatchId){
-        backToLiveNow();
-        dd.classList.remove('open');
-        return;
-      }
-      manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
-      document.getElementById('manualBanner').classList.add('show');
-      dd.classList.remove('open');
-      startViewOnlyTimer(); // ★ 10분 뒤 자동 복귀 카운트다운 시작(계속 보기로 고정도 가능)
-      pollOnce(); // 고른 배치로 즉시 갱신
-    };
-  });
+  tvHistoryWireRows_(dd);
   const moreEl = document.getElementById('tbHistoryMoreBtn');
   if(moreEl) moreEl.onclick = (ev) => { ev.stopPropagation(); loadBatchHistoryList(365); };
+}
+
+function renderTvHistoryCalendar(){
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  const y = _tvCalendarMonth.getFullYear();
+  const m = _tvCalendarMonth.getMonth();
+
+  const countsByDay = {};
+  _tvHistoryFullList.forEach(b => {
+    const key = tvHistoryDateKey_(b);
+    countsByDay[key] = (countsByDay[key] || 0) + 1;
+  });
+
+  const first = new Date(y, m, 1);
+  const startWeekday = first.getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayKey = tvTodayKey_();
+
+  let cells = '';
+  for(let i = 0; i < startWeekday; i++) cells += `<div class="tb-cal-cell tb-cal-empty"></div>`;
+  for(let d = 1; d <= daysInMonth; d++){
+    const key = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    const cnt = countsByDay[key] || 0;
+    const cls = ['tb-cal-cell'];
+    if(cnt > 0) cls.push('has-batch');
+    if(key === todayKey) cls.push('is-today');
+    if(key === _tvCalendarSelectedDate) cls.push('is-selected');
+    cells += `<div class="${cls.join(' ')}" ${cnt > 0 ? `data-day="${key}"` : ''}>
+      <span>${d}</span>
+      ${cnt > 0 ? `<span class="tb-cal-dot">${cnt}건</span>` : ''}
+    </div>`;
+  }
+
+  const weekdayLabels = ['일','월','화','수','목','금','토'].map(w => `<div class="tb-cal-wd">${w}</div>`).join('');
+
+  let listHtml;
+  if(_tvCalendarSelectedDate){
+    const dayBatches = _tvHistoryFullList.filter(b => tvHistoryDateKey_(b) === _tvCalendarSelectedDate);
+    listHtml = !dayBatches.length
+      ? `<div class="tb-switch-empty">이 날짜엔 배치 기록이 없습니다</div>`
+      : `<div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px;">
+          <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">${_tvCalendarSelectedDate} · ${dayBatches.length}건</div>
+          ${dayBatches.map(b => tvHistoryRowHtml_(b)).join('')}
+        </div>`;
+  } else {
+    listHtml = `<div class="tb-switch-empty" style="padding-top:10px;">배치가 있는 날짜(파란색 표시)를 눌러보세요</div>`;
+  }
+
+  dd.innerHTML = `
+    <div class="tb-cal-header">
+      <button class="tb-cal-nav" id="tbCalPrev" type="button">◀</button>
+      <div class="tb-cal-title">${y}년 ${m + 1}월</div>
+      <button class="tb-cal-nav" id="tbCalNext" type="button">▶</button>
+    </div>
+    <div class="tb-cal-grid">${weekdayLabels}${cells}</div>
+    ${listHtml}
+    <div class="tb-switch-more" id="tbHistoryBackBtn">← 최근 14일 목록으로</div>
+  `;
+
+  document.getElementById('tbCalPrev').onclick = (e) => { e.stopPropagation(); _tvCalendarMonth = new Date(y, m - 1, 1); _tvCalendarSelectedDate = null; renderTvHistoryCalendar(); };
+  document.getElementById('tbCalNext').onclick = (e) => { e.stopPropagation(); _tvCalendarMonth = new Date(y, m + 1, 1); _tvCalendarSelectedDate = null; renderTvHistoryCalendar(); };
+  document.getElementById('tbHistoryBackBtn').onclick = (e) => { e.stopPropagation(); loadBatchHistoryList(14); };
+  dd.querySelectorAll('[data-day]').forEach(cell => {
+    cell.onclick = (e) => { e.stopPropagation(); _tvCalendarSelectedDate = cell.dataset.day; renderTvHistoryCalendar(); };
+  });
+  tvHistoryWireRows_(dd);
 }
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('batchHistoryDropdownTV');
