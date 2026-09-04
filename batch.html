@@ -1346,9 +1346,9 @@ select option:disabled{color:var(--text-dim2);}
           <div class="pv-boxpallet-field">
             <label>현재 박스</label>
             <div class="pv-boxpallet-stepper">
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(-1)">−</button>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(-1)" title="실수로 넘어갔을 때 되돌리기">−</button>
               <span class="pv-boxpallet-num" id="pvBoxNum">1</span>
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(1)">+</button>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(1)" title="다음 박스로">+</button>
             </div>
           </div>
           <div class="pv-boxpallet-field" id="pvPalletField">
@@ -1360,7 +1360,8 @@ select option:disabled{color:var(--text-dim2);}
             </div>
           </div>
         </div>
-        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 기록됩니다. 박스를 다 채우면 +를 눌러 다음 박스로 넘어가세요.</div>
+        <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
+        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, cf ? cf.meta.ship_via : '', _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
@@ -1422,9 +1423,9 @@ select option:disabled{color:var(--text-dim2);}
           <div class="pv-boxpallet-field">
             <label>현재 박스</label>
             <div class="pv-boxpallet-stepper">
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(-1)">−</button>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(-1)" title="실수로 넘어갔을 때 되돌리기">−</button>
               <span class="pv-boxpallet-num" id="psvBoxNum">1</span>
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(1)">+</button>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(1)" title="다음 박스로">+</button>
             </div>
           </div>
           <div class="pv-boxpallet-field" id="psvPalletField">
@@ -1436,7 +1437,8 @@ select option:disabled{color:var(--text-dim2);}
             </div>
           </div>
         </div>
-        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 기록됩니다. 박스를 다 채우면 +를 눌러 다음 박스로 넘어가세요.</div>
+        <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
+        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, ord ? ord.shipVia : '', _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
@@ -7599,33 +7601,63 @@ function buildPackSlipGroupsHtml_(items, shipVia){
 function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice){
   const isPallet = String(shipVia || '').trim().toUpperCase() === 'TK';
   const labelKind = isPallet ? 'PALLET' : 'BOX';
-  const labelNum = isPallet ? palletNum : boxNum;
+  const totalCount = isPallet ? Number(palletNum) || 1 : Number(boxNum) || 1;
   const printedAt = new Date().toLocaleString('en-US');
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Label · ${labelNum}</title>
+  // ★ 2026-09-04 버그 수정(2건) —
+  //   1) "BOX # 1" 같은 짧은 텍스트도 65pt로는 4인치 폭 안에 한 줄로 안 들어가서
+  //      줄바꿈되던 문제(현장에서 사진으로 확인됨) → 폭에 맞춰 자동으로 글자를
+  //      줄이는 스크립트로 해결. 요청하신 30/65/40은 "최대 크기"로 유지.
+  //   2) 박스가 4개인데 라벨은 "지금 박스 번호" 1장만 나오던 문제(현장 지적) →
+  //      1번부터 지금 번호까지 전부 각각 한 페이지씩, 한 번의 인쇄로 다 나오게
+  //      수정. 예: 지금 박스가 4번이면 Box #1~#4 라벨 4장이 한 번에 인쇄됨.
+  const pagesHtml = Array.from({ length: totalCount }, (_, i) => i + 1).map((num, i, arr) => `
+    <div class="label-page"${i < arr.length - 1 ? ' style="page-break-after:always;"' : ''}>
+      <div class="label-brand lbl-brand">StyleKorean</div>
+      <div class="label-pallet lbl-pallet">${labelKind} # ${num}</div>
+      <div class="label-customer lbl-customer">${customer || '-'}</div>
+      <div class="label-footer">${shipVia || ''} &nbsp;·&nbsp; ${invoice || ''} &nbsp;·&nbsp; ${printedAt}</div>
+    </div>`).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Labels · ${totalCount}장</title>
   <style>
     @page{ size: 4in 6in; margin: 0.1in; }
     html,body{ margin:0; padding:0; }
-    body{
+    .label-page{
       font-family:'Helvetica Neue',Arial,sans-serif; color:#111; text-align:center;
       width:3.8in; height:5.8in; display:flex; flex-direction:column;
-      align-items:center; justify-content:center; gap:0.25in;
+      align-items:center; justify-content:center; gap:0.25in; box-sizing:border-box;
+      position:relative;
     }
-    .label-brand{ font-size:30pt; font-weight:800; letter-spacing:0.03em; }
-    .label-pallet{ font-size:65pt; font-weight:900; line-height:1; letter-spacing:-0.01em; }
-    .label-customer{ font-size:40pt; font-weight:700; line-height:1.15; padding:0 0.1in; }
-    .label-footer{ position:fixed; bottom:0.12in; left:0; right:0; font-size:7pt; color:#888; }
+    .label-brand{ font-size:30pt; font-weight:800; letter-spacing:0.03em; white-space:nowrap; }
+    .label-pallet{ font-size:65pt; font-weight:900; line-height:1; letter-spacing:-0.01em; white-space:nowrap; }
+    .label-customer{ font-size:40pt; font-weight:700; line-height:1.15; white-space:nowrap; }
+    .label-footer{ position:absolute; bottom:0.12in; left:0; right:0; font-size:7pt; color:#888; }
   </style></head><body>
-    <div class="label-brand">StyleKorean</div>
-    <div class="label-pallet">${labelKind} # ${labelNum}</div>
-    <div class="label-customer">${customer || '-'}</div>
-    <div class="label-footer">${shipVia || ''} &nbsp;·&nbsp; ${invoice || ''} &nbsp;·&nbsp; ${printedAt}</div>
+    ${pagesHtml}
+    <script>
+      function fitOneLine(el, maxWidthIn){
+        const maxPx = maxWidthIn * 96;
+        let size = parseFloat(getComputedStyle(el).fontSize);
+        let guard = 0;
+        while(el.scrollWidth > maxPx && size > 8 && guard < 40){
+          size -= 1;
+          el.style.fontSize = size + 'px';
+          guard++;
+        }
+      }
+      window.onload = function(){
+        document.querySelectorAll('.lbl-brand').forEach(el => fitOneLine(el, 3.6));
+        document.querySelectorAll('.lbl-pallet').forEach(el => fitOneLine(el, 3.6));
+        document.querySelectorAll('.lbl-customer').forEach(el => fitOneLine(el, 3.6));
+      };
+    <\/script>
   </body></html>`;
 
   const win = window.open('', '_blank', 'width=420,height=620');
   if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
   win.document.write(html);
   win.document.close();
-  setTimeout(() => { win.focus(); win.print(); }, 300);
+  setTimeout(() => { win.focus(); win.print(); }, 400);
 }
 
 function printPvSlip(format){
