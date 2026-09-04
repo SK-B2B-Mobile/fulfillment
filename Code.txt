@@ -2737,69 +2737,83 @@ function getRevenueSummary() {
     const _cached = _cache.get(_cacheKey);
     if (_cached) return JSON.parse(_cached);
 
-    const sh = SHEET_();
-    const hdr = headerMapCached_();
-    const norm = normalizeHeaderName_;
-    const lastRow = sh.getLastRow();
-    if (lastRow < 2) return { ok: true, summary: {} };
-
-    const iInv    = hdr[norm('Invoice')];
-    const iAmount = hdr[norm('Amount')];
-    const iShip   = hdr[norm('Ship Date')];
-    const iStatus = hdr[norm('Status')];
-    const iPicker = hdr[norm('Picker')];
-    const iArch   = hdr[norm('archived')];
-
-    const lastCol = sh.getLastColumn();
-    const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
-
     const tz = Session.getScriptTimeZone();
     const summary = {};
 
-    rows.forEach(function(r) {
-      const status = String(r[iStatus - 1] || '').trim().toLowerCase();
-      if (status !== 'completed') return;
+    // ★ 2026-09-04 긴급 버그 수정 — 이 함수가 지금까지 "살아있는" Jobs 시트만
+    //   읽고 있었음. archiveOldJobs가 검수완료 후 30일 지난 오더를 Archive_Jobs로
+    //   옮기면(정상 동작 — 이번 주에 관련 버그를 고쳐서 이제서야 제대로 작동함),
+    //   그 오더의 매출이 월별 통계에서 통째로 사라지는 심각한 문제가 있었음
+    //   (실제로 AUG 2026 매출이 하루 사이 $4,052,114.31 → $3,543,600.23로 줄어든
+    //   것으로 확인됨). 보관(Archive) 여부와 무관하게 매출 통계는 항상 정확해야
+    //   하므로, Archive_Jobs도 같이 훑어서 합산하도록 수정. 시트마다 헤더 위치가
+    //   다를 수 있어(예: 예전 아카이브엔 나중에 추가된 컬럼이 없을 수 있음) 매번
+    //   그 시트 자신의 헤더를 다시 읽어서 컬럼 인덱스를 찾음.
+    function accumulateRevenueFrom_(sh) {
+      if (!sh) return;
+      const lastRow = sh.getLastRow();
+      if (lastRow < 2) return;
+      const lastCol = sh.getLastColumn();
+      const norm = normalizeHeaderName_;
+      const headerRow = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+      const localHdr = {};
+      headerRow.forEach((h, i) => { localHdr[norm(String(h || ''))] = i + 1; });
 
-      const amount = parseFloat(r[iAmount - 1]) || 0;
-      if (amount <= 0) return;
+      const iAmount = localHdr[norm('Amount')];
+      const iShip   = localHdr[norm('Ship Date')];
+      const iStatus = localHdr[norm('Status')];
+      const iPicker = localHdr[norm('Picker')];
+      if (!iAmount || !iShip || !iStatus) return; // 필요한 컬럼이 없는 시트는 안전하게 건너뜀
 
-      const shipVal = r[iShip - 1];
-      if (!shipVal) return;
+      const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+      rows.forEach(function(r) {
+        const status = String(r[iStatus - 1] || '').trim().toLowerCase();
+        if (status !== 'completed') return;
 
-      let shipDateStr = '';
-      if (Object.prototype.toString.call(shipVal) === '[object Date]' && !isNaN(shipVal)) {
-        shipDateStr = Utilities.formatDate(shipVal, tz, 'yyyy-MM-dd');
-      } else {
-        const s = String(shipVal).trim();
-        if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-          shipDateStr = s.slice(0, 10);
+        const amount = parseFloat(r[iAmount - 1]) || 0;
+        if (amount <= 0) return;
+
+        const shipVal = r[iShip - 1];
+        if (!shipVal) return;
+
+        let shipDateStr = '';
+        if (Object.prototype.toString.call(shipVal) === '[object Date]' && !isNaN(shipVal)) {
+          shipDateStr = Utilities.formatDate(shipVal, tz, 'yyyy-MM-dd');
         } else {
-          const d = new Date(s);
-          if (!isNaN(d.getTime())) {
-            shipDateStr = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+          const s = String(shipVal).trim();
+          if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+            shipDateStr = s.slice(0, 10);
+          } else {
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) {
+              shipDateStr = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+            }
           }
         }
-      }
-      if (!shipDateStr) return;
+        if (!shipDateStr) return;
 
-      const monthKey = shipDateStr.slice(0, 7);
-      const picker   = String(r[iPicker - 1] || '').trim() || 'Unknown';
+        const monthKey = shipDateStr.slice(0, 7);
+        const picker   = String(r[iPicker - 1] || '').trim() || 'Unknown';
 
-      if (!summary[monthKey]) {
-        summary[monthKey] = { amount: 0, count: 0, byDate: {}, byPicker: {} };
-      }
-      const m = summary[monthKey];
-      m.amount += amount;
-      m.count++;
+        if (!summary[monthKey]) {
+          summary[monthKey] = { amount: 0, count: 0, byDate: {}, byPicker: {} };
+        }
+        const m = summary[monthKey];
+        m.amount += amount;
+        m.count++;
 
-      if (!m.byDate[shipDateStr]) m.byDate[shipDateStr] = { amount: 0, count: 0 };
-      m.byDate[shipDateStr].amount += amount;
-      m.byDate[shipDateStr].count++;
+        if (!m.byDate[shipDateStr]) m.byDate[shipDateStr] = { amount: 0, count: 0 };
+        m.byDate[shipDateStr].amount += amount;
+        m.byDate[shipDateStr].count++;
 
-      if (!m.byPicker[picker]) m.byPicker[picker] = { amount: 0, count: 0 };
-      m.byPicker[picker].amount += amount;
-      m.byPicker[picker].count++;
-    });
+        if (!m.byPicker[picker]) m.byPicker[picker] = { amount: 0, count: 0 };
+        m.byPicker[picker].amount += amount;
+        m.byPicker[picker].count++;
+      });
+    }
+
+    accumulateRevenueFrom_(SHEET_());
+    accumulateRevenueFrom_(ss_().getSheetByName(ARCHIVE_PREFIX + JOBS_SHEET));
 
     Object.keys(summary).forEach(function(k) {
       summary[k].amount = Math.round(summary[k].amount * 100) / 100;
