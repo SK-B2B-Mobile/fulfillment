@@ -665,6 +665,11 @@ function packscanSheet_() { return ensureBatchSheet_(PACKSCAN_SHEET, ['BatchId',
 function packscanSheetSafe_() {
   const pl = packscanSheet_();
   if (!pl.getRange(1, 11).getValue()) pl.getRange(1, 11).setValue('Round');
+  // ★ 2026-09-04 신규(현장 요청) — 박스/팔렛 추적 기능. 스캔 시점에 "지금 몇 번
+  //   박스·몇 번 팔렛에 담는 중인지"를 같이 기록해서, 패킹슬립 인쇄 시 박스별
+  //   (UPS/PU) 또는 팔렛별(TK)로 상품을 묶어서 보여줄 수 있게 함.
+  if (!pl.getRange(1, 12).getValue()) pl.getRange(1, 12).setValue('Box');
+  if (!pl.getRange(1, 13).getValue()) pl.getRange(1, 13).setValue('Pallet');
   return pl;
 }
 
@@ -1533,6 +1538,11 @@ function logPackScan(data) {
     //   쓰고, 기존에 이미 쌓인 데이터(Round 컬럼 없음)도 2로 취급되어 예전과
     //   동일하게 동작함 — 총량피킹 쪽은 이 수정으로 전혀 영향받지 않음.
     const round = Number(data.round) || 2;
+    // ★ 2026-09-04 신규(현장 요청) — 박스/팔렛 추적. 값이 없으면(예: 04는 이
+    //   개념 자체가 없음) 빈 문자열로 저장 — round와 달리 box/pallet은 "몰라도
+    //   되는" 정보라 기본값을 강제하지 않음.
+    const box = data.box !== undefined && data.box !== null && data.box !== '' ? String(data.box) : '';
+    const pallet = data.pallet !== undefined && data.pallet !== null && data.pallet !== '' ? String(data.pallet) : '';
 
     // ★ 2026-09-01 수정(속도) — BatchItems 전체를 매번 읽는 대신, 이 인보이스
     //   범위로 캐싱된(20초) 목록에서 바코드가 일치하는 줄만 찾음. 자세한 이유는
@@ -1564,9 +1574,9 @@ function logPackScan(data) {
       const newRow = pl.getLastRow() + 1;
       ensureSheetRoom_(pl, newRow);
       pl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
-      pl.getRange(newRow, 1, 1, 11).setValues([[
+      pl.getRange(newRow, 1, 1, 13).setValues([[
         data.batchId, packScanId, batchNow_(), data.worker || '', barcode, '',
-        data.invoice, 'wrong', 'active', 0, round,
+        data.invoice, 'wrong', 'active', 0, round, box, pallet,
       ]]);
       return { ok: true, result: 'wrong', packScanId: packScanId, ownerInvoices: Array.from(owners) };
     }
@@ -1610,9 +1620,9 @@ function logPackScan(data) {
       const newRow0 = pl.getLastRow() + 1;
       ensureSheetRoom_(pl, newRow0);
       pl.getRange(newRow0, 5, 1, 2).setNumberFormat('@');
-      pl.getRange(newRow0, 1, 1, 11).setValues([[
+      pl.getRange(newRow0, 1, 1, 13).setValues([[
         data.batchId, packScanId0, batchNow_(), data.worker || '', barcode, sku,
-        data.invoice, 'over', 'active', 0, round,
+        data.invoice, 'over', 'active', 0, round, box, pallet,
       ]]);
       return {
         ok: true, result: 'over', note: note, packScanId: packScanId0, sku: sku, name: name,
@@ -1640,14 +1650,14 @@ function logPackScan(data) {
     const newRow2 = pl.getLastRow() + 1;
     ensureSheetRoom_(pl, newRow2);
     pl.getRange(newRow2, 5, 1, 2).setNumberFormat('@');
-    pl.getRange(newRow2, 1, 1, 11).setValues([[
+    pl.getRange(newRow2, 1, 1, 13).setValues([[
       data.batchId, packScanId, batchNow_(), data.worker || '', barcode, sku,
-      data.invoice, 'pass', 'active', fillQty, round,
+      data.invoice, 'pass', 'active', fillQty, round, box, pallet,
     ]]);
     bumpVersion_();
     return {
       ok: true, result: 'pass', packScanId: packScanId, sku: sku, name: name,
-      filled: fillQty, packed: already + fillQty, required: effectiveReq,
+      filled: fillQty, packed: already + fillQty, required: effectiveReq, box: box, pallet: pallet,
     };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1805,18 +1815,22 @@ function getPackScanState(batchId, invoice, round) {
     const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
     const packedByBarcode = {};
+    const boxPalletByBarcode = {};
     const history = [];
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
+      pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[6]) !== String(invoice)) return;
         if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리 — 다른 라운드 기록은 아예 안 보여줌
-        const entry = { packScanId: r[1], time: String(r[2]), worker: r[3], barcode: String(r[4]), sku: String(r[5]), result: r[7], status: r[8], qty: Number(r[9]) || 0 };
+        const entry = { packScanId: r[1], time: String(r[2]), worker: r[3], barcode: String(r[4]), sku: String(r[5]), result: r[7], status: r[8], qty: Number(r[9]) || 0, box: String(r[11] || ''), pallet: String(r[12] || '') };
         history.push(entry);
         if (r[8] === 'undone') return;
         if (r[7] !== 'pass') return;
         const k = normBarcode_(r[4]);
         packedByBarcode[k] = (packedByBarcode[k] || 0) + entry.qty;
+        // ★ 2026-09-04 신규 — 같은 SKU는 절대 여러 박스에 나뉘지 않는다는 원칙이라
+        //   (매니저 확인됨) 마지막으로 기록된 박스/팔렛 값을 그 SKU의 값으로 사용.
+        if (entry.box || entry.pallet) boxPalletByBarcode[k] = { box: entry.box, pallet: entry.pallet };
       });
     }
     history.sort((a, b) => String(b.time).localeCompare(String(a.time)));
@@ -1825,10 +1839,12 @@ function getPackScanState(batchId, invoice, round) {
       const issueQty = issueQtyByBarcode[k] || 0;
       const effectiveReq = Math.max(0, l.reqQty - issueQty);
       const packed = Math.min(packedByBarcode[k] || 0, effectiveReq);
+      const bp = boxPalletByBarcode[k] || { box: '', pallet: '' };
       return {
         barcode: l.barcode, sku: l.skus.join('+'), name: l.names[0],
         reqQty: l.reqQty, issueQty: issueQty, effectiveReq: effectiveReq,
         packed: packed, complete: packed >= effectiveReq,
+        box: bp.box, pallet: bp.pallet,
       };
     });
     lines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
