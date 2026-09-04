@@ -360,6 +360,17 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-opt-empty{padding:14px 12px; font-size:13px; color:var(--text-dim); text-align:center;}
 .pv-invoice-picker select{width:100%; padding:12px 14px; background:var(--surface2); border:2px solid var(--purple); border-radius:10px; color:var(--text); font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer;}
 .pv-worker-row{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:12px;}
+/* ★ 2026-09-04 신규(현장 요청) — Pack Verify(단독·총량) 박스/팔렛 배정 컨트롤.
+   스캔하는 모든 상품이 여기 표시된 박스·팔렛 번호로 자동 기록되어, 패킹슬립
+   인쇄 시 박스별(UPS/PU)·팔렛별(TK)로 상품을 묶어서 보여줄 수 있게 함. */
+.pv-boxpallet-row{display:flex; gap:8px; margin-top:12px;}
+.pv-boxpallet-field{flex:1; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; padding:8px 10px; display:flex; align-items:center; justify-content:space-between;}
+.pv-boxpallet-field label{font-size:11px; color:var(--text-dim); font-weight:700; margin-right:8px;}
+.pv-boxpallet-num{font-family:var(--mono); font-size:16px; font-weight:800; min-width:20px; text-align:center;}
+.pv-boxpallet-stepper{display:flex; align-items:center; gap:6px;}
+.pv-boxpallet-btn{width:26px; height:26px; border-radius:6px; border:1px solid var(--border2); background:transparent; color:var(--text); font-size:15px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
+.pv-boxpallet-btn:hover{border-color:#8B5CF6; color:#8B5CF6;}
+.pv-boxpallet-hint{font-size:11px; color:var(--text-dim); margin-top:6px;}
 .pv-worker-row select{flex:1 1 160px; min-width:120px;}
 .pv-worker-row input[type="text"]{flex:1 1 160px; min-width:120px;}
 .pv-worker-row label{font-size:11px; color:var(--text-dim); font-weight:700; white-space:nowrap;}
@@ -1331,6 +1342,26 @@ select option:disabled{color:var(--text-dim2);}
           <select id="pvWorkerSelect" onchange="document.getElementById('pvWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
           <input type="text" id="pvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
         </div>
+        <div class="pv-boxpallet-row">
+          <div class="pv-boxpallet-field">
+            <label>현재 박스</label>
+            <div class="pv-boxpallet-stepper">
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(-1)">−</button>
+              <span class="pv-boxpallet-num" id="pvBoxNum">1</span>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(1)">+</button>
+            </div>
+          </div>
+          <div class="pv-boxpallet-field">
+            <label>팔렛</label>
+            <div class="pv-boxpallet-stepper">
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(-1)">−</button>
+              <span class="pv-boxpallet-num" id="pvPalletNum">1</span>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(1)">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 기록됩니다. 박스를 다 채우면 +를 눌러 다음 박스로 넘어가세요.</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, cf ? cf.meta.ship_via : '', _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
       <div class="pv-scan-panel" id="pvScanPanel">
@@ -1394,6 +1425,26 @@ select option:disabled{color:var(--text-dim2);}
           <select id="psvWorkerSelect" onchange="document.getElementById('psvWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
           <input type="text" id="psvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
         </div>
+        <div class="pv-boxpallet-row">
+          <div class="pv-boxpallet-field">
+            <label>현재 박스</label>
+            <div class="pv-boxpallet-stepper">
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(-1)">−</button>
+              <span class="pv-boxpallet-num" id="psvBoxNum">1</span>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(1)">+</button>
+            </div>
+          </div>
+          <div class="pv-boxpallet-field">
+            <label>팔렛</label>
+            <div class="pv-boxpallet-stepper">
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(-1)">−</button>
+              <span class="pv-boxpallet-num" id="psvPalletNum">1</span>
+              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(1)">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 기록됩니다. 박스를 다 채우면 +를 눌러 다음 박스로 넘어가세요.</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, ord ? ord.shipVia : '', _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
       <div class="pv-scan-panel" id="psvScanPanel">
@@ -5814,6 +5865,11 @@ document.getElementById('logSearchInput').addEventListener('input', (e) => {
 // ═══════════════════════════════════════════════════════════
 let _pvInvoice = null;
 let _pvState = null;
+// ★ 2026-09-04 신규(현장 요청) — 박스/팔렛 배정. 오더 바뀔 때마다 1/1로 초기화됨(onPvInvoiceChange).
+let _pvCurrentBox = 1;
+let _pvCurrentPallet = 1;
+function stepPvBox(delta){ _pvCurrentBox = Math.max(1, _pvCurrentBox + delta); document.getElementById('pvBoxNum').textContent = _pvCurrentBox; }
+function stepPvPallet(delta){ _pvCurrentPallet = Math.max(1, _pvCurrentPallet + delta); document.getElementById('pvPalletNum').textContent = _pvCurrentPallet; }
 let _pvForceVerified = false; // ★ 2026-08-24 신규 — 지금 선택된 오더가 관리자 강제확정으로 완료된 것인지
 let pvCurrentWorker = null;
 let _pvAudioCtx = null;
@@ -6749,6 +6805,11 @@ async function completeSsInspection(){
 let psvCurrentWorker = null;
 let _psvInvoice = null;
 let _psvState = null;
+// ★ 2026-09-04 신규 — pv와 동일한 박스/팔렛 배정.
+let _psvCurrentBox = 1;
+let _psvCurrentPallet = 1;
+function stepPsvBox(delta){ _psvCurrentBox = Math.max(1, _psvCurrentBox + delta); document.getElementById('psvBoxNum').textContent = _psvCurrentBox; }
+function stepPsvPallet(delta){ _psvCurrentPallet = Math.max(1, _psvCurrentPallet + delta); document.getElementById('psvPalletNum').textContent = _psvCurrentPallet; }
 let _psvForceVerified = false;
 
 function populatePsvWorkerSelect(){
@@ -6821,6 +6882,10 @@ async function onPsvInvoiceChange(){
   if(!invoice){ panel.classList.remove('active'); _psvInvoice = null; _psvState = null; return; }
   _psvInvoice = invoice;
   _psvForceVerified = false;
+  // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
+  _psvCurrentBox = 1; _psvCurrentPallet = 1;
+  document.getElementById('psvBoxNum').textContent = '1';
+  document.getElementById('psvPalletNum').textContent = '1';
   panel.classList.add('active');
   document.getElementById('psvMsg').style.display = 'none';
   const input = document.getElementById('psvScanInput');
@@ -6885,7 +6950,7 @@ function renderPsvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''}` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -6941,7 +7006,7 @@ async function doPsvScanOne(barcode){
   if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함).
-  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2 });
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2, box: _psvCurrentBox, pallet: _psvCurrentPallet });
   if(!res.ok){
     showPsvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
     return;
@@ -7136,6 +7201,10 @@ async function onPvInvoiceChange(){
   if(!invoice){ panel.classList.remove('active'); _pvInvoice = null; _pvState = null; return; }
   _pvInvoice = invoice;
   _pvForceVerified = false;
+  // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
+  _pvCurrentBox = 1; _pvCurrentPallet = 1;
+  document.getElementById('pvBoxNum').textContent = '1';
+  document.getElementById('pvPalletNum').textContent = '1';
   panel.classList.add('active');
   document.getElementById('pvMsg').style.display = 'none';
   const input = document.getElementById('pvScanInput');
@@ -7203,7 +7272,7 @@ function renderPvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''}` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -7302,7 +7371,7 @@ async function doPvScanOne(barcode){
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함). "TypeError: Failed to fetch"로
   //   스캔이 먹통되던 사고의 핵심 수정.
-  const res = await gasCallWithRetry('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode });
+  const res = await gasCallWithRetry('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode, box: _pvCurrentBox, pallet: _pvCurrentPallet });
   if(!res.ok){
     flashPv('bad'); beepPv(false);
     showPvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
@@ -7484,6 +7553,81 @@ async function forcePvComplete(){
 //   또는 'label'(4x6인치 라벨 — 여백·글자크기를 훨씬 촘촘하게 줄여서 라벨 1장에
 //   최대한 들어가도록 함. 그래도 SKU가 아주 많으면 자동으로 다음 라벨로 넘어감
 //   — 이건 라벨 프린팅의 정상 동작이라 막을 필요 없음).
+// ★ 2026-09-04 신규(현장 요청) — 패킹슬립에 "어떤 박스에 뭐가 들어갔고, 어느
+//   팔렛인지"를 보여주기 위한 공용 헬퍼. UPS/PU는 박스 기준, TK는 팔렛 기준으로
+//   묶어서 보여줌(같은 SKU는 절대 여러 박스에 안 나뉜다는 원칙이라 각 상품은
+//   딱 하나의 박스/팔렛 값만 가짐). printPvSlip/printPsvSlip 둘 다 재사용.
+function buildPackSlipGroupsHtml_(items, shipVia){
+  const groupByPallet = String(shipVia || '').trim().toUpperCase() === 'TK';
+  const groups = {};
+  const unassigned = [];
+  items.forEach(it => {
+    if(!it.box && !it.pallet){ unassigned.push(it); return; }
+    const key = groupByPallet ? (it.pallet || '—') : (it.box || '—');
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(it);
+  });
+  const sortedKeys = Object.keys(groups).sort((a, b) => {
+    const na = parseInt(a, 10), nb = parseInt(b, 10);
+    if(!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a).localeCompare(String(b));
+  });
+  const rowHtml = it => `<div class="slip-group-row"><span>${groupByPallet && it.box ? `Box ${it.box} · ` : ''}${it.label}</span><span>${it.qty}</span></div>`;
+  let html = sortedKeys.map(key => `
+    <div class="slip-group">
+      <div class="slip-group-head">${groupByPallet ? 'Pallet' : 'Box'} ${key}</div>
+      ${groups[key].map(rowHtml).join('')}
+    </div>`).join('');
+  if(unassigned.length){
+    html += `
+    <div class="slip-group slip-group-unassigned">
+      <div class="slip-group-head">Unassigned (no box recorded)</div>
+      ${unassigned.map(rowHtml).join('')}
+    </div>`;
+  }
+  return html || '';
+}
+
+// ★ 2026-09-04 신규(현장 요청) — 4×6 라벨 프린터로 찍는 "박스/팔렛 식별 라벨". 위
+//   패킹슬립(상품 상세 목록)과는 완전히 다른, 박스나 팔렛에 붙여서 눈에 띄게
+//   식별하기 위한 전용 라벨. 회사명 30pt / 번호 65pt(가장 크게) / 고객사명 40pt로
+//   현장에서 주신 실제 라벨 사진 그대로 재현.
+// ★ 2026-09-04 수정 — 패킹슬립의 박스(UPS/PU)/팔렛(TK) 구분 기준과 똑같이,
+//   라벨도 배송방법(shipVia)에 따라 자동으로 "BOX #"/"PALLET #"로 바뀌도록 수정.
+//   처음엔 무조건 PALLET으로만 찍히던 실수를 바로잡음 — 패킹슬립과 라벨이
+//   서로 다른 기준을 쓰면 현장에서 혼란스러우므로 반드시 통일.
+function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice){
+  const isPallet = String(shipVia || '').trim().toUpperCase() === 'TK';
+  const labelKind = isPallet ? 'PALLET' : 'BOX';
+  const labelNum = isPallet ? palletNum : boxNum;
+  const printedAt = new Date().toLocaleString('en-US');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Label · ${labelNum}</title>
+  <style>
+    @page{ size: 4in 6in; margin: 0.1in; }
+    html,body{ margin:0; padding:0; }
+    body{
+      font-family:'Helvetica Neue',Arial,sans-serif; color:#111; text-align:center;
+      width:3.8in; height:5.8in; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:0.25in;
+    }
+    .label-brand{ font-size:30pt; font-weight:800; letter-spacing:0.03em; }
+    .label-pallet{ font-size:65pt; font-weight:900; line-height:1; letter-spacing:-0.01em; }
+    .label-customer{ font-size:40pt; font-weight:700; line-height:1.15; padding:0 0.1in; }
+    .label-footer{ position:fixed; bottom:0.12in; left:0; right:0; font-size:7pt; color:#888; }
+  </style></head><body>
+    <div class="label-brand">StyleKorean</div>
+    <div class="label-pallet">${labelKind} # ${labelNum}</div>
+    <div class="label-customer">${customer || '-'}</div>
+    <div class="label-footer">${shipVia || ''} &nbsp;·&nbsp; ${invoice || ''} &nbsp;·&nbsp; ${printedAt}</div>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=420,height=620');
+  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 300);
+}
+
 function printPvSlip(format){
   format = format || 'letter';
   const invoice = _pvInvoice;
@@ -7524,6 +7668,13 @@ function printPvSlip(format){
       <td style="text-align:center; font-weight:700;">${forcedVerify ? l.reqQty : l.packed}</td>
     </tr>`).join('');
 
+  // ★ 2026-09-04 신규 — 박스/팔렛 배정 정보로 박스(UPS/PU)·팔렛(TK) 구분 섹션 생성.
+  //   effectiveReq가 0인 줄(이슈로 전량 제외됨)은 실물이 없으므로 아예 제외.
+  const packItems = lines.filter(l => l.effectiveReq > 0).map(l => ({
+    label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: l.box, pallet: l.pallet,
+  }));
+  const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia);
+
   // ★ 2026-09-01 신규(매니저 요청) — 외부(고객사)로 나가는 문서라, 표 맨 아래에
   //   합계 줄(총 SKU 종류 수 · 총 Ordered/Issue/Packed 수량)을 추가해서 한눈에
   //   확인 가능하게 함.
@@ -7562,6 +7713,10 @@ function printPvSlip(format){
     table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
     .slip-total-row td{border-top:2px solid #111; border-bottom:none; padding-top:10px; background:#f7f7f7;}
     .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
+    .slip-group{border:1px solid #ccc; border-radius:6px; padding:8px 12px; margin-bottom:8px;}
+    .slip-group-head{font-weight:800; font-size:13px; margin-bottom:4px;}
+    .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
+    .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -7584,6 +7739,10 @@ function printPvSlip(format){
     table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
     .slip-total-row td{border-top:1px solid #111; border-bottom:none; padding-top:4px; background:#f7f7f7;}
     .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
+    .slip-group{border:0.5px solid #ccc; border-radius:4px; padding:4px 6px; margin-bottom:4px;}
+    .slip-group-head{font-weight:800; font-size:7.5px; margin-bottom:2px;}
+    .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
+    .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -7612,6 +7771,7 @@ function printPvSlip(format){
       <div><b>Ship Via</b>${shipVia || '-'}</div>
       <div><b>Slot</b>${slotObj ? slotObj.num : '-'}</div>
     </div>
+    ${boxGroupsHtml}
     <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>${totalRowHtml}</tfoot>
@@ -7671,6 +7831,13 @@ async function printPsvSlip(format){
       <td style="text-align:center; font-weight:700;">${forcedVerify ? l.reqQty : l.packed}</td>
     </tr>`).join('');
 
+  // ★ 2026-09-04 신규 — 박스/팔렛 배정 정보로 박스(UPS/PU)·팔렛(TK) 구분 섹션 생성.
+  //   effectiveReq가 0인 줄(이슈로 전량 제외됨)은 실물이 없으므로 아예 제외.
+  const packItems = lines.filter(l => l.effectiveReq > 0).map(l => ({
+    label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: l.box, pallet: l.pallet,
+  }));
+  const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia);
+
   const totalSku = lines.length;
   const totalOrdered = lines.reduce((a, l) => a + (Number(l.reqQty) || 0), 0);
   const totalIssue = lines.reduce((a, l) => a + (Number(l.issueQty) || 0), 0);
@@ -7704,6 +7871,10 @@ async function printPsvSlip(format){
     table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
     .slip-total-row td{border-top:2px solid #111; border-bottom:none; padding-top:10px; background:#f7f7f7;}
     .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
+    .slip-group{border:1px solid #ccc; border-radius:6px; padding:8px 12px; margin-bottom:8px;}
+    .slip-group-head{font-weight:800; font-size:13px; margin-bottom:4px;}
+    .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
+    .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -7722,6 +7893,10 @@ async function printPsvSlip(format){
     table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
     .slip-total-row td{border-top:1px solid #111; border-bottom:none; padding-top:4px; background:#f7f7f7;}
     .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
+    .slip-group{border:0.5px solid #ccc; border-radius:4px; padding:4px 6px; margin-bottom:4px;}
+    .slip-group-head{font-weight:800; font-size:7.5px; margin-bottom:2px;}
+    .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
+    .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -7750,6 +7925,7 @@ async function printPsvSlip(format){
       <div><b>Ship Via</b>${shipVia || '-'}</div>
       <div><b>Type</b>STANDALONE</div>
     </div>
+    ${boxGroupsHtml}
     <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>${totalRowHtml}</tfoot>
