@@ -456,6 +456,7 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 @keyframes pvLastScanPulse{ 0%{ transform:scale(1.025); box-shadow:0 0 0 3px rgba(139,92,246,0.35);} 100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(139,92,246,0);} }
 .pv-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02); gap:10px;}
 .pv-line.done{border-color:rgba(139,92,246,0.5); background:var(--purple-bg);}
+.pv-line.has-issue{border-color:rgba(239,68,68,0.6); background:var(--red-bg);}
 /* ★ 2026-09-01 버그 수정 — "오른쪽 수량이 잘려서 손가락으로 밀어야 보인다"는
    지적의 실제 원인. .pv-line은 flex 컨테이너인데 상품명+SKU를 감싸는 왼쪽 칸에
    min-width:0이 없어서, 상품명이 길면(흔함) 그 칸이 절대 안 줄어들고 오른쪽
@@ -6133,8 +6134,18 @@ function renderSsBody(){
   document.getElementById('ssProgressBar').style.width = pct + '%';
   document.getElementById('ssCompleteBtn').disabled = !st.complete;
 
-  document.getElementById('ssLines').innerHTML = (st.lines || []).map(l => `
-    <div class="pv-line ${l.complete ? 'done' : ''}">
+  // ★ 2026-09-03 신규(현장 지적) — SKU가 많을 때(예: 174종) 스캔할 항목을 찾으려고
+  //   매번 아래로 스크롤해야 하는 불편 해결. "미완료(안 된 것)"를 위로, "완료"는
+  //   아래로 가라앉힘. Array.sort는 안정 정렬(stable)이라 각 그룹 안에서는 원래
+  //   순서 그대로 유지되므로, 스캔할 때마다 화면이 어수선하게 재배치되지 않고
+  //   딱 "그 줄 하나만" 완료 그룹으로 자연스럽게 내려감.
+  const sortedLines = (st.lines || []).slice().sort((a, b) => {
+    if (a.complete === b.complete) return 0;
+    return a.complete ? 1 : -1;
+  });
+
+  document.getElementById('ssLines').innerHTML = sortedLines.map(l => `
+    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
@@ -6560,8 +6571,15 @@ function renderPsvBody(){
   document.getElementById('psvProgressBar').style.width = pct + '%';
   document.getElementById('psvCompleteBtn').disabled = !st.complete;
 
-  const linesHtml = (st.lines || []).map(l => `
-    <div class="pv-line ${l.complete ? 'done' : ''}">
+  // ★ 2026-09-03 신규 — 04(단독 1차)와 동일하게, 미완료 SKU를 위로 · 완료는
+  //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
+  //   화면이 어수선하게 재배치되지 않음). 이슈 걸린 미완료 항목은 빨간색 강조.
+  const psvSortedLines = (st.lines || []).slice().sort((a, b) => {
+    if (a.complete === b.complete) return 0;
+    return a.complete ? 1 : -1;
+  });
+  const linesHtml = psvSortedLines.map(l => `
+    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
@@ -6860,8 +6878,15 @@ function renderPvBody(){
   document.getElementById('pvProgressBar').style.width = pct + '%';
   document.getElementById('pvCompleteBtn').disabled = !st.complete;
 
-  const linesHtml = (st.lines || []).map(l => `
-    <div class="pv-line ${l.complete ? 'done' : ''}">
+  // ★ 2026-09-03 신규 — 04(단독 1차)와 동일하게, 미완료 SKU를 위로 · 완료는
+  //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
+  //   화면이 어수선하게 재배치되지 않음). 이슈 걸린 미완료 항목은 빨간색 강조.
+  const pvSortedLines = (st.lines || []).slice().sort((a, b) => {
+    if (a.complete === b.complete) return 0;
+    return a.complete ? 1 : -1;
+  });
+  const linesHtml = pvSortedLines.map(l => `
+    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
