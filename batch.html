@@ -1424,6 +1424,14 @@ select option:disabled{color:var(--text-dim2);}
         <div id="psvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
           <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ 관리자 강제확정</button>
+          <div class="pv-print-group">
+            <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 패킹슬립 인쇄 (Letter)</button>
+            <button class="pv-print-toggle" onclick="event.stopPropagation(); document.getElementById('psvPrintMenu').classList.toggle('open');" title="다른 용지 크기">▾</button>
+            <div class="pv-print-menu" id="psvPrintMenu">
+              <button onclick="document.getElementById('psvPrintMenu').classList.remove('open'); printPsvSlip('letter');">📄 Letter (일반 A4/레터 용지)</button>
+              <button onclick="document.getElementById('psvPrintMenu').classList.remove('open'); printPsvSlip('label');">🏷 4×6 라벨 (라벨 프린터)</button>
+            </div>
+          </div>
           <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 최종 2차 검증완료 확정</button>
         </div>
       </div>
@@ -6669,6 +6677,14 @@ async function populatePsvInvoiceSelect(){
   if(picker) picker.style.display = 'block';
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
+  // ★ 2026-09-04 긴급 버그 수정 — 커스텀 목록으로 바꾸면서 이 hidden select에
+  //   실제 <option>을 채우는 부분을 실수로 빼먹었음. select에 매칭되는 option이
+  //   하나도 없으면 sel.value='...' 대입 자체가 브라우저에서 조용히 무시되어서
+  //   (매칭되는 option 없인 값이 안 들어감) 목록에서 눌러도 선택이 전혀 안 되는
+  //   버그로 이어졌음. option을 다시 채워서 실제로 선택이 되도록 복구.
+  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(o =>
+    `<option value="${o.invoice}">${o.invoice}</option>`
+  ).join('');
   if(prevSelected && candidates.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
   else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
   const psvRows = candidates.map(o => ({
@@ -6892,6 +6908,7 @@ async function completePsvVerify(){
     if(input){ input.disabled = true; input.placeholder = '이미 검증완료된 오더입니다'; }
     btn.disabled = true; btn.textContent = '✅ 검증완료됨 (스캔 100%)';
     await populatePsvInvoiceSelect();
+    printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 검증완료 확정 시 자동으로 패킹슬립 인쇄
   } else {
     btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
     alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
@@ -6920,6 +6937,7 @@ async function forcePsvComplete(){
     if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ 이미 검증완료됨 (관리자 확정)'; }
     // ★ 2026-09-01 버그 수정 — forcePvComplete와 동일한 이유. 강제확정 버튼 자체를 잠금.
     if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ 이미 확정됨'; }
+    printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 강제확정 시에도 자동 인쇄
   } else {
     if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ 관리자 강제확정'; }
     alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
@@ -6950,6 +6968,10 @@ function populatePvInvoiceSelect(){
   if(picker) picker.style.display = 'block';
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
+  // ★ 2026-09-04 긴급 버그 수정 — 위 psv와 동일한 이유로 option 복구.
+  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(c =>
+    `<option value="${c.invoice}">${c.invoice}</option>`
+  ).join('');
   if(prevSelected && candidates.some(c => c.invoice === prevSelected)) sel.value = prevSelected;
   else if(!prevSelected) { if(panel) panel.classList.remove('active'); }
   const pvRows = candidates.map(c => ({
@@ -7491,14 +7513,153 @@ function printPvSlip(format){
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
 
+// ★ 2026-09-04 신규(현장 지적) — 단독 오더 2차 검증(Pack Verify 단독)에는 여태
+//   패킹슬립 인쇄 기능이 아예 없었음(총량에만 있었음, 원래부터 없던 기능이지
+//   오늘 만든 코드 때문에 사라진 게 아님). 위 printPvSlip과 최대한 같은 형식으로
+//   맞춰서 새로 만듦 — 고객명/배송방법은 _standaloneOrders에서, SKU 목록은
+//   _psvState.lines에서, 이슈는 서버에서 별도 조회(총량과 달리 state.issues에
+//   단독 오더 이슈가 안 들어있어서 여기서 직접 불러와야 함). "슬롯" 개념이 없는
+//   단독 오더라 그 자리엔 "STANDALONE"으로 표시.
+async function printPsvSlip(format){
+  format = format || 'letter';
+  const invoice = _psvInvoice;
+  if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
+  const order = _standaloneOrders.find(o => o.invoice === invoice);
+  const st = _psvState;
+  const lines = (st && st.lines) ? st.lines : [];
+  const issuesRes = await gasQueryWithRetry('getInvoiceIssues', { batchId: STANDALONE_BATCH_ID, invoice });
+  const invoiceIssues = (issuesRes && issuesRes.ok) ? (issuesRes.issues || []) : [];
+
+  const scanComplete = st ? !!st.complete : false;
+  const verified = order ? !!order.packVerified : false;
+  const forcedVerify = verified && (_psvForceVerified || !scanComplete);
+  const worker = currentPsvWorker() || '-';
+  const printedAt = new Date().toLocaleString('en-US');
+  const customer = order ? order.customer : '';
+  const shipVia = order ? order.shipVia : '';
+
+  const badgeClass = verified ? (forcedVerify ? 'verify-forced' : 'verify-ok') : 'verify-bad';
+  const badgeText = verified
+    ? (forcedVerify ? '⚠ 2ND VERIFICATION — ADMIN OVERRIDE (not scan-checked)' : '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED')
+    : '⚠ NOT FULLY VERIFIED (2nd check pending)';
+
+  const rowsHtml = lines.map(l => `
+    <tr>
+      <td>${l.barcode}</td>
+      <td>${l.name || ''}</td>
+      <td style="text-align:center;">${l.reqQty}</td>
+      <td style="text-align:center;">${l.issueQty || 0}</td>
+      <td style="text-align:center; font-weight:700;">${forcedVerify ? l.reqQty : l.packed}</td>
+    </tr>`).join('');
+
+  const totalSku = lines.length;
+  const totalOrdered = lines.reduce((a, l) => a + (Number(l.reqQty) || 0), 0);
+  const totalIssue = lines.reduce((a, l) => a + (Number(l.issueQty) || 0), 0);
+  const totalPacked = lines.reduce((a, l) => a + (Number(forcedVerify ? l.reqQty : l.packed) || 0), 0);
+  const totalRowHtml = lines.length ? `
+    <tr class="slip-total-row">
+      <td colspan="2"><b>TOTAL — ${totalSku} SKU${totalSku === 1 ? '' : 's'}</b></td>
+      <td style="text-align:center;"><b>${totalOrdered.toLocaleString()}</b></td>
+      <td style="text-align:center;"><b>${totalIssue.toLocaleString()}</b></td>
+      <td style="text-align:center;"><b>${totalPacked.toLocaleString()}</b></td>
+    </tr>` : '';
+
+  const issuesHtml = invoiceIssues.length ? `
+    <h4 class="issues-h4">Issues / Shortages</h4>
+    <table class="slip-table"><thead><tr><th>Reason</th><th>Product</th><th style="text-align:center;">Qty</th></tr></thead><tbody>
+    ${invoiceIssues.map(i => `<tr><td>${i.reason}</td><td>${i.name || i.sku || ''}</td><td style="text-align:center;">${i.qty}</td></tr>`).join('')}
+    </tbody></table>` : '';
+
+  const letterCss = `
+    @page{ size: letter; margin: 12mm; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
+    .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
+    .slip-title{font-size:20px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:12px; color:#555; text-align:right; margin-top:4px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; font-size:13px;}
+    .slip-info div b{display:block; font-size:11px; color:#777; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
+    table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
+    table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .slip-total-row td{border-top:2px solid #111; border-bottom:none; padding-top:10px; background:#f7f7f7;}
+    .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
+    .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
+    .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
+  `;
+  const labelCss = `
+    @page{ size: 4in 6in; margin: 0.1in 0.12in 0.1in 0.05in; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:0; width:3.8in; margin:0; font-size:9px; line-height:1.3;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1.5px solid #111; padding-bottom:5px; margin-bottom:7px;}
+    .slip-logo{font-size:15px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:7px; color:#555; margin-top:2px; line-height:1.3;}
+    .slip-title{font-size:11px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:7px; color:#555; text-align:right; margin-top:2px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px; font-size:8.5px;}
+    .slip-info div b{display:block; font-size:6.5px; color:#777; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:1px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:8px; margin-top:4px;}
+    table.slip-table th{background:#111; color:#fff; padding:2.5px 4px; text-align:left; font-size:6.5px; text-transform:uppercase;}
+    table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
+    .slip-total-row td{border-top:1px solid #111; border-bottom:none; padding-top:4px; background:#f7f7f7;}
+    .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
+    .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
+    .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
+  `;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
+  <style>
+    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
+    .verify-forced{background:#fef3c7; color:#92400e; border:1px solid #f59e0b;}
+    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    .forced-note{font-size:0.85em; color:#92400e; margin-top:6px; font-style:italic;}
+    ${format === 'label' ? labelCss : letterCss}
+  </style></head><body>
+    <div class="slip-head">
+      <div>
+        <div class="slip-logo">StyleKorean</div>
+        <div class="slip-addr">5609 River Way, Buena Park, CA 90621</div>
+      </div>
+      <div>
+        <div class="slip-title">PACKING SLIP</div>
+        <div class="slip-meta">Standalone Order<br>Printed ${printedAt}</div>
+      </div>
+    </div>
+    <div class="slip-info">
+      <div><b>Customer</b>${customer || '-'}</div>
+      <div><b>Invoice #</b>${invoice}</div>
+      <div><b>Ship Via</b>${shipVia || '-'}</div>
+      <div><b>Type</b>STANDALONE</div>
+    </div>
+    <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+    <tfoot>${totalRowHtml}</tfoot>
+    </table>
+    ${issuesHtml}
+    <div class="verify-badge ${badgeClass}">${badgeText}</div>
+    <div class="slip-footer">
+      <span>Verified by: ${worker}${verified ? ` &nbsp;·&nbsp; ${printedAt}` : ''}</span>
+      <span>StyleKorean B2B Fulfillment System</span>
+    </div>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=820,height=1000');
+  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 300);
+}
+
 // ═══════════════════════════════════════════════════════════
 // Workers CRUD
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-08-24 신규 — 패킹슬립 용지 선택 드롭업 메뉴, 바깥 클릭 시 닫힘
+// ★ 2026-09-04 수정 — 단독(psvPrintMenu)에도 같은 메뉴가 생겨서, 특정 id 하나만
+//   보던 것을 열려있는 .pv-print-menu 전부를 닫도록 일반화.
 document.addEventListener('click', e => {
-  const menu = document.getElementById('pvPrintMenu');
-  if(!menu || !menu.classList.contains('open')) return;
-  if(!e.target.closest('.pv-print-group')) menu.classList.remove('open');
+  document.querySelectorAll('.pv-print-menu.open').forEach(menu => {
+    if(!e.target.closest('.pv-print-group')) menu.classList.remove('open');
+  });
 });
 
 function populateWorkerSelect(){
