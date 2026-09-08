@@ -1976,6 +1976,14 @@ function getPackScanState(batchId, invoice, round) {
     const plLast = pl.getLastRow();
     const packedByBarcode = {};
     const boxPalletByBarcode = {};
+    // ★ 2026-09-08 신규(현장 지적) — "같은 SKU는 절대 여러 박스에 안 나뉜다"는
+    //   원칙이 있었는데, 실제로 수량이 많은 SKU가 물리적으로 여러 박스에
+    //   나뉘어 담기는 경우가 있어서 분할 기능(splitScannedItemBox)을 새로
+    //   만들었음. 그런데 화면 목록은 여전히 바코드당 "마지막에 기록된 박스"만
+    //   보여주는 구조라, 30개는 Box 1에 그대로 있는데 화면엔 Box 2(나중에
+    //   나뉜 쪽)만 보이고 Box 1 몫이 안 보이는 문제가 있었음. 바코드별로
+    //   박스마다 수량을 따로 집계해서, 여러 박스에 걸쳐 있으면 전부 보여줌.
+    const boxBreakdownByBarcode = {};
     const history = [];
     if (plLast >= 2) {
       pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
@@ -1988,9 +1996,16 @@ function getPackScanState(batchId, invoice, round) {
         if (r[7] !== 'pass') return;
         const k = normBarcode_(r[4]);
         packedByBarcode[k] = (packedByBarcode[k] || 0) + entry.qty;
-        // ★ 2026-09-04 신규 — 같은 SKU는 절대 여러 박스에 나뉘지 않는다는 원칙이라
-        //   (매니저 확인됨) 마지막으로 기록된 박스/팔렛 값을 그 SKU의 값으로 사용.
+        // 마지막으로 기록된 박스/팔렛 값 — 분할 없이 한 박스에만 있는 보통의
+        // 경우, 화면 상단의 "Box N" 표시 및 다음 스캔 기본값 등에 그대로 사용.
         if (entry.box || entry.pallet) boxPalletByBarcode[k] = { box: entry.box, pallet: entry.pallet };
+        // 박스별 수량 집계 — 분할된 경우 여기서 여러 항목으로 쌓임.
+        if (entry.box || entry.pallet) {
+          if (!boxBreakdownByBarcode[k]) boxBreakdownByBarcode[k] = {};
+          const bk = entry.box + '|' + entry.pallet;
+          if (!boxBreakdownByBarcode[k][bk]) boxBreakdownByBarcode[k][bk] = { box: entry.box, pallet: entry.pallet, qty: 0 };
+          boxBreakdownByBarcode[k][bk].qty += entry.qty;
+        }
       });
     }
     history.sort((a, b) => String(b.time).localeCompare(String(a.time)));
@@ -2000,11 +2015,15 @@ function getPackScanState(batchId, invoice, round) {
       const effectiveReq = Math.max(0, l.reqQty - issueQty);
       const packed = Math.min(packedByBarcode[k] || 0, effectiveReq);
       const bp = boxPalletByBarcode[k] || { box: '', pallet: '' };
+      const breakdownObj = boxBreakdownByBarcode[k] || {};
+      const breakdownList = Object.values(breakdownObj);
       return {
         barcode: l.barcode, sku: l.skus.join('+'), name: l.names[0],
         reqQty: l.reqQty, issueQty: issueQty, effectiveReq: effectiveReq,
         packed: packed, complete: packed >= effectiveReq,
         box: bp.box, pallet: bp.pallet,
+        // ★ 2026-09-08 신규 — 박스가 2개 이상으로 나뉜 경우만 채워짐(보통은 빈 배열).
+        boxBreakdown: breakdownList.length > 1 ? breakdownList : [],
       };
     });
     lines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
