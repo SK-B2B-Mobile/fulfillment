@@ -6288,6 +6288,28 @@ document.getElementById('ssInvoiceSearch').addEventListener('focus', function(){
   const list = document.getElementById('ssInvoiceList');
   if(list) list.style.display = 'block';
 });
+// ★ 2026-09-08 신규(현장 요청) — 검수용지에 인보이스 바코드가 이미 찍혀
+//   나오는 걸 확인함(예: IN00472935). 바코드 스캐너는 이 검색창에 커서가
+//   있는 상태로 스캔하면 텍스트를 "타이핑" 후 Enter를 보내는 방식이라,
+//   정확히 일치하는 인보이스 1건이면 목록에서 따로 안 눌러도 자동으로
+//   바로 선택되게 함 — 서버 호출 없이 이미 불러온 목록에서만 찾는 거라
+//   속도엔 전혀 영향 없음.
+document.getElementById('ssInvoiceSearch').addEventListener('keydown', function(e){
+  if(e.key !== 'Enter') return;
+  const q = this.value.trim();
+  if(!q) return;
+  const exact = _ssCandidates.find(o => o.invoice.toLowerCase() === q.toLowerCase());
+  if(!exact) return; // 정확히 일치하는 게 없으면(여러 건 후보만 있으면) 그냥 목록에서 고르게 둠
+  e.preventDefault();
+  const sel = document.getElementById('ssInvoiceSelect');
+  sel.value = exact.invoice;
+  this.value = `${exact.invoice} · ${exact.customer||''} (SKU ${exact.totalSku})`;
+  const list = document.getElementById('ssInvoiceList');
+  if(list) list.style.display = 'none';
+  sel.dispatchEvent(new Event('change'));
+  // 오더 선택되면 바로 바코드 스캔칸으로 포커스 이동 — 작업자가 손 안 대고 바로 이어서 스캔 가능
+  setTimeout(() => { const si = document.getElementById('ssScanInput'); if(si) si.focus(); }, 150);
+});
 document.addEventListener('click', (e) => {
   if(!e.target.closest('.pv-opt-trigger') && !e.target.closest('.pv-opt-list') && !e.target.closest('#ssInvoiceSearch')){
     document.querySelectorAll('.pv-opt-list').forEach(l => l.style.display = 'none');
@@ -6345,6 +6367,24 @@ function renderTriggerOptList(selId, rows, placeholderText){
         const match = !q || row.textContent.toLowerCase().includes(q);
         row.style.display = match ? '' : 'none';
       });
+    };
+    // ★ 2026-09-08 신규(현장 요청) — 04와 동일하게, 인보이스 바코드를 스캔하면
+    //   (검색창에 텍스트가 입력되고 Enter가 뒤따라옴) 정확히 일치하는 오더가
+    //   있을 때 목록에서 따로 안 눌러도 바로 선택되게 함. 이미 불러온 목록
+    //   안에서만 찾는 거라 서버 호출 없음 — 속도 영향 없음.
+    searchInput.onkeydown = (e) => {
+      if(e.key !== 'Enter') return;
+      const q = searchInput.value.trim().toLowerCase();
+      if(!q) return;
+      const exact = rows.find(r => String(r.value).toLowerCase() === q);
+      if(!exact) return;
+      e.preventDefault();
+      sel.value = exact.value;
+      list.style.display = 'none';
+      renderTriggerOptList(selId, rows, placeholderText);
+      sel.dispatchEvent(new Event('change'));
+      const scanInputId = selId === 'psvInvoiceSelect' ? 'psvScanInput' : 'pvScanInput';
+      setTimeout(() => { const si = document.getElementById(scanInputId); if(si) si.focus(); }, 150);
     };
   }
   trigger.onclick = (e) => {
