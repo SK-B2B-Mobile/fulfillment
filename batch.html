@@ -5977,13 +5977,13 @@ function togglePvPalletMode(){
 //   박스/팔렛 번호를 나중에 바로잡는 기능.
 async function editScannedBoxPv(barcode, name, curBox, curPallet){
   const isTk = document.getElementById('pvPalletField') && document.getElementById('pvPalletField').style.display !== 'none';
-  const vBox = prompt(`${name}\n박스 번호를 입력하세요`, curBox);
+  const vBox = prompt(`${name}\n변경할 박스 번호를 입력해주세요`, curBox);
   if(vBox === null) return;
   const nBox = parseInt(vBox, 10);
   if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
   let nPallet = curPallet || '1';
   if(isTk){
-    const vPallet = prompt(`${name}\n팔렛 번호를 입력하세요`, curPallet || '1');
+    const vPallet = prompt(`${name}\n변경할 팔렛 번호를 입력해주세요`, curPallet || '1');
     if(vPallet === null) return;
     const p = parseInt(vPallet, 10);
     if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
@@ -7047,13 +7047,13 @@ function togglePsvPalletMode(){
 //   지나간 스캔 건은 고칠 방법이 없다는 지적으로 신규 추가.
 async function editScannedBoxPsv(barcode, name, curBox, curPallet){
   const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
-  const vBox = prompt(`${name}\n박스 번호를 입력하세요`, curBox);
+  const vBox = prompt(`${name}\n변경할 박스 번호를 입력해주세요`, curBox);
   if(vBox === null) return;
   const nBox = parseInt(vBox, 10);
   if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
   let nPallet = curPallet || '1';
   if(isTk){
-    const vPallet = prompt(`${name}\n팔렛 번호를 입력하세요`, curPallet || '1');
+    const vPallet = prompt(`${name}\n변경할 팔렛 번호를 입력해주세요`, curPallet || '1');
     if(vPallet === null) return;
     const p = parseInt(vPallet, 10);
     if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
@@ -7326,7 +7326,7 @@ function renderPsvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#B8C4E0; font-weight:600;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -7676,7 +7676,7 @@ function renderPvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#B8C4E0; font-weight:600;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -7976,7 +7976,7 @@ function buildPackSlipGroupsHtml_(items, shipVia){
     if(!isNaN(na) && !isNaN(nb)) return na - nb;
     return String(a).localeCompare(String(b));
   });
-  const rowHtml = it => `<div class="slip-group-row"><span>${groupByPallet && it.box ? `Box ${it.box} · ` : ''}${it.label}</span><span>${it.qty}</span></div>`;
+  const rowHtml = it => `<div class="slip-group-row"><span>${groupByPallet && it.box ? `Box ${it.box} · ` : ''}${it.label} <span class="slip-group-barcode">(${it.barcode || ''})</span></span><span>${it.qty}</span></div>`;
   let html = sortedKeys.map(key => `
     <div class="slip-group">
       <div class="slip-group-head">${groupByPallet ? 'Pallet' : 'Box'} ${key}</div>
@@ -8107,7 +8107,7 @@ function printPvSlip(format){
   // ★ 2026-09-04 신규 — 박스/팔렛 배정 정보로 박스(UPS/PU)·팔렛(TK) 구분 섹션 생성.
   //   effectiveReq가 0인 줄(이슈로 전량 제외됨)은 실물이 없으므로 아예 제외.
   const packItems = lines.filter(l => l.effectiveReq > 0).map(l => ({
-    label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: l.box, pallet: l.pallet,
+    label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: l.box, pallet: l.pallet, barcode: l.barcode,
   }));
   const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia);
 
@@ -8152,6 +8152,7 @@ function printPvSlip(format){
     .slip-group{border:1px solid #ccc; border-radius:6px; padding:8px 12px; margin-bottom:8px;}
     .slip-group-head{font-weight:800; font-size:13px; margin-bottom:4px;}
     .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
+    .slip-group-barcode{font-size:10px; color:#777; font-weight:400;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
     .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
@@ -8180,6 +8181,7 @@ function printPvSlip(format){
     .slip-group{border:0.5px solid #ccc; border-radius:4px; padding:4px 6px; margin-bottom:4px;}
     .slip-group-head{font-weight:800; font-size:7.5px; margin-bottom:2px;}
     .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
+    .slip-group-barcode{font-size:5.5px; color:#777; font-weight:400;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
     .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
@@ -8276,7 +8278,7 @@ async function printPsvSlip(format){
   // ★ 2026-09-04 신규 — 박스/팔렛 배정 정보로 박스(UPS/PU)·팔렛(TK) 구분 섹션 생성.
   //   effectiveReq가 0인 줄(이슈로 전량 제외됨)은 실물이 없으므로 아예 제외.
   const packItems = lines.filter(l => l.effectiveReq > 0).map(l => ({
-    label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: l.box, pallet: l.pallet,
+    label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: l.box, pallet: l.pallet, barcode: l.barcode,
   }));
   const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia);
 
@@ -8316,6 +8318,7 @@ async function printPsvSlip(format){
     .slip-group{border:1px solid #ccc; border-radius:6px; padding:8px 12px; margin-bottom:8px;}
     .slip-group-head{font-weight:800; font-size:13px; margin-bottom:4px;}
     .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
+    .slip-group-barcode{font-size:10px; color:#777; font-weight:400;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
     .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
@@ -8340,6 +8343,7 @@ async function printPsvSlip(format){
     .slip-group{border:0.5px solid #ccc; border-radius:4px; padding:4px 6px; margin-bottom:4px;}
     .slip-group-head{font-weight:800; font-size:7.5px; margin-bottom:2px;}
     .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
+    .slip-group-barcode{font-size:5.5px; color:#777; font-weight:400;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
     .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
