@@ -1375,6 +1375,7 @@ select option:disabled{color:var(--text-dim2);}
         <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
         <button type="button" class="btn btn-primary btn-sm" id="pvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
         <button type="button" class="btn btn-ghost btn-sm" id="pvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="width:100%; margin-top:6px; font-size:11px;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS'); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
@@ -1454,6 +1455,7 @@ select option:disabled{color:var(--text-dim2);}
         <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
         <button type="button" class="btn btn-primary btn-sm" id="psvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
         <button type="button" class="btn btn-ghost btn-sm" id="psvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePsvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="width:100%; margin-top:6px; font-size:11px;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS'); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
@@ -5943,6 +5945,46 @@ function togglePvPalletMode(){
   const si = document.getElementById('pvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
+// ★ 2026-09-08 신규(현장 요청) — psv와 동일한 이유. 이미 스캔완료된 상품의
+//   박스/팔렛 번호를 나중에 바로잡는 기능.
+async function editScannedBoxPv(barcode, name, curBox, curPallet){
+  const isTk = document.getElementById('pvPalletField') && document.getElementById('pvPalletField').style.display !== 'none';
+  const vBox = prompt(`${name}\n박스 번호를 입력하세요`, curBox);
+  if(vBox === null) return;
+  const nBox = parseInt(vBox, 10);
+  if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  let nPallet = curPallet || '1';
+  if(isTk){
+    const vPallet = prompt(`${name}\n팔렛 번호를 입력하세요`, curPallet || '1');
+    if(vPallet === null) return;
+    const p = parseInt(vPallet, 10);
+    if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+    nPallet = p;
+  }
+  const res = await gasCallWithRetry('updatePackScanBoxPallet', {
+    batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, box: nBox, pallet: nPallet,
+  });
+  if(!res.ok){ alert('수정 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast('박스·팔렛 번호가 수정되었습니다', 'success');
+  await refreshPvState();
+}
+// ★ 2026-09-08 신규(현장 요청) — psv와 동일한 이유. 박스 전체 이동.
+async function moveBoxOrPalletPv(){
+  if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  const isTk = document.getElementById('pvPalletField') && document.getElementById('pvPalletField').style.display !== 'none';
+  const mode = isTk ? (confirm('박스 단위로 이동하시겠습니까?\n(취소를 누르면 팔렛 단위로 이동합니다)') ? 'box' : 'pallet') : 'box';
+  const label = mode === 'pallet' ? '팔렛' : '박스';
+  const fromValue = prompt(`이동할 ${label} 번호를 입력하세요 (지금 그 ${label}에 담긴 상품 전부가 옮겨집니다)`);
+  if(!fromValue) return;
+  const toValue = prompt(`몇 번 ${label}로 옮기시겠습니까?`);
+  if(!toValue) return;
+  const res = await gasCallWithRetry('moveBoxOrPallet', {
+    batchId: state.batchId, invoice: _pvInvoice, round: 2, mode, fromValue, toValue,
+  });
+  if(!res.ok){ alert('이동 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast(`${res.updated}건 이동되었습니다`, 'success');
+  await refreshPvState();
+}
 let _pvForceVerified = false; // ★ 2026-08-24 신규 — 지금 선택된 오더가 관리자 강제확정으로 완료된 것인지
 let pvCurrentWorker = null;
 let _pvAudioCtx = null;
@@ -6985,6 +7027,49 @@ function togglePsvPalletMode(){
   const si = document.getElementById('psvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
+// ★ 2026-09-08 신규(현장 요청) — 이미 스캔 완료된 상품의 박스/팔렛 번호를
+//   나중에 바로잡는 기능. "현재 박스" 스텝퍼는 앞으로 스캔할 것에만 적용되고
+//   지나간 스캔 건은 고칠 방법이 없다는 지적으로 신규 추가.
+async function editScannedBoxPsv(barcode, name, curBox, curPallet){
+  const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
+  const vBox = prompt(`${name}\n박스 번호를 입력하세요`, curBox);
+  if(vBox === null) return;
+  const nBox = parseInt(vBox, 10);
+  if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  let nPallet = curPallet || '1';
+  if(isTk){
+    const vPallet = prompt(`${name}\n팔렛 번호를 입력하세요`, curPallet || '1');
+    if(vPallet === null) return;
+    const p = parseInt(vPallet, 10);
+    if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+    nPallet = p;
+  }
+  const res = await gasCallWithRetry('updatePackScanBoxPallet', {
+    batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, box: nBox, pallet: nPallet,
+  });
+  if(!res.ok){ alert('수정 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast('박스·팔렛 번호가 수정되었습니다', 'success');
+  await refreshPsvState();
+}
+// ★ 2026-09-08 신규(현장 요청) — 박스 하나에 여러 상품이 들어있을 때, 통째로
+//   다른 박스(또는 팔렛)로 옮겼다면 한 상품씩 고치는 건 번거로움. 담긴 전체
+//   상품을 한 번에 이동.
+async function moveBoxOrPalletPsv(){
+  if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
+  const mode = isTk ? (confirm('박스 단위로 이동하시겠습니까?\n(취소를 누르면 팔렛 단위로 이동합니다)') ? 'box' : 'pallet') : 'box';
+  const label = mode === 'pallet' ? '팔렛' : '박스';
+  const fromValue = prompt(`이동할 ${label} 번호를 입력하세요 (지금 그 ${label}에 담긴 상품 전부가 옮겨집니다)`);
+  if(!fromValue) return;
+  const toValue = prompt(`몇 번 ${label}로 옮기시겠습니까?`);
+  if(!toValue) return;
+  const res = await gasCallWithRetry('moveBoxOrPallet', {
+    batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2, mode, fromValue, toValue,
+  });
+  if(!res.ok){ alert('이동 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast(`${res.updated}건 이동되었습니다`, 'success');
+  await refreshPsvState();
+}
 let _psvForceVerified = false;
 
 function populatePsvWorkerSelect(){
@@ -7153,7 +7238,7 @@ function renderPsvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''}` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스·팔렛 번호 수정">Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -7501,7 +7586,7 @@ function renderPvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''}` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스·팔렛 번호 수정">Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
