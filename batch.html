@@ -1594,6 +1594,34 @@ select option:disabled{color:var(--text-dim2);}
   </div>
 </div>
 
+<!-- ★ 2026-09-08 신규(현장 요청) — 예전엔 prompt() 팝업이 연달아 두 번 떠서
+     헷갈렸음(어느 박스인지 기억 안 나고, 안에 뭐가 있는지도 안 보임). 하나의
+     화면에서 박스 선택 → 안에 든 상품 미리보기(이름+바코드) → 옮길 번호까지
+     한 번에 처리하도록 재설계. 단독/총량 공용(어느 쪽에서 열렸는지는
+     _moveBoxContext로 추적). -->
+<div class="modal-bg" id="moveBoxModal">
+  <div class="modal">
+    <h3 id="moveBoxModalTitle">박스 전체 이동</h3>
+    <div id="moveBoxModeToggleWrap" style="display:none; margin-bottom:12px;">
+      <button class="btn btn-ghost btn-sm" onclick="switchMoveBoxMode()">🔄 <span id="moveBoxModeToggleText">박스 단위로 보는 중 — 팔렛 단위로 전환</span></button>
+    </div>
+    <div class="form-field">
+      <label id="moveBoxFromLabel">어느 박스를 옮기시겠습니까?</label>
+      <select id="moveBoxFromSelect" onchange="updateMoveBoxPreview()"></select>
+    </div>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이 안에 담긴 상품</label>
+    <div id="moveBoxPreviewList" style="margin:8px 0 14px; max-height:180px; overflow-y:auto; border:1px solid var(--border2); border-radius:8px; padding:4px 10px;"></div>
+    <div class="form-field">
+      <label id="moveBoxToLabel">몇 번으로 옮기시겠습니까?</label>
+      <input type="number" id="moveBoxToInput" min="1" placeholder="새 번호 입력">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-modal-close>취소</button>
+      <button class="btn btn-primary" onclick="confirmMoveBox()">이동 확정</button>
+    </div>
+  </div>
+</div>
+
 <!-- ★ 2026-08-31 신규 — 04/Pack Verify/단독 Pack Verify 공용 바코드 수동 입력 모달.
      스캐너가 못 읽는 바코드를 사람이 직접 숫자로 입력해서, 실제 스캔과 완전히
      동일한 경로로 처리함(어느 패널에서 열렸는지에 따라 그 패널의 제출 함수로 연결). -->
@@ -5969,22 +5997,9 @@ async function editScannedBoxPv(barcode, name, curBox, curPallet){
   await refreshPvState();
 }
 // ★ 2026-09-08 신규(현장 요청) — psv와 동일한 이유. 박스 전체 이동.
-async function moveBoxOrPalletPv(){
-  if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
-  const isTk = document.getElementById('pvPalletField') && document.getElementById('pvPalletField').style.display !== 'none';
-  const mode = isTk ? (confirm('박스 단위로 이동하시겠습니까?\n(취소를 누르면 팔렛 단위로 이동합니다)') ? 'box' : 'pallet') : 'box';
-  const label = mode === 'pallet' ? '팔렛' : '박스';
-  const fromValue = prompt(`이동할 ${label} 번호를 입력하세요 (지금 그 ${label}에 담긴 상품 전부가 옮겨집니다)`);
-  if(!fromValue) return;
-  const toValue = prompt(`몇 번 ${label}로 옮기시겠습니까?`);
-  if(!toValue) return;
-  const res = await gasCallWithRetry('moveBoxOrPallet', {
-    batchId: state.batchId, invoice: _pvInvoice, round: 2, mode, fromValue, toValue,
-  });
-  if(!res.ok){ alert('이동 실패: ' + (res.error || '알 수 없는 오류')); return; }
-  toast(`${res.updated}건 이동되었습니다`, 'success');
-  await refreshPvState();
-}
+// ★ 2026-09-08 재설계 — prompt() 두 번 연달아 뜨던 방식을 하나의 모달로 통합.
+//   실제 로직은 openMoveBoxModal(공용)에서 처리, 이 함수는 그냥 진입점.
+function moveBoxOrPalletPv(){ openMoveBoxModal('pv'); }
 let _pvForceVerified = false; // ★ 2026-08-24 신규 — 지금 선택된 오더가 관리자 강제확정으로 완료된 것인지
 let pvCurrentWorker = null;
 let _pvAudioCtx = null;
@@ -7054,23 +7069,92 @@ async function editScannedBoxPsv(barcode, name, curBox, curPallet){
 // ★ 2026-09-08 신규(현장 요청) — 박스 하나에 여러 상품이 들어있을 때, 통째로
 //   다른 박스(또는 팔렛)로 옮겼다면 한 상품씩 고치는 건 번거로움. 담긴 전체
 //   상품을 한 번에 이동.
-async function moveBoxOrPalletPsv(){
-  if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
-  const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
-  const mode = isTk ? (confirm('박스 단위로 이동하시겠습니까?\n(취소를 누르면 팔렛 단위로 이동합니다)') ? 'box' : 'pallet') : 'box';
-  const label = mode === 'pallet' ? '팔렛' : '박스';
-  const fromValue = prompt(`이동할 ${label} 번호를 입력하세요 (지금 그 ${label}에 담긴 상품 전부가 옮겨집니다)`);
-  if(!fromValue) return;
-  const toValue = prompt(`몇 번 ${label}로 옮기시겠습니까?`);
-  if(!toValue) return;
+function moveBoxOrPalletPsv(){ openMoveBoxModal('psv'); }
+let _psvForceVerified = false;
+
+// ★ 2026-09-08 신규 — 박스 이동 통합 모달의 실제 로직(단독·총량 공용).
+let _moveBoxContext = null; // 'psv' | 'pv'
+let _moveBoxMode = 'box';   // 'box' | 'pallet'
+function _moveBoxState_(){ return _moveBoxContext === 'psv' ? _psvState : _pvState; }
+function _moveBoxInvoice_(){ return _moveBoxContext === 'psv' ? _psvInvoice : _pvInvoice; }
+function _moveBoxBatchId_(){ return _moveBoxContext === 'psv' ? STANDALONE_BATCH_ID : state.batchId; }
+
+function openMoveBoxModal(context){
+  const invoice = context === 'psv' ? _psvInvoice : _pvInvoice;
+  const st = context === 'psv' ? _psvState : _pvState;
+  if(!invoice || !st){ alert('먼저 오더를 선택하세요'); return; }
+  const palletFieldId = context === 'psv' ? 'psvPalletField' : 'pvPalletField';
+  const pf = document.getElementById(palletFieldId);
+  const isTk = !!(pf && pf.style.display !== 'none');
+
+  _moveBoxContext = context;
+  _moveBoxMode = 'box';
+
+  const toggleWrap = document.getElementById('moveBoxModeToggleWrap');
+  if(toggleWrap) toggleWrap.style.display = isTk ? 'block' : 'none';
+
+  populateMoveBoxSelect();
+  document.getElementById('moveBoxModal').classList.add('open');
+}
+function switchMoveBoxMode(){
+  _moveBoxMode = _moveBoxMode === 'box' ? 'pallet' : 'box';
+  const txt = document.getElementById('moveBoxModeToggleText');
+  if(txt) txt.textContent = _moveBoxMode === 'box' ? '박스 단위로 보는 중 — 팔렛 단위로 전환' : '팔렛 단위로 보는 중 — 박스 단위로 전환';
+  populateMoveBoxSelect();
+}
+function populateMoveBoxSelect(){
+  const st = _moveBoxState_();
+  const key = _moveBoxMode === 'pallet' ? 'pallet' : 'box';
+  const label = _moveBoxMode === 'pallet' ? 'Pallet' : 'Box';
+  const groups = {};
+  (st.lines || []).forEach(l => {
+    const k = l[key];
+    if(!k) return;
+    if(!groups[k]) groups[k] = [];
+    groups[k].push(l);
+  });
+  const keys = Object.keys(groups).sort((a, b) => {
+    const na = parseInt(a, 10), nb = parseInt(b, 10);
+    if(!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a).localeCompare(String(b));
+  });
+  document.getElementById('moveBoxModalTitle').textContent = `${label} 전체 이동`;
+  document.getElementById('moveBoxFromLabel').textContent = `어느 ${label}를 옮기시겠습니까?`;
+  document.getElementById('moveBoxToLabel').textContent = `몇 번 ${label}로 옮기시겠습니까?`;
+  const sel = document.getElementById('moveBoxFromSelect');
+  sel.innerHTML = keys.length
+    ? keys.map(k => `<option value="${k}">${label} ${k} (상품 ${groups[k].length}종)</option>`).join('')
+    : `<option value="">담긴 상품이 없습니다</option>`;
+  updateMoveBoxPreview();
+}
+function updateMoveBoxPreview(){
+  const st = _moveBoxState_();
+  const key = _moveBoxMode === 'pallet' ? 'pallet' : 'box';
+  const sel = document.getElementById('moveBoxFromSelect');
+  const val = sel.value;
+  const items = (st.lines || []).filter(l => String(l[key]) === String(val));
+  const list = document.getElementById('moveBoxPreviewList');
+  list.innerHTML = items.length
+    ? items.map(l => `
+      <div style="padding:7px 0; border-bottom:1px solid var(--border2);">
+        <div style="font-size:13px; font-weight:700;">${l.name || l.sku}</div>
+        <div style="font-size:11px; color:var(--text-dim);">${l.sku} · 바코드 ${l.barcode} · ${l.packed}/${l.effectiveReq}개</div>
+      </div>`).join('')
+    : `<div style="padding:8px 0; font-size:12px; color:var(--text-dim);">담긴 상품이 없습니다</div>`;
+}
+async function confirmMoveBox(){
+  const fromValue = document.getElementById('moveBoxFromSelect').value;
+  const toValue = document.getElementById('moveBoxToInput').value.trim();
+  if(!fromValue){ alert('이동할 박스(팔렛)를 선택하세요'); return; }
+  if(!toValue){ alert('옮길 번호를 입력하세요'); return; }
   const res = await gasCallWithRetry('moveBoxOrPallet', {
-    batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2, mode, fromValue, toValue,
+    batchId: _moveBoxBatchId_(), invoice: _moveBoxInvoice_(), round: 2, mode: _moveBoxMode, fromValue, toValue,
   });
   if(!res.ok){ alert('이동 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  closeAllModals();
   toast(`${res.updated}건 이동되었습니다`, 'success');
-  await refreshPsvState();
+  if(_moveBoxContext === 'psv') await refreshPsvState(); else await refreshPvState();
 }
-let _psvForceVerified = false;
 
 function populatePsvWorkerSelect(){
   const sel = document.getElementById('psvWorkerSelect');
@@ -7203,10 +7287,14 @@ function renderPsvBody(){
   //   불러와지면 이 처리가 아예 안 타서 UPS/PU인데도 팔렛이 계속 보이는
   //   문제가 있었음(현장에서 확인됨). 화면이 갱신될 때마다(폴링 포함) 매번
   //   실행되는 이 렌더 함수 안으로 옮겨서, 항상 확실히 맞는 상태로 유지.
+  // ★ 2026-09-08 재수정 — isTk를 블록 스코프 안에서만 썼더니, 아래 상품 목록을
+  //   그릴 때는 이 값을 몰라서 UPS/PU인데도 "Pallet 1"이 계속 표시되던 문제.
+  //   함수 전체에서 쓸 수 있게 밖으로 뺌.
+  let isTk;
   {
     const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
     const autoIsTk = ord && String(ord.shipVia || '').trim().toUpperCase() === 'TK';
-    const isTk = _psvPalletModeOverride !== null ? _psvPalletModeOverride : autoIsTk;
+    isTk = _psvPalletModeOverride !== null ? _psvPalletModeOverride : autoIsTk;
     const pf = document.getElementById('psvPalletField');
     const pb = document.getElementById('psvPalletCompleteBtn');
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
@@ -7238,7 +7326,7 @@ function renderPsvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스·팔렛 번호 수정">Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#B8C4E0; font-weight:600;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -7551,10 +7639,12 @@ function renderPvBody(){
   //   바뀌어도(예: PU→TK) 이미 만들어진 배치는 스냅샷이라 자동 반영이 안 됨.
   //   그럴 때 작업자가 직접 박스/팔렛 기준을 바꿀 수 있도록 수동 전환 지원
   //   (_pvPalletModeOverride: null=자동판단, true=팔렛 강제, false=박스 강제).
+  // ★ 2026-09-08 재수정 — isTk를 함수 전체에서 쓸 수 있게 밖으로 뺌(상품 목록에서도 필요).
+  let isTk;
   {
     const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
     const autoIsTk = cf && String(cf.meta.ship_via || '').trim().toUpperCase() === 'TK';
-    const isTk = _pvPalletModeOverride !== null ? _pvPalletModeOverride : autoIsTk;
+    isTk = _pvPalletModeOverride !== null ? _pvPalletModeOverride : autoIsTk;
     const pf = document.getElementById('pvPalletField');
     const pb = document.getElementById('pvPalletCompleteBtn');
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
@@ -7586,7 +7676,7 @@ function renderPvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스·팔렛 번호 수정">Box ${l.box}${l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#B8C4E0; font-weight:600;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}')" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -8046,7 +8136,7 @@ function printPvSlip(format){
 
   const letterCss = `
     @page{ size: letter; margin: 12mm; }
-    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px;}
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
     .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
     .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
@@ -8064,7 +8154,7 @@ function printPvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
-    .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px;}
+    .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .slip-section-h:first-of-type{margin-top:4px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -8092,7 +8182,7 @@ function printPvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
-    .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px;}
+    .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .slip-section-h:first-of-type{margin-top:2px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -8210,7 +8300,7 @@ async function printPsvSlip(format){
 
   const letterCss = `
     @page{ size: letter; margin: 12mm; }
-    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px;}
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
     .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
     .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
@@ -8228,7 +8318,7 @@ async function printPsvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
-    .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px;}
+    .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .slip-section-h:first-of-type{margin-top:4px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
@@ -8252,7 +8342,7 @@ async function printPsvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
-    .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px;}
+    .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .slip-section-h:first-of-type{margin-top:2px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
   `;
