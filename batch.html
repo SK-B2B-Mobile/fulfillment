@@ -1374,8 +1374,9 @@ select option:disabled{color:var(--text-dim2);}
         </div>
         <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
         <button type="button" class="btn btn-primary btn-sm" id="pvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, cf ? cf.meta.ship_via : '', _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS'); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
       <div class="pv-scan-panel" id="pvScanPanel">
@@ -1452,8 +1453,9 @@ select option:disabled{color:var(--text-dim2);}
         </div>
         <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
         <button type="button" class="btn btn-primary btn-sm" id="psvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="psvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePsvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, ord ? ord.shipVia : '', _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS'); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
       <div class="pv-scan-panel" id="psvScanPanel">
@@ -5878,6 +5880,8 @@ let _pvInvoice = null;
 let _pvState = null;
 // ★ 2026-09-04 신규(현장 요청) — 박스/팔렛 배정. 오더 바뀔 때마다 1/1로 초기화됨(onPvInvoiceChange).
 let _pvCurrentBox = 1;
+// ★ 2026-09-08 신규 — null=자동판단(shipVia로), true=팔렛 강제, false=박스 강제
+let _pvPalletModeOverride = null;
 let _pvCurrentPallet = 1;
 // ★ 2026-09-08 긴급 버그 수정 — 패킹슬립에서 박스 번호가 1,3,5,6,8,10...
 //   처럼 군데군데 비어서 뒤죽박죽으로 나온 사고 확인. 원인으로 가장 유력한
@@ -5926,6 +5930,16 @@ function editPvPallet(){
   if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
   _pvCurrentPallet = n;
   document.getElementById('pvPalletNum').textContent = _pvCurrentPallet;
+  const si = document.getElementById('pvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+// ★ 2026-09-08 신규 — 배송방법 수동 전환(박스 기준 ⇄ 팔렛 기준). 세 단계로
+//   순환: 자동판단 → 팔렛 강제 → 박스 강제 → 자동판단...
+function togglePvPalletMode(){
+  if(_pvPalletModeOverride === null) _pvPalletModeOverride = true;
+  else if(_pvPalletModeOverride === true) _pvPalletModeOverride = false;
+  else _pvPalletModeOverride = null;
+  renderPvBody();
   const si = document.getElementById('pvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
@@ -6922,6 +6936,7 @@ let _psvInvoice = null;
 let _psvState = null;
 // ★ 2026-09-04 신규 — pv와 동일한 박스/팔렛 배정.
 let _psvCurrentBox = 1;
+let _psvPalletModeOverride = null;
 let _psvCurrentPallet = 1;
 let __psvStepLock = 0;
 function stepPsvBox(delta){
@@ -6959,6 +6974,14 @@ function editPsvPallet(){
   if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
   _psvCurrentPallet = n;
   document.getElementById('psvPalletNum').textContent = _psvCurrentPallet;
+  const si = document.getElementById('psvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+function togglePsvPalletMode(){
+  if(_psvPalletModeOverride === null) _psvPalletModeOverride = true;
+  else if(_psvPalletModeOverride === true) _psvPalletModeOverride = false;
+  else _psvPalletModeOverride = null;
+  renderPsvBody();
   const si = document.getElementById('psvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
@@ -7036,6 +7059,7 @@ async function onPsvInvoiceChange(){
   _psvForceVerified = false;
   // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
   _psvCurrentBox = 1; _psvCurrentPallet = 1;
+  _psvPalletModeOverride = null;
   document.getElementById('psvBoxNum').textContent = '1';
   document.getElementById('psvPalletNum').textContent = '1';
   // ★ 2026-09-04 신규(현장 지적) — UPS/PU는 팔렛 개념이 없으니 팔렛 스텝퍼
@@ -7096,11 +7120,16 @@ function renderPsvBody(){
   //   실행되는 이 렌더 함수 안으로 옮겨서, 항상 확실히 맞는 상태로 유지.
   {
     const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
-    const isTk = ord && String(ord.shipVia || '').trim().toUpperCase() === 'TK';
+    const autoIsTk = ord && String(ord.shipVia || '').trim().toUpperCase() === 'TK';
+    const isTk = _psvPalletModeOverride !== null ? _psvPalletModeOverride : autoIsTk;
     const pf = document.getElementById('psvPalletField');
     const pb = document.getElementById('psvPalletCompleteBtn');
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
     if(pb) pb.style.display = isTk ? 'block' : 'none';
+    const toggleBtn = document.getElementById('psvModeToggleBtn');
+    if(toggleBtn) toggleBtn.textContent = isTk
+      ? (_psvPalletModeOverride !== null ? '📦 박스 기준으로 수동 전환 (원래는 팔렛)' : '📦 배송방법이 바뀌었나요? 박스 기준으로 보기')
+      : (_psvPalletModeOverride !== null ? '🚚 팔렛 기준으로 수동 전환 (원래는 박스)' : '🚚 배송방법이 바뀌었나요? 팔렛 기준으로 보기');
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('psvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
@@ -7377,6 +7406,7 @@ async function onPvInvoiceChange(){
   _pvForceVerified = false;
   // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
   _pvCurrentBox = 1; _pvCurrentPallet = 1;
+  _pvPalletModeOverride = null; // ★ 2026-09-08 신규 — 오더 바뀌면 수동 전환도 초기화
   document.getElementById('pvBoxNum').textContent = '1';
   document.getElementById('pvPalletNum').textContent = '1';
   // ★ 2026-09-04 신규(현장 지적) — psv와 동일한 이유. UPS/PU는 팔렛 스텝퍼 숨김.
@@ -7432,12 +7462,21 @@ function renderPvBody(){
   const st = _pvState;
   if(!st) return;
   // ★ 2026-09-08 버그 수정 — psv와 동일한 이유로 렌더 함수 안으로 이동.
+  // ★ 2026-09-08 신규(현장 요청) — 배치 생성 후에 원본 시스템에서 배송방법이
+  //   바뀌어도(예: PU→TK) 이미 만들어진 배치는 스냅샷이라 자동 반영이 안 됨.
+  //   그럴 때 작업자가 직접 박스/팔렛 기준을 바꿀 수 있도록 수동 전환 지원
+  //   (_pvPalletModeOverride: null=자동판단, true=팔렛 강제, false=박스 강제).
   {
     const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
-    const isTk = cf && String(cf.meta.ship_via || '').trim().toUpperCase() === 'TK';
+    const autoIsTk = cf && String(cf.meta.ship_via || '').trim().toUpperCase() === 'TK';
+    const isTk = _pvPalletModeOverride !== null ? _pvPalletModeOverride : autoIsTk;
     const pf = document.getElementById('pvPalletField');
     const pb = document.getElementById('pvPalletCompleteBtn');
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
+    const toggleBtn = document.getElementById('pvModeToggleBtn');
+    if(toggleBtn) toggleBtn.textContent = isTk
+      ? (_pvPalletModeOverride !== null ? '📦 박스 기준으로 수동 전환 (원래는 팔렛)' : '📦 배송방법이 바뀌었나요? 박스 기준으로 보기')
+      : (_pvPalletModeOverride !== null ? '🚚 팔렛 기준으로 수동 전환 (원래는 박스)' : '🚚 배송방법이 바뀌었나요? 팔렛 기준으로 보기');
     if(pb) pb.style.display = isTk ? 'block' : 'none';
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
@@ -7868,7 +7907,9 @@ function printPvSlip(format){
   const worker = currentPvWorker() || '-';
   const printedAt = new Date().toLocaleString('en-US');
   const customer = cf ? cf.meta.customer : '';
-  const shipVia = cf ? cf.meta.ship_via : '';
+  // ★ 2026-09-08 신규 — 작업자가 수동으로 박스/팔렛 기준을 바꿨다면 패킹슬립도
+  //   그 기준을 그대로 따름(자동판단된 예전 배송방법으로 되돌아가지 않게).
+  const shipVia = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
 
   const badgeClass = verified ? (forcedVerify ? 'verify-forced' : 'verify-ok') : 'verify-bad';
   const badgeText = verified
@@ -8035,7 +8076,7 @@ async function printPsvSlip(format){
   const worker = currentPsvWorker() || '-';
   const printedAt = new Date().toLocaleString('en-US');
   const customer = order ? order.customer : '';
-  const shipVia = order ? order.shipVia : '';
+  const shipVia = _psvPalletModeOverride === null ? (order ? order.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
 
   const badgeClass = verified ? (forcedVerify ? 'verify-forced' : 'verify-ok') : 'verify-bad';
   const badgeText = verified
