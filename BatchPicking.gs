@@ -1753,6 +1753,78 @@ function updatePackScanBoxPallet(data) {
   }
 }
 
+// ★ 2026-09-08 신규(현장 요청) — 한 SKU 수량이 실제로는 여러 박스에 나뉘어
+//   담기는 경우(예: 60개 중 30개는 박스1, 나머지 30개는 박스2)를 지원.
+//   기존 updatePackScanBoxPallet은 "전체를 통째로" 다른 박스로 옮기는 것뿐이라
+//   이런 분할은 지원 못 했음. 이 함수는 기존 스캔 기록에서 splitQty만큼만
+//   떼어내서(기존 기록은 그만큼 줄이거나, 전부 떼어내는 경우 취소 처리) 새
+//   박스로 옮긴 별도 기록을 만듦 — 화면·패킹슬립에는 같은 SKU가 두 줄(각각의
+//   박스)로 나뉘어 보이게 됨.
+function splitScannedItemBox(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    if (!data.batchId || !data.invoice || !data.barcode || !data.splitQty) {
+      return { ok: false, error: '필요한 값이 없습니다' };
+    }
+    const round = Number(data.round) || 2;
+    const splitQty = Number(data.splitQty);
+    if (!splitQty || splitQty <= 0) return { ok: false, error: '옮길 수량을 올바르게 입력하세요' };
+    const toBox = data.toBox !== undefined && data.toBox !== null ? String(data.toBox) : '';
+    const toPallet = data.toPallet !== undefined && data.toPallet !== null ? String(data.toPallet) : '';
+    const normBc = normBarcode_(String(data.barcode || ''));
+
+    const pl = packscanSheetSafe_();
+    const plLast = pl.getLastRow();
+    if (plLast < 2) return { ok: false, error: '스캔 기록이 없습니다' };
+
+    const rows = pl.getRange(2, 1, plLast - 1, 13).getValues();
+    let remaining = splitQty;
+    let worker = data.worker || '';
+    let sku = '';
+    for (let i = 0; i < rows.length && remaining > 0; i++) {
+      const r = rows[i];
+      if (String(r[0]) !== String(data.batchId)) continue;
+      if (String(r[6]) !== String(data.invoice)) continue;
+      if ((Number(r[10]) || 2) !== round) continue;
+      if (r[7] !== 'pass' || r[8] === 'undone') continue;
+      if (normBarcode_(r[4]) !== normBc) continue;
+      const rowNum = i + 2;
+      const curQty = Number(r[9]) || 0;
+      if (curQty <= 0) continue;
+      worker = r[3] || worker;
+      sku = r[5];
+      if (curQty <= remaining) {
+        // 이 기록 전체가 떼어내는 수량에 포함됨 — 취소 처리(새 기록으로 대체되므로)
+        pl.getRange(rowNum, 9, 1, 1).setValue('undone');
+        remaining -= curQty;
+      } else {
+        // 일부만 떼어내고 나머지는 원래 박스에 그대로 남김
+        pl.getRange(rowNum, 10, 1, 1).setValue(curQty - remaining);
+        remaining = 0;
+      }
+    }
+    if (remaining > 0) {
+      return { ok: false, error: '요청한 수량만큼 기존 스캔 기록을 찾지 못했습니다(부족분 ' + remaining + '개) — 실제 확인된 수량을 다시 확인해주세요' };
+    }
+
+    const newRow = pl.getLastRow() + 1;
+    ensureSheetRoom_(pl, newRow);
+    pl.getRange(newRow, 5, 1, 2).setNumberFormat('@');
+    pl.getRange(newRow, 1, 1, 13).setValues([[
+      data.batchId, Utilities.getUuid(), batchNow_(), worker, String(data.barcode), sku,
+      data.invoice, 'pass', 'active', splitQty, round, toBox, toPallet,
+    ]]);
+
+    bumpVersion_();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ★ 2026-09-08 신규(현장 요청) — 박스 하나에 여러 상품이 들어있을 때, 물건을
 //   통째로 다른 박스(또는 팔렛)로 옮겼다면 한 상품씩 일일이 고치는 건 너무
 //   번거로움. "이 박스에 담긴 전체 상품"을 한 번에 다른 번호로 옮기는 기능.
