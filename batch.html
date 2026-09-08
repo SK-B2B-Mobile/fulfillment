@@ -8064,6 +8064,8 @@ function printPvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
+    .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px;}
+    .slip-section-h:first-of-type{margin-top:4px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
   const labelCss = `
@@ -8090,6 +8092,8 @@ function printPvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
+    .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px;}
+    .slip-section-h:first-of-type{margin-top:2px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
   `;
 
@@ -8117,7 +8121,9 @@ function printPvSlip(format){
       <div><b>Ship Via</b>${shipVia || '-'}</div>
       <div><b>Slot</b>${slotObj ? slotObj.num : '-'}</div>
     </div>
+    ${boxGroupsHtml ? `<h3 class="slip-section-h">📦 BOX / PALLET BREAKDOWN — 박스·팔렛별 내용</h3>` : ''}
     ${boxGroupsHtml}
+    <h3 class="slip-section-h"${boxGroupsHtml ? ' style="page-break-before:always;"' : ''}>📋 FULL SKU LIST — 전체 상품 상세 내역</h3>
     <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>${totalRowHtml}</tfoot>
@@ -8222,6 +8228,8 @@ async function printPsvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:12px; padding:2px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
+    .slip-section-h{font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; background:#111; color:#fff; padding:6px 10px; margin:16px 0 8px; border-radius:4px;}
+    .slip-section-h:first-of-type{margin-top:4px;}
     .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
   `;
   const labelCss = `
@@ -8244,6 +8252,8 @@ async function printPsvSlip(format){
     .slip-group-row{display:flex; justify-content:space-between; font-size:7px; padding:1px 0;}
     .slip-group-unassigned .slip-group-head{color:#92400e;}
     .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
+    .slip-section-h{font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; background:#111; color:#fff; padding:3px 5px; margin:6px 0 3px; border-radius:3px;}
+    .slip-section-h:first-of-type{margin-top:2px;}
     .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
   `;
 
@@ -8271,7 +8281,9 @@ async function printPsvSlip(format){
       <div><b>Ship Via</b>${shipVia || '-'}</div>
       <div><b>Type</b>STANDALONE</div>
     </div>
+    ${boxGroupsHtml ? `<h3 class="slip-section-h">📦 BOX / PALLET BREAKDOWN — 박스·팔렛별 내용</h3>` : ''}
     ${boxGroupsHtml}
+    <h3 class="slip-section-h"${boxGroupsHtml ? ' style="page-break-before:always;"' : ''}>📋 FULL SKU LIST — 전체 상품 상세 내역</h3>
     <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
     <tbody>${rowsHtml}</tbody>
     <tfoot>${totalRowHtml}</tfoot>
