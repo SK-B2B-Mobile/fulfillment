@@ -1377,7 +1377,7 @@ select option:disabled{color:var(--text-dim2);}
         <button type="button" class="btn btn-ghost btn-sm" id="pvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
         <button type="button" class="btn btn-ghost btn-sm" style="width:100%; margin-top:6px; font-size:11px;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; } const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice); const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS'); printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="triggerPrintPalletLabelPv()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
       <div class="pv-scan-panel" id="pvScanPanel">
@@ -1457,7 +1457,7 @@ select option:disabled{color:var(--text-dim2);}
         <button type="button" class="btn btn-ghost btn-sm" id="psvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePsvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
         <button type="button" class="btn btn-ghost btn-sm" style="width:100%; margin-top:6px; font-size:11px;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="(function(){ if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; } const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice); const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS'); printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice); })()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="triggerPrintPalletLabelPsv()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
       </div>
 
       <div class="pv-scan-panel" id="psvScanPanel">
@@ -8000,10 +8000,45 @@ function buildPackSlipGroupsHtml_(items, shipVia){
 //   라벨도 배송방법(shipVia)에 따라 자동으로 "BOX #"/"PALLET #"로 바뀌도록 수정.
 //   처음엔 무조건 PALLET으로만 찍히던 실수를 바로잡음 — 패킹슬립과 라벨이
 //   서로 다른 기준을 쓰면 현장에서 혼란스러우므로 반드시 통일.
-function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice){
+// ★ 2026-09-08 신규(현장 요청) — 라벨 인쇄 전에 "몇 장 인쇄할지" 확인/수정할 수
+//   있게 함(자동 계산값이 기본으로 채워짐). 한 SKU 수량이 많아서 시스템엔 박스
+//   1개로 기록됐지만 실제로는 여러 박스에 나뉘어 담긴 경우에 유용. 패킹슬립
+//   데이터와는 완전히 무관 — 여기서 매수를 바꿔도 패킹슬립엔 영향 없음.
+function triggerPrintPalletLabelPv(){
+  if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
+  const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
+  const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
+  const autoCount = isPallet ? _pvCurrentPallet : _pvCurrentBox;
+  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 현재 ${isPallet ? '팔렛' : '박스'} 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
+  if(v === null) return;
+  const n = parseInt(v, 10);
+  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice, n);
+}
+function triggerPrintPalletLabelPsv(){
+  if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
+  const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
+  const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
+  const autoCount = isPallet ? _psvCurrentPallet : _psvCurrentBox;
+  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 현재 ${isPallet ? '팔렛' : '박스'} 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
+  if(v === null) return;
+  const n = parseInt(v, 10);
+  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice, n);
+}
+function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualCount){
   const isPallet = String(shipVia || '').trim().toUpperCase() === 'TK';
   const labelKind = isPallet ? 'PALLET' : 'BOX';
-  const totalCount = isPallet ? Number(palletNum) || 1 : Number(boxNum) || 1;
+  // ★ 2026-09-08 신규(현장 요청) — 한 SKU 수량이 많아서(예: 300개) 시스템엔
+  //   "박스 1"로 한 번에 기록됐지만, 실제로는 물리적으로 여러 박스(예: 10개,
+  //   30개씩)에 나눠 담기는 경우가 있음. 시스템 박스 기록과 실제 라벨 인쇄
+  //   매수는 서로 다른 문제라, 필요하면 직접 매수를 지정할 수 있게 함.
+  //   패킹슬립은 이 값을 전혀 참조하지 않으므로(별도 함수, 별도 데이터) 안전함.
+  const totalCount = manualCount && Number(manualCount) > 0
+    ? Number(manualCount)
+    : (isPallet ? Number(palletNum) || 1 : Number(boxNum) || 1);
   const printedAt = new Date().toLocaleString('en-US');
   // ★ 2026-09-04 버그 수정(2건) —
   //   1) "BOX # 1" 같은 짧은 텍스트도 65pt로는 4인치 폭 안에 한 줄로 안 들어가서
