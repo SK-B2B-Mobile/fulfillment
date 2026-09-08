@@ -690,13 +690,17 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .retro-issue-form-row{display:flex; gap:10px;}
 .retro-issue-form-row > div{flex:1;}
 
-@media (max-width:480px){
+@media (max-width:768px){
   .tgrid-2{grid-template-columns:1fr;} /* 폰/스캐너 좁은 화면에선 2단도 1단으로 */
   /* ★ 2026-09-08 버그 수정(현장 사진으로 확인됨) — 상단바가 좁은 화면에서
      줄바꿈 안 되고 그대로 넘쳐서(가로 스크롤 발생), "다른 배치"/"지난 배치"
      드롭다운이 그 넓은 상단바 기준(right:0)으로 위치를 잡다 보니 화면 왼쪽
      밖으로 잘려서 글자가 안 보이던 문제. 좁은 화면에서는 뷰포트 자체에
      딱 붙여서(fixed) 항상 화면 안에 온전히 보이도록 강제.*/
+  /* ★ 2026-09-08 재수정 — 세로 420px 기준으로만 맞춰놨더니, 스캐너를 가로로
+     돌렸을 때(폭이 420px 넘어감)는 이 보정이 안 먹혀서 상단바가 다시 넘치고
+     드롭다운이 잘리는 문제가 재발함(현장 사진으로 확인됨). 가로/세로 방향
+     둘 다 커버하도록 768px까지 넓힘. */
   #switchBatchDropdown{
     position:fixed !important; left:8px !important; right:8px !important;
     top:64px !important; width:auto !important; min-width:0 !important;
@@ -840,7 +844,7 @@ select option:disabled{color:var(--text-dim2);}
      수동으로 브라우저를 줌아웃하지 않아도 한 화면에 편하게 들어오도록
      여백/글자크기/버튼 크기를 자동으로 줄여줌.
 ═══════════════════════════════════════════════════════════ */
-@media (max-width:420px){
+@media (max-width:768px){
   main{padding:14px;}
   .sim-bar{padding:5px 10px; font-size:9.5px; flex-wrap:wrap; gap:2px;}
   .topbar{padding:10px 14px; flex-wrap:wrap; gap:8px;}
@@ -6937,6 +6941,19 @@ async function refreshPsvState(){
 function renderPsvBody(){
   const st = _psvState;
   if(!st) return;
+  // ★ 2026-09-08 버그 수정 — onPsvInvoiceChange에서만 팔렛 필드 표시/숨김을
+  //   처리했더니, 새로고침 복원 등 change 이벤트를 안 거치는 경로로 오더가
+  //   불러와지면 이 처리가 아예 안 타서 UPS/PU인데도 팔렛이 계속 보이는
+  //   문제가 있었음(현장에서 확인됨). 화면이 갱신될 때마다(폴링 포함) 매번
+  //   실행되는 이 렌더 함수 안으로 옮겨서, 항상 확실히 맞는 상태로 유지.
+  {
+    const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
+    const isTk = ord && String(ord.shipVia || '').trim().toUpperCase() === 'TK';
+    const pf = document.getElementById('psvPalletField');
+    const pb = document.getElementById('psvPalletCompleteBtn');
+    if(pf) pf.style.display = isTk ? 'flex' : 'none';
+    if(pb) pb.style.display = isTk ? 'block' : 'none';
+  }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('psvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
   // ★ 2026-09-01 신규(매니저 요청) — 총 수량(pcs)만으로는 몇 개 SKU가 더 남았는지
@@ -7266,6 +7283,15 @@ async function refreshPvState(){
 function renderPvBody(){
   const st = _pvState;
   if(!st) return;
+  // ★ 2026-09-08 버그 수정 — psv와 동일한 이유로 렌더 함수 안으로 이동.
+  {
+    const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
+    const isTk = cf && String(cf.meta.ship_via || '').trim().toUpperCase() === 'TK';
+    const pf = document.getElementById('pvPalletField');
+    const pb = document.getElementById('pvPalletCompleteBtn');
+    if(pf) pf.style.display = isTk ? 'flex' : 'none';
+    if(pb) pb.style.display = isTk ? 'block' : 'none';
+  }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('pvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
   // ★ 2026-09-01 신규(매니저 요청) — 총 수량(pcs)만으로는 몇 개 SKU가 더 남았는지
