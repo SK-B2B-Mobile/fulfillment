@@ -692,6 +692,16 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 
 @media (max-width:480px){
   .tgrid-2{grid-template-columns:1fr;} /* 폰/스캐너 좁은 화면에선 2단도 1단으로 */
+  /* ★ 2026-09-08 버그 수정(현장 사진으로 확인됨) — 상단바가 좁은 화면에서
+     줄바꿈 안 되고 그대로 넘쳐서(가로 스크롤 발생), "다른 배치"/"지난 배치"
+     드롭다운이 그 넓은 상단바 기준(right:0)으로 위치를 잡다 보니 화면 왼쪽
+     밖으로 잘려서 글자가 안 보이던 문제. 좁은 화면에서는 뷰포트 자체에
+     딱 붙여서(fixed) 항상 화면 안에 온전히 보이도록 강제.*/
+  #switchBatchDropdown{
+    position:fixed !important; left:8px !important; right:8px !important;
+    top:64px !important; width:auto !important; min-width:0 !important;
+    max-height:70vh; overflow-y:auto;
+  }
 }
 
 /* Recent scans panel */
