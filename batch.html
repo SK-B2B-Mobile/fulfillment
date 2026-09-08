@@ -367,7 +367,7 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-boxpallet-row{display:flex; gap:8px; margin-top:12px;}
 .pv-boxpallet-field{flex:1; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; padding:8px 10px; display:flex; align-items:center; justify-content:space-between;}
 .pv-boxpallet-field label{font-size:11px; color:var(--text-dim); font-weight:700; margin-right:8px;}
-.pv-boxpallet-num{font-family:var(--mono); font-size:16px; font-weight:800; min-width:20px; text-align:center;}
+.pv-boxpallet-num{font-family:var(--mono); font-size:16px; font-weight:800; min-width:20px; text-align:center; cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
 .pv-boxpallet-stepper{display:flex; align-items:center; gap:6px;}
 .pv-boxpallet-btn{width:26px; height:26px; border-radius:6px; border:1px solid var(--border2); background:transparent; color:var(--text); font-size:15px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
 .pv-boxpallet-btn:hover{border-color:#8B5CF6; color:#8B5CF6;}
@@ -1359,7 +1359,7 @@ select option:disabled{color:var(--text-dim2);}
             <label>현재 박스</label>
             <div class="pv-boxpallet-stepper">
               <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(-1)" title="실수로 넘어갔을 때 되돌리기">−</button>
-              <span class="pv-boxpallet-num" id="pvBoxNum">1</span>
+              <span class="pv-boxpallet-num" id="pvBoxNum" onclick="editPvBox()" title="눌러서 직접 수정">1</span>
               <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(1)" title="다음 박스로">+</button>
             </div>
           </div>
@@ -1367,7 +1367,7 @@ select option:disabled{color:var(--text-dim2);}
             <label>팔렛</label>
             <div class="pv-boxpallet-stepper">
               <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(-1)">−</button>
-              <span class="pv-boxpallet-num" id="pvPalletNum">1</span>
+              <span class="pv-boxpallet-num" id="pvPalletNum" onclick="editPvPallet()" title="눌러서 직접 수정">1</span>
               <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(1)">+</button>
             </div>
           </div>
@@ -1437,7 +1437,7 @@ select option:disabled{color:var(--text-dim2);}
             <label>현재 박스</label>
             <div class="pv-boxpallet-stepper">
               <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(-1)" title="실수로 넘어갔을 때 되돌리기">−</button>
-              <span class="pv-boxpallet-num" id="psvBoxNum">1</span>
+              <span class="pv-boxpallet-num" id="psvBoxNum" onclick="editPsvBox()" title="눌러서 직접 수정">1</span>
               <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(1)" title="다음 박스로">+</button>
             </div>
           </div>
@@ -1445,7 +1445,7 @@ select option:disabled{color:var(--text-dim2);}
             <label>팔렛</label>
             <div class="pv-boxpallet-stepper">
               <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(-1)">−</button>
-              <span class="pv-boxpallet-num" id="psvPalletNum">1</span>
+              <span class="pv-boxpallet-num" id="psvPalletNum" onclick="editPsvPallet()" title="눌러서 직접 수정">1</span>
               <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(1)">+</button>
             </div>
           </div>
@@ -5879,8 +5879,56 @@ let _pvState = null;
 // ★ 2026-09-04 신규(현장 요청) — 박스/팔렛 배정. 오더 바뀔 때마다 1/1로 초기화됨(onPvInvoiceChange).
 let _pvCurrentBox = 1;
 let _pvCurrentPallet = 1;
-function stepPvBox(delta){ _pvCurrentBox = Math.max(1, _pvCurrentBox + delta); document.getElementById('pvBoxNum').textContent = _pvCurrentBox; }
-function stepPvPallet(delta){ _pvCurrentPallet = Math.max(1, _pvCurrentPallet + delta); document.getElementById('pvPalletNum').textContent = _pvCurrentPallet; }
+// ★ 2026-09-08 긴급 버그 수정 — 패킹슬립에서 박스 번호가 1,3,5,6,8,10...
+//   처럼 군데군데 비어서 뒤죽박죽으로 나온 사고 확인. 원인으로 가장 유력한
+//   것은 터치스크린에서 빠르게 두 번 눌리는 "더블탭"이 클릭 이벤트를 두 번
+//   쏴서 번호가 한 번에 2씩 튀는 것 — 그러면 중간 번호(예: 2, 4, 7, 9)엔
+//   아무 것도 안 담겨서 완전히 비어버림(사진으로 확인된 증상과 정확히 일치).
+//   각 스텝 함수에 짧은 쿨다운(400ms)을 걸어서 같은 시간 안에 두 번째 호출은
+//   무시하도록 막음. 그리고 버튼을 눌러도 스캔칸의 깜빡이는 커서가 안
+//   없어지도록, 끝나고 항상 스캔칸으로 포커스를 돌려줌.
+let __pvStepLock = 0;
+function stepPvBox(delta){
+  const now = Date.now();
+  if(now - __pvStepLock < 400) return; // 더블탭/중복 클릭 방지
+  __pvStepLock = now;
+  _pvCurrentBox = Math.max(1, _pvCurrentBox + delta);
+  document.getElementById('pvBoxNum').textContent = _pvCurrentBox;
+  const si = document.getElementById('pvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+function stepPvPallet(delta){
+  const now = Date.now();
+  if(now - __pvStepLock < 400) return;
+  __pvStepLock = now;
+  _pvCurrentPallet = Math.max(1, _pvCurrentPallet + delta);
+  document.getElementById('pvPalletNum').textContent = _pvCurrentPallet;
+  const si = document.getElementById('pvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+// ★ 2026-09-08 신규(현장 요청) — 박스 번호를 눌러서 직접 고칠 수 있게 함
+//   (잘못 넘어갔거나 나중에 바로잡아야 할 때). prompt()는 어떤 기기에서도
+//   확실히 뜨는 가장 단순하고 안전한 방식이라 채택.
+function editPvBox(){
+  const v = prompt('박스 번호를 직접 입력하세요', _pvCurrentBox);
+  if(v === null) return;
+  const n = parseInt(v, 10);
+  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  _pvCurrentBox = n;
+  document.getElementById('pvBoxNum').textContent = _pvCurrentBox;
+  const si = document.getElementById('pvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+function editPvPallet(){
+  const v = prompt('팔렛 번호를 직접 입력하세요', _pvCurrentPallet);
+  if(v === null) return;
+  const n = parseInt(v, 10);
+  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  _pvCurrentPallet = n;
+  document.getElementById('pvPalletNum').textContent = _pvCurrentPallet;
+  const si = document.getElementById('pvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
 let _pvForceVerified = false; // ★ 2026-08-24 신규 — 지금 선택된 오더가 관리자 강제확정으로 완료된 것인지
 let pvCurrentWorker = null;
 let _pvAudioCtx = null;
@@ -6875,8 +6923,45 @@ let _psvState = null;
 // ★ 2026-09-04 신규 — pv와 동일한 박스/팔렛 배정.
 let _psvCurrentBox = 1;
 let _psvCurrentPallet = 1;
-function stepPsvBox(delta){ _psvCurrentBox = Math.max(1, _psvCurrentBox + delta); document.getElementById('psvBoxNum').textContent = _psvCurrentBox; }
-function stepPsvPallet(delta){ _psvCurrentPallet = Math.max(1, _psvCurrentPallet + delta); document.getElementById('psvPalletNum').textContent = _psvCurrentPallet; }
+let __psvStepLock = 0;
+function stepPsvBox(delta){
+  const now = Date.now();
+  if(now - __psvStepLock < 400) return;
+  __psvStepLock = now;
+  _psvCurrentBox = Math.max(1, _psvCurrentBox + delta);
+  document.getElementById('psvBoxNum').textContent = _psvCurrentBox;
+  const si = document.getElementById('psvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+function stepPsvPallet(delta){
+  const now = Date.now();
+  if(now - __psvStepLock < 400) return;
+  __psvStepLock = now;
+  _psvCurrentPallet = Math.max(1, _psvCurrentPallet + delta);
+  document.getElementById('psvPalletNum').textContent = _psvCurrentPallet;
+  const si = document.getElementById('psvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+function editPsvBox(){
+  const v = prompt('박스 번호를 직접 입력하세요', _psvCurrentBox);
+  if(v === null) return;
+  const n = parseInt(v, 10);
+  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  _psvCurrentBox = n;
+  document.getElementById('psvBoxNum').textContent = _psvCurrentBox;
+  const si = document.getElementById('psvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
+function editPsvPallet(){
+  const v = prompt('팔렛 번호를 직접 입력하세요', _psvCurrentPallet);
+  if(v === null) return;
+  const n = parseInt(v, 10);
+  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  _psvCurrentPallet = n;
+  document.getElementById('psvPalletNum').textContent = _psvCurrentPallet;
+  const si = document.getElementById('psvScanInput');
+  if(si) setTimeout(() => si.focus(), 50);
+}
 let _psvForceVerified = false;
 
 function populatePsvWorkerSelect(){
