@@ -1711,6 +1711,94 @@ function undoPackScan(data) {
  * 항상 일관되게 100%로 보임 — 강제확정이 "숫자만 속이는 것"이 아니라 "관리자가
  * 책임지고 나머지를 한 번에 확인 처리하는 것"이 되도록 의미 자체를 정확하게 함.
  * 입력: { batchId, invoice, worker } */
+// ★ 2026-09-08 신규(현장 요청) — 이미 스캔 완료된 상품의 박스/팔렛 번호를
+//   나중에 바로잡을 수 있는 기능. "현재 박스" 스텝퍼는 앞으로 스캔할 것에만
+//   적용되고, 이미 기록된 스캔 건은 고칠 방법이 전혀 없었음. 같은 SKU는
+//   절대 여러 박스에 나뉘지 않는다는 원칙이라, 이 바코드의 활성 pass 기록을
+//   찾아서 Box/Pallet 값만 덮어씀(수량·다른 값은 그대로).
+function updatePackScanBoxPallet(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    if (!data.batchId || !data.invoice || !data.barcode) return { ok: false, error: '필요한 값이 없습니다' };
+    const round = Number(data.round) || 2;
+    const box = data.box !== undefined && data.box !== null ? String(data.box) : '';
+    const pallet = data.pallet !== undefined && data.pallet !== null ? String(data.pallet) : '';
+    const normBc = normBarcode_(String(data.barcode || ''));
+
+    const pl = packscanSheetSafe_();
+    const plLast = pl.getLastRow();
+    if (plLast < 2) return { ok: false, error: '스캔 기록이 없습니다' };
+
+    const rows = pl.getRange(2, 1, plLast - 1, 13).getValues();
+    let updated = 0;
+    rows.forEach((r, i) => {
+      if (String(r[0]) !== String(data.batchId)) return;
+      if (String(r[6]) !== String(data.invoice)) return;
+      if ((Number(r[10]) || 2) !== round) return;
+      if (r[7] !== 'pass' || r[8] === 'undone') return;
+      if (normBarcode_(r[4]) !== normBc) return;
+      const rowNum = i + 2;
+      pl.getRange(rowNum, 12, 1, 2).setValues([[box, pallet]]);
+      updated++;
+    });
+
+    if (updated === 0) return { ok: false, error: '해당 상품의 스캔 기록을 찾지 못했습니다' };
+    bumpVersion_();
+    return { ok: true, updated: updated };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ★ 2026-09-08 신규(현장 요청) — 박스 하나에 여러 상품이 들어있을 때, 물건을
+//   통째로 다른 박스(또는 팔렛)로 옮겼다면 한 상품씩 일일이 고치는 건 너무
+//   번거로움. "이 박스에 담긴 전체 상품"을 한 번에 다른 번호로 옮기는 기능.
+//   mode: 'box' — fromBox의 모든 상품을 toBox로 이동(팔렛은 그대로 유지)
+//         'pallet' — fromPallet의 모든 상품(여러 박스 포함)을 toPallet으로 이동
+function moveBoxOrPallet(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    if (!data.batchId || !data.invoice || !data.mode || !data.fromValue || !data.toValue) {
+      return { ok: false, error: '필요한 값이 없습니다' };
+    }
+    const round = Number(data.round) || 2;
+    const mode = data.mode; // 'box' | 'pallet'
+    const fromValue = String(data.fromValue);
+    const toValue = String(data.toValue);
+    const targetCol = mode === 'pallet' ? 13 : 12; // Box=12, Pallet=13
+
+    const pl = packscanSheetSafe_();
+    const plLast = pl.getLastRow();
+    if (plLast < 2) return { ok: false, error: '스캔 기록이 없습니다' };
+
+    const rows = pl.getRange(2, 1, plLast - 1, 13).getValues();
+    let updated = 0;
+    rows.forEach((r, i) => {
+      if (String(r[0]) !== String(data.batchId)) return;
+      if (String(r[6]) !== String(data.invoice)) return;
+      if ((Number(r[10]) || 2) !== round) return;
+      if (r[7] !== 'pass' || r[8] === 'undone') return;
+      const rowVal = mode === 'pallet' ? String(r[12] || '') : String(r[11] || '');
+      if (rowVal !== fromValue) return;
+      const rowNum = i + 2;
+      pl.getRange(rowNum, targetCol, 1, 1).setValue(toValue);
+      updated++;
+    });
+
+    if (updated === 0) return { ok: false, error: (mode === 'pallet' ? '팔렛' : '박스') + ' ' + fromValue + '번에 담긴 상품을 찾지 못했습니다' };
+    bumpVersion_();
+    return { ok: true, updated: updated };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function forceCompletePackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
