@@ -7383,7 +7383,11 @@ function renderPsvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
+          l.boxBreakdown && l.boxBreakdown.length > 1
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개</span>`).join('')
+            : (l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : '')
+        }</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
@@ -7733,7 +7737,11 @@ function renderPvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : ''}</div>
+        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
+          l.boxBreakdown && l.boxBreakdown.length > 1
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개</span>`).join('')
+            : (l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : '')
+        }</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
