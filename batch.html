@@ -493,6 +493,10 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-lastscan-row2{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:4px; padding-left:34px; min-width:0;}
 .pv-lastscan-sub{flex:1; min-width:0; font-size:11.5px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .pv-lastscan-qty{font-family:var(--mono); font-size:18px; font-weight:800; color:#C4B5FD; flex-shrink:0; white-space:nowrap;}
+/* ★ 2026-09-09 신규(현장 요청) — 스캔 결과 카드(성공/중복 모두)에서 바로 그
+   자리에서 이슈를 등록할 수 있는 버튼. 예전엔 이슈 등록이 상품 목록에서
+   그 줄을 찾아 눌러야만 가능했는데, 스캔한 그 자리에서 바로 되도록 함. */
+.pv-msg-action-btn{width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1.5px solid #F59E0B; background:rgba(245,158,11,0.15); color:#FCD34D; font-weight:800; font-size:13px; cursor:pointer;}
 .pv-msg.pv-lastscan.bad .pv-lastscan-qty{color:#FF8A8A;}
 /* 내용이 똑같아도(예: 같은 상품 연속 스캔) "방금 갱신됐다"는 걸 알 수 있게 매번 살짝 튀는 애니메이션 */
 .pv-msg.pv-lastscan.pulse{animation: pvLastScanPulse 0.35s ease;}
@@ -1260,6 +1264,7 @@ select option:disabled{color:var(--text-dim2);}
             <span class="pv-lastscan-sub" id="ssMsgSub"></span>
             <span class="pv-lastscan-qty" id="ssMsgQty"></span>
           </div>
+          <button class="pv-msg-action-btn" id="ssMsgActionBtn" style="display:none;" onclick="__ssMsgActionHandler && __ssMsgActionHandler()">⚠ 이슈 등록</button>
         </div>
         <div class="pv-progress">
           <span class="pv-progress-left"><span>SKU</span><span class="n" id="ssProgressSku">0 / 0</span></span>
@@ -1398,6 +1403,7 @@ select option:disabled{color:var(--text-dim2);}
             <span class="pv-lastscan-sub" id="pvMsgSub"></span>
             <span class="pv-lastscan-qty" id="pvMsgQty"></span>
           </div>
+          <button class="pv-msg-action-btn" id="pvMsgActionBtn" style="display:none;" onclick="__pvMsgActionHandler && __pvMsgActionHandler()">⚠ 이슈 등록</button>
         </div>
         <div class="pv-progress">
           <span class="pv-progress-left"><span>SKU</span><span class="n" id="pvProgressSku">0 / 0</span></span>
@@ -1470,6 +1476,7 @@ select option:disabled{color:var(--text-dim2);}
             <span class="pv-lastscan-sub" id="psvMsgSub"></span>
             <span class="pv-lastscan-qty" id="psvMsgQty"></span>
           </div>
+          <button class="pv-msg-action-btn" id="psvMsgActionBtn" style="display:none;" onclick="__psvMsgActionHandler && __psvMsgActionHandler()">⚠ 이슈 등록</button>
         </div>
         <div class="pv-progress">
           <span class="pv-progress-left"><span>SKU</span><span class="n" id="psvProgressSku">0 / 0</span></span>
@@ -1581,6 +1588,36 @@ select option:disabled{color:var(--text-dim2);}
     <div class="modal-actions">
       <button class="btn btn-ghost" data-modal-close>닫기</button>
       <button class="btn btn-primary" id="psvIssueSubmitBtn" onclick="submitPsvIssue()">이슈 등록</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-09-09 신규(현장 지적) — 총량(pv) 2차 검수엔 이슈 등록 기능이 아예
+     없었음(단독엔 있었는데 빠져있었음). psv용 모달과 완전히 동일한 구조로 신규 추가. -->
+<div class="modal-bg" id="pvIssueModal">
+  <div class="modal">
+    <h3>이슈 관리 (2차 검수 · 총량)</h3>
+    <div id="pvIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
+    <div id="pvExistingIssuesWrap" style="display:none; margin-bottom:16px;">
+      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이미 등록된 이슈 (잘못 등록했으면 취소할 수 있습니다)</label>
+      <div id="pvExistingIssuesList" style="margin-top:8px;"></div>
+    </div>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">새 이슈 등록</label>
+    <div class="form-field" style="margin-top:8px;">
+      <label>사유</label>
+      <select id="pvIssueReason"></select>
+    </div>
+    <div class="form-field">
+      <label>수량</label>
+      <input type="number" id="pvIssueQty" min="1" value="1">
+    </div>
+    <div class="form-field">
+      <label>메모 (선택)</label>
+      <input type="text" id="pvIssueNote" placeholder="추가 설명이 필요하면 입력">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-modal-close>닫기</button>
+      <button class="btn btn-primary" id="pvIssueSubmitBtn" onclick="submitPvIssue()">이슈 등록</button>
     </div>
   </div>
 </div>
@@ -6775,6 +6812,77 @@ async function submitPsvIssue(){
   }
 }
 
+// ★ 2026-09-09 신규(현장 지적) — 총량(pv) 2차 검수엔 이슈 등록 기능이 아예
+//   없었음(위 psv용과 완전히 동일한 구조로 신규 추가). state.batchId/
+//   state.custFiles/currentPvWorker/showPvMsg/refreshPvState를 씀.
+let _pvIssueTarget = null;
+async function openPvIssueModal(sku, barcode, name){
+  if(!_pvInvoice){ return; }
+  _pvIssueTarget = { sku, barcode, name };
+  document.getElementById('pvIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
+  const reasonSel = document.getElementById('pvIssueReason');
+  reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
+  document.getElementById('pvIssueQty').value = 1;
+  document.getElementById('pvIssueNote').value = '';
+  document.getElementById('pvIssueModal').classList.add('open');
+  await refreshPvExistingIssues();
+}
+async function refreshPvExistingIssues(){
+  const wrap = document.getElementById('pvExistingIssuesWrap');
+  const list = document.getElementById('pvExistingIssuesList');
+  if(!_pvIssueTarget || !_pvInvoice){ wrap.style.display = 'none'; return; }
+  list.innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  wrap.style.display = 'block';
+  const res = await gasQueryWithRetry('getInvoiceIssues', { batchId: state.batchId, invoice: _pvInvoice });
+  if(!res.ok){ list.innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`; return; }
+  const mine = (res.issues || []).filter(iss => normBarcode(iss.barcode) === normBarcode(_pvIssueTarget.barcode));
+  if(!mine.length){ wrap.style.display = 'none'; return; }
+  const reasonLabel = v => (ISSUE_REASONS.find(r => r.v === v) || {}).label || v;
+  list.innerHTML = mine.map(iss => `
+    <div class="pv-line" style="margin-bottom:6px;">
+      <div class="pv-line-info">
+        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty}개</div>
+        <div class="pv-line-meta">${iss.time} · ${iss.worker || ''}${iss.note ? ` · ${iss.note}` : ''}</div>
+      </div>
+      <div class="pv-line-actions">
+        <button class="btn btn-ghost btn-sm" onclick="undoPvExistingIssue('${iss.issueId}')">취소</button>
+      </div>
+    </div>`).join('');
+}
+async function undoPvExistingIssue(issueId){
+  if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어, 완료 처리됐던 상품이 미완료로 돌아갈 수 있습니다.')) return;
+  const res = await gasCallWithRetry('undoIssue', { issueId });
+  if(!res.ok){ alert('취소 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  toast('이슈가 취소되었습니다', 'success');
+  await refreshPvExistingIssues();
+  await refreshPvState();
+}
+async function submitPvIssue(){
+  if(!_pvIssueTarget || !_pvInvoice) return;
+  const worker = currentPvWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  const reason = document.getElementById('pvIssueReason').value;
+  const qty = Number(document.getElementById('pvIssueQty').value) || 0;
+  if(qty <= 0){ alert('수량을 1 이상 입력하세요'); return; }
+  const note = document.getElementById('pvIssueNote').value.trim();
+  const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
+  const btn = document.getElementById('pvIssueSubmitBtn');
+  btn.disabled = true; btn.textContent = '등록 중...';
+  const res = await gasCallWithRetry('logIssue', {
+    batchId: state.batchId, invoice: _pvInvoice, worker,
+    barcode: _pvIssueTarget.barcode, sku: _pvIssueTarget.sku, name: _pvIssueTarget.name,
+    customer: cf ? cf.meta.customer : '', reason, qty, note
+  });
+  btn.disabled = false; btn.textContent = '이슈 등록';
+  if(res && res.ok){
+    closeAllModals();
+    showPvMsg(`⚠ 이슈 등록됨 — ${_pvIssueTarget.name || _pvIssueTarget.sku} ${qty}개`, 'ok');
+    await refreshPvState();
+  } else {
+    alert('이슈 등록 실패: ' + ((res && res.error) || '알 수 없는 오류'));
+  }
+}
+
 
 // ★ 2026-09-01 신규 — submitPvScan과 동일한 이유·동일한 구조(직렬 큐 + 즉시 피드백).
 let _ssScanQueue = [];
@@ -6886,6 +6994,7 @@ async function doSsScanOne(barcode){
         title: res.name || res.sku || barcode,
         sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ` · ${qty}개 입력됨`),
         qty: `${packed}/${required}`,
+        action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
       });
       refreshSsState(); // 백그라운드
       return;
@@ -6897,10 +7006,13 @@ async function doSsScanOne(barcode){
       const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
       showSsMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
     } else if(res.result === 'over'){
+      // ★ 2026-09-09 신규(현장 지적) — 중복 스캔 시 제품명·바코드가 하나도
+      //   안 보이던 문제 + 그 자리에서 바로 이슈 등록할 방법이 없던 문제.
       showSsMsg({
         kind:'bad', icon:'⚠',
-        title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
-        sub: '중복 스캔입니다',
+        title: res.name || res.sku || barcode,
+        sub: `바코드 ${barcode} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
+        action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
       });
     }
     await refreshSsState();
@@ -6934,6 +7046,7 @@ async function doSsScanOne(barcode){
       title: res.name || res.sku || barcode,
       sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
+      action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
     });
     refreshSsState();
     return;
@@ -6945,8 +7058,9 @@ async function doSsScanOne(barcode){
     playScanResultSound(false);
     showSsMsg({
       kind:'bad', icon:'⚠',
-      title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
-      sub: '중복 스캔입니다',
+      title: res.name || res.sku || barcode,
+      sub: `바코드 ${barcode} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
+      action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
   await refreshSsState();
@@ -6972,16 +7086,29 @@ document.getElementById('ssScanInput').addEventListener('input', function(){
 // ★ 2026-09-01 재설계 — showPvMsg/showPsvMsg와 동일한 이유·동일한 구조로 변경.
 function showSsMsg(msgOrOpts, kind){
   const el = document.getElementById('ssMsg');
-  let icon, title, sub, qty, k;
+  let icon, title, sub, qty, k, action;
   if(typeof msgOrOpts === 'string'){
-    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind;
+    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind; action = null;
   } else {
-    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind;
+    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind; action = msgOrOpts.action || null;
   }
   document.getElementById('ssMsgIcon').textContent = icon;
   document.getElementById('ssMsgTitle').textContent = title;
   document.getElementById('ssMsgSub').textContent = sub;
   document.getElementById('ssMsgQty').textContent = qty;
+  // ★ 2026-09-09 신규(현장 요청) — 스캔 결과 그 자리에서 바로 이슈 등록할 수
+  //   있는 버튼. action이 넘어오면 보이고, 그 클릭 핸들러를 전역에 걸어둠.
+  const actionBtn = document.getElementById('ssMsgActionBtn');
+  if(actionBtn){
+    if(action){
+      actionBtn.textContent = action.label || '⚠ 이슈 등록';
+      actionBtn.style.display = 'block';
+      window.__ssMsgActionHandler = action.onClick;
+    } else {
+      actionBtn.style.display = 'none';
+      window.__ssMsgActionHandler = null;
+    }
+  }
   el.className = 'pv-msg pv-lastscan ' + k;
   el.style.display = 'block';
   el.classList.remove('pulse');
@@ -7455,6 +7582,7 @@ async function doPsvScanOne(barcode){
       title: res.name || res.sku || barcode,
       sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
+      action: { label: '⚠ 이슈 등록', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
     refreshPsvState(); // 백그라운드
     return;
@@ -7473,8 +7601,9 @@ async function doPsvScanOne(barcode){
       : '';
     showPsvMsg({
       kind:'bad', icon:'⚠',
-      title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
-      sub: boxSub || '중복 스캔입니다',
+      title: res.name || res.sku || barcode,
+      sub: `바코드 ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
+      action: { label: '⚠ 이슈 등록', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
   await refreshPsvState();
@@ -7496,16 +7625,29 @@ document.getElementById('psvScanInput').addEventListener('input', function(){
 // ★ 2026-09-01 재설계 — showPvMsg와 동일한 이유·동일한 구조로 변경.
 function showPsvMsg(msgOrOpts, kind){
   const el = document.getElementById('psvMsg');
-  let icon, title, sub, qty, k;
+  let icon, title, sub, qty, k, action;
   if(typeof msgOrOpts === 'string'){
-    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind;
+    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind; action = null;
   } else {
-    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind;
+    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind; action = msgOrOpts.action || null;
   }
   document.getElementById('psvMsgIcon').textContent = icon;
   document.getElementById('psvMsgTitle').textContent = title;
   document.getElementById('psvMsgSub').textContent = sub;
   document.getElementById('psvMsgQty').textContent = qty;
+  // ★ 2026-09-09 신규(현장 요청) — 스캔 결과 그 자리에서 바로 이슈 등록할 수
+  //   있는 버튼. action이 넘어오면 보이고, 그 클릭 핸들러를 전역에 걸어둠.
+  const actionBtn = document.getElementById('psvMsgActionBtn');
+  if(actionBtn){
+    if(action){
+      actionBtn.textContent = action.label || '⚠ 이슈 등록';
+      actionBtn.style.display = 'block';
+      window.__psvMsgActionHandler = action.onClick;
+    } else {
+      actionBtn.style.display = 'none';
+      window.__psvMsgActionHandler = null;
+    }
+  }
   el.className = 'pv-msg pv-lastscan ' + k;
   el.style.display = 'block';
   el.classList.remove('pulse');
@@ -7758,6 +7900,7 @@ function renderPvBody(){
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
+        <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">⚠ 이슈</button>
       </div>
     </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 
@@ -7873,6 +8016,7 @@ async function doPvScanOne(barcode){
       title: res.name || res.sku || barcode,
       sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
+      action: { label: '⚠ 이슈 등록', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
     refreshPvState(); // 백그라운드 — 목록/진행률만 뒤이어 갱신, 카드 표시를 기다리게 하지 않음
     return;
@@ -7889,8 +8033,9 @@ async function doPvScanOne(barcode){
       : '';
     showPvMsg({
       kind:'bad', icon:'⚠',
-      title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
-      sub: boxSub || '중복 스캔입니다',
+      title: res.name || res.sku || barcode,
+      sub: `바코드 ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
+      action: { label: '⚠ 이슈 등록', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
   await refreshPvState();
@@ -7929,16 +8074,29 @@ function flashPv(kind){
 //   수량까지 풍부하게 표시함.
 function showPvMsg(msgOrOpts, kind){
   const el = document.getElementById('pvMsg');
-  let icon, title, sub, qty, k;
+  let icon, title, sub, qty, k, action;
   if(typeof msgOrOpts === 'string'){
-    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind;
+    icon = kind === 'ok' ? '✅' : '⚠'; title = msgOrOpts; sub = ''; qty = ''; k = kind; action = null;
   } else {
-    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind;
+    icon = msgOrOpts.icon || ''; title = msgOrOpts.title || ''; sub = msgOrOpts.sub || ''; qty = msgOrOpts.qty || ''; k = msgOrOpts.kind; action = msgOrOpts.action || null;
   }
   document.getElementById('pvMsgIcon').textContent = icon;
   document.getElementById('pvMsgTitle').textContent = title;
   document.getElementById('pvMsgSub').textContent = sub;
   document.getElementById('pvMsgQty').textContent = qty;
+  // ★ 2026-09-09 신규(현장 요청) — 스캔 결과 그 자리에서 바로 이슈 등록할 수
+  //   있는 버튼. action이 넘어오면 보이고, 그 클릭 핸들러를 전역에 걸어둠.
+  const actionBtn = document.getElementById('pvMsgActionBtn');
+  if(actionBtn){
+    if(action){
+      actionBtn.textContent = action.label || '⚠ 이슈 등록';
+      actionBtn.style.display = 'block';
+      window.__pvMsgActionHandler = action.onClick;
+    } else {
+      actionBtn.style.display = 'none';
+      window.__pvMsgActionHandler = null;
+    }
+  }
   el.className = 'pv-msg pv-lastscan ' + k;
   el.style.display = 'block';
   // 내용이 이전과 똑같아도(같은 상품 연속 스캔 등) "방금 갱신됐다"는 걸
