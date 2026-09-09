@@ -348,15 +348,16 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
    OS가 통째로 자기 스타일로 그려버려서(큰 글씨·줄바꿈·라디오버튼) CSS로 손댈 수
    없었음. 오더 선택 목록을 직접 그리는 커스텀 드롭다운으로 교체 — 인보이스 번호는
    크고 굵게, 고객명·SKU는 작고 흐리게, 한 줄로 정리. */
-.pv-opt-trigger{margin-top:8px; width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px; text-align:left; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.pv-opt-trigger{margin-top:8px; width:100%; box-sizing:border-box; padding:14px 14px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:16px; text-align:left; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:8px;}
 .pv-opt-trigger .ph{color:var(--text-dim);}
 .pv-opt-list{margin-top:6px; max-height:280px; overflow-y:auto; border:1.5px solid var(--border2); border-radius:8px; background:var(--surface2);}
-.pv-opt-search{position:sticky; top:0; z-index:2; width:100%; box-sizing:border-box; padding:10px 12px; border:none; border-bottom:1.5px solid var(--border2); background:var(--surface3); color:var(--text); font-size:14px; outline:none;}
+.pv-opt-search{position:sticky; top:0; z-index:2; width:100%; box-sizing:border-box; padding:14px 14px; border:none; border-bottom:2px solid #8B5CF6; background:#241B3D; color:#fff; font-size:16px; font-weight:600; outline:none;}
+.pv-opt-search::placeholder{color:#B39DDB; font-weight:500;}
 .pv-opt-row{display:flex; align-items:baseline; gap:8px; padding:11px 12px; border-bottom:1px solid var(--border2); cursor:pointer; overflow:hidden;}
 .pv-opt-row:last-child{border-bottom:none;}
 .pv-opt-row:hover, .pv-opt-row:active{background:var(--surface3);}
 .pv-opt-row .inv{font-size:15px; font-weight:800; white-space:nowrap; flex-shrink:0;}
-.pv-opt-row .sub{font-size:12px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.pv-opt-row .sub{font-size:14px; font-weight:600; color:#D5DCEC; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .pv-opt-row .badge{font-size:11px; font-weight:700; color:#8B5CF6; white-space:nowrap; flex-shrink:0;}
 .pv-opt-empty{padding:14px 12px; font-size:13px; color:var(--text-dim); text-align:center;}
 .pv-invoice-picker select{width:100%; padding:12px 14px; background:var(--surface2); border:2px solid var(--purple); border-radius:10px; color:var(--text); font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer;}
@@ -372,6 +373,12 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-boxpallet-btn{width:26px; height:26px; border-radius:6px; border:1px solid var(--border2); background:transparent; color:var(--text); font-size:15px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
 .pv-boxpallet-btn:hover{border-color:#8B5CF6; color:#8B5CF6;}
 .pv-boxpallet-hint{font-size:11px; color:var(--text-dim); margin-top:6px;}
+/* ★ 2026-09-08 신규(현장 요청) — 스캔 디바이스 화면 공간이 부족해서, 세로로
+   쌓이던 버튼 2개를 한 줄에 나란히 배치. 핵심 동작(박스완료 등)은 넓게,
+   보조 동작(기준전환 등)은 좁게. */
+.pv-btnrow{display:flex; gap:8px; margin-top:8px;}
+.pv-btnrow .btn{margin-top:0 !important;}
+.pv-btn-big{padding:14px 10px !important; font-size:15px !important; font-weight:800 !important;}
 .pv-worker-row select{flex:1 1 160px; min-width:120px;}
 .pv-worker-row input[type="text"]{flex:1 1 160px; min-width:120px;}
 .pv-worker-row label{font-size:11px; color:var(--text-dim); font-weight:700; white-space:nowrap;}
@@ -844,7 +851,9 @@ select option:disabled{color:var(--text-dim2);}
 ═══════════════════════════════════════════════════════════ */
 @media (max-width:768px){
   main{padding:14px;}
-  .sim-bar{padding:5px 10px; font-size:9.5px; flex-wrap:wrap; gap:2px;}
+  .sim-bar{padding:5px 10px; font-size:9.5px; flex-wrap:nowrap; gap:6px; overflow-x:hidden;}
+  #simBarText{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  #simDate{white-space:nowrap; flex-shrink:0;}
   .topbar{padding:10px 14px; flex-wrap:wrap; gap:8px;}
   .topbar-right{gap:8px; flex-wrap:wrap;}
   .logo{width:28px; height:28px; font-size:11px;}
@@ -1372,12 +1381,16 @@ select option:disabled{color:var(--text-dim2);}
             </div>
           </div>
         </div>
-        <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-        <button type="button" class="btn btn-primary btn-sm" id="pvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="pvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
-        <button type="button" class="btn btn-ghost btn-sm" style="width:100%; margin-top:6px; font-size:11px;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
+        <div class="pv-btnrow">
+          <button type="button" class="btn btn-primary pv-btn-big" style="flex:2;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
+          <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦 배송 방법 전환</button>
+        </div>
+        <button type="button" class="btn btn-primary pv-btn-big" id="pvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="triggerPrintPalletLabelPv()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
+        <div class="pv-btnrow">
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPv()">🏷 라벨 인쇄 (4×6)</button>
+        </div>
       </div>
 
       <div class="pv-scan-panel" id="pvScanPanel">
@@ -1452,12 +1465,16 @@ select option:disabled{color:var(--text-dim2);}
             </div>
           </div>
         </div>
-        <button type="button" class="btn btn-primary btn-sm" style="width:100%; margin-top:8px;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-        <button type="button" class="btn btn-primary btn-sm" id="psvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="psvModeToggleBtn" style="width:100%; margin-top:6px; font-size:11px;" onclick="togglePsvPalletMode()">📦 배송방법이 바뀌었나요? 박스 기준으로 보기</button>
-        <button type="button" class="btn btn-ghost btn-sm" style="width:100%; margin-top:6px; font-size:11px;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
+        <div class="pv-btnrow">
+          <button type="button" class="btn btn-primary pv-btn-big" style="flex:2;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
+          <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦 배송 방법 전환</button>
+        </div>
+        <button type="button" class="btn btn-primary pv-btn-big" id="psvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
         <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;" onclick="triggerPrintPalletLabelPsv()">🏷 박스·팔렛 라벨 인쇄 (4×6)</button>
+        <div class="pv-btnrow">
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 라벨 인쇄 (4×6)</button>
+        </div>
       </div>
 
       <div class="pv-scan-panel" id="psvScanPanel">
@@ -1770,12 +1787,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if(!bar || !txt) return;
   if(GAS_READY && API_READY){
     bar.style.background = 'linear-gradient(90deg,rgba(16,185,129,0.18),rgba(16,185,129,0.08))';
-    txt.innerHTML = '🟢 <b>LIVE</b> · Apps Script + PDF 파싱 서버 연결됨 · 데이터가 스프레드시트에 저장됩니다';
+    txt.innerHTML = '🟢 <b>LIVE</b> · 실시간 저장 중';
   } else if(GAS_READY && !API_READY){
     bar.style.background = 'linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08))';
-    txt.innerHTML = '🟡 <b>부분연결</b> · Apps Script는 연결됨(데이터 저장 O) · PDF 파싱 서버 미연결(데모 데이터만 사용 가능)';
+    txt.innerHTML = '🟡 <b>부분연결</b> · PDF 서버 미연결';
   } else {
-    txt.innerHTML = '🧪 <b>SIMULATION</b> · v4.0 · 완결형 시연 · 데이터는 브라우저 세션에만 저장됩니다 (CONFIG 미설정)';
+    txt.innerHTML = '🧪 <b>SIMULATION</b> 모드';
   }
 });
 
@@ -7276,7 +7293,7 @@ async function populatePsvInvoiceSelect(){
   const psvRows = candidates.map(o => ({
     value: o.invoice,
     invHtml: o.invoice,
-    subHtml: (o.customer||'').replace(/</g,'&lt;'),
+    subHtml: `${o.shipVia ? `<b style="color:#3EB8F5;">[${o.shipVia}]</b> ` : ''}${(o.customer||'').replace(/</g,'&lt;')}`,
     badgeHtml: o.packVerified ? '<span class="badge">🟣 검증완료</span>' : '',
   }));
   renderTriggerOptList('psvInvoiceSelect', psvRows, '— 오더를 선택하세요 —');
@@ -7364,8 +7381,8 @@ function renderPsvBody(){
     if(pb) pb.style.display = isTk ? 'block' : 'none';
     const toggleBtn = document.getElementById('psvModeToggleBtn');
     if(toggleBtn) toggleBtn.textContent = isTk
-      ? (_psvPalletModeOverride !== null ? '📦 박스 기준으로 수동 전환 (원래는 팔렛)' : '📦 배송방법이 바뀌었나요? 박스 기준으로 보기')
-      : (_psvPalletModeOverride !== null ? '🚚 팔렛 기준으로 수동 전환 (원래는 박스)' : '🚚 배송방법이 바뀌었나요? 팔렛 기준으로 보기');
+      ? (_psvPalletModeOverride !== null ? '📦 박스로 전환됨' : '📦 박스 기준 전환')
+      : (_psvPalletModeOverride !== null ? '🚚 팔렛으로 전환됨' : '🚚 팔렛 기준 전환');
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('psvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
@@ -7583,7 +7600,7 @@ function populatePvInvoiceSelect(){
     if(!inv) return;
     if(!state.takenOutInvoices.has(inv)) return; // ★ 파랑(패킹존 이동완료) 상태만 대상 — 그 전 단계는 검증 대상 아님
     const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === inv);
-    candidates.push({ invoice: inv, slotNum: s.num, customer: cf ? cf.meta.customer : '', verified: state.packVerifiedInvoices.has(inv) });
+    candidates.push({ invoice: inv, slotNum: s.num, customer: cf ? cf.meta.customer : '', verified: state.packVerifiedInvoices.has(inv), shipVia: cf ? cf.meta.ship_via : '' });
   });
   candidates.sort((a,b) => Number(a.slotNum) - Number(b.slotNum));
   if(candidates.length === 0){
@@ -7604,7 +7621,7 @@ function populatePvInvoiceSelect(){
   const pvRows = candidates.map(c => ({
     value: c.invoice,
     invHtml: c.invoice,
-    subHtml: `SLOT ${c.slotNum} · ${(c.customer||'').replace(/</g,'&lt;')}`,
+    subHtml: `SLOT ${c.slotNum} · ${c.shipVia ? `<b style="color:#3EB8F5;">[${c.shipVia}]</b> ` : ''}${(c.customer||'').replace(/</g,'&lt;')}`,
     badgeHtml: c.verified ? '<span class="badge">🟣 검증완료</span>' : '',
   }));
   renderTriggerOptList('pvInvoiceSelect', pvRows, '— 오더를 선택하세요 —');
@@ -7717,8 +7734,8 @@ function renderPvBody(){
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
     const toggleBtn = document.getElementById('pvModeToggleBtn');
     if(toggleBtn) toggleBtn.textContent = isTk
-      ? (_pvPalletModeOverride !== null ? '📦 박스 기준으로 수동 전환 (원래는 팔렛)' : '📦 배송방법이 바뀌었나요? 박스 기준으로 보기')
-      : (_pvPalletModeOverride !== null ? '🚚 팔렛 기준으로 수동 전환 (원래는 박스)' : '🚚 배송방법이 바뀌었나요? 팔렛 기준으로 보기');
+      ? (_pvPalletModeOverride !== null ? '📦 박스로 전환됨' : '📦 박스 기준 전환')
+      : (_pvPalletModeOverride !== null ? '🚚 팔렛으로 전환됨' : '🚚 팔렛 기준 전환');
     if(pb) pb.style.display = isTk ? 'block' : 'none';
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
@@ -8139,7 +8156,7 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
     .label-brand{ font-size:30pt; font-weight:800; letter-spacing:0.03em; white-space:nowrap; }
     .label-pallet{ font-size:65pt; font-weight:900; line-height:1; letter-spacing:-0.01em; white-space:nowrap; }
     .label-customer{ font-size:40pt; font-weight:700; line-height:1.15; white-space:nowrap; }
-    .label-footer{ position:absolute; bottom:0.12in; left:0; right:0; font-size:7pt; color:#888; }
+    .label-footer{ position:absolute; bottom:0.15in; left:0; right:0; font-size:13pt; font-weight:600; color:#333; }
   </style></head><body>
     ${pagesHtml}
     <script>
