@@ -1725,6 +1725,13 @@ function updatePackScanBoxPallet(data) {
     const box = data.box !== undefined && data.box !== null ? String(data.box) : '';
     const pallet = data.pallet !== undefined && data.pallet !== null ? String(data.pallet) : '';
     const normBc = normBarcode_(String(data.barcode || ''));
+    // ★ 2026-09-08 신규(현장 지적) — 한 SKU가 여러 박스로 나뉜 뒤에는 "이 조각만"
+    //   수정하고 싶을 때가 있음(예: Box2의 30개만 Box3으로). fromBox/fromPallet을
+    //   넘기면 그 박스·팔렛에 있는 기록만 골라서 바꾸고, 안 넘기면(보통의
+    //   나뉘지 않은 경우) 예전처럼 이 바코드의 모든 기록을 다 바꿈.
+    const hasFromFilter = data.fromBox !== undefined && data.fromBox !== null && data.fromBox !== '';
+    const fromBox = hasFromFilter ? String(data.fromBox) : null;
+    const fromPallet = data.fromPallet !== undefined && data.fromPallet !== null ? String(data.fromPallet) : '';
 
     const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
@@ -1738,6 +1745,10 @@ function updatePackScanBoxPallet(data) {
       if ((Number(r[10]) || 2) !== round) return;
       if (r[7] !== 'pass' || r[8] === 'undone') return;
       if (normBarcode_(r[4]) !== normBc) return;
+      if (fromBox !== null) {
+        if (String(r[11] || '') !== fromBox) return;
+        if (fromPallet && String(r[12] || '') !== fromPallet) return;
+      }
       const rowNum = i + 2;
       pl.getRange(rowNum, 12, 1, 2).setValues([[box, pallet]]);
       updated++;
@@ -1773,6 +1784,13 @@ function splitScannedItemBox(data) {
     const toBox = data.toBox !== undefined && data.toBox !== null ? String(data.toBox) : '';
     const toPallet = data.toPallet !== undefined && data.toPallet !== null ? String(data.toPallet) : '';
     const normBc = normBarcode_(String(data.barcode || ''));
+    // ★ 2026-09-08 신규 — updatePackScanBoxPallet과 동일한 이유. 이미 여러
+    //   박스로 나뉜 상품에서 "특정 박스 조각"만 골라서 추가로 나눠야 할 때,
+    //   fromBox/fromPallet을 넘기면 그 박스에서만 떼어냄(안 넘기면 예전처럼
+    //   아무 기록에서나 순서대로 떼어냄 — 나뉜 적 없는 보통의 경우엔 문제 없음).
+    const hasFromFilter = data.fromBox !== undefined && data.fromBox !== null && data.fromBox !== '';
+    const fromBox = hasFromFilter ? String(data.fromBox) : null;
+    const fromPallet = data.fromPallet !== undefined && data.fromPallet !== null ? String(data.fromPallet) : '';
 
     const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
@@ -1789,6 +1807,10 @@ function splitScannedItemBox(data) {
       if ((Number(r[10]) || 2) !== round) continue;
       if (r[7] !== 'pass' || r[8] === 'undone') continue;
       if (normBarcode_(r[4]) !== normBc) continue;
+      if (fromBox !== null) {
+        if (String(r[11] || '') !== fromBox) continue;
+        if (fromPallet && String(r[12] || '') !== fromPallet) continue;
+      }
       const rowNum = i + 2;
       const curQty = Number(r[9]) || 0;
       if (curQty <= 0) continue;
