@@ -1583,16 +1583,26 @@ function logPackScan(data) {
 
     // 이미 이 바코드로 채운 수량(같은 배치+인보이스, pass만, undone 제외)
     // ★ 이 값은 스캔마다 반드시 바뀌므로 절대 캐싱하지 않고 항상 최신으로 읽음.
+    // ★ 2026-09-09 신규(현장 질문) — 중복 스캔(이미 확인 완료된 상품을 또
+    //   스캔)했을 때, "이거 몇 번 박스에 넣었더라?" 확인 용도로도 쓸 수
+    //   있도록, 기존에 기록된 박스/팔렛 정보도 같이 모아둠(분할된 경우 여러 개).
     const plLast = pl.getLastRow();
     let already = 0;
+    const existingBoxGroups = {};
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
+      pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
         if (String(r[0]) !== String(data.batchId)) return;
         if (String(r[6]) !== String(data.invoice)) return;
         if (r[7] !== 'pass' || r[8] === 'undone') return;
         if (normBarcode_(r[4]) !== normBc) return;
         if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
         already += Number(r[9]) || 0;
+        const rBox = String(r[11] || ''), rPallet = String(r[12] || '');
+        if (rBox || rPallet) {
+          const bk = rBox + '|' + rPallet;
+          if (!existingBoxGroups[bk]) existingBoxGroups[bk] = { box: rBox, pallet: rPallet, qty: 0 };
+          existingBoxGroups[bk].qty += Number(r[9]) || 0;
+        }
       });
     }
     const totalReq = matchLines.reduce((a, l) => a + l.reqQty, 0);
@@ -1627,6 +1637,7 @@ function logPackScan(data) {
       return {
         ok: true, result: 'over', note: note, packScanId: packScanId0, sku: sku, name: name,
         filled: 0, packed: already, required: effectiveReq,
+        existingBoxes: Object.values(existingBoxGroups), // ★ 2026-09-09 신규 — 중복 스캔 시 "이미 몇 번 박스/팔렛에 있는지" 알려줌
       };
     }
 
