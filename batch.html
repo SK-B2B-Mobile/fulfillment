@@ -502,6 +502,13 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-msg.pv-lastscan.pulse{animation: pvLastScanPulse 0.35s ease;}
 @keyframes pvLastScanPulse{ 0%{ transform:scale(1.025); box-shadow:0 0 0 3px rgba(139,92,246,0.35);} 100%{ transform:scale(1); box-shadow:0 0 0 0 rgba(139,92,246,0);} }
 .pv-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02); gap:10px;}
+/* ★ 2026-09-09 신규(현장 요청) — "지금 스캔한 게 이 줄이구나" 눈에 확 들어오게
+   잠깐 반짝여주는 강조 효과. 스캔 직후 그 상품 줄로 자동 스크롤+강조. */
+.pv-line-flash{animation:pvLineFlash 1.8s ease-out;}
+@keyframes pvLineFlash{
+  0%{ background:rgba(139,92,246,0.45); border-color:#8B5CF6; }
+  100%{ background:rgba(255,255,255,0.02); }
+}
 .pv-line.done{border-color:rgba(139,92,246,0.5); background:var(--purple-bg);}
 .pv-line.has-issue{border-color:rgba(239,68,68,0.6); background:var(--red-bg);}
 /* ★ 2026-09-01 버그 수정 — "오른쪽 수량이 잘려서 손가락으로 밀어야 보인다"는
@@ -1948,6 +1955,44 @@ function normBarcode(v){
     return stripped === '' ? '0' : stripped;
   }
   return s;
+}
+
+// ★ 2026-09-09 신규(현장 요청) — 04/단독·총량 Pack Verify 공용 정렬 함수.
+//   요청사항: (1) 이슈 걸린 상품은 처음부터 맨 아래로, (2) 나머지는 "실제로
+//   스캔한 순서대로" — 같은 시간대에 스캔한 상품은 보통 같은 박스에 들어가니
+//   순서대로 묶여 보이면 작업자가 같은 박스 상품을 한눈에 확인하기 쉬움.
+//   아직 스캔 안 한 상품(스캔 기록 없음)은 "할 일" 취급으로 맨 위.
+// ★ 2026-09-09 신규(현장 요청) — "이 상품이 어디 있는지 찾고 싶다"는 요청.
+//   스캔(성공/중복 모두)하면 목록에서 그 줄로 자동 스크롤하고 잠깐
+//   반짝여줘서, 주변에 뭐가 있는지(같은 박스 상품들) 바로 보이게 함.
+function scrollToAndHighlightLine_(containerId, barcode){
+  const container = document.getElementById(containerId);
+  if(!container) return;
+  const key = normBarcode(barcode);
+  const el = container.querySelector(`[data-barcode="${key}"]`);
+  if(!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('pv-line-flash');
+  void el.offsetWidth; // 애니메이션 재시작을 위한 강제 리플로우
+  el.classList.add('pv-line-flash');
+  setTimeout(() => el.classList.remove('pv-line-flash'), 1800);
+}
+
+function sortLinesByScanOrder_(lines, history){
+  const lastScanTimeByBarcode = {};
+  (history || []).forEach(h => {
+    if(h.status === 'undone' || h.result !== 'pass') return;
+    const k = normBarcode(h.barcode);
+    if(!lastScanTimeByBarcode[k] || String(h.time) > String(lastScanTimeByBarcode[k])) lastScanTimeByBarcode[k] = h.time;
+  });
+  return (lines || []).map((l, i) => ({ l, i, t: lastScanTimeByBarcode[normBarcode(l.barcode)] || null })).sort((a, b) => {
+    const aIssue = a.l.issueQty > 0, bIssue = b.l.issueQty > 0;
+    if(aIssue !== bIssue) return aIssue ? 1 : -1; // 이슈는 항상 맨 아래
+    if(!a.t && !b.t) return a.i - b.i; // 둘 다 아직 스캔 안 함 — 원래 순서 유지
+    if(!a.t) return -1; // 아직 스캔 안 한 쪽이 위로("할 일")
+    if(!b.t) return 1;
+    return String(a.t).localeCompare(String(b.t)); // 둘 다 스캔됨 — 스캔한 시간 순서대로
+  }).map(x => x.l);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -6658,13 +6703,10 @@ function renderSsBody(){
   //   아래로 가라앉힘. Array.sort는 안정 정렬(stable)이라 각 그룹 안에서는 원래
   //   순서 그대로 유지되므로, 스캔할 때마다 화면이 어수선하게 재배치되지 않고
   //   딱 "그 줄 하나만" 완료 그룹으로 자연스럽게 내려감.
-  const sortedLines = (st.lines || []).slice().sort((a, b) => {
-    if (a.complete === b.complete) return 0;
-    return a.complete ? 1 : -1;
-  });
+  const sortedLines = sortLinesByScanOrder_(st.lines, st.history);
 
   document.getElementById('ssLines').innerHTML = sortedLines.map(l => `
-    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
+    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
@@ -7016,7 +7058,7 @@ async function doSsScanOne(barcode){
         sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ` · ${qty}개 입력됨`),
         qty: `${packed}/${required}`,
       });
-      refreshSsState(); // 백그라운드
+      refreshSsState().then(() => scrollToAndHighlightLine_('ssLines', barcode)); // 백그라운드
       return;
     }
     // 방어적 처리 — 위에서 이미 매칭 확인을 했으므로 이론상 거의 안 오지만,
@@ -7034,7 +7076,7 @@ async function doSsScanOne(barcode){
         sub: `바코드 ${barcode} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
       });
     }
-    await refreshSsState();
+    await refreshSsState().then(() => scrollToAndHighlightLine_('ssLines', barcode));
     return;
   }
 
@@ -7080,7 +7122,7 @@ async function doSsScanOne(barcode){
       sub: `바코드 ${barcode} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
     });
   }
-  await refreshSsState();
+  await refreshSsState().then(() => scrollToAndHighlightLine_('ssLines', barcode));
 }
 document.getElementById('ssScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitSsScan(); }
@@ -7513,12 +7555,9 @@ function renderPsvBody(){
   // ★ 2026-09-03 신규 — 04(단독 1차)와 동일하게, 미완료 SKU를 위로 · 완료는
   //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
   //   화면이 어수선하게 재배치되지 않음). 이슈 걸린 미완료 항목은 빨간색 강조.
-  const psvSortedLines = (st.lines || []).slice().sort((a, b) => {
-    if (a.complete === b.complete) return 0;
-    return a.complete ? 1 : -1;
-  });
+  const psvSortedLines = sortLinesByScanOrder_(st.lines, st.history);
   const linesHtml = psvSortedLines.map(l => `
-    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
+    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
@@ -7601,7 +7640,7 @@ async function doPsvScanOne(barcode){
       qty: `${packed}/${required}`,
       action: { label: '⚠ 이슈 등록', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
-    refreshPsvState(); // 백그라운드
+    refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode)); // 백그라운드
     return;
   } else if(res.result === 'wrong'){
     playScanResultSound(false);
@@ -7623,7 +7662,7 @@ async function doPsvScanOne(barcode){
       action: { label: '⚠ 이슈 등록', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
-  await refreshPsvState();
+  await refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode));
 }
 document.getElementById('psvScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitPsvScan(); }
@@ -7900,12 +7939,9 @@ function renderPvBody(){
   // ★ 2026-09-03 신규 — 04(단독 1차)와 동일하게, 미완료 SKU를 위로 · 완료는
   //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
   //   화면이 어수선하게 재배치되지 않음). 이슈 걸린 미완료 항목은 빨간색 강조.
-  const pvSortedLines = (st.lines || []).slice().sort((a, b) => {
-    if (a.complete === b.complete) return 0;
-    return a.complete ? 1 : -1;
-  });
+  const pvSortedLines = sortLinesByScanOrder_(st.lines, st.history);
   const linesHtml = pvSortedLines.map(l => `
-    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}">
+    <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
@@ -8035,7 +8071,7 @@ async function doPvScanOne(barcode){
       qty: `${packed}/${required}`,
       action: { label: '⚠ 이슈 등록', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
-    refreshPvState(); // 백그라운드 — 목록/진행률만 뒤이어 갱신, 카드 표시를 기다리게 하지 않음
+    refreshPvState().then(() => scrollToAndHighlightLine_('pvLines', barcode)); // 백그라운드 — 목록/진행률만 뒤이어 갱신, 카드 표시를 기다리게 하지 않음
     return;
   } else if(res.result === 'wrong'){
     flashPv('bad'); beepPv(false);
@@ -8055,7 +8091,7 @@ async function doPvScanOne(barcode){
       action: { label: '⚠ 이슈 등록', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
-  await refreshPvState();
+  await refreshPvState().then(() => scrollToAndHighlightLine_('pvLines', barcode));
 }
 document.getElementById('pvScanInput').addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); submitPvScan(); }
