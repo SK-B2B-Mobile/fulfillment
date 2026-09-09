@@ -7464,10 +7464,17 @@ async function doPsvScanOne(barcode){
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
     showPsvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
   } else if(res.result === 'over'){
+    // ★ 2026-09-09 신규(현장 질문) — 중복 스캔(이미 확인 완료된 상품을 또
+    //   스캔)한 건, "이거 몇 번 박스/팔렛이었지?" 확인 용도로도 쓸 수 있게
+    //   서버가 같이 보낸 박스·팔렛 정보를 보여줌.
+    const boxes = res.existingBoxes || [];
+    const boxSub = boxes.length
+      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty}개)`).join(' / ')
+      : '';
     showPsvMsg({
       kind:'bad', icon:'⚠',
       title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
-      sub: '중복 스캔입니다',
+      sub: boxSub || '중복 스캔입니다',
     });
   }
   await refreshPsvState();
@@ -7875,10 +7882,15 @@ async function doPvScanOne(barcode){
     showPvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것 — 상자에서 빼주세요` });
   } else if(res.result === 'over'){
     flashPv('bad'); beepPv(false);
+    // ★ 2026-09-09 신규 — psv와 동일한 이유. 박스·팔렛 정보를 보여줌.
+    const boxes = res.existingBoxes || [];
+    const boxSub = boxes.length
+      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty}개)`).join(' / ')
+      : '';
     showPvMsg({
       kind:'bad', icon:'⚠',
       title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
-      sub: '중복 스캔입니다',
+      sub: boxSub || '중복 스캔입니다',
     });
   }
   await refreshPvState();
@@ -8079,41 +8091,65 @@ function buildPackSlipGroupsHtml_(items, shipVia){
 // ★ 2026-09-08 재설계(현장 요청) — 매번 "몇 장 인쇄할지" 물어보는 게 번거롭다는
 //   지적. 기본 버튼은 자동 계산값으로 바로 인쇄(안 물어봄)하고, 옆에 작은
 //   연필 버튼을 눌렀을 때만 수동으로 매수를 직접 입력할 수 있게 분리.
+// ★ 2026-09-09 버그 수정(현장 사진으로 확인됨) — 라벨 자동 매수 계산이 화면의
+//   "현재 박스/팔렛" 카운터(_pvCurrentBox 등)만 봤는데, 이 카운터는 "이 박스
+//   완료" 버튼을 눌러야만 올라감. 실제로는 개별 상품의 "Box N ✎"으로 박스를
+//   나중에 고쳤을 때(그 버튼을 안 거침) 실제 데이터엔 Box 2까지 있어도
+//   카운터는 계속 1에 머물러서, 라벨이 1장만 나오는 사고로 이어졌음(사진
+//   확인됨: Box1·Box2 둘 다 있는데 라벨은 BOX#1 1장만 나옴). 화면 카운터 대신
+//   실제 스캔 데이터(lines/boxBreakdown)에서 제일 큰 박스·팔렛 번호를 직접
+//   찾아서 그걸 진짜 "자동 계산값"으로 씀 — 카운터를 안 올렸어도 항상 맞음.
+function getActualMaxBoxOrPallet_(st, isPallet){
+  let max = 1;
+  (st && st.lines ? st.lines : []).forEach(l => {
+    const consider = v => { const n = parseInt(v, 10); if(!isNaN(n) && n > max) max = n; };
+    if(l.boxBreakdown && l.boxBreakdown.length > 1){
+      l.boxBreakdown.forEach(bd => consider(isPallet ? bd.pallet : bd.box));
+    } else {
+      consider(isPallet ? l.pallet : l.box);
+    }
+  });
+  return max;
+}
 function triggerPrintPalletLabelPv(){
   if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
-  printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
+  const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
+  const autoCount = getActualMaxBoxOrPallet_(_pvState, isPallet);
+  printPalletLabel(cf ? cf.meta.customer : '', autoCount, autoCount, sv, _pvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
 }
 function triggerPrintPalletLabelPvManual(){
   if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
   const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
-  const autoCount = isPallet ? _pvCurrentPallet : _pvCurrentBox;
-  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 현재 ${isPallet ? '팔렛' : '박스'} 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
+  const autoCount = getActualMaxBoxOrPallet_(_pvState, isPallet);
+  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 실제 스캔 데이터 기준 ${isPallet ? '팔렛' : '박스'} 최대 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
   if(v === null) return;
   const n = parseInt(v, 10);
   if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-  printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice, n);
+  printPalletLabel(cf ? cf.meta.customer : '', autoCount, autoCount, sv, _pvInvoice, n);
 }
 function triggerPrintPalletLabelPsv(){
   if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
-  printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
+  const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
+  const autoCount = getActualMaxBoxOrPallet_(_psvState, isPallet);
+  printPalletLabel(ord ? ord.customer : '', autoCount, autoCount, sv, _psvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
 }
 function triggerPrintPalletLabelPsvManual(){
   if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
   const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
-  const autoCount = isPallet ? _psvCurrentPallet : _psvCurrentBox;
-  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 현재 ${isPallet ? '팔렛' : '박스'} 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
+  const autoCount = getActualMaxBoxOrPallet_(_psvState, isPallet);
+  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 실제 스캔 데이터 기준 ${isPallet ? '팔렛' : '박스'} 최대 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
   if(v === null) return;
   const n = parseInt(v, 10);
   if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-  printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice, n);
+  printPalletLabel(ord ? ord.customer : '', autoCount, autoCount, sv, _psvInvoice, n);
 }
 function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualCount){
   const isPallet = String(shipVia || '').trim().toUpperCase() === 'TK';
