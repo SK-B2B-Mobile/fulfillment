@@ -1353,14 +1353,6 @@ select option:disabled{color:var(--text-dim2);}
       <h2 class="h-page">패킹 최종검증 (총량)</h2>
       <p class="sub">패킹존으로 물리적으로 이동한(파랑) 고객사만 여기서 다시 스캔으로 확인합니다.</p>
 
-      <div class="pv-banner">
-        <div class="pv-banner-icon">🟣</div>
-        <div class="pv-banner-text">
-          <b>이 화면은 피킹 스캔(Scan & Sort)과 완전히 별개입니다</b>
-          <div>피킹 분류·검수와는 무관하게, 이미 파랑(패킹존 이동완료)으로 표시된 오더만 골라서 상자/팔레트에 담긴 실물을 다시 확인하는 화면입니다.</div>
-        </div>
-      </div>
-
       <div class="pv-invoice-picker">
         <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검증할 오더 선택 (파랑 상태만 표시)</label>
         <select id="pvInvoiceSelect" style="margin-top:8px;" onchange="onPvInvoiceChange()"></select>
@@ -1385,9 +1377,9 @@ select option:disabled{color:var(--text-dim2);}
           <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦→🚚 팔렛 전환</button>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPv()">🏷 라벨 인쇄 (4×6)</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 44px; font-size:15px !important; padding:0 !important;" onclick="triggerPrintPalletLabelPvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스·팔렛 이동</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPv()">🏷 라벨 인쇄</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
         </div>
       </div>
 
@@ -1461,9 +1453,9 @@ select option:disabled{color:var(--text-dim2);}
           <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦→🚚 팔렛 전환</button>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 라벨 인쇄 (4×6)</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 44px; font-size:15px !important; padding:0 !important;" onclick="triggerPrintPalletLabelPsvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스·팔렛 이동</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 라벨 인쇄</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPsvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
         </div>
       </div>
 
