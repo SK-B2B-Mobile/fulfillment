@@ -461,6 +461,10 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-scan-input-wrap input{flex:1; background:transparent; border:none; outline:none; color:var(--text); font-family:var(--mono); font-size:17px; font-weight:700; letter-spacing:0.05em;}
 .pv-scan-input-wrap input::placeholder{color:var(--text-dim2);}
 .pv-progress{display:flex; justify-content:space-between; align-items:center; margin:14px 0 6px; font-family:var(--mono); font-size:13px; color:var(--text-dim); font-weight:700;}
+/* ★ 2026-09-09 재설계(현장 요청) — 예전엔 "SKU N/M"이 아주 작은 글씨로 아래
+   줄에 따로 있어서 잘 안 보였음. 총수량과 한 줄로 합치고, 크기도 똑같이
+   키움 — 공간은 오히려 한 줄 줄어서 더 확보됨. */
+.pv-progress-left{display:flex; align-items:center; gap:6px;}
 .pv-progress-sku{display:flex; justify-content:space-between; align-items:center; margin:0 0 8px; font-family:var(--mono); font-size:11.5px; color:var(--text-dim2); font-weight:700;}
 .pv-progress-sku .n{font-size:14px; color:var(--text-dim);}
 .pv-progress .n{font-size:20px; color:var(--purple); font-weight:800;}
@@ -1258,12 +1262,8 @@ select option:disabled{color:var(--text-dim2);}
           </div>
         </div>
         <div class="pv-progress">
-          <span>진행률</span>
+          <span class="pv-progress-left"><span>SKU</span><span class="n" id="ssProgressSku">0 / 0</span></span>
           <span class="n" id="ssProgressText">0 / 0 pcs</span>
-        </div>
-        <div class="pv-progress-sku">
-          <span>SKU</span>
-          <span class="n" id="ssProgressSku">0 / 0</span>
         </div>
         <div class="pv-progress-bar"><div id="ssProgressBar" style="width:0%"></div></div>
         <div id="ssLines" style="margin-top:14px;"></div>
@@ -1400,12 +1400,8 @@ select option:disabled{color:var(--text-dim2);}
           </div>
         </div>
         <div class="pv-progress">
-          <span>진행률</span>
+          <span class="pv-progress-left"><span>SKU</span><span class="n" id="pvProgressSku">0 / 0</span></span>
           <span class="n" id="pvProgressText">0 / 0 pcs</span>
-        </div>
-        <div class="pv-progress-sku">
-          <span>SKU</span>
-          <span class="n" id="pvProgressSku">0 / 0</span>
         </div>
         <div class="pv-progress-bar"><div id="pvProgressBar" style="width:0%"></div></div>
         <div id="pvLines" style="margin-top:14px;"></div>
@@ -1476,12 +1472,8 @@ select option:disabled{color:var(--text-dim2);}
           </div>
         </div>
         <div class="pv-progress">
-          <span>진행률</span>
+          <span class="pv-progress-left"><span>SKU</span><span class="n" id="psvProgressSku">0 / 0</span></span>
           <span class="n" id="psvProgressText">0 / 0 pcs</span>
-        </div>
-        <div class="pv-progress-sku">
-          <span>SKU</span>
-          <span class="n" id="psvProgressSku">0 / 0</span>
         </div>
         <div class="pv-progress-bar"><div id="psvProgressBar" style="width:0%"></div></div>
         <div id="psvLines" style="margin-top:14px;"></div>
@@ -6884,6 +6876,7 @@ async function doSsScanOne(barcode){
       return;
     }
     if(res.result === 'pass'){
+      playScanResultSound(true); // ★ 2026-09-09 신규 — 서버 확정 신호를 소리로 명확히 구분
       const required = Number(res.required) || 0;
       const packed = Number(res.packed) || 0;
       const complete = required > 0 && packed >= required;
@@ -6891,7 +6884,7 @@ async function doSsScanOne(barcode){
         kind: 'ok',
         icon: complete ? '✅' : '✓',
         title: res.name || res.sku || barcode,
-        sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ` · ${qty}개 입력됨`),
+        sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ` · ${qty}개 입력됨`),
         qty: `${packed}/${required}`,
       });
       refreshSsState(); // 백그라운드
@@ -6899,6 +6892,7 @@ async function doSsScanOne(barcode){
     }
     // 방어적 처리 — 위에서 이미 매칭 확인을 했으므로 이론상 거의 안 오지만,
     // 그 사이 다른 기기가 먼저 채웠거나 이슈가 등록된 경우를 대비해 남겨둠.
+    playScanResultSound(false);
     if(res.result === 'wrong'){
       const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
       showSsMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
@@ -6930,6 +6924,7 @@ async function doSsScanOne(barcode){
   }
   if(res.result === 'pass'){
     // (이론상 거의 안 옴 — _ssState가 아직 최신이 아니었던 경우의 안전망)
+    playScanResultSound(true);
     const required = Number(res.required) || 0;
     const packed = Number(res.packed) || 0;
     const complete = required > 0 && packed >= required;
@@ -6937,15 +6932,17 @@ async function doSsScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
     });
     refreshSsState();
     return;
   } else if(res.result === 'wrong'){
+    playScanResultSound(false);
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
     showSsMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
   } else if(res.result === 'over'){
+    playScanResultSound(false);
     showSsMsg({
       kind:'bad', icon:'⚠',
       title: res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '이미 확인 완료된 상품',
@@ -7446,6 +7443,7 @@ async function doPsvScanOne(barcode){
     return;
   }
   if(res.result === 'pass'){
+    playScanResultSound(true); // ★ 2026-09-09 신규
     // ★ 2026-09-01 재수정(속도 핵심) — doSsScanOne과 동일한 이유. logPackScan
     //   응답에 이미 packed/required가 있으므로 추가 서버 왕복 없이 즉시 표시.
     const required = Number(res.required) || 0;
@@ -7455,15 +7453,17 @@ async function doPsvScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
     });
     refreshPsvState(); // 백그라운드
     return;
   } else if(res.result === 'wrong'){
+    playScanResultSound(false);
     const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
     showPsvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
   } else if(res.result === 'over'){
+    playScanResultSound(false);
     // ★ 2026-09-09 신규(현장 질문) — 중복 스캔(이미 확인 완료된 상품을 또
     //   스캔)한 건, "이거 몇 번 박스/팔렛이었지?" 확인 용도로도 쓸 수 있게
     //   서버가 같이 보낸 박스·팔렛 정보를 보여줌.
@@ -7871,7 +7871,7 @@ async function doPvScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku}` : '') + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
     });
     refreshPvState(); // 백그라운드 — 목록/진행률만 뒤이어 갱신, 카드 표시를 기다리게 하지 않음
@@ -7949,9 +7949,16 @@ function showPvMsg(msgOrOpts, kind){
 }
 // ★ 외부 오디오 파일 없이 WebAudio로 즉석 생성 — 피킹 쪽과 소리도 다르게(더 높은 음)
 //   해서, 눈을 안 봐도 "이건 2차 검증 소리"라는 걸 구분할 수 있게 함.
-function beepPv(ok){
+// ★ 2026-09-09 재설계(현장 요청) — 스캐너 자체 "띡" 소리와 시스템이 실제로
+//   정상 처리했다는 신호를 구분하기 위한 소리. 서버 응답까지 6~10초씩 걸릴
+//   때 "방금 스캔한 게 이 상품인지, 그 전 상품인지" 헷갈리는 문제를 줄이기
+//   위해, 스캐너 소리와 확실히 다른 "띠-딕" 느낌의 상승음으로 만듦. 예전엔
+//   pv(총량)에만 있었는데, 04(1차)·단독(2차) 전부 소리가 아예 없었어서
+//   여기로 통합하고 세 화면 모두에서 씀.
+let _scanAudioCtx = null;
+function playScanResultSound(ok){
   try{
-    const ctx = _pvAudioCtx || (_pvAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    const ctx = _scanAudioCtx || (_scanAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
     function tone(freq, start, dur){
       const o = ctx.createOscillator(), g = ctx.createGain();
       o.frequency.value = freq; o.type = 'sine';
@@ -7961,9 +7968,11 @@ function beepPv(ok){
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
       o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02);
     }
-    if(ok){ tone(1400, 0, 0.12); } else { tone(280, 0, 0.16); tone(280, 0.19, 0.16); }
+    if(ok){ tone(1050, 0, 0.07); tone(1650, 0.08, 0.09); } else { tone(280, 0, 0.16); tone(280, 0.19, 0.16); }
   }catch(e){ /* 오디오 실패해도 스캔 자체엔 지장 없음 */ }
 }
+// ★ 이전 코드와의 호환 — beepPv 이름으로 부르던 곳들이 그대로 동작하도록 유지.
+function beepPv(ok){ playScanResultSound(ok); }
 
 async function undoPvScanEntry(packScanId){
   if(!confirm('이 스캔을 취소하시겠습니까?')) return;
