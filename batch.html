@@ -761,7 +761,7 @@ td .mini-btn{background:none; border:1px solid var(--border); color:var(--text-d
 .mini-btn.danger:hover{color:var(--red); border-color:var(--red);}
 
 /* Modals */
-.modal-bg{position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); display:none; align-items:center; justify-content:center; z-index:200; padding:20px;}
+.modal-bg{position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); display:none; align-items:flex-start; justify-content:center; z-index:200; padding:20px; padding-top:4vh; overflow-y:auto;}
 .modal-bg.open{display:flex; animation:fadeIn 0.15s;}
 .modal{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:24px; width:100%; max-width:440px; box-shadow:var(--shadow-lg);}
 .modal h3{font-size:16px; font-weight:700; margin-bottom:6px; letter-spacing:-0.01em;}
@@ -1252,7 +1252,7 @@ select option:disabled{color:var(--text-dim2);}
               <button class="pv-qty-step" id="ssQtyPlus" type="button">+</button>
               <button class="btn btn-ghost btn-sm" id="ssQtyCancelBtn" type="button">취소</button>
               <button class="btn btn-primary btn-sm" id="ssQtyConfirmBtn" type="button">✓ 이 수량으로 저장</button>
-              <button class="btn btn-ghost btn-sm" id="ssQtyIssueBtn" type="button" style="border-color:#F59E0B; color:#FCD34D;" onclick="handleSsQtyIssueClick()">⚠ 이슈</button>
+              <button class="btn btn-ghost btn-sm" id="ssQtyIssueBtn" type="button" style="border-color:#F59E0B; color:#FCD34D; margin-left:24px;" onclick="handleSsQtyIssueClick()">⚠ 이슈</button>
             </div>
           </div>
         </div>
@@ -8134,16 +8134,28 @@ let _scanAudioCtx = null;
 function playScanResultSound(ok){
   try{
     const ctx = _scanAudioCtx || (_scanAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
-    function tone(freq, start, dur){
+    // ★ 2026-09-09 버그 수정(현장 지적) — 브라우저가 한동안 소리가 안 나면
+    //   오디오를 "일시정지" 상태로 재워버리는 경우가 있음. 정상 스캔은 자주
+    //   일어나서 계속 깨어있지만, 중복·문제 스캔은 뜸하게 발생해서 그 사이에
+    //   잠들어 소리가 안 나는 사고로 이어졌던 것으로 보임. 소리 낼 때마다
+    //   먼저 깨워줌(이미 깨어있으면 아무 영향 없음).
+    if(ctx.state === 'suspended'){ ctx.resume(); }
+    function tone(freq, start, dur, type){
       const o = ctx.createOscillator(), g = ctx.createGain();
-      o.frequency.value = freq; o.type = 'sine';
+      o.frequency.value = freq; o.type = type || 'sine';
       o.connect(g); g.connect(ctx.destination);
       g.gain.setValueAtTime(0.001, ctx.currentTime + start);
-      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.28, ctx.currentTime + start + 0.01);
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
       o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02);
     }
-    if(ok){ tone(1050, 0, 0.07); tone(1650, 0.08, 0.09); } else { tone(280, 0, 0.16); tone(280, 0.19, 0.16); }
+    if(ok){
+      tone(1050, 0, 0.07); tone(1650, 0.08, 0.09);
+    } else {
+      // ★ 2026-09-09 재설계 — 성공음(밝게 올라가는 소리)과 절대 헷갈리지
+      //   않도록, 낮은 음 3번을 부저처럼 울리는 경고음으로 바꿈.
+      tone(260, 0, 0.13, 'square'); tone(260, 0.16, 0.13, 'square'); tone(260, 0.32, 0.13, 'square');
+    }
   }catch(e){ /* 오디오 실패해도 스캔 자체엔 지장 없음 */ }
 }
 // ★ 이전 코드와의 호환 — beepPv 이름으로 부르던 곳들이 그대로 동작하도록 유지.
