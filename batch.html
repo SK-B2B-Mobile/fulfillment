@@ -6453,6 +6453,14 @@ document.getElementById('ssInvoiceSearch').addEventListener('input', function(){
   document.getElementById('ssInvoiceList').style.display = 'block';
 });
 document.getElementById('ssInvoiceSearch').addEventListener('focus', function(){
+  // ★ 2026-09-09 버그 수정(현장 지적) — 오더를 고른 뒤 검색창을 다시 누르면,
+  //   선택 전에 만들어졌던(그래서 "선택 안 함" 줄이 없는) 예전 목록을 그대로
+  //   다시 보여주기만 했음(display만 바꾸고 목록을 새로 안 그렸음). 열 때마다
+  //   현재 선택 상태 그대로 다시 그려서 "선택 안 함" 줄이 항상 정확히 뜨게 함.
+  //   필터는 빈 문자열로(검색창엔 선택된 항목 설명이 남아있을 수 있는데, 그
+  //   텍스트로 필터링하면 전체 목록이 안 보이고 텅 빈 목록이 나오게 됨).
+  const sel = document.getElementById('ssInvoiceSelect');
+  renderSsInvoiceOptions('', sel ? sel.value : '');
   const list = document.getElementById('ssInvoiceList');
   if(list) list.style.display = 'block';
 });
