@@ -1252,6 +1252,7 @@ select option:disabled{color:var(--text-dim2);}
               <button class="pv-qty-step" id="ssQtyPlus" type="button">+</button>
               <button class="btn btn-ghost btn-sm" id="ssQtyCancelBtn" type="button">취소</button>
               <button class="btn btn-primary btn-sm" id="ssQtyConfirmBtn" type="button">✓ 이 수량으로 저장</button>
+              <button class="btn btn-ghost btn-sm" id="ssQtyIssueBtn" type="button" style="border-color:#F59E0B; color:#FCD34D;" onclick="handleSsQtyIssueClick()">⚠ 이슈</button>
             </div>
           </div>
         </div>
@@ -6929,6 +6930,12 @@ let _ssQtyResolve = null;
 function askSsScanQty(line, remaining, barcode){
   return new Promise(resolve => {
     _ssQtyResolve = resolve;
+    // ★ 2026-09-09 신규(현장 지적) — 스캔 결과 카드(#ssMsg)는 항상 "바로 전에
+    //   끝난 스캔"만 보여주는 구조라, 지금 이 수량확인 카드에 뜬 "현재
+    //   스캔한" 상품과는 다른 상품이 같이 보여서 헷갈렸음(사진으로 확인됨).
+    //   그 카드에 이슈 버튼을 다는 대신, 지금 실제로 처리 중인 이 상품 정보를
+    //   저장해두고 이 카드 자체에 이슈 버튼을 달아서 헷갈릴 일이 없게 함.
+    _ssQtyCurrentTarget = { sku: line.sku, barcode, name: line.name || line.sku || barcode };
     document.getElementById('ssQtyName').textContent = line.name || line.sku || barcode;
     document.getElementById('ssQtySub').textContent =
       `SKU ${line.sku || ''} · 필요 ${line.effectiveReq}개 중 ${line.packed}개 확인됨 (남음 ${remaining}개) — 실제로 확인한 개수를 입력하세요`;
@@ -6940,6 +6947,12 @@ function askSsScanQty(line, remaining, barcode){
     //   무심코 먼저 스캔하면 바코드 숫자가 이 칸에 잘못 들어가는 사고 방지.
     //   수정이 필요할 때만 작업자가 직접 탭해서 고치면 됨.
   });
+}
+let _ssQtyCurrentTarget = null;
+function handleSsQtyIssueClick(){
+  const t = _ssQtyCurrentTarget;
+  resolveSsQty(null); // 수량 저장은 안 하고(이슈로 처리할 거라) 카드만 닫음
+  if(t) openSsIssueModal(t.sku, t.barcode, t.name);
 }
 function resolveSsQty(v){
   const el = document.getElementById('ssQtyConfirm');
@@ -7002,7 +7015,6 @@ async function doSsScanOne(barcode){
         title: res.name || res.sku || barcode,
         sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ` · ${qty}개 입력됨`),
         qty: `${packed}/${required}`,
-        action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
       });
       refreshSsState(); // 백그라운드
       return;
@@ -7020,7 +7032,6 @@ async function doSsScanOne(barcode){
         kind:'bad', icon:'⚠',
         title: res.name || res.sku || barcode,
         sub: `바코드 ${barcode} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
-        action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
       });
     }
     await refreshSsState();
@@ -7054,7 +7065,6 @@ async function doSsScanOne(barcode){
       title: res.name || res.sku || barcode,
       sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
       qty: `${packed}/${required}`,
-      action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
     });
     refreshSsState();
     return;
@@ -7068,7 +7078,6 @@ async function doSsScanOne(barcode){
       kind:'bad', icon:'⚠',
       title: res.name || res.sku || barcode,
       sub: `바코드 ${barcode} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
-      action: { label: '⚠ 이슈 등록', onClick: () => openSsIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
   await refreshSsState();
