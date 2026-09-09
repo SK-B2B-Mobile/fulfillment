@@ -1387,6 +1387,7 @@ select option:disabled{color:var(--text-dim2);}
         <div class="pv-btnrow">
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPv()">🏷 라벨 인쇄 (4×6)</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 44px; font-size:15px !important; padding:0 !important;" onclick="triggerPrintPalletLabelPvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
         </div>
       </div>
 
@@ -1462,6 +1463,7 @@ select option:disabled{color:var(--text-dim2);}
         <div class="pv-btnrow">
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 라벨 인쇄 (4×6)</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 44px; font-size:15px !important; padding:0 !important;" onclick="triggerPrintPalletLabelPsvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
         </div>
       </div>
 
@@ -8082,7 +8084,16 @@ function buildPackSlipGroupsHtml_(items, shipVia){
 //   있게 함(자동 계산값이 기본으로 채워짐). 한 SKU 수량이 많아서 시스템엔 박스
 //   1개로 기록됐지만 실제로는 여러 박스에 나뉘어 담긴 경우에 유용. 패킹슬립
 //   데이터와는 완전히 무관 — 여기서 매수를 바꿔도 패킹슬립엔 영향 없음.
+// ★ 2026-09-08 재설계(현장 요청) — 매번 "몇 장 인쇄할지" 물어보는 게 번거롭다는
+//   지적. 기본 버튼은 자동 계산값으로 바로 인쇄(안 물어봄)하고, 옆에 작은
+//   연필 버튼을 눌렀을 때만 수동으로 매수를 직접 입력할 수 있게 분리.
 function triggerPrintPalletLabelPv(){
+  if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
+  const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
+  printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
+}
+function triggerPrintPalletLabelPvManual(){
   if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
@@ -8095,6 +8106,12 @@ function triggerPrintPalletLabelPv(){
   printPalletLabel(cf ? cf.meta.customer : '', _pvCurrentBox, _pvCurrentPallet, sv, _pvInvoice, n);
 }
 function triggerPrintPalletLabelPsv(){
+  if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
+  const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
+  printPalletLabel(ord ? ord.customer : '', _psvCurrentBox, _psvCurrentPallet, sv, _psvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
+}
+function triggerPrintPalletLabelPsvManual(){
   if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
