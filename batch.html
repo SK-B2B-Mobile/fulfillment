@@ -5977,12 +5977,15 @@ function togglePvPalletMode(){
 //   박스/팔렛 번호를 나중에 바로잡는 기능.
 async function editScannedBoxPv(barcode, name, curBox, curPallet, curPacked){
   const isTk = document.getElementById('pvPalletField') && document.getElementById('pvPalletField').style.display !== 'none';
-  // ★ 2026-09-08 신규(현장 요청) — 한 SKU 수량이 실제로는 여러 박스에 나뉘어
-  //   담기는 경우 지원(예: 60개 중 30개는 박스1, 30개는 박스2). "전체 이동"과
-  //   "일부만 나누기" 중 먼저 선택하게 함.
-  const splitMode = curPacked > 1 && confirm(`${name}\n전체 ${curPacked}개 중 일부만 다른 박스로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 전체 이동`);
+  // ★ 2026-09-08 신규(현장 지적) — 이미 여러 박스로 나뉜 뒤에는 각 조각을
+  //   눌러도 이 함수가 호출되는데, "이 조각만" 정확히 골라서 바꿔야 하므로
+  //   지금 누른 박스/팔렛(curBox/curPallet)을 그대로 fromBox/fromPallet으로
+  //   서버에 넘김 — 나뉜 적 없는 보통의 경우엔 curBox가 유일한 박스라 결과가
+  //   예전과 완전히 동일함.
+  const fromBox = curBox, fromPallet = curPallet;
+  const splitMode = curPacked > 1 && confirm(`${name}\n이 박스에 담긴 ${curPacked}개 중 일부만 다른 박스로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 박스 전체 이동`);
   if(splitMode){
-    const vQty = prompt(`전체 ${curPacked}개 중 몇 개를 다른 박스로 옮기시겠습니까?`, Math.floor(curPacked / 2));
+    const vQty = prompt(`이 박스의 ${curPacked}개 중 몇 개를 다른 박스로 옮기시겠습니까?`, Math.floor(curPacked / 2));
     if(vQty === null) return;
     const splitQty = parseInt(vQty, 10);
     if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`1 이상 ${curPacked - 1} 이하의 숫자를 입력하세요`); return; }
@@ -6000,14 +6003,14 @@ async function editScannedBoxPv(barcode, name, curBox, curPallet, curPacked){
     }
     const worker = currentPvWorker();
     const res = await gasCallWithRetry('splitScannedItemBox', {
-      batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker,
+      batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker, fromBox, fromPallet,
     });
     if(!res.ok){ alert('나누기 실패: ' + (res.error || '알 수 없는 오류')); return; }
     toast(`${splitQty}개가 Box ${nBox}로 나뉘어 옮겨졌습니다`, 'success');
     await refreshPvState();
     return;
   }
-  const vBox = prompt(`${name}\n변경할 박스 번호를 입력해주세요`, curBox);
+  const vBox = prompt(`${name}\n(Box ${curBox}) 변경할 박스 번호를 입력해주세요`, curBox);
   if(vBox === null) return;
   const nBox = parseInt(vBox, 10);
   if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
@@ -6020,7 +6023,7 @@ async function editScannedBoxPv(barcode, name, curBox, curPallet, curPacked){
     nPallet = p;
   }
   const res = await gasCallWithRetry('updatePackScanBoxPallet', {
-    batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, box: nBox, pallet: nPallet,
+    batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, box: nBox, pallet: nPallet, fromBox, fromPallet,
   });
   if(!res.ok){ alert('수정 실패: ' + (res.error || '알 수 없는 오류')); return; }
   toast('박스·팔렛 번호가 수정되었습니다', 'success');
@@ -7077,9 +7080,12 @@ function togglePsvPalletMode(){
 //   지나간 스캔 건은 고칠 방법이 없다는 지적으로 신규 추가.
 async function editScannedBoxPsv(barcode, name, curBox, curPallet, curPacked){
   const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
-  const splitMode = curPacked > 1 && confirm(`${name}\n전체 ${curPacked}개 중 일부만 다른 박스로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 전체 이동`);
+  // ★ 2026-09-08 신규(현장 지적) — pv와 동일한 이유. 나뉜 조각을 정확히
+  //   짚어서 수정할 수 있게 fromBox/fromPallet을 서버에 같이 넘김.
+  const fromBox = curBox, fromPallet = curPallet;
+  const splitMode = curPacked > 1 && confirm(`${name}\n이 박스에 담긴 ${curPacked}개 중 일부만 다른 박스로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 박스 전체 이동`);
   if(splitMode){
-    const vQty = prompt(`전체 ${curPacked}개 중 몇 개를 다른 박스로 옮기시겠습니까?`, Math.floor(curPacked / 2));
+    const vQty = prompt(`이 박스의 ${curPacked}개 중 몇 개를 다른 박스로 옮기시겠습니까?`, Math.floor(curPacked / 2));
     if(vQty === null) return;
     const splitQty = parseInt(vQty, 10);
     if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`1 이상 ${curPacked - 1} 이하의 숫자를 입력하세요`); return; }
@@ -7097,14 +7103,14 @@ async function editScannedBoxPsv(barcode, name, curBox, curPallet, curPacked){
     }
     const worker = currentPsvWorker();
     const res = await gasCallWithRetry('splitScannedItemBox', {
-      batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker,
+      batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker, fromBox, fromPallet,
     });
     if(!res.ok){ alert('나누기 실패: ' + (res.error || '알 수 없는 오류')); return; }
     toast(`${splitQty}개가 Box ${nBox}로 나뉘어 옮겨졌습니다`, 'success');
     await refreshPsvState();
     return;
   }
-  const vBox = prompt(`${name}\n변경할 박스 번호를 입력해주세요`, curBox);
+  const vBox = prompt(`${name}\n(Box ${curBox}) 변경할 박스 번호를 입력해주세요`, curBox);
   if(vBox === null) return;
   const nBox = parseInt(vBox, 10);
   if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
@@ -7117,7 +7123,7 @@ async function editScannedBoxPsv(barcode, name, curBox, curPallet, curPacked){
     nPallet = p;
   }
   const res = await gasCallWithRetry('updatePackScanBoxPallet', {
-    batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, box: nBox, pallet: nPallet,
+    batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, box: nBox, pallet: nPallet, fromBox, fromPallet,
   });
   if(!res.ok){ alert('수정 실패: ' + (res.error || '알 수 없는 오류')); return; }
   toast('박스·팔렛 번호가 수정되었습니다', 'success');
@@ -7385,7 +7391,7 @@ function renderPsvBody(){
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개</span>`).join('')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 박스 조각만 수정·재분할">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개 ✎</span>`).join('')
             : (l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : '')
         }</div>
       </div>
@@ -7739,7 +7745,7 @@ function renderPvBody(){
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개</span>`).join('')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 박스 조각만 수정·재분할">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개 ✎</span>`).join('')
             : (l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : '')
         }</div>
       </div>
