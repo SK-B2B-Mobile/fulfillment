@@ -369,6 +369,12 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-boxpallet-field{flex:1; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; padding:8px 10px; display:flex; align-items:center; justify-content:space-between;}
 .pv-boxpallet-field label{font-size:11px; color:var(--text-dim); font-weight:700; margin-right:8px;}
 .pv-boxpallet-num{font-family:var(--mono); font-size:16px; font-weight:800; min-width:20px; text-align:center; cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;}
+/* ★ 2026-09-08 재설계(현장 지적) — 스캔 중에 박스 번호를 손으로 만지면
+   실수로 잘못 바뀌어서 패킹슬립에 오차가 생길 위험이 있음. "이 박스 완료"
+   버튼으로만 넘어가게 하고, 여기는 지금 몇 번에 담기는 중인지 보여주기만
+   하는 읽기 전용 표시로 바꿈. 고치고 싶으면 스캔 다 끝난 뒤 "Box N ✎"이나
+   "박스 전체 이동"으로 하면 됨. */
+.pv-boxpallet-display{font-family:var(--mono); font-size:22px; font-weight:800; color:#fff;}
 .pv-boxpallet-stepper{display:flex; align-items:center; gap:6px;}
 .pv-boxpallet-btn{width:26px; height:26px; border-radius:6px; border:1px solid var(--border2); background:transparent; color:var(--text); font-size:15px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;}
 .pv-boxpallet-btn:hover{border-color:#8B5CF6; color:#8B5CF6;}
@@ -1364,29 +1370,20 @@ select option:disabled{color:var(--text-dim2);}
           <input type="text" id="pvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
         </div>
         <div class="pv-boxpallet-row">
-          <div class="pv-boxpallet-field">
+          <div class="pv-boxpallet-field" id="pvBoxField">
             <label>현재 박스</label>
-            <div class="pv-boxpallet-stepper">
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(-1)" title="실수로 넘어갔을 때 되돌리기">−</button>
-              <span class="pv-boxpallet-num" id="pvBoxNum" onclick="editPvBox()" title="눌러서 직접 수정">1</span>
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPvBox(1)" title="다음 박스로">+</button>
-            </div>
+            <span class="pv-boxpallet-display" id="pvBoxNum">1</span>
           </div>
           <div class="pv-boxpallet-field" id="pvPalletField">
             <label>팔렛</label>
-            <div class="pv-boxpallet-stepper">
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(-1)">−</button>
-              <span class="pv-boxpallet-num" id="pvPalletNum" onclick="editPvPallet()" title="눌러서 직접 수정">1</span>
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPvPallet(1)">+</button>
-            </div>
+            <span class="pv-boxpallet-display" id="pvPalletNum">1</span>
           </div>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-primary pv-btn-big" style="flex:2;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-          <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦 배송 방법 전환</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="pvBoxCompleteBtn" style="flex:2;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="pvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
+          <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦→🚚 팔렛 전환</button>
         </div>
-        <button type="button" class="btn btn-primary pv-btn-big" id="pvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
-        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
         <div class="pv-btnrow">
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스(팔렛) 전체 이동</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPv()">🏷 라벨 인쇄 (4×6)</button>
@@ -1448,29 +1445,20 @@ select option:disabled{color:var(--text-dim2);}
           <input type="text" id="psvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
         </div>
         <div class="pv-boxpallet-row">
-          <div class="pv-boxpallet-field">
+          <div class="pv-boxpallet-field" id="psvBoxField">
             <label>현재 박스</label>
-            <div class="pv-boxpallet-stepper">
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(-1)" title="실수로 넘어갔을 때 되돌리기">−</button>
-              <span class="pv-boxpallet-num" id="psvBoxNum" onclick="editPsvBox()" title="눌러서 직접 수정">1</span>
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvBox(1)" title="다음 박스로">+</button>
-            </div>
+            <span class="pv-boxpallet-display" id="psvBoxNum">1</span>
           </div>
           <div class="pv-boxpallet-field" id="psvPalletField">
             <label>팔렛</label>
-            <div class="pv-boxpallet-stepper">
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(-1)">−</button>
-              <span class="pv-boxpallet-num" id="psvPalletNum" onclick="editPsvPallet()" title="눌러서 직접 수정">1</span>
-              <button type="button" class="pv-boxpallet-btn" onclick="stepPsvPallet(1)">+</button>
-            </div>
+            <span class="pv-boxpallet-display" id="psvPalletNum">1</span>
           </div>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-primary pv-btn-big" style="flex:2;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-          <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦 배송 방법 전환</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="psvBoxCompleteBtn" style="flex:2;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="psvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
+          <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦→🚚 팔렛 전환</button>
         </div>
-        <button type="button" class="btn btn-primary pv-btn-big" id="psvPalletCompleteBtn" style="width:100%; margin-top:6px; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
-        <div class="pv-boxpallet-hint">스캔하는 상품은 지금 표시된 박스·팔렛 번호로 자동 기록됩니다. 지금 박스에 담을 상품을 다 스캔했으면 위 버튼을 눌러 다음 박스로 넘어가세요. 박스 여러 개가 같은 팔렛에 실린다면 팔렛 번호는 그대로 두고, 다른 팔렛으로 옮겨 실을 때만 "팔렛 완료" 버튼을 눌러주세요.</div>
         <div class="pv-btnrow">
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스(팔렛) 전체 이동</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:13px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 라벨 인쇄 (4×6)</button>
@@ -5994,51 +5982,39 @@ function togglePvPalletMode(){
 //   박스/팔렛 번호를 나중에 바로잡는 기능.
 async function editScannedBoxPv(barcode, name, curBox, curPallet, curPacked){
   const isTk = document.getElementById('pvPalletField') && document.getElementById('pvPalletField').style.display !== 'none';
-  // ★ 2026-09-08 신규(현장 지적) — 이미 여러 박스로 나뉜 뒤에는 각 조각을
-  //   눌러도 이 함수가 호출되는데, "이 조각만" 정확히 골라서 바꿔야 하므로
-  //   지금 누른 박스/팔렛(curBox/curPallet)을 그대로 fromBox/fromPallet으로
-  //   서버에 넘김 — 나뉜 적 없는 보통의 경우엔 curBox가 유일한 박스라 결과가
-  //   예전과 완전히 동일함.
+  // ★ 2026-09-08 재설계(현장 지적) — TK는 이제 박스 없이 팔렛만 쓰므로, TK일
+  //   땐 "박스 번호"가 아니라 "팔렛 번호"를 물어봐야 함(예전엔 항상 박스부터
+  //   물어봐서 TK에서도 안 맞는 질문이 뜨는 버그가 있었음).
+  const label = isTk ? '팔렛' : '박스';
+  const curValue = isTk ? curPallet : curBox;
   const fromBox = curBox, fromPallet = curPallet;
-  const splitMode = curPacked > 1 && confirm(`${name}\n이 박스에 담긴 ${curPacked}개 중 일부만 다른 박스로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 박스 전체 이동`);
+  const splitMode = curPacked > 1 && confirm(`${name}\n이 ${label}에 담긴 ${curPacked}개 중 일부만 다른 ${label}로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 ${label} 전체 이동`);
   if(splitMode){
-    const vQty = prompt(`이 박스의 ${curPacked}개 중 몇 개를 다른 박스로 옮기시겠습니까?`, Math.floor(curPacked / 2));
+    const vQty = prompt(`이 ${label}의 ${curPacked}개 중 몇 개를 다른 ${label}로 옮기시겠습니까?`, Math.floor(curPacked / 2));
     if(vQty === null) return;
     const splitQty = parseInt(vQty, 10);
     if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`1 이상 ${curPacked - 1} 이하의 숫자를 입력하세요`); return; }
-    const vBox = prompt(`그 ${splitQty}개를 옮길 박스 번호를 입력해주세요`, Number(curBox) + 1);
-    if(vBox === null) return;
-    const nBox = parseInt(vBox, 10);
-    if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-    let nPallet = curPallet || '1';
-    if(isTk){
-      const vPallet = prompt(`옮길 팔렛 번호를 입력해주세요`, curPallet || '1');
-      if(vPallet === null) return;
-      const p = parseInt(vPallet, 10);
-      if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-      nPallet = p;
-    }
+    const vTo = prompt(`그 ${splitQty}개를 옮길 ${label} 번호를 입력해주세요`, Number(curValue) + 1);
+    if(vTo === null) return;
+    const nTo = parseInt(vTo, 10);
+    if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+    const nBox = isTk ? (curBox || '1') : nTo;
+    const nPallet = isTk ? nTo : (curPallet || '1');
     const worker = currentPvWorker();
     const res = await gasCallWithRetry('splitScannedItemBox', {
       batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker, fromBox, fromPallet,
     });
     if(!res.ok){ alert('나누기 실패: ' + (res.error || '알 수 없는 오류')); return; }
-    toast(`${splitQty}개가 Box ${nBox}로 나뉘어 옮겨졌습니다`, 'success');
+    toast(`${splitQty}개가 ${label} ${nTo}로 나뉘어 옮겨졌습니다`, 'success');
     await refreshPvState();
     return;
   }
-  const vBox = prompt(`${name}\n(Box ${curBox}) 변경할 박스 번호를 입력해주세요`, curBox);
-  if(vBox === null) return;
-  const nBox = parseInt(vBox, 10);
-  if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-  let nPallet = curPallet || '1';
-  if(isTk){
-    const vPallet = prompt(`${name}\n변경할 팔렛 번호를 입력해주세요`, curPallet || '1');
-    if(vPallet === null) return;
-    const p = parseInt(vPallet, 10);
-    if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-    nPallet = p;
-  }
+  const vTo = prompt(`${name}\n(${label} ${curValue}) 변경할 ${label} 번호를 입력해주세요`, curValue);
+  if(vTo === null) return;
+  const nTo = parseInt(vTo, 10);
+  if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  const nBox = isTk ? (curBox || '1') : nTo;
+  const nPallet = isTk ? nTo : (curPallet || '1');
   const res = await gasCallWithRetry('updatePackScanBoxPallet', {
     batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, box: nBox, pallet: nPallet, fromBox, fromPallet,
   });
@@ -7097,48 +7073,37 @@ function togglePsvPalletMode(){
 //   지나간 스캔 건은 고칠 방법이 없다는 지적으로 신규 추가.
 async function editScannedBoxPsv(barcode, name, curBox, curPallet, curPacked){
   const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
-  // ★ 2026-09-08 신규(현장 지적) — pv와 동일한 이유. 나뉜 조각을 정확히
-  //   짚어서 수정할 수 있게 fromBox/fromPallet을 서버에 같이 넘김.
+  // ★ 2026-09-08 재설계 — pv와 동일한 이유. TK는 팔렛 번호를 물어봐야 함.
+  const label = isTk ? '팔렛' : '박스';
+  const curValue = isTk ? curPallet : curBox;
   const fromBox = curBox, fromPallet = curPallet;
-  const splitMode = curPacked > 1 && confirm(`${name}\n이 박스에 담긴 ${curPacked}개 중 일부만 다른 박스로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 박스 전체 이동`);
+  const splitMode = curPacked > 1 && confirm(`${name}\n이 ${label}에 담긴 ${curPacked}개 중 일부만 다른 ${label}로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 ${label} 전체 이동`);
   if(splitMode){
-    const vQty = prompt(`이 박스의 ${curPacked}개 중 몇 개를 다른 박스로 옮기시겠습니까?`, Math.floor(curPacked / 2));
+    const vQty = prompt(`이 ${label}의 ${curPacked}개 중 몇 개를 다른 ${label}로 옮기시겠습니까?`, Math.floor(curPacked / 2));
     if(vQty === null) return;
     const splitQty = parseInt(vQty, 10);
     if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`1 이상 ${curPacked - 1} 이하의 숫자를 입력하세요`); return; }
-    const vBox = prompt(`그 ${splitQty}개를 옮길 박스 번호를 입력해주세요`, Number(curBox) + 1);
-    if(vBox === null) return;
-    const nBox = parseInt(vBox, 10);
-    if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-    let nPallet = curPallet || '1';
-    if(isTk){
-      const vPallet = prompt(`옮길 팔렛 번호를 입력해주세요`, curPallet || '1');
-      if(vPallet === null) return;
-      const p = parseInt(vPallet, 10);
-      if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-      nPallet = p;
-    }
+    const vTo = prompt(`그 ${splitQty}개를 옮길 ${label} 번호를 입력해주세요`, Number(curValue) + 1);
+    if(vTo === null) return;
+    const nTo = parseInt(vTo, 10);
+    if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+    const nBox = isTk ? (curBox || '1') : nTo;
+    const nPallet = isTk ? nTo : (curPallet || '1');
     const worker = currentPsvWorker();
     const res = await gasCallWithRetry('splitScannedItemBox', {
       batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker, fromBox, fromPallet,
     });
     if(!res.ok){ alert('나누기 실패: ' + (res.error || '알 수 없는 오류')); return; }
-    toast(`${splitQty}개가 Box ${nBox}로 나뉘어 옮겨졌습니다`, 'success');
+    toast(`${splitQty}개가 ${label} ${nTo}로 나뉘어 옮겨졌습니다`, 'success');
     await refreshPsvState();
     return;
   }
-  const vBox = prompt(`${name}\n(Box ${curBox}) 변경할 박스 번호를 입력해주세요`, curBox);
-  if(vBox === null) return;
-  const nBox = parseInt(vBox, 10);
-  if(!nBox || nBox < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-  let nPallet = curPallet || '1';
-  if(isTk){
-    const vPallet = prompt(`${name}\n변경할 팔렛 번호를 입력해주세요`, curPallet || '1');
-    if(vPallet === null) return;
-    const p = parseInt(vPallet, 10);
-    if(!p || p < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
-    nPallet = p;
-  }
+  const vTo = prompt(`${name}\n(${label} ${curValue}) 변경할 ${label} 번호를 입력해주세요`, curValue);
+  if(vTo === null) return;
+  const nTo = parseInt(vTo, 10);
+  if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  const nBox = isTk ? (curBox || '1') : nTo;
+  const nPallet = isTk ? nTo : (curPallet || '1');
   const res = await gasCallWithRetry('updatePackScanBoxPallet', {
     batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, box: nBox, pallet: nPallet, fromBox, fromPallet,
   });
@@ -7168,10 +7133,13 @@ function openMoveBoxModal(context){
   const isTk = !!(pf && pf.style.display !== 'none');
 
   _moveBoxContext = context;
-  _moveBoxMode = 'box';
+  // ★ 2026-09-08 재설계 — TK는 이제 박스 없이 팔렛만 쓰므로, 이 모달도
+  //   더 이상 안에서 박스/팔렛을 고르게 할 필요 없이 자동으로 맞춰줌
+  //   (UPS/PU=박스, TK=팔렛) — 전환 버튼과 안내문 자체를 없앰.
+  _moveBoxMode = isTk ? 'pallet' : 'box';
 
   const toggleWrap = document.getElementById('moveBoxModeToggleWrap');
-  if(toggleWrap) toggleWrap.style.display = isTk ? 'block' : 'none';
+  if(toggleWrap) toggleWrap.style.display = 'none';
 
   populateMoveBoxSelect();
   document.getElementById('moveBoxModal').classList.add('open');
@@ -7311,14 +7279,17 @@ async function onPsvInvoiceChange(){
   _psvPalletModeOverride = null;
   document.getElementById('psvBoxNum').textContent = '1';
   document.getElementById('psvPalletNum').textContent = '1';
-  // ★ 2026-09-04 신규(현장 지적) — UPS/PU는 팔렛 개념이 없으니 팔렛 스텝퍼
-  //   자체를 숨기고 박스만 보여줌. TK만 팔렛도 같이 씀(박스는 TK도 필요 —
-  //   한 팔렛 안에 여러 박스가 있을 수 있어서 패킹슬립에 "Box N ·" 로 표시됨).
+  // ★ 2026-09-08 재설계 — TK도 이제 박스 없이 팔렛만 씀(현장 지적으로 변경).
+  //   여기서 한 번 먼저 맞춰두고, renderPsvBody가 다시 한번 정확히 맞춤.
   {
     const ordForShip = _standaloneOrders.find(o => o.invoice === invoice);
     const isTk = ordForShip && String(ordForShip.shipVia || '').trim().toUpperCase() === 'TK';
+    const bf = document.getElementById('psvBoxField');
+    const bcb = document.getElementById('psvBoxCompleteBtn');
+    if(bf) bf.style.display = isTk ? 'none' : 'flex';
+    if(bcb) bcb.style.display = isTk ? 'none' : 'flex';
     document.getElementById('psvPalletField').style.display = isTk ? 'flex' : 'none';
-    document.getElementById('psvPalletCompleteBtn').style.display = isTk ? 'block' : 'none';
+    document.getElementById('psvPalletCompleteBtn').style.display = isTk ? 'flex' : 'none';
   }
   panel.classList.add('active');
   document.getElementById('psvMsg').style.display = 'none';
@@ -7370,19 +7341,28 @@ function renderPsvBody(){
   // ★ 2026-09-08 재수정 — isTk를 블록 스코프 안에서만 썼더니, 아래 상품 목록을
   //   그릴 때는 이 값을 몰라서 UPS/PU인데도 "Pallet 1"이 계속 표시되던 문제.
   //   함수 전체에서 쓸 수 있게 밖으로 뺌.
+  // ★ 2026-09-08 재설계(현장 지적) — TK인데도 "박스 완료"·"팔렛 완료" 버튼이
+  //   동시에 뜨던 버그. 원래는 TK도 박스+팔렛 둘 다 쓰는 설계였는데, 실제
+  //   써보니 헷갈린다는 지적이 맞아서, UPS/PU처럼 TK도 딱 하나만(팔렛) 쓰도록
+  //   상호 배타적으로 바꿈 — 박스 필드/버튼 전부 TK면 숨김, PU/UPS면 팔렛
+  //   전부 숨김.
   let isTk;
   {
     const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
     const autoIsTk = ord && String(ord.shipVia || '').trim().toUpperCase() === 'TK';
     isTk = _psvPalletModeOverride !== null ? _psvPalletModeOverride : autoIsTk;
+    const bf = document.getElementById('psvBoxField');
+    const bcb = document.getElementById('psvBoxCompleteBtn');
     const pf = document.getElementById('psvPalletField');
     const pb = document.getElementById('psvPalletCompleteBtn');
+    if(bf) bf.style.display = isTk ? 'none' : 'flex';
+    if(bcb) bcb.style.display = isTk ? 'none' : 'flex';
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
-    if(pb) pb.style.display = isTk ? 'block' : 'none';
+    if(pb) pb.style.display = isTk ? 'flex' : 'none';
     const toggleBtn = document.getElementById('psvModeToggleBtn');
     if(toggleBtn) toggleBtn.textContent = isTk
-      ? (_psvPalletModeOverride !== null ? '📦 박스로 전환됨' : '📦 박스 기준 전환')
-      : (_psvPalletModeOverride !== null ? '🚚 팔렛으로 전환됨' : '🚚 팔렛 기준 전환');
+      ? (_psvPalletModeOverride !== null ? '🚚→📦 박스로 전환됨' : '🚚→📦 박스 전환')
+      : (_psvPalletModeOverride !== null ? '📦→🚚 팔렛으로 전환됨' : '📦→🚚 팔렛 전환');
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('psvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
@@ -7408,8 +7388,8 @@ function renderPsvBody(){
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 박스 조각만 수정·재분할">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개 ✎</span>`).join('')
-            : (l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : '')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 ${isTk ? '팔렛' : '박스'} 조각만 수정·재분할">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty}개 ✎</span>`).join('')
+            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 ${isTk ? '팔렛' : '박스'} 번호 수정">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
         }</div>
       </div>
       <div class="pv-line-actions">
@@ -7666,12 +7646,16 @@ async function onPvInvoiceChange(){
   _pvPalletModeOverride = null; // ★ 2026-09-08 신규 — 오더 바뀌면 수동 전환도 초기화
   document.getElementById('pvBoxNum').textContent = '1';
   document.getElementById('pvPalletNum').textContent = '1';
-  // ★ 2026-09-04 신규(현장 지적) — psv와 동일한 이유. UPS/PU는 팔렛 스텝퍼 숨김.
+  // ★ 2026-09-08 재설계 — psv와 동일한 이유. TK도 이제 박스 없이 팔렛만 씀.
   {
     const cfForShip = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
     const isTk = cfForShip && String(cfForShip.meta.ship_via || '').trim().toUpperCase() === 'TK';
+    const bf = document.getElementById('pvBoxField');
+    const bcb = document.getElementById('pvBoxCompleteBtn');
+    if(bf) bf.style.display = isTk ? 'none' : 'flex';
+    if(bcb) bcb.style.display = isTk ? 'none' : 'flex';
     document.getElementById('pvPalletField').style.display = isTk ? 'flex' : 'none';
-    document.getElementById('pvPalletCompleteBtn').style.display = isTk ? 'block' : 'none';
+    document.getElementById('pvPalletCompleteBtn').style.display = isTk ? 'flex' : 'none';
   }
   panel.classList.add('active');
   document.getElementById('pvMsg').style.display = 'none';
@@ -7729,14 +7713,18 @@ function renderPvBody(){
     const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
     const autoIsTk = cf && String(cf.meta.ship_via || '').trim().toUpperCase() === 'TK';
     isTk = _pvPalletModeOverride !== null ? _pvPalletModeOverride : autoIsTk;
+    const bf = document.getElementById('pvBoxField');
+    const bcb = document.getElementById('pvBoxCompleteBtn');
     const pf = document.getElementById('pvPalletField');
     const pb = document.getElementById('pvPalletCompleteBtn');
+    if(bf) bf.style.display = isTk ? 'none' : 'flex';
+    if(bcb) bcb.style.display = isTk ? 'none' : 'flex';
     if(pf) pf.style.display = isTk ? 'flex' : 'none';
+    if(pb) pb.style.display = isTk ? 'flex' : 'none';
     const toggleBtn = document.getElementById('pvModeToggleBtn');
     if(toggleBtn) toggleBtn.textContent = isTk
-      ? (_pvPalletModeOverride !== null ? '📦 박스로 전환됨' : '📦 박스 기준 전환')
-      : (_pvPalletModeOverride !== null ? '🚚 팔렛으로 전환됨' : '🚚 팔렛 기준 전환');
-    if(pb) pb.style.display = isTk ? 'block' : 'none';
+      ? (_pvPalletModeOverride !== null ? '🚚→📦 박스로 전환됨' : '🚚→📦 박스 전환')
+      : (_pvPalletModeOverride !== null ? '📦→🚚 팔렛으로 전환됨' : '📦→🚚 팔렛 전환');
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('pvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
@@ -7762,8 +7750,8 @@ function renderPvBody(){
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 박스 조각만 수정·재분할">Box ${bd.box}${isTk && bd.pallet ? '·P' + bd.pallet : ''}: ${bd.qty}개 ✎</span>`).join('')
-            : (l.box ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 박스${isTk ? '·팔렛' : ''} 번호 수정">Box ${l.box}${isTk && l.pallet ? ' · Pallet ' + l.pallet : ''} ✎</span>` : '')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 ${isTk ? '팔렛' : '박스'} 조각만 수정·재분할">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty}개 ✎</span>`).join('')
+            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 ${isTk ? '팔렛' : '박스'} 번호 수정">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
         }</div>
       </div>
       <div class="pv-line-actions">
@@ -8064,7 +8052,9 @@ function buildPackSlipGroupsHtml_(items, shipVia){
     if(!isNaN(na) && !isNaN(nb)) return na - nb;
     return String(a).localeCompare(String(b));
   });
-  const rowHtml = it => `<div class="slip-group-row"><span>${groupByPallet && it.box ? `Box ${it.box} · ` : ''}${it.label} <span class="slip-group-barcode">(${it.barcode || ''})</span></span><span>${it.qty}</span></div>`;
+  // ★ 2026-09-08 재설계(현장 지적) — TK는 이제 박스 없이 팔렛만 쓰므로(항상
+  //   "박스 1"에 머묾), "Box N ·" 접두사가 더 이상 의미 없어서 뺌.
+  const rowHtml = it => `<div class="slip-group-row"><span>${it.label} <span class="slip-group-barcode">(${it.barcode || ''})</span></span><span>${it.qty}</span></div>`;
   let html = sortedKeys.map(key => `
     <div class="slip-group">
       <div class="slip-group-head">${groupByPallet ? 'Pallet' : 'Box'} ${key}</div>
