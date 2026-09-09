@@ -1962,16 +1962,19 @@ function normBarcode(v){
 //   스캔한 순서대로" — 같은 시간대에 스캔한 상품은 보통 같은 박스에 들어가니
 //   순서대로 묶여 보이면 작업자가 같은 박스 상품을 한눈에 확인하기 쉬움.
 //   아직 스캔 안 한 상품(스캔 기록 없음)은 "할 일" 취급으로 맨 위.
-// ★ 2026-09-09 신규(현장 요청) — "이 상품이 어디 있는지 찾고 싶다"는 요청.
-//   스캔(성공/중복 모두)하면 목록에서 그 줄로 자동 스크롤하고 잠깐
-//   반짝여줘서, 주변에 뭐가 있는지(같은 박스 상품들) 바로 보이게 함.
+// ★ 2026-09-09 신규 → 같은 날 재수정(현장 지적) — 원래는 스캔한 상품으로
+//   화면을 자동 스크롤까지 시켰는데, 정렬 기능(스캔 순서대로 재배치)과
+//   같이 쓰니 스캔할 때마다 화면이 그 상품의 "새 위치"로 튀어서 작업하던
+//   자리를 계속 벗어나버리는 부작용이 생겼음. 작업자는 항상 같은 자리(보통
+//   스캔칸 근처)에서 계속 스캔해야 하므로, 화면을 강제로 움직이는 동작은
+//   완전히 없앰 — 지금 보이는 범위 안에 그 줄이 있으면 반짝여서 표시만 하고,
+//   화면 밖에 있으면 조용히 넘어감(스크롤 이동 없음).
 function scrollToAndHighlightLine_(containerId, barcode){
   const container = document.getElementById(containerId);
   if(!container) return;
   const key = normBarcode(barcode);
   const el = container.querySelector(`[data-barcode="${key}"]`);
   if(!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.remove('pv-line-flash');
   void el.offsetWidth; // 애니메이션 재시작을 위한 강제 리플로우
   el.classList.add('pv-line-flash');
