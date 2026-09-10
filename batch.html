@@ -1422,6 +1422,7 @@ select option:disabled{color:var(--text-dim2);}
         <div class="pv-actions">
           <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ 관리자 강제확정</button>
           <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 패킹슬립 인쇄</button>
+          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPvSlip('letter', true)" title="박스·팔렛 번호 구분 없이 전체 목록만 인쇄">📋</button>
           <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 최종 2차 검증완료 확정</button>
         </div>
       </div>
@@ -1495,6 +1496,7 @@ select option:disabled{color:var(--text-dim2);}
         <div class="pv-actions">
           <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ 관리자 강제확정</button>
           <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 패킹슬립 인쇄</button>
+          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPsvSlip('letter', true)" title="박스·팔렛 번호 구분 없이 전체 목록만 인쇄">📋</button>
           <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 최종 2차 검증완료 확정</button>
         </div>
       </div>
@@ -1988,13 +1990,17 @@ function sortLinesByScanOrder_(lines, history){
     const k = normBarcode(h.barcode);
     if(!lastScanTimeByBarcode[k] || String(h.time) > String(lastScanTimeByBarcode[k])) lastScanTimeByBarcode[k] = h.time;
   });
+  // ★ 2026-09-09 재수정(현장 지적 — 빠뜨린 부분 보완) — 맨 위는 항상 "아직
+  //   스캔 안 한 상품"(할 일), 그 바로 밑부터 "스캔한 상품"이 오는데, 그
+  //   안에서는 방금 스캔한 게 제일 위(내림차순). 이슈는 이전과 동일하게
+  //   항상 맨 아래.
   return (lines || []).map((l, i) => ({ l, i, t: lastScanTimeByBarcode[normBarcode(l.barcode)] || null })).sort((a, b) => {
     const aIssue = a.l.issueQty > 0, bIssue = b.l.issueQty > 0;
     if(aIssue !== bIssue) return aIssue ? 1 : -1; // 이슈는 항상 맨 아래
-    if(!a.t && !b.t) return a.i - b.i; // 둘 다 아직 스캔 안 함 — 원래 순서 유지
-    if(!a.t) return -1; // 아직 스캔 안 한 쪽이 위로("할 일")
-    if(!b.t) return 1;
-    return String(a.t).localeCompare(String(b.t)); // 둘 다 스캔됨 — 스캔한 시간 순서대로
+    const aScanned = !!a.t, bScanned = !!b.t;
+    if(aScanned !== bScanned) return aScanned ? 1 : -1; // 아직 스캔 안 한 것이 위, 스캔한 것은 그 아래
+    if(!aScanned) return a.i - b.i; // 둘 다 아직 안 함 — 원래 순서 유지
+    return String(b.t).localeCompare(String(a.t)); // 둘 다 스캔됨 — 그 안에서는 최신 스캔이 위로(내림차순)
   }).map(x => x.l);
 }
 
@@ -8278,7 +8284,12 @@ async function forcePvComplete(){
 //   팔렛인지"를 보여주기 위한 공용 헬퍼. UPS/PU는 박스 기준, TK는 팔렛 기준으로
 //   묶어서 보여줌(같은 SKU는 절대 여러 박스에 안 나뉜다는 원칙이라 각 상품은
 //   딱 하나의 박스/팔렛 값만 가짐). printPvSlip/printPsvSlip 둘 다 재사용.
-function buildPackSlipGroupsHtml_(items, shipVia){
+function buildPackSlipGroupsHtml_(items, shipVia, forceFlat){
+  // ★ 2026-09-09 재재설계(현장 재확인 후 최종 결론) — 박스/팔렛이 딱 1개뿐인
+  //   경우는 애초에 "구분"이라는 게 의미가 없음(그 하나뿐인 곳에 전부 다
+  //   있는 거니까). 그래서 그 경우엔 자동으로 구분 섹션 생략 — 다시 넣음.
+  //   수동으로 강제 생략하고 싶을 때를 위해 forceFlat 버튼도 그대로 남겨둠
+  //   (둘 중 하나라도 해당하면 구분 없이 전체 목록만 나감).
   const groupByPallet = String(shipVia || '').trim().toUpperCase() === 'TK';
   const groups = {};
   const unassigned = [];
@@ -8293,6 +8304,7 @@ function buildPackSlipGroupsHtml_(items, shipVia){
     if(!isNaN(na) && !isNaN(nb)) return na - nb;
     return String(a).localeCompare(String(b));
   });
+  if(forceFlat || (sortedKeys.length <= 1 && unassigned.length === 0)) return '';
   // ★ 2026-09-08 재설계(현장 지적) — TK는 이제 박스 없이 팔렛만 쓰므로(항상
   //   "박스 1"에 머묾), "Box N ·" 접두사가 더 이상 의미 없어서 뺌.
   const rowHtml = it => `<div class="slip-group-row"><span>${it.label} <span class="slip-group-barcode">(${it.barcode || ''})</span></span><span>${it.qty}</span></div>`;
@@ -8455,7 +8467,7 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
   setTimeout(() => { win.focus(); win.print(); }, 400);
 }
 
-function printPvSlip(format){
+function printPvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _pvInvoice;
   if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
@@ -8536,7 +8548,7 @@ function printPvSlip(format){
       packItems.push({ label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: '', pallet: '', barcode: l.barcode });
     }
   });
-  const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia);
+  const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia, forceFlat);
 
   // ★ 2026-09-01 신규(매니저 요청) — 외부(고객사)로 나가는 문서라, 표 맨 아래에
   //   합계 줄(총 SKU 종류 수 · 총 Ordered/Issue/Packed 수량)을 추가해서 한눈에
@@ -8670,7 +8682,7 @@ function printPvSlip(format){
 //   _psvState.lines에서, 이슈는 서버에서 별도 조회(총량과 달리 state.issues에
 //   단독 오더 이슈가 안 들어있어서 여기서 직접 불러와야 함). "슬롯" 개념이 없는
 //   단독 오더라 그 자리엔 "STANDALONE"으로 표시.
-async function printPsvSlip(format){
+async function printPsvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _psvInvoice;
   if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
@@ -8741,7 +8753,7 @@ async function printPsvSlip(format){
       packItems.push({ label: l.name || l.sku, qty: forcedVerify ? l.reqQty : l.packed, box: '', pallet: '', barcode: l.barcode });
     }
   });
-  const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia);
+  const boxGroupsHtml = buildPackSlipGroupsHtml_(packItems, shipVia, forceFlat);
 
   const totalSku = lines.length;
   const totalOrdered = lines.reduce((a, l) => a + (Number(l.reqQty) || 0), 0);
