@@ -2429,6 +2429,17 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   for (let i = 0; i < jobsInvoiceCol.length; i++) {
     if (String(jobsInvoiceCol[i][0]).trim() === String(invoice).trim()) { jobsRow = i + 2; break; }
   }
+  // ★ 2026-09-10 버그 수정(현장 발견) — saveInspection과 동일한 이유. 정확히
+  //   일치하는 인보이스가 없으면 분할 주문(IN00473862_1, _2 등)일 수 있으니
+  //   "인보이스_"로 시작하는 행도 찾아봄. 여기서는 "이미 같은 값이면 저장
+  //   생략"하기 위한 미리보기용이라, 분할된 것 중 아무거나 하나만 봐도 충분함
+  //   (실제로 여러 조각에 전부 반영하는 건 saveInspection이 이미 처리함).
+  if (jobsRow === -1) {
+    const prefix = String(invoice).trim() + '_';
+    for (let i = 0; i < jobsInvoiceCol.length; i++) {
+      if (String(jobsInvoiceCol[i][0]).trim().indexOf(prefix) === 0) { jobsRow = i + 2; break; }
+    }
+  }
   if (jobsRow === -1) return; // fulfillment 대시보드에 없는 인보이스(예: 오더 관리 시스템에 등록 안 된 경우)는 그냥 넘어감
 
   const currentVal = String(jobsSheet.getRange(jobsRow, 19).getValue() || '').trim();
