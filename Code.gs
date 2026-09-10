@@ -1979,7 +1979,11 @@ function saveInspection(data) {
     //   경우 총량피킹/단독오더 쪽은 분할 전의 "원래 인보이스 번호"만 알고
     //   있어서, 정확히 일치하는 행을 못 찾아 검수 결과가 Jobs 시트에 아예
     //   반영이 안 되는(=조용히 실패하는) 사고로 이어졌음. "인보이스_"로
-    //   시작하는 행들을 대신 찾아서, 나뉜 조각 전부에 똑같이 반영함.
+    //   시작하는 행들을 찾아서 반영하되(아래 참고), 예전처럼 전부에 "똑같은
+    //   내용"을 그대로 복사하지는 않음 — 그러면 이슈 건수가 분할 개수만큼
+    //   부풀려 보여서(예: 78건이 _1/_2에 각각 찍혀 영업팀이 156건으로 착각)
+    //   실제 출고/청구 판단에 혼동을 줄 수 있음(2026-09-10 현장 발견).
+    var isSplitFallback = false;
     if (targetRows.length === 0) {
       var prefix = String(data.invoice).trim() + '_';
       for (var i = 0; i < invoiceCol.length; i++) {
@@ -1987,6 +1991,7 @@ function saveInspection(data) {
           targetRows.push(i + 2);
         }
       }
+      if (targetRows.length > 0) isSplitFallback = true;
     }
     if (targetRows.length === 0) {
       return ContentService.createTextOutput(
@@ -1994,11 +1999,52 @@ function saveInspection(data) {
       ).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // ★ 2026-09-10 신규 — 분할 주문(_1, _2, ...) 여러 줄에 걸쳐 반영해야 하는
+    //   경우, "대표(primary)" 한 줄에만 실제 검수결과(PASS/ISSUES + 상세내역)를
+    //   쓰고, 나머지 줄에는 "🔗 대표인보이스" 라는 가벼운 참조 표시만 남김.
+    //   대표는 분할번호(_뒤의 숫자)가 가장 작은 줄로 고정 — 항상 같은 줄이
+    //   대표가 되도록 결정적으로 정함. 숫자를 못 뽑는 경우(형식이 다른 극히
+    //   드문 케이스)엔 시트에 먼저 나오는 줄을 그대로 대표로 씀.
+    var primaryRow = targetRows[0];
+    var primaryInvoiceText = String(data.invoice).trim();
+    if (isSplitFallback && targetRows.length > 1) {
+      var rowsWithSuffix = targetRows.map(function(r){
+        var invText = String(invoiceCol[r - 2][0]).trim();
+        var m = invText.match(/_(\d+)$/);
+        return { row: r, invText: invText, suffixNum: m ? parseInt(m[1], 10) : 999999 };
+      });
+      rowsWithSuffix.sort(function(a, b){ return a.suffixNum - b.suffixNum; });
+      primaryRow = rowsWithSuffix[0].row;
+      primaryInvoiceText = rowsWithSuffix[0].invText;
+    }
+
     var inspEndAt  = fmtTime(data.inspEndAt || data.inspectedAt);
     var inspector  = String(data.inspector || '').trim();
 
+    var sH = sheet.getRange(1, 19);
+    if (!sH.getValue()) { sH.setValue('Inspection'); sH.setFontWeight('bold'); }
+    var tH = sheet.getRange(1, 20);
+    if (!tH.getValue()) { tH.setValue('Inspector'); tH.setFontWeight('bold'); }
+    var uH = sheet.getRange(1, 21);
+    if (!uH.getValue()) { uH.setValue('Insp. End'); uH.setFontWeight('bold'); }
+
     targetRows.forEach(function(targetRow) {
       var cell = sheet.getRange(targetRow, 19);
+
+      // ★ 2026-09-10 신규 — 대표가 아닌 분할 줄은 실제 결과를 복사하지 않고
+      //   "🔗 대표인보이스" 참조만 남김(디멘션의 dimsLinkedTo와 동일한 패턴).
+      //   sales.html의 classifyInsp()가 이 표시를 pass/issues와 별개로
+      //   'linked' 상태로 인식해서, 이슈 건수를 이중으로 세지 않음.
+      if (isSplitFallback && targetRows.length > 1 && targetRow !== primaryRow) {
+        cell.setValue('🔗 ' + primaryInvoiceText);
+        cell.setBackground(null);
+        cell.setFontColor(null);
+        cell.setFontWeight('normal');
+        cell.setNote('이 분할 주문의 실제 검수결과/이슈는 ' + primaryInvoiceText + ' 줄에 기록되어 있습니다(같은 배송 건이라 한 곳에만 기록).');
+        if (inspector) sheet.getRange(targetRow, 20).setValue(inspector);
+        sheet.getRange(targetRow, 21).setValue(inspEndAt);
+        return;
+      }
 
       if (data.pass && (!data.issues || data.issues.length === 0)) {
         cell.setValue('✓ PASS');
@@ -2029,15 +2075,12 @@ function saveInspection(data) {
         noteLines.push('');
         noteLines.push('Completed: ' + inspEndAt);
         if (inspector) noteLines.push('Inspector: ' + inspector);
+        if (isSplitFallback && targetRows.length > 1) {
+          noteLines.push('');
+          noteLines.push('(분할 주문 전체(' + targetRows.length + '건)의 대표 기록입니다.)');
+        }
         cell.setNote(noteLines.join('\n'));
       }
-
-      var sH = sheet.getRange(1, 19);
-      if (!sH.getValue()) { sH.setValue('Inspection'); sH.setFontWeight('bold'); }
-      var tH = sheet.getRange(1, 20);
-      if (!tH.getValue()) { tH.setValue('Inspector'); tH.setFontWeight('bold'); }
-      var uH = sheet.getRange(1, 21);
-      if (!uH.getValue()) { uH.setValue('Insp. End'); uH.setFontWeight('bold'); }
 
       if (inspector) {
         sheet.getRange(targetRow, 20).setValue(inspector);
@@ -2059,6 +2102,88 @@ function saveInspection(data) {
       JSON.stringify({ ok: false, error: e.message })
     ).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+/* ===================== cleanupDuplicateSplitInspections (★ 2026-09-10 신규) =====================
+ * 목적: saveInspection()의 분할주문(_1,_2...) 프리픽스 매칭 버그가 예전에 써놓은
+ * "중복 검수결과"(같은 배송인데 여러 분할 줄에 똑같은 PASS/ISSUES 내용이 그대로
+ * 복사돼있는 것)를 찾아서, 대표(가장 작은 분할번호) 한 줄만 남기고 나머지는
+ * "🔗 대표인보이스" 참조로 정리함. saveInspection()이 이제 새로 검수되는 건은
+ * 이렇게 안 만들지만, 이미 예전에 잘못 찍힌 기존 데이터는 이 함수로 한 번
+ * 정리해야 함.
+ *
+ * ⚠ 반드시 DRY_RUN=true(기본값)로 먼저 실행해서 실행 로그에 찍히는 "바뀔 목록"을
+ * 확인한 뒤에, 문제없다고 판단되면 DRY_RUN=false로 바꿔서 다시 실행하세요.
+ *
+ * 판정 기준(보수적으로 — 진짜 서로 다른 분할 결과는 절대 안 건드림):
+ * - 같은 "기본 인보이스"(맨 뒤 _숫자를 뗀 부분) 아래 2줄 이상
+ * - 그 줄들의 Inspection 텍스트가 전부 완전히 동일하고, 비어있지 않고,
+ *   아직 🔗로 시작하지 않은 경우만 — "우연히 둘 다 PASS"인 경우도 걸릴 수는
+ *   있지만, PASS끼리는 어차피 내용 차이가 없어 정리해도 안전함. ISSUES는
+ *   메모(상세내역)까지 완전히 똑같아야만 대상으로 잡음(부분출고 등으로 실제
+ *   다른 이슈인데 우연히 같은 건수인 경우까지 잘못 건드리지 않기 위함).
+ *
+ * 사용법: Apps Script 편집기에서 DRY_RUN 값을 확인 후 cleanupDuplicateSplitInspections
+ *         함수 선택 → ▶ 실행 → 실행 로그(보기 → 실행 기록) 확인.
+ * ================================================================================ */
+function cleanupDuplicateSplitInspections() {
+  const DRY_RUN = true; // ← 확인 끝나면 false로 바꿔서 한 번 더 실행
+
+  const sh = SHEET_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) { Logger.log('Jobs 시트에 데이터 없음'); return { ok: true, groups: 0 }; }
+
+  const invVals = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  const inspVals = sh.getRange(2, 19, lastRow - 1, 1).getValues();
+  const noteRange = sh.getRange(2, 19, lastRow - 1, 1);
+
+  // 기본 인보이스별로 그룹핑
+  const groups = {}; // base -> [{row, invText, suffixNum, insp}]
+  for (let i = 0; i < invVals.length; i++) {
+    const invText = String(invVals[i][0] || '').trim();
+    const m = invText.match(/^(.*)_(\d+)$/);
+    if (!m) continue; // 분할 인보이스가 아니면 대상 아님
+    const base = m[1];
+    if (!groups[base]) groups[base] = [];
+    groups[base].push({ row: i + 2, invText: invText, suffixNum: parseInt(m[2], 10), insp: String(inspVals[i][0] || '').trim() });
+  }
+
+  const plan = []; // 실제로 바꿀 목록
+  Object.keys(groups).forEach(base => {
+    const rows = groups[base];
+    if (rows.length < 2) return;
+    const nonEmpty = rows.filter(r => r.insp && r.insp.indexOf('🔗') !== 0);
+    if (nonEmpty.length < 2) return;
+    const firstInsp = nonEmpty[0].insp;
+    const allSame = nonEmpty.every(r => r.insp === firstInsp);
+    if (!allSame) return; // 서로 다르면(=진짜 각자 다른 결과) 절대 안 건드림
+    nonEmpty.sort((a, b) => a.suffixNum - b.suffixNum);
+    const primary = nonEmpty[0];
+    nonEmpty.slice(1).forEach(r => {
+      plan.push({ base: base, row: r.row, invText: r.invText, oldInsp: r.insp, newInsp: '🔗 ' + primary.invText, primaryInvText: primary.invText });
+    });
+  });
+
+  Logger.log('=== 분할주문 중복 검수결과 정리 계획 (DRY_RUN=' + DRY_RUN + ') ===');
+  Logger.log('바뀔 줄 수: ' + plan.length);
+  Logger.log(JSON.stringify(plan, null, 2));
+
+  if (!DRY_RUN && plan.length > 0) {
+    plan.forEach(p => {
+      const cell = sh.getRange(p.row, 19);
+      cell.setValue(p.newInsp);
+      cell.setBackground(null);
+      cell.setFontColor(null);
+      cell.setFontWeight('normal');
+      cell.setNote('이 분할 주문의 실제 검수결과/이슈는 ' + p.primaryInvText + ' 줄에 기록되어 있습니다(같은 배송 건이라 한 곳에만 기록). — 2026-09-10 일괄정리로 수정됨');
+    });
+    bumpVersion_();
+    Logger.log('✅ 실제로 ' + plan.length + '줄을 수정했습니다.');
+  } else if (DRY_RUN) {
+    Logger.log('⚠ DRY_RUN=true — 아직 아무것도 안 바꿨습니다. 위 목록 확인 후 DRY_RUN=false로 바꿔서 다시 실행하세요.');
+  }
+
+  return { ok: true, groups: Object.keys(groups).length, changed: DRY_RUN ? 0 : plan.length, plan: plan };
 }
 
 // ★ 2026-07-14 신규 — 체크박스로 선택한 여러 건을 한번에 처리하는 벌크 버전.
