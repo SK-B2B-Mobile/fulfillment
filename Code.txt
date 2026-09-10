@@ -3366,17 +3366,48 @@ function buildPackStageMap_() {
   try {
     const bc = bcustSheetSafe_();
     const last = bc.getLastRow();
-    if (last < 2) return map;
-    const rows = bc.getRange(2, 1, last - 1, 13).getValues();
-    rows.forEach(r => {
-      const inv = String(r[1] || '').trim();
-      if (!inv) return;
-      if (r[12]) map[inv] = 'verified';       // M컬럼: 최종 2차 검증완료(주황)
-      else if (r[11]) map[inv] = 'taken';     // L컬럼: 패킹존 이동완료(파랑) — 기존 그대로
-      else if (r[10]) map[inv] = 'moved';     // K컬럼: 이동대기(핑크) — 기존 그대로
-      else map[inv] = 'none';
-    });
+    if (last >= 2) {
+      const rows = bc.getRange(2, 1, last - 1, 13).getValues();
+      rows.forEach(r => {
+        const inv = String(r[1] || '').trim();
+        if (!inv) return;
+        if (r[12]) map[inv] = 'verified';       // M컬럼: 최종 2차 검증완료(주황)
+        else if (r[11]) map[inv] = 'taken';     // L컬럼: 패킹존 이동완료(파랑) — 기존 그대로
+        else if (r[10]) map[inv] = 'moved';     // K컬럼: 이동대기(핑크) — 기존 그대로
+        else map[inv] = 'none';
+      });
+    }
   } catch (e) { /* best-effort */ }
+
+  // ★ 2026-09-10 버그 수정 — buildMovedToPackingMap_()은 총량피킹 배치를
+  //   거치지 않은 단독오더도 Jobs 시트의 수동 표시(PackingMovedManual)를 OR로
+  //   합쳐서 movedToPacking=true로 정확히 반영하는데, 이 함수(buildPackStageMap_)는
+  //   그동안 BatchCustomers만 보고 있어서 그런 단독오더는 항상 'none'으로 남아있었음.
+  //   그 결과 packStageBadgeHtml()의 `o.packStage || (o.movedToPacking?...)` 에서
+  //   'none'이 이미 참 값(비어있지 않은 문자열)이라 movedToPacking 쪽 fallback이
+  //   전혀 실행되지 않고, Sales Lookup 목록에는 계속 "No"로 표시됐음(상세 모달은
+  //   packStage 필드 자체가 없어서 movedToPacking으로 정상 대체됐던 것 — 그래서
+  //   목록과 상세가 서로 다르게 보였던 것). 여기서도 동일하게 Jobs 시트 수동
+  //   표시를 반영 — 이미 'verified'인 건 절대 덮어쓰지 않고, 그 외엔 최소 'taken'
+  //   (파랑, "✓ Moved to Packing")으로 승격시킴.
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    const iManual = hdr[norm('PackingMovedManual')];
+    const lastRow = sh.getLastRow();
+    if (iInv && iManual && lastRow >= 2) {
+      const invVals = sh.getRange(2, iInv, lastRow - 1, 1).getValues();
+      const manualVals = sh.getRange(2, iManual, lastRow - 1, 1).getValues();
+      for (let i = 0; i < invVals.length; i++) {
+        const inv = String(invVals[i][0] || '').trim();
+        if (!inv) continue;
+        if (manualVals[i][0] && map[inv] !== 'verified') map[inv] = 'taken';
+      }
+    }
+  } catch (e) { /* best-effort */ }
+
   return map;
 }
 
