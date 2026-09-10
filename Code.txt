@@ -2030,12 +2030,16 @@ function saveInspection(data) {
 
     targetRows.forEach(function(targetRow) {
       var cell = sheet.getRange(targetRow, 19);
+      var isSecondarySplit = isSplitFallback && targetRows.length > 1 && targetRow !== primaryRow;
+      var shouldBePassNow = data.pass && (!data.issues || data.issues.length === 0);
 
-      // ★ 2026-09-10 신규 — 대표가 아닌 분할 줄은 실제 결과를 복사하지 않고
-      //   "🔗 대표인보이스" 참조만 남김(디멘션의 dimsLinkedTo와 동일한 패턴).
-      //   sales.html의 classifyInsp()가 이 표시를 pass/issues와 별개로
-      //   'linked' 상태로 인식해서, 이슈 건수를 이중으로 세지 않음.
-      if (isSplitFallback && targetRows.length > 1 && targetRow !== primaryRow) {
+      // ★ 2026-09-10 신규(문구 개선) — 분할 주문 중 대표가 아닌 줄:
+      //   - 결과가 PASS(이슈 없음)면 헷갈릴 게 없으므로 그냥 다른 줄과 똑같이
+      //     "✓ PASS"를 씀 (예전처럼 자연스럽게 중복 표시돼도 무해함)
+      //   - 결과가 ISSUES면 실제 상세내역은 대표 줄에만 쓰고, 여기엔
+      //     "🔗 대표인보이스" 참조만 남겨서 이슈 건수가 이중으로 안 보이게 함
+      //     (sales.html classifyInsp()가 이 표시를 'linked' 상태로 인식)
+      if (isSecondarySplit && !shouldBePassNow) {
         cell.setValue('🔗 ' + primaryInvoiceText);
         cell.setBackground(null);
         cell.setFontColor(null);
@@ -2046,7 +2050,7 @@ function saveInspection(data) {
         return;
       }
 
-      if (data.pass && (!data.issues || data.issues.length === 0)) {
+      if (shouldBePassNow) {
         cell.setValue('✓ PASS');
         cell.setBackground('#0d2e1a');
         cell.setFontColor('#10b981');
@@ -2127,7 +2131,7 @@ function saveInspection(data) {
  *         함수 선택 → ▶ 실행 → 실행 로그(보기 → 실행 기록) 확인.
  * ================================================================================ */
 function cleanupDuplicateSplitInspections() {
-  const DRY_RUN = false; // ★ 2026-09-10 — DRY_RUN 확인 완료(6줄, 예상과 일치) 후 실제 적용 모드로 전환
+  const DRY_RUN = true; // ★ 2026-09-10 재수정 — PASS/ISSUES 구분 로직으로 바뀌어서 다시 미리보기부터. 확인 후 false로.
 
   const sh = SHEET_();
   const lastRow = sh.getLastRow();
@@ -2148,7 +2152,7 @@ function cleanupDuplicateSplitInspections() {
     groups[base].push({ row: i + 2, invText: invText, suffixNum: parseInt(m[2], 10), insp: String(inspVals[i][0] || '').trim() });
   }
 
-  const plan = []; // 실제로 바꿀 목록
+  const plan = []; // 실제로 바꿀 목록 (이슈가 있는 중복 그룹만 — PASS 중복은 그대로 둬도 무해함)
   Object.keys(groups).forEach(base => {
     const rows = groups[base];
     if (rows.length < 2) return;
@@ -2157,6 +2161,9 @@ function cleanupDuplicateSplitInspections() {
     const firstInsp = nonEmpty[0].insp;
     const allSame = nonEmpty.every(r => r.insp === firstInsp);
     if (!allSame) return; // 서로 다르면(=진짜 각자 다른 결과) 절대 안 건드림
+    // ★ 2026-09-10 문구 개선 — PASS끼리 중복인 경우는 헷갈릴 게 없으므로
+    //   그대로 둠(정리 대상 아님). ISSUES 중복만 대표+참조로 정리함.
+    if (firstInsp.indexOf('ISSUES') < 0) return;
     nonEmpty.sort((a, b) => a.suffixNum - b.suffixNum);
     const primary = nonEmpty[0];
     nonEmpty.slice(1).forEach(r => {
@@ -2164,11 +2171,31 @@ function cleanupDuplicateSplitInspections() {
     });
   });
 
-  Logger.log('=== 분할주문 중복 검수결과 정리 계획 (DRY_RUN=' + DRY_RUN + ') ===');
-  Logger.log('바뀔 줄 수: ' + plan.length);
-  Logger.log(JSON.stringify(plan, null, 2));
+  // ★ 2026-09-10 신규 — 복구 패스: 지난번 실행(문구 개선 전)에서 PASS끼리
+  //   중복이던 줄까지 실수로 "🔗 대표인보이스"로 바꿔놨을 수 있음. 그 대표가
+  //   지금 "✓ PASS"라면(=원래도 이슈가 없었다면), 굳이 참조로 남겨둘 필요가
+  //   없으므로 다시 "✓ PASS"로 되돌림.
+  const revertPlan = [];
+  for (let i = 0; i < invVals.length; i++) {
+    const insp = String(inspVals[i][0] || '').trim();
+    if (insp.indexOf('🔗') !== 0) continue;
+    const primaryInvText = insp.replace('🔗', '').trim();
+    let primaryInsp = '';
+    for (let j = 0; j < invVals.length; j++) {
+      if (String(invVals[j][0]).trim() === primaryInvText) { primaryInsp = String(inspVals[j][0] || '').trim(); break; }
+    }
+    if (primaryInsp === '✓ PASS') {
+      revertPlan.push({ row: i + 2, invText: String(invVals[i][0]).trim(), oldInsp: insp, newInsp: '✓ PASS' });
+    }
+  }
 
-  if (!DRY_RUN && plan.length > 0) {
+  Logger.log('=== 분할주문 중복 검수결과 정리 계획 (DRY_RUN=' + DRY_RUN + ') ===');
+  Logger.log('바뀔 줄 수(ISSUES → 🔗 참조): ' + plan.length);
+  Logger.log(JSON.stringify(plan, null, 2));
+  Logger.log('복구할 줄 수(잘못 🔗로 바뀐 PASS → ✓ PASS 되돌림): ' + revertPlan.length);
+  Logger.log(JSON.stringify(revertPlan, null, 2));
+
+  if (!DRY_RUN && (plan.length > 0 || revertPlan.length > 0)) {
     plan.forEach(p => {
       const cell = sh.getRange(p.row, 19);
       cell.setValue(p.newInsp);
@@ -2177,13 +2204,21 @@ function cleanupDuplicateSplitInspections() {
       cell.setFontWeight('normal');
       cell.setNote('이 분할 주문의 실제 검수결과/이슈는 ' + p.primaryInvText + ' 줄에 기록되어 있습니다(같은 배송 건이라 한 곳에만 기록). — 2026-09-10 일괄정리로 수정됨');
     });
+    revertPlan.forEach(p => {
+      const cell = sh.getRange(p.row, 19);
+      cell.setValue('✓ PASS');
+      cell.setBackground('#0d2e1a');
+      cell.setFontColor('#10b981');
+      cell.setFontWeight('bold');
+      cell.setNote('✓ PASS\n(이전 일괄정리에서 실수로 참조표시로 바뀌었던 것을 되돌림 — 2026-09-10)');
+    });
     bumpVersion_();
-    Logger.log('✅ 실제로 ' + plan.length + '줄을 수정했습니다.');
+    Logger.log('✅ 실제로 ' + plan.length + '줄 정리 + ' + revertPlan.length + '줄 복구를 완료했습니다.');
   } else if (DRY_RUN) {
     Logger.log('⚠ DRY_RUN=true — 아직 아무것도 안 바꿨습니다. 위 목록 확인 후 DRY_RUN=false로 바꿔서 다시 실행하세요.');
   }
 
-  return { ok: true, groups: Object.keys(groups).length, changed: DRY_RUN ? 0 : plan.length, plan: plan };
+  return { ok: true, groups: Object.keys(groups).length, changed: DRY_RUN ? 0 : plan.length, reverted: DRY_RUN ? 0 : revertPlan.length, plan: plan, revertPlan: revertPlan };
 }
 
 // ★ 2026-07-14 신규 — 체크박스로 선택한 여러 건을 한번에 처리하는 벌크 버전.
