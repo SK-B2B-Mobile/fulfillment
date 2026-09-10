@@ -6464,9 +6464,17 @@ function renderSsInvoiceOptions(filterText, keepSelected){
   //   등 기존 로직은 손대지 않고 그대로 재사용). 화면엔 커스텀 목록을 대신 그림.
   sel.style.display = 'none';
   const q = (filterText || '').trim().toLowerCase();
+  // ★ 2026-09-10 버그 수정(현장 지적) — 04(1차)는 지금까지 "아직 패킹존 이동
+  //   안 된 것"만 대상으로 삼아서(_ssCandidates), 2차까지 다 끝나서
+  //   패킹존으로 넘어간(takenOut=true) 오더는 검색해도 아예 안 나왔음. 그런데
+  //   나중에 그 오더에 이슈를 등록해야 하는 경우(영업쪽 sales.html 이슈
+  //   추적용)가 있어서, "검색어를 직접 입력했을 때만" 완료된 오더까지 포함한
+  //   전체 목록에서 찾아지도록 함(기본 목록엔 그대로 활성 대상만 보여서
+  //   평소 작업 흐름엔 영향 없음 — 검색으로 콕 집어 찾을 때만 예외 허용).
+  const searchPool = q ? _standaloneOrders : _ssCandidates;
   const filtered = q
-    ? _ssCandidates.filter(o => (o.invoice||'').toLowerCase().includes(q) || (o.customer||'').toLowerCase().includes(q))
-    : _ssCandidates;
+    ? searchPool.filter(o => (o.invoice||'').toLowerCase().includes(q) || (o.customer||'').toLowerCase().includes(q))
+    : searchPool;
   const prevSelected = keepSelected !== undefined ? keepSelected : sel.value;
   sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + filtered.map(o =>
     `<option value="${o.invoice}">${o.invoice} · ${o.customer||''} (SKU ${o.totalSku})</option>`
@@ -6482,7 +6490,7 @@ function renderSsInvoiceOptions(filterText, keepSelected){
     sel.insertAdjacentElement('afterend', list);
   }
   list.innerHTML = (sel.value ? `<div class="pv-opt-row" data-value="" style="color:var(--text-dim);">← 선택 안 함 (목록으로 돌아가기)</div>` : '') + (filtered.length
-    ? filtered.map(o => `<div class="pv-opt-row" data-value="${o.invoice}"><span class="inv">${o.invoice}</span><span class="sub">${(o.customer||'').replace(/</g,'&lt;')} · SKU ${o.totalSku}</span></div>`).join('')
+    ? filtered.map(o => `<div class="pv-opt-row" data-value="${o.invoice}"><span class="inv">${o.invoice}</span><span class="sub">${(o.customer||'').replace(/</g,'&lt;')} · SKU ${o.totalSku}${o.takenOut ? ' · <b style="color:#3EB8F5;">완료됨(이슈만 등록 가능)</b>' : ''}</span></div>`).join('')
     : `<div class="pv-opt-empty">조건에 맞는 오더가 없습니다</div>`);
   list.querySelectorAll('[data-value]').forEach(row => {
     row.onclick = () => {
