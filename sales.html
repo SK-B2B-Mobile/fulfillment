@@ -1131,6 +1131,11 @@ function onRowsPerPageChange(){
 function classifyInsp(insp){
   insp = String(insp||'').trim();
   if (!insp) return {status:'pending'};
+  // ★ 2026-09-10 신규 — 분할 주문(_1,_2...)의 실제 검수결과는 대표(primary) 줄
+  //   하나에만 기록되고, 나머지 줄엔 "🔗 대표인보이스" 참조만 남음(saveInspection
+  //   참고). 이걸 pass/issues와 별개인 'linked' 상태로 인식해야, 이슈 건수가
+  //   분할 개수만큼 중복 카운트되는 걸 막을 수 있음(2026-09-10 현장 발견 버그).
+  if (insp.indexOf('🔗') >= 0) return {status:'linked', linkTo: insp.replace('🔗','').trim()};
   if (insp.indexOf('PASS') >= 0) return {status:'pass'};
   if (insp.indexOf('ISSUES') >= 0) return {status:'issues'};
   return {status:'pending'};
@@ -1191,12 +1196,16 @@ function renderSheet(){
       //   받으면 PASS 건도 열어봐야 함.
       //   → 모든 행에 링크를 넣되, 이슈 건은 빨간색 + 건수로 계속 눈에 띄게 유지.
       let badge;
-      const isIssue = (c.status !== 'pending' && c.status !== 'pass');
+      const isIssue = (c.status === 'issues');
       const linkCls = isIssue ? 'detail-link issue-link' : 'detail-link';
-      const linkTxt = isIssue ? ('Issues →') : ('View →');
-      const link = '<a class="'+linkCls+'" onclick="jumpToInvoice(\''+o.invoice+'\')">'+linkTxt+'</a>';
+      const linkTxt = isIssue ? ('Issues →') : (c.status==='linked' ? ('View '+c.linkTo+' →') : 'View →');
+      const linkTargetInv = c.status==='linked' ? c.linkTo : o.invoice;
+      const link = '<a class="'+linkCls+'" onclick="jumpToInvoice(\''+linkTargetInv+'\')">'+linkTxt+'</a>';
       if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
       else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
+      // ★ 2026-09-10 신규 — 분할 주문 참조 표시. 빨간 issue 배지가 아니라 dims의
+      //   🔗 링크와 같은 중립 스타일로 — 실제 이슈 건수는 대표 인보이스에서만 셈.
+      else if (c.status==='linked'){ badge = '<span class="badge pass">🔗 '+c.linkTo+'</span>'; }
       else { badge = '<span class="badge issue">'+o.inspection+'</span>'; }
       const movedBadge = packStageBadgeHtml(o, 'badge');
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
@@ -1338,7 +1347,10 @@ function renderToday(){
   document.getElementById('today-list').innerHTML = pageJobs.map(j=>{
     const insp = String(j.inspection || '').trim();
     let badge;
-    if (insp.indexOf('PASS') >= 0) badge = '<span class="plain-tag pass">✓ PASS</span>';
+    // ★ 2026-09-10 신규 — 분할 주문 참조 표시("🔗 대표인보이스")는 issue가 아니라
+    //   중립 배지로. classifyInsp()와 동일한 기준(saveInspection 참고).
+    if (insp.indexOf('🔗') >= 0) badge = '<span class="plain-tag pass">'+insp+'</span>';
+    else if (insp.indexOf('PASS') >= 0) badge = '<span class="plain-tag pass">✓ PASS</span>';
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="plain-tag issue">'+insp+' →</span>';
     else badge = '<span class="plain-tag pending">'+insp+'</span>';
     const movedBadge = packStageBadgeHtml(j, 'plain-tag');
@@ -1857,7 +1869,12 @@ function renderDetail(res){
   //   경우(취소/수정 후 재동기화가 안 된 경우 등) "NO ISSUES"라고 잘못 보여주는
   //   사고가 있었음. 이제는 Jobs 시트의 검수결과 문구를 먼저 확인해서, ISSUES로
   //   찍혀있는데 상세를 못 찾으면 "없다"고 하지 않고 "확인 필요"로 명확히 구분.
+  // ★ 2026-09-10 신규 — 분할 주문(_1,_2...) 중 대표가 아닌 줄은 실제 검수결과 대신
+  //   "🔗 대표인보이스" 참조만 갖고 있음(saveInspection 참고). NO ISSUES로
+  //   잘못 보이지 않도록 별도 상태로 분리.
+  let linkedTo = '';
   if (!insp) status = 'pending';
+  else if (insp.indexOf('🔗') >= 0) { status = 'linked'; linkedTo = insp.replace('🔗','').trim(); }
   else if (insp.indexOf('ISSUES') >= 0) {
     if (items.length === 0) {
       status = 'issue-no-detail';
@@ -1897,6 +1914,9 @@ function renderDetail(res){
 
   if (status==='pending'){
     statusHtml = '<span class="status-big pending">⏳ Not Inspected Yet</span>';
+  } else if (status==='linked'){
+    statusHtml = '<span class="status-big pass">🔗 SAME SHIPMENT AS ' + linkedTo + '</span>';
+    itemsSectionHtml = `<div class="note-box gap-note">This order was picked as a separate slip of the same combined shipment. The actual inspection result and any short items are recorded once, under <a class="detail-link" onclick="jumpToInvoice('${linkedTo}')">${linkedTo}</a> — check that invoice for the full item detail.</div>`;
   } else if (status==='pass'){
     statusHtml = '<span class="status-big pass">✓ ALL ITEMS PICKED — NO ISSUES</span>';
   } else if (status==='issue-no-detail'){
