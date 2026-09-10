@@ -1196,16 +1196,20 @@ function renderSheet(){
       //   받으면 PASS 건도 열어봐야 함.
       //   → 모든 행에 링크를 넣되, 이슈 건은 빨간색 + 건수로 계속 눈에 띄게 유지.
       let badge;
-      const isIssue = (c.status === 'issues');
+      // ★ 2026-09-10 — 'linked' 상태는 이제 항상 "대표 인보이스에 이슈가 있다"는
+      //   뜻이므로(이슈 없는 PASS는 더 이상 🔗로 표시하지 않음), issue와 동일하게
+      //   빨간 계열로 표시하고 대표 인보이스로 바로 이동하게 함.
+      const isIssue = (c.status === 'issues' || c.status === 'linked');
       const linkCls = isIssue ? 'detail-link issue-link' : 'detail-link';
-      const linkTxt = isIssue ? ('Issues →') : (c.status==='linked' ? ('View '+c.linkTo+' →') : 'View →');
+      const linkTxt = isIssue ? ('Issues →') : 'View →';
       const linkTargetInv = c.status==='linked' ? c.linkTo : o.invoice;
       const link = '<a class="'+linkCls+'" onclick="jumpToInvoice(\''+linkTargetInv+'\')">'+linkTxt+'</a>';
       if (c.status==='pending'){ badge = '<span class="badge pending">⏳ Not Inspected</span>'; }
       else if (c.status==='pass'){ badge = '<span class="badge pass">✓ PASS</span>'; }
-      // ★ 2026-09-10 신규 — 분할 주문 참조 표시. 빨간 issue 배지가 아니라 dims의
-      //   🔗 링크와 같은 중립 스타일로 — 실제 이슈 건수는 대표 인보이스에서만 셈.
-      else if (c.status==='linked'){ badge = '<span class="badge pass">🔗 '+c.linkTo+'</span>'; }
+      // ★ 2026-09-10 신규 — 분할 주문 중 이슈가 있는 대표를 가리키는 참조 표시.
+      //   "🔗 IN0047xxxx" 원시 인보이스만 보이면 영업팀이 헷갈린다는 현장
+      //   피드백 → "Issues on {invoice}"로 명확화하고, 실제 이슈처럼 빨간색으로.
+      else if (c.status==='linked'){ badge = '<span class="badge issue">⚠ Issues on '+c.linkTo+'</span>'; }
       else { badge = '<span class="badge issue">'+o.inspection+'</span>'; }
       const movedBadge = packStageBadgeHtml(o, 'badge');
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
@@ -1349,7 +1353,9 @@ function renderToday(){
     let badge;
     // ★ 2026-09-10 신규 — 분할 주문 참조 표시("🔗 대표인보이스")는 issue가 아니라
     //   중립 배지로. classifyInsp()와 동일한 기준(saveInspection 참고).
-    if (insp.indexOf('🔗') >= 0) badge = '<span class="plain-tag pass">'+insp+'</span>';
+    // ★ 2026-09-10 신규 — 분할 주문 참조 표시. "🔗 IN0047xxxx" 원문 대신
+    //   "Issues on IN0047xxxx"로 명확하게 (classifyInsp()와 동일한 기준).
+    if (insp.indexOf('🔗') >= 0) badge = '<span class="plain-tag issue">⚠ Issues on '+insp.replace('🔗','').trim()+'</span>';
     else if (insp.indexOf('PASS') >= 0) badge = '<span class="plain-tag pass">✓ PASS</span>';
     else if (insp.indexOf('ISSUES') >= 0) badge = '<span class="plain-tag issue">'+insp+' →</span>';
     else badge = '<span class="plain-tag pending">'+insp+'</span>';
@@ -1364,7 +1370,7 @@ function renderToday(){
     }
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>')) : '<span class="plain-tag na">N/A</span>';
-    return `<div class="today-row" data-invoice="${j.invoice}" onclick="jumpToInvoice('${j.invoice}')" title="${insp.indexOf('ISSUES')>=0 ? 'Click for issue details' : ''}">
+    return `<div class="today-row" data-invoice="${j.invoice}" onclick="jumpToInvoice('${j.invoice}')" title="${(insp.indexOf('ISSUES')>=0 || insp.indexOf('🔗')>=0) ? 'Click for issue details' : ''}">
       <span class="today-inv">${j.invoice||''}</span>
       <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
       <span class="today-time">Ship ${j.shipDate||'-'}</span>
@@ -1915,8 +1921,8 @@ function renderDetail(res){
   if (status==='pending'){
     statusHtml = '<span class="status-big pending">⏳ Not Inspected Yet</span>';
   } else if (status==='linked'){
-    statusHtml = '<span class="status-big pass">🔗 SAME SHIPMENT AS ' + linkedTo + '</span>';
-    itemsSectionHtml = `<div class="note-box gap-note">This order was picked as a separate slip of the same combined shipment. The actual inspection result and any short items are recorded once, under <a class="detail-link" onclick="jumpToInvoice('${linkedTo}')">${linkedTo}</a> — check that invoice for the full item detail.</div>`;
+    statusHtml = '<span class="status-big issue">⚠ ISSUES RECORDED UNDER ' + linkedTo + '</span>';
+    itemsSectionHtml = `<div class="note-box gap-note">This slip is part of the same combined shipment. Short items are recorded once, under <a class="detail-link" onclick="jumpToInvoice('${linkedTo}')">${linkedTo}</a> — check that invoice for the full item detail.</div>`;
   } else if (status==='pass'){
     statusHtml = '<span class="status-big pass">✓ ALL ITEMS PICKED — NO ISSUES</span>';
   } else if (status==='issue-no-detail'){
