@@ -2432,12 +2432,21 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   // ★ 2026-09-10 버그 수정(현장 발견) — saveInspection과 동일한 이유. 정확히
   //   일치하는 인보이스가 없으면 분할 주문(IN00473862_1, _2 등)일 수 있으니
   //   "인보이스_"로 시작하는 행도 찾아봄. 여기서는 "이미 같은 값이면 저장
-  //   생략"하기 위한 미리보기용이라, 분할된 것 중 아무거나 하나만 봐도 충분함
-  //   (실제로 여러 조각에 전부 반영하는 건 saveInspection이 이미 처리함).
+  //   생략"하기 위한 미리보기용 비교라, 정확한 값이 중요함 — saveInspection이
+  //   이제 여러 조각 중 대표(가장 작은 분할번호) 한 줄에만 실제 PASS/ISSUES를
+  //   쓰고 나머지는 "🔗 대표인보이스" 참조만 남기므로(중복 이슈 건수 표시 방지,
+  //   2026-09-10 수정), 대표가 아닌 줄을 골라버리면 currentVal이 항상
+  //   "🔗 ..."가 되어 매번 불필요하게 재저장을 시도하게 됨. 그래서 여기서도
+  //   똑같이 분할번호가 가장 작은(=대표) 줄을 우선으로 찾음.
   if (jobsRow === -1) {
     const prefix = String(invoice).trim() + '_';
+    let bestSuffix = Infinity;
     for (let i = 0; i < jobsInvoiceCol.length; i++) {
-      if (String(jobsInvoiceCol[i][0]).trim().indexOf(prefix) === 0) { jobsRow = i + 2; break; }
+      const invText = String(jobsInvoiceCol[i][0]).trim();
+      if (invText.indexOf(prefix) !== 0) continue;
+      const m = invText.match(/_(\d+)$/);
+      const suffixNum = m ? parseInt(m[1], 10) : 0;
+      if (suffixNum < bestSuffix) { bestSuffix = suffixNum; jobsRow = i + 2; }
     }
   }
   if (jobsRow === -1) return; // fulfillment 대시보드에 없는 인보이스(예: 오더 관리 시스템에 등록 안 된 경우)는 그냥 넘어감
