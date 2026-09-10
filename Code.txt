@@ -1967,14 +1967,28 @@ function saveInspection(data) {
     }
 
     var invoiceCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    var targetRow  = -1;
+    var targetRows = [];
     for (var i = 0; i < invoiceCol.length; i++) {
       if (String(invoiceCol[i][0]).trim() === String(data.invoice).trim()) {
-        targetRow = i + 2;
-        break;
+        targetRows.push(i + 2);
       }
     }
-    if (targetRow === -1) {
+    // ★ 2026-09-10 버그 수정(현장 발견) — 정확히 일치하는 인보이스가 없으면
+    //   분할 주문(예: 원래 IN00473862 하나가 부분출고 등의 이유로 Jobs 시트에
+    //   IN00473862_1, IN00473862_2 두 줄로 나뉘어 있는 경우)일 수 있음. 이런
+    //   경우 총량피킹/단독오더 쪽은 분할 전의 "원래 인보이스 번호"만 알고
+    //   있어서, 정확히 일치하는 행을 못 찾아 검수 결과가 Jobs 시트에 아예
+    //   반영이 안 되는(=조용히 실패하는) 사고로 이어졌음. "인보이스_"로
+    //   시작하는 행들을 대신 찾아서, 나뉜 조각 전부에 똑같이 반영함.
+    if (targetRows.length === 0) {
+      var prefix = String(data.invoice).trim() + '_';
+      for (var i = 0; i < invoiceCol.length; i++) {
+        if (String(invoiceCol[i][0]).trim().indexOf(prefix) === 0) {
+          targetRows.push(i + 2);
+        }
+      }
+    }
+    if (targetRows.length === 0) {
       return ContentService.createTextOutput(
         JSON.stringify({ ok: false, error: 'Invoice not found: ' + data.invoice })
       ).setMimeType(ContentService.MimeType.JSON);
@@ -1983,59 +1997,61 @@ function saveInspection(data) {
     var inspEndAt  = fmtTime(data.inspEndAt || data.inspectedAt);
     var inspector  = String(data.inspector || '').trim();
 
-    var cell = sheet.getRange(targetRow, 19);
+    targetRows.forEach(function(targetRow) {
+      var cell = sheet.getRange(targetRow, 19);
 
-    if (data.pass && (!data.issues || data.issues.length === 0)) {
-      cell.setValue('✓ PASS');
-      cell.setBackground('#0d2e1a');
-      cell.setFontColor('#10b981');
-      cell.setFontWeight('bold');
-      cell.setNote(
-        '✓ PASS\n'
-        + 'Completed: ' + inspEndAt
-        + (inspector ? '\nInspector: ' + inspector : '')
-      );
-    } else {
-      var issueCount = data.issues ? data.issues.length : 0;
-      cell.setValue('⚠ ISSUES(' + issueCount + ')');
-      cell.setBackground('#2e0d0d');
-      cell.setFontColor('#ef4444');
-      cell.setFontWeight('bold');
-      var noteLines = ['=== Inspection Issues ==='];
-      if (data.issues && data.issues.length > 0) {
-        data.issues.forEach(function(issue) {
-          noteLines.push(issue.type + ': Barcode ' + issue.barcode + ' x ' + issue.qty + ' pcs');
-        });
-      }
-      if (data.memo && data.memo.trim() !== '') {
+      if (data.pass && (!data.issues || data.issues.length === 0)) {
+        cell.setValue('✓ PASS');
+        cell.setBackground('#0d2e1a');
+        cell.setFontColor('#10b981');
+        cell.setFontWeight('bold');
+        cell.setNote(
+          '✓ PASS\n'
+          + 'Completed: ' + inspEndAt
+          + (inspector ? '\nInspector: ' + inspector : '')
+        );
+      } else {
+        var issueCount = data.issues ? data.issues.length : 0;
+        cell.setValue('⚠ ISSUES(' + issueCount + ')');
+        cell.setBackground('#2e0d0d');
+        cell.setFontColor('#ef4444');
+        cell.setFontWeight('bold');
+        var noteLines = ['=== Inspection Issues ==='];
+        if (data.issues && data.issues.length > 0) {
+          data.issues.forEach(function(issue) {
+            noteLines.push(issue.type + ': Barcode ' + issue.barcode + ' x ' + issue.qty + ' pcs');
+          });
+        }
+        if (data.memo && data.memo.trim() !== '') {
+          noteLines.push('');
+          noteLines.push('Note: ' + data.memo);
+        }
         noteLines.push('');
-        noteLines.push('Note: ' + data.memo);
+        noteLines.push('Completed: ' + inspEndAt);
+        if (inspector) noteLines.push('Inspector: ' + inspector);
+        cell.setNote(noteLines.join('\n'));
       }
-      noteLines.push('');
-      noteLines.push('Completed: ' + inspEndAt);
-      if (inspector) noteLines.push('Inspector: ' + inspector);
-      cell.setNote(noteLines.join('\n'));
-    }
 
-    var sH = sheet.getRange(1, 19);
-    if (!sH.getValue()) { sH.setValue('Inspection'); sH.setFontWeight('bold'); }
-    var tH = sheet.getRange(1, 20);
-    if (!tH.getValue()) { tH.setValue('Inspector'); tH.setFontWeight('bold'); }
-    var uH = sheet.getRange(1, 21);
-    if (!uH.getValue()) { uH.setValue('Insp. End'); uH.setFontWeight('bold'); }
+      var sH = sheet.getRange(1, 19);
+      if (!sH.getValue()) { sH.setValue('Inspection'); sH.setFontWeight('bold'); }
+      var tH = sheet.getRange(1, 20);
+      if (!tH.getValue()) { tH.setValue('Inspector'); tH.setFontWeight('bold'); }
+      var uH = sheet.getRange(1, 21);
+      if (!uH.getValue()) { uH.setValue('Insp. End'); uH.setFontWeight('bold'); }
 
-    if (inspector) {
-      sheet.getRange(targetRow, 20).setValue(inspector);
-    } else {
-      var existing = sheet.getRange(targetRow, 20).getValue();
-      if (!existing) sheet.getRange(targetRow, 20).setValue('(Unknown)');
-    }
+      if (inspector) {
+        sheet.getRange(targetRow, 20).setValue(inspector);
+      } else {
+        var existing = sheet.getRange(targetRow, 20).getValue();
+        if (!existing) sheet.getRange(targetRow, 20).setValue('(Unknown)');
+      }
 
-    sheet.getRange(targetRow, 21).setValue(inspEndAt);
+      sheet.getRange(targetRow, 21).setValue(inspEndAt);
+    });
 
     bumpVersion_();
     return ContentService.createTextOutput(
-      JSON.stringify({ ok: true, invoice: data.invoice, row: targetRow })
+      JSON.stringify({ ok: true, invoice: data.invoice, rows: targetRows })
     ).setMimeType(ContentService.MimeType.JSON);
 
   } catch (e) {
