@@ -2127,7 +2127,7 @@ function saveInspection(data) {
  *         함수 선택 → ▶ 실행 → 실행 로그(보기 → 실행 기록) 확인.
  * ================================================================================ */
 function cleanupDuplicateSplitInspections() {
-  const DRY_RUN = true; // ← 확인 끝나면 false로 바꿔서 한 번 더 실행
+  const DRY_RUN = false; // ★ 2026-09-10 — DRY_RUN 확인 완료(6줄, 예상과 일치) 후 실제 적용 모드로 전환
 
   const sh = SHEET_();
   const lastRow = sh.getLastRow();
