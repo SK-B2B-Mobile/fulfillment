@@ -1340,68 +1340,68 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
 
-    <!-- ─── VIEW P-choose: Pack Verify 선택 (★ 2026-08-31 신규) ─── -->
+    <!-- ─── VIEW P-choose: Pack Verify selection (★ 2026-08-31 신규) ─── -->
     <div class="view" id="v-pack-choose">
       <div class="eyebrow" style="color:var(--purple);">Step P · Pack Verify</div>
-      <h2 class="h-page">최종 2차 검증 — 어느 쪽인가요?</h2>
-      <p class="sub">패킹존으로 이동한 오더를 스캔으로 최종 확인합니다. <b>총량피킹 오더인지, 단독 오더인지</b> 먼저 선택해주세요 — 두 목록은 절대 섞이지 않습니다.</p>
+      <h2 class="h-page">Final Verification (2nd) — Which one?</h2>
+      <p class="sub">Scan to do a final check on orders moved to the packing zone. Please choose whether it's a <b>Total Picking order or a Standalone order</b> first — the two lists are never mixed.</p>
       <div class="pack-choose-grid">
         <div class="pack-choose-card batch" onclick="gotoView('v-pack')">
           <div class="pack-choose-icon">📦</div>
-          <div class="pack-choose-title">총량피킹 Pack Verify</div>
-          <div class="pack-choose-desc">TV 현황판에서 파랑(패킹존 이동완료)으로 표시된 총량피킹 오더만 대상.</div>
+          <div class="pack-choose-title">Total Picking Pack Verify</div>
+          <div class="pack-choose-desc">Only for Total Picking orders marked blue (moved to packing) on the TV board.</div>
         </div>
         <div class="pack-choose-card standalone" onclick="gotoView('v-pack-standalone')">
           <div class="pack-choose-icon">🧾</div>
-          <div class="pack-choose-title">단독 Pack Verify</div>
-          <div class="pack-choose-desc">04번에서 1차 검수 끝내고 패킹존 이동 표시된 단독 오더만 대상.</div>
+          <div class="pack-choose-title">Standalone Pack Verify</div>
+          <div class="pack-choose-desc">Only for standalone orders that finished 1st inspection in Step 04 and were marked moved to packing.</div>
         </div>
       </div>
     </div>
 
-    <!-- ─── VIEW P: Pack Verify (최종 2차 검증) ─── -->
+    <!-- ─── VIEW P: Pack Verify (Final Verification, 2nd) ─── -->
     <div class="view" id="v-pack">
-      <div class="pack-backlink" onclick="gotoView('v-pack-choose')">← Pack Verify 선택으로</div>
+      <div class="pack-backlink" onclick="gotoView('v-pack-choose')">← Back to Pack Verify selection</div>
       <div class="eyebrow" style="color:var(--purple);">Packing Zone · Final Check (2nd)</div>
-      <h2 class="h-page">패킹 최종검증 (총량)</h2>
-      <p class="sub">패킹존으로 물리적으로 이동한(파랑) 고객사만 여기서 다시 스캔으로 확인합니다.</p>
+      <h2 class="h-page">Final Packing Verification (Total Picking)</h2>
+      <p class="sub">Only customers physically moved to the packing zone (blue) are re-checked here by scanning.</p>
 
       <div class="pv-invoice-picker">
-        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검증할 오더 선택 (파랑 상태만 표시)</label>
+        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Select order to verify (blue status only)</label>
         <select id="pvInvoiceSelect" style="margin-top:8px;" onchange="onPvInvoiceChange()"></select>
         <div class="pv-worker-row">
-          <label>작업자</label>
+          <label>Worker</label>
           <select id="pvWorkerSelect" onchange="document.getElementById('pvWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
-          <input type="text" id="pvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+          <input type="text" id="pvWorkerManual" placeholder="Type name manually" style="display:none;">
         </div>
         <div class="pv-boxpallet-row">
           <div class="pv-boxpallet-field" id="pvBoxField">
-            <label>현재 박스</label>
+            <label>Current Box</label>
             <span class="pv-boxpallet-display" id="pvBoxNum">1</span>
           </div>
           <div class="pv-boxpallet-field" id="pvPalletField">
-            <label>팔렛</label>
+            <label>Pallet</label>
             <span class="pv-boxpallet-display" id="pvPalletNum">1</span>
           </div>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-primary pv-btn-big" id="pvBoxCompleteBtn" style="flex:2;" onclick="stepPvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-          <button type="button" class="btn btn-primary pv-btn-big" id="pvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
-          <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦→🚚 팔렛 전환</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="pvBoxCompleteBtn" style="flex:2;" onclick="stepPvBox(1)">✅ Finish This Box → Next Box</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="pvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPvPallet(1)">✅ Finish This Pallet → Next Pallet</button>
+          <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="If the shipping method changed, you can manually switch between box/pallet tracking">📦→🚚 Switch to Pallet</button>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 박스·팔렛 이동</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPv()">🏷 라벨 인쇄</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 Move Box/Pallet</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPv()">🏷 Print Label</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPvManual()" title="Enter quantity manually to print">✏️</button>
         </div>
       </div>
 
       <div class="pv-scan-panel" id="pvScanPanel">
         <div class="pv-scan-input-wrap">
           <span class="pv-scan-icon">🟣▤</span>
-          <input id="pvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
+          <input id="pvScanInput" placeholder="Scan a barcode..." autocomplete="off">
         </div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('pvScanInput', submitPvScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('pvScanInput', submitPvScan)">✎ Enter Barcode Manually (if scan fails)</button>
         <div class="pv-msg" id="pvMsg">
           <div class="pv-lastscan-row1">
             <span class="pv-lastscan-icon" id="pvMsgIcon"></span>
@@ -1411,7 +1411,7 @@ select option:disabled{color:var(--text-dim2);}
             <span class="pv-lastscan-sub" id="pvMsgSub"></span>
             <span class="pv-lastscan-qty" id="pvMsgQty"></span>
           </div>
-          <button class="pv-msg-action-btn" id="pvMsgActionBtn" style="display:none;" onclick="__pvMsgActionHandler && __pvMsgActionHandler()">⚠ 이슈 등록</button>
+          <button class="pv-msg-action-btn" id="pvMsgActionBtn" style="display:none;" onclick="__pvMsgActionHandler && __pvMsgActionHandler()">⚠ Report Issue</button>
         </div>
         <div class="pv-progress">
           <span class="pv-progress-left"><span>SKU</span><span class="n" id="pvProgressSku">0 / 0</span></span>
@@ -1420,62 +1420,62 @@ select option:disabled{color:var(--text-dim2);}
         <div class="pv-progress-bar"><div id="pvProgressBar" style="width:0%"></div></div>
         <div id="pvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
-          <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ 관리자 강제확정</button>
-          <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 패킹슬립 인쇄</button>
-          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPvSlip('letter', true)" title="박스·팔렛 번호 구분 없이 전체 목록만 인쇄">📋</button>
-          <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 최종 2차 검증완료 확정</button>
+          <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ Manager Force Confirm</button>
+          <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 Print Packing Slip</button>
+          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPvSlip('letter', true)" title="Print full list only, without box/pallet numbers">📋</button>
+          <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 Confirm Final Verification (2nd)</button>
         </div>
       </div>
 
       <div class="pv-empty" id="pvEmptyState">
         <div class="pv-empty-icon">📦</div>
-        <div>패킹존 이동완료(파랑)된 오더가 없습니다.<br>TV 현황판 또는 이 탭 상단에서 먼저 파랑으로 표시된 오더가 있어야 검증할 수 있습니다.</div>
+        <div>No orders marked moved to packing (blue) yet.<br>An order must be marked blue on the TV board or at the top of this tab before it can be verified.</div>
       </div>
     </div>
 
-    <!-- ─── VIEW P-standalone: Pack Verify (단독, ★ 2026-08-31 신규) ─── -->
+    <!-- ─── VIEW P-standalone: Pack Verify (Standalone, ★ 2026-08-31 신규) ─── -->
     <div class="view" id="v-pack-standalone">
-      <div class="pack-backlink" onclick="gotoView('v-pack-choose')">← Pack Verify 선택으로</div>
+      <div class="pack-backlink" onclick="gotoView('v-pack-choose')">← Back to Pack Verify selection</div>
       <div class="eyebrow" style="color:#B39DDB;">Standalone · Final Check (2nd)</div>
-      <h2 class="h-page" style="color:#B39DDB;">패킹 최종검증 (단독)</h2>
-      <p class="sub">04번에서 1차 검수 끝내고 <b>패킹존 이동으로 표시된 단독 오더만</b> 여기 나타납니다. 스캔 방식은 총량과 동일 — 목록은 절대 안 섞입니다.</p>
+      <h2 class="h-page" style="color:#B39DDB;">Final Packing Verification (Standalone)</h2>
+      <p class="sub">Only standalone orders that finished 1st inspection in Step 04 and <b>were marked moved to packing</b> appear here. Scanning works the same as Total Picking — the lists are never mixed.</p>
 
       <div class="pv-invoice-picker">
-        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검증할 단독 오더 선택 (패킹존 이동 표시된 것만)</label>
+        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Select standalone order to verify (moved-to-packing only)</label>
         <select id="psvInvoiceSelect" style="margin-top:8px;" onchange="onPsvInvoiceChange()"></select>
         <div class="pv-worker-row">
-          <label>작업자</label>
+          <label>Worker</label>
           <select id="psvWorkerSelect" onchange="document.getElementById('psvWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
-          <input type="text" id="psvWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+          <input type="text" id="psvWorkerManual" placeholder="Type name manually" style="display:none;">
         </div>
         <div class="pv-boxpallet-row">
           <div class="pv-boxpallet-field" id="psvBoxField">
-            <label>현재 박스</label>
+            <label>Current Box</label>
             <span class="pv-boxpallet-display" id="psvBoxNum">1</span>
           </div>
           <div class="pv-boxpallet-field" id="psvPalletField">
-            <label>팔렛</label>
+            <label>Pallet</label>
             <span class="pv-boxpallet-display" id="psvPalletNum">1</span>
           </div>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-primary pv-btn-big" id="psvBoxCompleteBtn" style="flex:2;" onclick="stepPsvBox(1)">✅ 이 박스 완료 → 다음 박스로</button>
-          <button type="button" class="btn btn-primary pv-btn-big" id="psvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPsvPallet(1)">✅ 이 팔렛 완료 → 다음 팔렛으로</button>
-          <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="배송방법이 바뀌었으면 박스/팔렛 기준을 수동으로 바꿀 수 있습니다">📦→🚚 팔렛 전환</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="psvBoxCompleteBtn" style="flex:2;" onclick="stepPsvBox(1)">✅ Finish This Box → Next Box</button>
+          <button type="button" class="btn btn-primary pv-btn-big" id="psvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPsvPallet(1)">✅ Finish This Pallet → Next Pallet</button>
+          <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="If the shipping method changed, you can manually switch between box/pallet tracking">📦→🚚 Switch to Pallet</button>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 박스·팔렛 이동</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 라벨 인쇄</button>
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPsvManual()" title="매수 직접 입력해서 인쇄">✏️</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 Move Box/Pallet</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 Print Label</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPsvManual()" title="Enter quantity manually to print">✏️</button>
         </div>
       </div>
 
       <div class="pv-scan-panel" id="psvScanPanel">
         <div class="pv-scan-input-wrap">
           <span class="pv-scan-icon">🟣▤</span>
-          <input id="psvScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
+          <input id="psvScanInput" placeholder="Scan a barcode..." autocomplete="off">
         </div>
-        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('psvScanInput', submitPsvScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('psvScanInput', submitPsvScan)">✎ Enter Barcode Manually (if scan fails)</button>
         <div class="pv-msg" id="psvMsg">
           <div class="pv-lastscan-row1">
             <span class="pv-lastscan-icon" id="psvMsgIcon"></span>
@@ -1485,7 +1485,7 @@ select option:disabled{color:var(--text-dim2);}
             <span class="pv-lastscan-sub" id="psvMsgSub"></span>
             <span class="pv-lastscan-qty" id="psvMsgQty"></span>
           </div>
-          <button class="pv-msg-action-btn" id="psvMsgActionBtn" style="display:none;" onclick="__psvMsgActionHandler && __psvMsgActionHandler()">⚠ 이슈 등록</button>
+          <button class="pv-msg-action-btn" id="psvMsgActionBtn" style="display:none;" onclick="__psvMsgActionHandler && __psvMsgActionHandler()">⚠ Report Issue</button>
         </div>
         <div class="pv-progress">
           <span class="pv-progress-left"><span>SKU</span><span class="n" id="psvProgressSku">0 / 0</span></span>
@@ -1494,16 +1494,16 @@ select option:disabled{color:var(--text-dim2);}
         <div class="pv-progress-bar"><div id="psvProgressBar" style="width:0%"></div></div>
         <div id="psvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
-          <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ 관리자 강제확정</button>
-          <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 패킹슬립 인쇄</button>
-          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPsvSlip('letter', true)" title="박스·팔렛 번호 구분 없이 전체 목록만 인쇄">📋</button>
-          <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 최종 2차 검증완료 확정</button>
+          <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ Manager Force Confirm</button>
+          <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 Print Packing Slip</button>
+          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPsvSlip('letter', true)" title="Print full list only, without box/pallet numbers">📋</button>
+          <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 Confirm Final Verification (2nd)</button>
         </div>
       </div>
 
       <div class="pv-empty" id="psvEmptyState">
         <div class="pv-empty-icon">🧾</div>
-        <div>패킹존 이동완료로 표시된 단독 오더가 없습니다.<br>&quot;04 단독 1차 검수&quot;에서 먼저 1차 검수를 끝내고 이동 표시해주세요.</div>
+        <div>No standalone orders marked moved to packing yet.<br>Please finish 1st inspection in &quot;04 Standalone Scan&quot; and mark it moved first.</div>
       </div>
     </div>
 
@@ -1545,28 +1545,28 @@ select option:disabled{color:var(--text-dim2);}
      단독은 고객사 1곳뿐이라 "여러 고객사에 자동분배"할 필요가 없어 훨씬 단순함. -->
 <div class="modal-bg" id="ssIssueModal">
   <div class="modal">
-    <h3>이슈 관리</h3>
+    <h3>Manage Issue</h3>
     <div id="ssIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
     <div id="ssExistingIssuesWrap" style="display:none; margin-bottom:16px;">
-      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이미 등록된 이슈 (잘못 등록했으면 취소할 수 있습니다)</label>
+      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Existing issue(s) (cancel here if registered by mistake)</label>
       <div id="ssExistingIssuesList" style="margin-top:8px;"></div>
     </div>
-    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">새 이슈 등록</label>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Report New Issue</label>
     <div class="form-field" style="margin-top:8px;">
-      <label>사유</label>
+      <label>Reason</label>
       <select id="ssIssueReason"></select>
     </div>
     <div class="form-field">
-      <label>수량</label>
+      <label>Quantity</label>
       <input type="number" id="ssIssueQty" min="1" value="1">
     </div>
     <div class="form-field">
-      <label>메모 (선택)</label>
-      <input type="text" id="ssIssueNote" placeholder="추가 설명이 필요하면 입력">
+      <label>Note (optional)</label>
+      <input type="text" id="ssIssueNote" placeholder="Add more detail if needed">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" data-modal-close>닫기</button>
-      <button class="btn btn-primary" id="ssIssueSubmitBtn" onclick="submitSsIssue()">이슈 등록</button>
+      <button class="btn btn-ghost" data-modal-close>Close</button>
+      <button class="btn btn-primary" id="ssIssueSubmitBtn" onclick="submitSsIssue()">Report Issue</button>
     </div>
   </div>
 </div>
@@ -1576,28 +1576,28 @@ select option:disabled{color:var(--text-dim2);}
      되돌아갈 수도 없었음). 위 04용 모달과 완전히 동일한 구조로 2차 전용 모달 신규 추가. -->
 <div class="modal-bg" id="psvIssueModal">
   <div class="modal">
-    <h3>이슈 관리 (2차 검수)</h3>
+    <h3>Manage Issue (2nd Inspection)</h3>
     <div id="psvIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
     <div id="psvExistingIssuesWrap" style="display:none; margin-bottom:16px;">
-      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이미 등록된 이슈 (잘못 등록했으면 취소할 수 있습니다)</label>
+      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Existing issue(s) (cancel here if registered by mistake)</label>
       <div id="psvExistingIssuesList" style="margin-top:8px;"></div>
     </div>
-    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">새 이슈 등록</label>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Report New Issue</label>
     <div class="form-field" style="margin-top:8px;">
-      <label>사유</label>
+      <label>Reason</label>
       <select id="psvIssueReason"></select>
     </div>
     <div class="form-field">
-      <label>수량</label>
+      <label>Quantity</label>
       <input type="number" id="psvIssueQty" min="1" value="1">
     </div>
     <div class="form-field">
-      <label>메모 (선택)</label>
-      <input type="text" id="psvIssueNote" placeholder="추가 설명이 필요하면 입력">
+      <label>Note (optional)</label>
+      <input type="text" id="psvIssueNote" placeholder="Add more detail if needed">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" data-modal-close>닫기</button>
-      <button class="btn btn-primary" id="psvIssueSubmitBtn" onclick="submitPsvIssue()">이슈 등록</button>
+      <button class="btn btn-ghost" data-modal-close>Close</button>
+      <button class="btn btn-primary" id="psvIssueSubmitBtn" onclick="submitPsvIssue()">Report Issue</button>
     </div>
   </div>
 </div>
@@ -1606,28 +1606,28 @@ select option:disabled{color:var(--text-dim2);}
      없었음(단독엔 있었는데 빠져있었음). psv용 모달과 완전히 동일한 구조로 신규 추가. -->
 <div class="modal-bg" id="pvIssueModal">
   <div class="modal">
-    <h3>이슈 관리 (2차 검수 · 총량)</h3>
+    <h3>Manage Issue (2nd Inspection · Total Picking)</h3>
     <div id="pvIssueTargetInfo" class="sub" style="margin-bottom:14px;"></div>
     <div id="pvExistingIssuesWrap" style="display:none; margin-bottom:16px;">
-      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이미 등록된 이슈 (잘못 등록했으면 취소할 수 있습니다)</label>
+      <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Existing issue(s) (cancel here if registered by mistake)</label>
       <div id="pvExistingIssuesList" style="margin-top:8px;"></div>
     </div>
-    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">새 이슈 등록</label>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Report New Issue</label>
     <div class="form-field" style="margin-top:8px;">
-      <label>사유</label>
+      <label>Reason</label>
       <select id="pvIssueReason"></select>
     </div>
     <div class="form-field">
-      <label>수량</label>
+      <label>Quantity</label>
       <input type="number" id="pvIssueQty" min="1" value="1">
     </div>
     <div class="form-field">
-      <label>메모 (선택)</label>
-      <input type="text" id="pvIssueNote" placeholder="추가 설명이 필요하면 입력">
+      <label>Note (optional)</label>
+      <input type="text" id="pvIssueNote" placeholder="Add more detail if needed">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" data-modal-close>닫기</button>
-      <button class="btn btn-primary" id="pvIssueSubmitBtn" onclick="submitPvIssue()">이슈 등록</button>
+      <button class="btn btn-ghost" data-modal-close>Close</button>
+      <button class="btn btn-primary" id="pvIssueSubmitBtn" onclick="submitPvIssue()">Report Issue</button>
     </div>
   </div>
 </div>
@@ -1639,23 +1639,23 @@ select option:disabled{color:var(--text-dim2);}
      _moveBoxContext로 추적). -->
 <div class="modal-bg" id="moveBoxModal">
   <div class="modal">
-    <h3 id="moveBoxModalTitle">박스 전체 이동</h3>
+    <h3 id="moveBoxModalTitle">Move Entire Box</h3>
     <div id="moveBoxModeToggleWrap" style="display:none; margin-bottom:12px;">
-      <button class="btn btn-ghost btn-sm" onclick="switchMoveBoxMode()">🔄 <span id="moveBoxModeToggleText">박스 단위로 보는 중 — 팔렛 단위로 전환</span></button>
+      <button class="btn btn-ghost btn-sm" onclick="switchMoveBoxMode()">🔄 <span id="moveBoxModeToggleText">Viewing by box — switch to pallet view</span></button>
     </div>
     <div class="form-field">
-      <label id="moveBoxFromLabel">어느 박스를 옮기시겠습니까?</label>
+      <label id="moveBoxFromLabel">Which box do you want to move?</label>
       <select id="moveBoxFromSelect" onchange="updateMoveBoxPreview()"></select>
     </div>
-    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">이 안에 담긴 상품</label>
+    <label style="font-size:11px; color:var(--text-dim); font-weight:700;">Items in this box</label>
     <div id="moveBoxPreviewList" style="margin:8px 0 14px; max-height:180px; overflow-y:auto; border:1px solid var(--border2); border-radius:8px; padding:4px 10px;"></div>
     <div class="form-field">
-      <label id="moveBoxToLabel">몇 번으로 옮기시겠습니까?</label>
-      <input type="number" id="moveBoxToInput" min="1" placeholder="새 번호 입력">
+      <label id="moveBoxToLabel">Move to which number?</label>
+      <input type="number" id="moveBoxToInput" min="1" placeholder="Enter new number">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" data-modal-close>취소</button>
-      <button class="btn btn-primary" onclick="confirmMoveBox()">이동 확정</button>
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" onclick="confirmMoveBox()">Confirm Move</button>
     </div>
   </div>
 </div>
@@ -6027,20 +6027,20 @@ function stepPvPallet(delta){
 //   (잘못 넘어갔거나 나중에 바로잡아야 할 때). prompt()는 어떤 기기에서도
 //   확실히 뜨는 가장 단순하고 안전한 방식이라 채택.
 function editPvBox(){
-  const v = prompt('박스 번호를 직접 입력하세요', _pvCurrentBox);
+  const v = prompt('Enter the box number', _pvCurrentBox);
   if(v === null) return;
   const n = parseInt(v, 10);
-  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
   _pvCurrentBox = n;
   document.getElementById('pvBoxNum').textContent = _pvCurrentBox;
   const si = document.getElementById('pvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
 function editPvPallet(){
-  const v = prompt('팔렛 번호를 직접 입력하세요', _pvCurrentPallet);
+  const v = prompt('Enter the pallet number', _pvCurrentPallet);
   if(v === null) return;
   const n = parseInt(v, 10);
-  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
   _pvCurrentPallet = n;
   document.getElementById('pvPalletNum').textContent = _pvCurrentPallet;
   const si = document.getElementById('pvScanInput');
@@ -6063,41 +6063,41 @@ async function editScannedBoxPv(barcode, name, curBox, curPallet, curPacked){
   // ★ 2026-09-08 재설계(현장 지적) — TK는 이제 박스 없이 팔렛만 쓰므로, TK일
   //   땐 "박스 번호"가 아니라 "팔렛 번호"를 물어봐야 함(예전엔 항상 박스부터
   //   물어봐서 TK에서도 안 맞는 질문이 뜨는 버그가 있었음).
-  const label = isTk ? '팔렛' : '박스';
+  const label = isTk ? 'Pallet' : 'Box';
   const curValue = isTk ? curPallet : curBox;
   const fromBox = curBox, fromPallet = curPallet;
-  const splitMode = curPacked > 1 && confirm(`${name}\n이 ${label}에 담긴 ${curPacked}개 중 일부만 다른 ${label}로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 ${label} 전체 이동`);
+  const splitMode = curPacked > 1 && confirm(`${name}\nSplit some of the ${curPacked} pcs in this ${label} into another ${label}?\n\nOK = split part of it\nCancel = move the entire ${label}`);
   if(splitMode){
-    const vQty = prompt(`이 ${label}의 ${curPacked}개 중 몇 개를 다른 ${label}로 옮기시겠습니까?`, Math.floor(curPacked / 2));
+    const vQty = prompt(`How many of the ${curPacked} pcs in this ${label} do you want to move to another ${label}?`, Math.floor(curPacked / 2));
     if(vQty === null) return;
     const splitQty = parseInt(vQty, 10);
-    if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`1 이상 ${curPacked - 1} 이하의 숫자를 입력하세요`); return; }
-    const vTo = prompt(`그 ${splitQty}개를 옮길 ${label} 번호를 입력해주세요`, Number(curValue) + 1);
+    if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`Enter a number between 1 and ${curPacked - 1}`); return; }
+    const vTo = prompt(`Enter the ${label} number to move those ${splitQty} pcs to`, Number(curValue) + 1);
     if(vTo === null) return;
     const nTo = parseInt(vTo, 10);
-    if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+    if(!nTo || nTo < 1){ alert('Enter a number of 1 or more'); return; }
     const nBox = isTk ? (curBox || '1') : nTo;
     const nPallet = isTk ? nTo : (curPallet || '1');
     const worker = currentPvWorker();
     const res = await gasCallWithRetry('splitScannedItemBox', {
       batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker, fromBox, fromPallet,
     });
-    if(!res.ok){ alert('나누기 실패: ' + (res.error || '알 수 없는 오류')); return; }
-    toast(`${splitQty}개가 ${label} ${nTo}로 나뉘어 옮겨졌습니다`, 'success');
+    if(!res.ok){ alert('Split failed: ' + (res.error || 'Unknown error')); return; }
+    toast(`${splitQty} pcs moved to ${label} ${nTo}`, 'success');
     await refreshPvState();
     return;
   }
-  const vTo = prompt(`${name}\n(${label} ${curValue}) 변경할 ${label} 번호를 입력해주세요`, curValue);
+  const vTo = prompt(`${name}\n(${label} ${curValue}) Enter the new ${label} number`, curValue);
   if(vTo === null) return;
   const nTo = parseInt(vTo, 10);
-  if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!nTo || nTo < 1){ alert('Enter a number of 1 or more'); return; }
   const nBox = isTk ? (curBox || '1') : nTo;
   const nPallet = isTk ? nTo : (curPallet || '1');
   const res = await gasCallWithRetry('updatePackScanBoxPallet', {
     batchId: state.batchId, invoice: _pvInvoice, barcode, round: 2, box: nBox, pallet: nPallet, fromBox, fromPallet,
   });
-  if(!res.ok){ alert('수정 실패: ' + (res.error || '알 수 없는 오류')); return; }
-  toast('박스·팔렛 번호가 수정되었습니다', 'success');
+  if(!res.ok){ alert('Update failed: ' + (res.error || 'Unknown error')); return; }
+  toast('Box/Pallet number updated', 'success');
   await refreshPvState();
 }
 // ★ 2026-09-08 신규(현장 요청) — psv와 동일한 이유. 박스 전체 이동.
@@ -6822,7 +6822,7 @@ let _psvIssueTarget = null;
 async function openPsvIssueModal(sku, barcode, name){
   if(!_psvInvoice){ return; }
   _psvIssueTarget = { sku, barcode, name };
-  document.getElementById('psvIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
+  document.getElementById('psvIssueTargetInfo').textContent = `${name || sku} · ${sku} · Barcode ${barcode}`;
   const reasonSel = document.getElementById('psvIssueReason');
   reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
   // ★ 2026-09-11 신규 — 04(ssIssueModal)와 동일한 커서 자동 이동.
@@ -6837,55 +6837,55 @@ async function refreshPsvExistingIssues(){
   const wrap = document.getElementById('psvExistingIssuesWrap');
   const list = document.getElementById('psvExistingIssuesList');
   if(!_psvIssueTarget || !_psvInvoice){ wrap.style.display = 'none'; return; }
-  list.innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  list.innerHTML = '<div class="empty-log">Loading...</div>';
   wrap.style.display = 'block';
   const res = await gasQueryWithRetry('getInvoiceIssues', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice });
-  if(!res.ok){ list.innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`; return; }
+  if(!res.ok){ list.innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`; return; }
   const mine = (res.issues || []).filter(iss => normBarcode(iss.barcode) === normBarcode(_psvIssueTarget.barcode));
   if(!mine.length){ wrap.style.display = 'none'; return; }
   const reasonLabel = v => (ISSUE_REASONS.find(r => r.v === v) || {}).label || v;
   list.innerHTML = mine.map(iss => `
     <div class="pv-line" style="margin-bottom:6px;">
       <div class="pv-line-info">
-        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty}개</div>
+        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty} pcs</div>
         <div class="pv-line-meta">${iss.time} · ${iss.worker || ''}${iss.note ? ` · ${iss.note}` : ''}</div>
       </div>
       <div class="pv-line-actions">
-        <button class="btn btn-ghost btn-sm" onclick="undoPsvExistingIssue('${iss.issueId}')">취소</button>
+        <button class="btn btn-ghost btn-sm" onclick="undoPsvExistingIssue('${iss.issueId}')">Cancel</button>
       </div>
     </div>`).join('');
 }
 async function undoPsvExistingIssue(issueId){
-  if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어, 완료 처리됐던 상품이 미완료로 돌아갈 수 있습니다.')) return;
+  if(!confirm('Cancel this issue?\nThe quantity will count toward the required amount again, so an item that was marked complete may become incomplete.')) return;
   const res = await gasCallWithRetry('undoIssue', { issueId });
-  if(!res.ok){ alert('취소 실패: ' + (res.error || '알 수 없는 오류')); return; }
-  toast('이슈가 취소되었습니다', 'success');
+  if(!res.ok){ alert('Cancel failed: ' + (res.error || 'Unknown error')); return; }
+  toast('Issue cancelled', 'success');
   await refreshPsvExistingIssues();
   await refreshPsvState();
 }
 async function submitPsvIssue(){
   if(!_psvIssueTarget || !_psvInvoice) return;
   const worker = currentPsvWorker();
-  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  if(!worker){ alert('Please select a worker first'); return; }
   const reason = document.getElementById('psvIssueReason').value;
   const qty = Number(document.getElementById('psvIssueQty').value) || 0;
-  if(qty <= 0){ alert('수량을 1 이상 입력하세요'); return; }
+  if(qty <= 0){ alert('Enter a quantity of 1 or more'); return; }
   const note = document.getElementById('psvIssueNote').value.trim();
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const btn = document.getElementById('psvIssueSubmitBtn');
-  btn.disabled = true; btn.textContent = '등록 중...';
+  btn.disabled = true; btn.textContent = 'Submitting...';
   const res = await gasCallWithRetry('logIssue', {
     batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker,
     barcode: _psvIssueTarget.barcode, sku: _psvIssueTarget.sku, name: _psvIssueTarget.name,
     customer: ord ? ord.customer : '', reason, qty, note
   });
-  btn.disabled = false; btn.textContent = '이슈 등록';
+  btn.disabled = false; btn.textContent = 'Report Issue';
   if(res && res.ok){
     closeAllModals();
-    showPsvMsg(`⚠ 이슈 등록됨 — ${_psvIssueTarget.name || _psvIssueTarget.sku} ${qty}개`, 'ok');
+    showPsvMsg(`⚠ Issue reported — ${_psvIssueTarget.name || _psvIssueTarget.sku} ${qty} pcs`, 'ok');
     await refreshPsvState();
   } else {
-    alert('이슈 등록 실패: ' + ((res && res.error) || '알 수 없는 오류'));
+    alert('Failed to report issue: ' + ((res && res.error) || 'Unknown error'));
   }
 }
 
@@ -6896,7 +6896,7 @@ let _pvIssueTarget = null;
 async function openPvIssueModal(sku, barcode, name){
   if(!_pvInvoice){ return; }
   _pvIssueTarget = { sku, barcode, name };
-  document.getElementById('pvIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
+  document.getElementById('pvIssueTargetInfo').textContent = `${name || sku} · ${sku} · Barcode ${barcode}`;
   const reasonSel = document.getElementById('pvIssueReason');
   reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
   // ★ 2026-09-11 신규 — 04(ssIssueModal)와 동일한 커서 자동 이동.
@@ -6911,55 +6911,55 @@ async function refreshPvExistingIssues(){
   const wrap = document.getElementById('pvExistingIssuesWrap');
   const list = document.getElementById('pvExistingIssuesList');
   if(!_pvIssueTarget || !_pvInvoice){ wrap.style.display = 'none'; return; }
-  list.innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  list.innerHTML = '<div class="empty-log">Loading...</div>';
   wrap.style.display = 'block';
   const res = await gasQueryWithRetry('getInvoiceIssues', { batchId: state.batchId, invoice: _pvInvoice });
-  if(!res.ok){ list.innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`; return; }
+  if(!res.ok){ list.innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`; return; }
   const mine = (res.issues || []).filter(iss => normBarcode(iss.barcode) === normBarcode(_pvIssueTarget.barcode));
   if(!mine.length){ wrap.style.display = 'none'; return; }
   const reasonLabel = v => (ISSUE_REASONS.find(r => r.v === v) || {}).label || v;
   list.innerHTML = mine.map(iss => `
     <div class="pv-line" style="margin-bottom:6px;">
       <div class="pv-line-info">
-        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty}개</div>
+        <div class="pv-line-name">${reasonLabel(iss.reason)} · ${iss.qty} pcs</div>
         <div class="pv-line-meta">${iss.time} · ${iss.worker || ''}${iss.note ? ` · ${iss.note}` : ''}</div>
       </div>
       <div class="pv-line-actions">
-        <button class="btn btn-ghost btn-sm" onclick="undoPvExistingIssue('${iss.issueId}')">취소</button>
+        <button class="btn btn-ghost btn-sm" onclick="undoPvExistingIssue('${iss.issueId}')">Cancel</button>
       </div>
     </div>`).join('');
 }
 async function undoPvExistingIssue(issueId){
-  if(!confirm('이 이슈를 취소하시겠습니까?\n다시 필요수량에 포함되어, 완료 처리됐던 상품이 미완료로 돌아갈 수 있습니다.')) return;
+  if(!confirm('Cancel this issue?\nThe quantity will count toward the required amount again, so an item that was marked complete may become incomplete.')) return;
   const res = await gasCallWithRetry('undoIssue', { issueId });
-  if(!res.ok){ alert('취소 실패: ' + (res.error || '알 수 없는 오류')); return; }
-  toast('이슈가 취소되었습니다', 'success');
+  if(!res.ok){ alert('Cancel failed: ' + (res.error || 'Unknown error')); return; }
+  toast('Issue cancelled', 'success');
   await refreshPvExistingIssues();
   await refreshPvState();
 }
 async function submitPvIssue(){
   if(!_pvIssueTarget || !_pvInvoice) return;
   const worker = currentPvWorker();
-  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  if(!worker){ alert('Please select a worker first'); return; }
   const reason = document.getElementById('pvIssueReason').value;
   const qty = Number(document.getElementById('pvIssueQty').value) || 0;
-  if(qty <= 0){ alert('수량을 1 이상 입력하세요'); return; }
+  if(qty <= 0){ alert('Enter a quantity of 1 or more'); return; }
   const note = document.getElementById('pvIssueNote').value.trim();
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const btn = document.getElementById('pvIssueSubmitBtn');
-  btn.disabled = true; btn.textContent = '등록 중...';
+  btn.disabled = true; btn.textContent = 'Submitting...';
   const res = await gasCallWithRetry('logIssue', {
     batchId: state.batchId, invoice: _pvInvoice, worker,
     barcode: _pvIssueTarget.barcode, sku: _pvIssueTarget.sku, name: _pvIssueTarget.name,
     customer: cf ? cf.meta.customer : '', reason, qty, note
   });
-  btn.disabled = false; btn.textContent = '이슈 등록';
+  btn.disabled = false; btn.textContent = 'Report Issue';
   if(res && res.ok){
     closeAllModals();
-    showPvMsg(`⚠ 이슈 등록됨 — ${_pvIssueTarget.name || _pvIssueTarget.sku} ${qty}개`, 'ok');
+    showPvMsg(`⚠ Issue reported — ${_pvIssueTarget.name || _pvIssueTarget.sku} ${qty} pcs`, 'ok');
     await refreshPvState();
   } else {
-    alert('이슈 등록 실패: ' + ((res && res.error) || '알 수 없는 오류'));
+    alert('Failed to report issue: ' + ((res && res.error) || 'Unknown error'));
   }
 }
 
@@ -7247,20 +7247,20 @@ function stepPsvPallet(delta){
   if(si) setTimeout(() => si.focus(), 50);
 }
 function editPsvBox(){
-  const v = prompt('박스 번호를 직접 입력하세요', _psvCurrentBox);
+  const v = prompt('Enter the box number', _psvCurrentBox);
   if(v === null) return;
   const n = parseInt(v, 10);
-  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
   _psvCurrentBox = n;
   document.getElementById('psvBoxNum').textContent = _psvCurrentBox;
   const si = document.getElementById('psvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
 function editPsvPallet(){
-  const v = prompt('팔렛 번호를 직접 입력하세요', _psvCurrentPallet);
+  const v = prompt('Enter the pallet number', _psvCurrentPallet);
   if(v === null) return;
   const n = parseInt(v, 10);
-  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
   _psvCurrentPallet = n;
   document.getElementById('psvPalletNum').textContent = _psvCurrentPallet;
   const si = document.getElementById('psvScanInput');
@@ -7280,41 +7280,41 @@ function togglePsvPalletMode(){
 async function editScannedBoxPsv(barcode, name, curBox, curPallet, curPacked){
   const isTk = document.getElementById('psvPalletField') && document.getElementById('psvPalletField').style.display !== 'none';
   // ★ 2026-09-08 재설계 — pv와 동일한 이유. TK는 팔렛 번호를 물어봐야 함.
-  const label = isTk ? '팔렛' : '박스';
+  const label = isTk ? 'Pallet' : 'Box';
   const curValue = isTk ? curPallet : curBox;
   const fromBox = curBox, fromPallet = curPallet;
-  const splitMode = curPacked > 1 && confirm(`${name}\n이 ${label}에 담긴 ${curPacked}개 중 일부만 다른 ${label}로 나누시겠습니까?\n\n확인 = 일부만 나누기\n취소 = 이 ${label} 전체 이동`);
+  const splitMode = curPacked > 1 && confirm(`${name}\nSplit some of the ${curPacked} pcs in this ${label} into another ${label}?\n\nOK = split part of it\nCancel = move the entire ${label}`);
   if(splitMode){
-    const vQty = prompt(`이 ${label}의 ${curPacked}개 중 몇 개를 다른 ${label}로 옮기시겠습니까?`, Math.floor(curPacked / 2));
+    const vQty = prompt(`How many of the ${curPacked} pcs in this ${label} do you want to move to another ${label}?`, Math.floor(curPacked / 2));
     if(vQty === null) return;
     const splitQty = parseInt(vQty, 10);
-    if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`1 이상 ${curPacked - 1} 이하의 숫자를 입력하세요`); return; }
-    const vTo = prompt(`그 ${splitQty}개를 옮길 ${label} 번호를 입력해주세요`, Number(curValue) + 1);
+    if(!splitQty || splitQty < 1 || splitQty >= curPacked){ alert(`Enter a number between 1 and ${curPacked - 1}`); return; }
+    const vTo = prompt(`Enter the ${label} number to move those ${splitQty} pcs to`, Number(curValue) + 1);
     if(vTo === null) return;
     const nTo = parseInt(vTo, 10);
-    if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+    if(!nTo || nTo < 1){ alert('Enter a number of 1 or more'); return; }
     const nBox = isTk ? (curBox || '1') : nTo;
     const nPallet = isTk ? nTo : (curPallet || '1');
     const worker = currentPsvWorker();
     const res = await gasCallWithRetry('splitScannedItemBox', {
       batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, splitQty, toBox: nBox, toPallet: nPallet, worker, fromBox, fromPallet,
     });
-    if(!res.ok){ alert('나누기 실패: ' + (res.error || '알 수 없는 오류')); return; }
-    toast(`${splitQty}개가 ${label} ${nTo}로 나뉘어 옮겨졌습니다`, 'success');
+    if(!res.ok){ alert('Split failed: ' + (res.error || 'Unknown error')); return; }
+    toast(`${splitQty} pcs moved to ${label} ${nTo}`, 'success');
     await refreshPsvState();
     return;
   }
-  const vTo = prompt(`${name}\n(${label} ${curValue}) 변경할 ${label} 번호를 입력해주세요`, curValue);
+  const vTo = prompt(`${name}\n(${label} ${curValue}) Enter the new ${label} number`, curValue);
   if(vTo === null) return;
   const nTo = parseInt(vTo, 10);
-  if(!nTo || nTo < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!nTo || nTo < 1){ alert('Enter a number of 1 or more'); return; }
   const nBox = isTk ? (curBox || '1') : nTo;
   const nPallet = isTk ? nTo : (curPallet || '1');
   const res = await gasCallWithRetry('updatePackScanBoxPallet', {
     batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, barcode, round: 2, box: nBox, pallet: nPallet, fromBox, fromPallet,
   });
-  if(!res.ok){ alert('수정 실패: ' + (res.error || '알 수 없는 오류')); return; }
-  toast('박스·팔렛 번호가 수정되었습니다', 'success');
+  if(!res.ok){ alert('Update failed: ' + (res.error || 'Unknown error')); return; }
+  toast('Box/Pallet number updated', 'success');
   await refreshPsvState();
 }
 // ★ 2026-09-08 신규(현장 요청) — 박스 하나에 여러 상품이 들어있을 때, 통째로
@@ -7333,7 +7333,7 @@ function _moveBoxBatchId_(){ return _moveBoxContext === 'psv' ? STANDALONE_BATCH
 function openMoveBoxModal(context){
   const invoice = context === 'psv' ? _psvInvoice : _pvInvoice;
   const st = context === 'psv' ? _psvState : _pvState;
-  if(!invoice || !st){ alert('먼저 오더를 선택하세요'); return; }
+  if(!invoice || !st){ alert('Please select an order first'); return; }
   const palletFieldId = context === 'psv' ? 'psvPalletField' : 'pvPalletField';
   const pf = document.getElementById(palletFieldId);
   const isTk = !!(pf && pf.style.display !== 'none');
@@ -7353,7 +7353,7 @@ function openMoveBoxModal(context){
 function switchMoveBoxMode(){
   _moveBoxMode = _moveBoxMode === 'box' ? 'pallet' : 'box';
   const txt = document.getElementById('moveBoxModeToggleText');
-  if(txt) txt.textContent = _moveBoxMode === 'box' ? '박스 단위로 보는 중 — 팔렛 단위로 전환' : '팔렛 단위로 보는 중 — 박스 단위로 전환';
+  if(txt) txt.textContent = _moveBoxMode === 'box' ? 'Viewing by box — switch to pallet view' : 'Viewing by pallet — switch to box view';
   populateMoveBoxSelect();
 }
 function populateMoveBoxSelect(){
@@ -7372,13 +7372,13 @@ function populateMoveBoxSelect(){
     if(!isNaN(na) && !isNaN(nb)) return na - nb;
     return String(a).localeCompare(String(b));
   });
-  document.getElementById('moveBoxModalTitle').textContent = `${label} 전체 이동`;
-  document.getElementById('moveBoxFromLabel').textContent = `어느 ${label}를 옮기시겠습니까?`;
-  document.getElementById('moveBoxToLabel').textContent = `몇 번 ${label}로 옮기시겠습니까?`;
+  document.getElementById('moveBoxModalTitle').textContent = `Move Entire ${label}`;
+  document.getElementById('moveBoxFromLabel').textContent = `Which ${label} do you want to move?`;
+  document.getElementById('moveBoxToLabel').textContent = `Move to which ${label} number?`;
   const sel = document.getElementById('moveBoxFromSelect');
   sel.innerHTML = keys.length
-    ? keys.map(k => `<option value="${k}">${label} ${k} (상품 ${groups[k].length}종)</option>`).join('')
-    : `<option value="">담긴 상품이 없습니다</option>`;
+    ? keys.map(k => `<option value="${k}">${label} ${k} (${groups[k].length} item(s))</option>`).join('')
+    : `<option value="">No items in any ${label.toLowerCase()}</option>`;
   updateMoveBoxPreview();
 }
 function updateMoveBoxPreview(){
@@ -7392,21 +7392,21 @@ function updateMoveBoxPreview(){
     ? items.map(l => `
       <div style="padding:7px 0; border-bottom:1px solid var(--border2);">
         <div style="font-size:13px; font-weight:700;">${l.name || l.sku}</div>
-        <div style="font-size:11px; color:var(--text-dim);">${l.sku} · 바코드 ${l.barcode} · ${l.packed}/${l.effectiveReq}개</div>
+        <div style="font-size:11px; color:var(--text-dim);">${l.sku} · Barcode ${l.barcode} · ${l.packed}/${l.effectiveReq} pcs</div>
       </div>`).join('')
-    : `<div style="padding:8px 0; font-size:12px; color:var(--text-dim);">담긴 상품이 없습니다</div>`;
+    : `<div style="padding:8px 0; font-size:12px; color:var(--text-dim);">No items in this one</div>`;
 }
 async function confirmMoveBox(){
   const fromValue = document.getElementById('moveBoxFromSelect').value;
   const toValue = document.getElementById('moveBoxToInput').value.trim();
-  if(!fromValue){ alert('이동할 박스(팔렛)를 선택하세요'); return; }
-  if(!toValue){ alert('옮길 번호를 입력하세요'); return; }
+  if(!fromValue){ alert('Select the box/pallet to move'); return; }
+  if(!toValue){ alert('Enter the destination number'); return; }
   const res = await gasCallWithRetry('moveBoxOrPallet', {
     batchId: _moveBoxBatchId_(), invoice: _moveBoxInvoice_(), round: 2, mode: _moveBoxMode, fromValue, toValue,
   });
-  if(!res.ok){ alert('이동 실패: ' + (res.error || '알 수 없는 오류')); return; }
+  if(!res.ok){ alert('Move failed: ' + (res.error || 'Unknown error')); return; }
   closeAllModals();
-  toast(`${res.updated}건 이동되었습니다`, 'success');
+  toast(`${res.updated} item(s) moved`, 'success');
   if(_moveBoxContext === 'psv') await refreshPsvState(); else await refreshPvState();
 }
 
@@ -7415,9 +7415,9 @@ function populatePsvWorkerSelect(){
   if(!sel) return;
   if(document.activeElement === sel) return;
   const all = [...state.workers]; // ★ 2026-09-01 — 재직 상태 필드 제거로 정렬 기준도 제거(등록 순서 그대로)
-  const optsHtml = '<option value="">— 선택 안 함 —</option>' + all.map(w =>
+  const optsHtml = '<option value="">— Select —</option>' + all.map(w =>
     `<option value="${w.name}">${w.name}</option>`
-  ).join('') + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+  ).join('') + '<option value="__manual__">✎ Not on the list — enter manually</option>';
   const savedWorker = localStorage.getItem('sk_standalone_pack_verify_worker'); // ★ 총량 Pack Verify(sk_pack_verify_worker)와 완전히 분리된 키
   const prev = (psvCurrentWorker === null || psvCurrentWorker === undefined) ? savedWorker : psvCurrentWorker;
   sel.innerHTML = optsHtml;
@@ -7459,7 +7459,7 @@ async function populatePsvInvoiceSelect(){
   //   하나도 없으면 sel.value='...' 대입 자체가 브라우저에서 조용히 무시되어서
   //   (매칭되는 option 없인 값이 안 들어감) 목록에서 눌러도 선택이 전혀 안 되는
   //   버그로 이어졌음. option을 다시 채워서 실제로 선택이 되도록 복구.
-  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(o =>
+  sel.innerHTML = '<option value="">— Select an order —</option>' + candidates.map(o =>
     `<option value="${o.invoice}">${o.invoice}</option>`
   ).join('');
   if(prevSelected && candidates.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
@@ -7468,9 +7468,9 @@ async function populatePsvInvoiceSelect(){
     value: o.invoice,
     invHtml: o.invoice,
     subHtml: `${o.shipVia ? `<b style="color:#3EB8F5;">[${o.shipVia}]</b> ` : ''}${(o.customer||'').replace(/</g,'&lt;')}`,
-    badgeHtml: o.packVerified ? '<span class="badge">🟣 검증완료</span>' : '',
+    badgeHtml: o.packVerified ? '<span class="badge">🟣 Verified</span>' : '',
   }));
-  renderTriggerOptList('psvInvoiceSelect', psvRows, '— 오더를 선택하세요 —');
+  renderTriggerOptList('psvInvoiceSelect', psvRows, '— Select an order —');
 }
 
 async function onPsvInvoiceChange(){
@@ -7501,27 +7501,27 @@ async function onPsvInvoiceChange(){
   document.getElementById('psvMsg').style.display = 'none';
   const input = document.getElementById('psvScanInput');
   input.disabled = false;
-  input.placeholder = '바코드를 스캔하세요...';
+  input.placeholder = 'Scan a barcode...';
   document.getElementById('psvCompleteBtn').disabled = true;
-  document.getElementById('psvCompleteBtn').textContent = '🟣 최종 2차 검증완료 확정';
-  document.getElementById('psvLines').innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  document.getElementById('psvCompleteBtn').textContent = '🟣 Confirm Final Verification (2nd)';
+  document.getElementById('psvLines').innerHTML = '<div class="empty-log">Loading...</div>';
   await refreshPsvState();
   const ord = _standaloneOrders.find(o => o.invoice === invoice);
   if(ord && ord.packVerified){
     _psvForceVerified = !(_psvState && _psvState.complete);
     input.disabled = true;
-    input.placeholder = _psvForceVerified ? '이미 관리자 강제확정으로 완료된 오더입니다' : '이미 스캔으로 검증완료된 오더입니다';
+    input.placeholder = _psvForceVerified ? 'Already completed via manager force confirm' : 'Already verified by scan';
     const completeBtn = document.getElementById('psvCompleteBtn');
     completeBtn.disabled = true;
-    completeBtn.textContent = _psvForceVerified ? '✅ 이미 검증완료됨 (관리자 확정)' : '✅ 이미 검증완료됨 (스캔 100%)';
+    completeBtn.textContent = _psvForceVerified ? '✅ Already Verified (Manager Confirmed)' : '✅ Already Verified (100% Scanned)';
     // ★ 2026-09-01 버그 수정 — onPvInvoiceChange와 동일한 이유. 강제확정 버튼도 잠금.
     const forceBtn = document.getElementById('psvForceBtn');
-    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ 이미 확정됨'; }
+    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ Already Confirmed'; }
   } else {
     input.value = '';
     setTimeout(() => input.focus(), 60);
     const forceBtn = document.getElementById('psvForceBtn');
-    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ 관리자 강제확정'; }
+    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
   }
 }
 
@@ -7529,7 +7529,7 @@ async function refreshPsvState(){
   if(!_psvInvoice) return;
   const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2 });
   if(!res.ok){
-    document.getElementById('psvLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
+    document.getElementById('psvLines').innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`;
     return;
   }
   _psvState = res;
@@ -7567,8 +7567,8 @@ function renderPsvBody(){
     if(pb) pb.style.display = isTk ? 'flex' : 'none';
     const toggleBtn = document.getElementById('psvModeToggleBtn');
     if(toggleBtn) toggleBtn.textContent = isTk
-      ? (_psvPalletModeOverride !== null ? '🚚→📦 박스로 전환됨' : '🚚→📦 박스 전환')
-      : (_psvPalletModeOverride !== null ? '📦→🚚 팔렛으로 전환됨' : '📦→🚚 팔렛 전환');
+      ? (_psvPalletModeOverride !== null ? '🚚→📦 Switched to Box' : '🚚→📦 Switch to Box')
+      : (_psvPalletModeOverride !== null ? '📦→🚚 Switched to Pallet' : '📦→🚚 Switch to Pallet');
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('psvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
@@ -7589,27 +7589,27 @@ function renderPsvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
+        <div class="pv-line-meta">${l.sku} · Barcode ${l.barcode}${l.issueQty > 0 ? ` · Issue deducted ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 ${isTk ? '팔렛' : '박스'} 조각만 수정·재분할">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty}개 ✎</span>`).join('')
-            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 ${isTk ? '팔렛' : '박스'} 번호 수정">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="Edit/re-split just this ${isTk ? 'pallet' : 'box'} portion">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty} pcs ✎</span>`).join('')
+            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="Edit this item's ${isTk ? 'pallet' : 'box'} number">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
         }</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
-        <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="Report an issue found during 2nd inspection / view or cancel existing issue">${l.issueQty > 0 ? `⚠ Issue(${l.issueQty})` : '⚠ Issue'}</button>
       </div>
-    </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
+    </div>`).join('') || `<div class="empty-log">No items registered for this invoice</div>`;
 
   const activeHistory = (st.history || []).filter(h => h.status !== 'undone');
   const historyHtml = activeHistory.length ? `
-    <div class="pv-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ 스캔 이력 보기 (${activeHistory.length}건)</div>
+    <div class="pv-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ View Scan History (${activeHistory.length})</div>
     <div style="display:none;">
       ${activeHistory.slice(0, 30).map(h => `
         <div class="pv-history-row ${h.result !== 'pass' ? h.result : ''}">
-          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (중복)':''}${h.qty>1?' x'+h.qty:''}</span>
-          <span class="pv-history-undo" onclick="undoPsvScanEntry('${h.packScanId}')">되돌리기</span>
+          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · Barcode ${h.barcode}${h.result==='wrong'?' (different customer\'s item)':h.result==='over'?' (duplicate)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span class="pv-history-undo" onclick="undoPsvScanEntry('${h.packScanId}')">Undo</span>
         </div>`).join('')}
     </div>` : '';
 
@@ -7624,7 +7624,7 @@ function submitPsvScan(){
   const barcode = input.value.trim();
   if(!barcode || !_psvInvoice) return;
   // ★ 2026-09-01 버그 수정 — submitPvScan과 동일한 이유(alert 반복 방지)
-  if(!currentPsvWorker()){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  if(!currentPsvWorker()){ alert('Please select a worker first'); input.focus(); return; }
   input.value = '';
   flashScannedIntoInput(input, barcode);
   _psvScanQueue.push(barcode);
@@ -7646,12 +7646,12 @@ async function processPsvScanQueue(){
 }
 async function doPsvScanOne(barcode){
   const worker = currentPsvWorker();
-  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  if(!worker){ alert('Please select a worker first'); return; }
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함).
   const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2, box: _psvCurrentBox, pallet: _psvCurrentPallet });
   if(!res.ok){
-    showPsvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    showPsvMsg('Error: ' + (res.error || 'Unknown error'), 'bad');
     return;
   }
   if(res.result === 'pass'){
@@ -7665,16 +7665,16 @@ async function doPsvScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed'),
       qty: `${packed}/${required}`,
-      action: { label: '⚠ 이슈 등록', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
+      action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
     refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode)); // 백그라운드
     return;
   } else if(res.result === 'wrong'){
     playScanResultSound(false);
-    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
-    showPsvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것` });
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : 'Unknown';
+    showPsvMsg({ kind:'bad', icon:'🚫', title:'This item belongs to a different customer', sub:`Actually belongs to [${owners}]` });
   } else if(res.result === 'over'){
     playScanResultSound(false);
     // ★ 2026-09-09 신규(현장 질문) — 중복 스캔(이미 확인 완료된 상품을 또
@@ -7682,13 +7682,13 @@ async function doPsvScanOne(barcode){
     //   서버가 같이 보낸 박스·팔렛 정보를 보여줌.
     const boxes = res.existingBoxes || [];
     const boxSub = boxes.length
-      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty}개)`).join(' / ')
+      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty} pcs)`).join(' / ')
       : '';
     showPsvMsg({
       kind:'bad', icon:'⚠',
       title: res.name || res.sku || barcode,
-      sub: `바코드 ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
-      action: { label: '⚠ 이슈 등록', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
+      sub: `Barcode ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan'}`,
+      action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
   await refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode));
@@ -7725,7 +7725,7 @@ function showPsvMsg(msgOrOpts, kind){
   const actionBtn = document.getElementById('psvMsgActionBtn');
   if(actionBtn){
     if(action){
-      actionBtn.textContent = action.label || '⚠ 이슈 등록';
+      actionBtn.textContent = action.label || '⚠ Report Issue';
       actionBtn.style.display = 'block';
       window.__psvMsgActionHandler = action.onClick;
     } else {
@@ -7741,29 +7741,29 @@ function showPsvMsg(msgOrOpts, kind){
 }
 
 async function undoPsvScanEntry(packScanId){
-  if(!confirm('이 스캔을 취소하시겠습니까?')) return;
+  if(!confirm('Undo this scan?')) return;
   const res = await gasCallWithRetry('undoPackScan', { packScanId });
   if(res.ok) await refreshPsvState();
-  else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+  else alert('Undo failed: ' + (res.error || 'Unknown error'));
 }
 
 async function completePsvVerify(){
   if(!_psvInvoice) return;
   const btn = document.getElementById('psvCompleteBtn');
-  btn.disabled = true; btn.textContent = '처리 중...';
+  btn.disabled = true; btn.textContent = 'Processing...';
   const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified' });
   if(res.ok){
-    showPsvMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
+    showPsvMsg('🟣 Final Verification (2nd) complete — switched to purple status', 'ok');
     // ★ 2026-09-01 버그 수정 — completePvVerify와 동일한 버그. 성공해도 버튼이
     //   "처리 중..."에 멈춰있는 것처럼 보이던 것을 여기서도 직접 확정해서 고침.
     const input = document.getElementById('psvScanInput');
-    if(input){ input.disabled = true; input.placeholder = '이미 검증완료된 오더입니다'; }
-    btn.disabled = true; btn.textContent = '✅ 검증완료됨 (스캔 100%)';
+    if(input){ input.disabled = true; input.placeholder = 'This order is already verified'; }
+    btn.disabled = true; btn.textContent = '✅ Already Verified (100% Scanned)';
     await populatePsvInvoiceSelect();
     printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 검증완료 확정 시 자동으로 패킹슬립 인쇄
   } else {
-    btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
-    alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
+    btn.disabled = false; btn.textContent = '🟣 Confirm Final Verification (2nd)';
+    alert('Failed to switch status: ' + (res.error || 'Unknown error'));
     await refreshPsvState();
   }
 }
@@ -7771,28 +7771,28 @@ async function completePsvVerify(){
 async function forcePsvComplete(){
   if(!_psvInvoice) return;
   const worker = currentPsvWorker();
-  if(!worker){ alert('작업자를 먼저 선택하세요(감사 기록용으로 필요합니다)'); return; }
-  if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.\n\n남은 상품은 전량 "확인됨"으로 자동 기록되어, 화면과 패킹슬립이 항상 일치하게 됩니다.')) return;
+  if(!worker){ alert('Please select a worker first (needed for the audit record)'); return; }
+  if(!confirm('⚠ Verification isn\'t finished yet — force this to "Final Verification (2nd) Complete" using manager authority?\n\nThis bypasses the mis-ship prevention safeguard, so only use it if you have already physically confirmed the items.\n\nAll remaining items will be automatically recorded as "confirmed", so the screen and packing slip always stay in sync.')) return;
   const forceBtn = document.getElementById('psvForceBtn');
-  if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '처리 중...'; }
+  if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = 'Processing...'; }
   // ★ 2026-09-01 신규 — forcePvComplete와 동일한 이유(화면·슬립 불일치 해결).
   await gasCallWithRetry('forceCompletePackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, round: 2 });
   const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
   if(res.ok){
-    showPsvMsg('⚠ 관리자 강제확정 — 남은 수량은 전량 확인된 것으로 기록됐습니다', 'ok');
+    showPsvMsg('⚠ Manager force confirm — all remaining quantity recorded as confirmed', 'ok');
     _psvForceVerified = true;
     await refreshPsvState(); // ★ 신규 — 방금 채운 수량을 화면에 즉시 반영
     await populatePsvInvoiceSelect();
     const input = document.getElementById('psvScanInput');
-    if(input){ input.disabled = true; input.placeholder = '이미 관리자 강제확정으로 완료된 오더입니다'; }
+    if(input){ input.disabled = true; input.placeholder = 'Already completed via manager force confirm'; }
     const completeBtn = document.getElementById('psvCompleteBtn');
-    if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ 이미 검증완료됨 (관리자 확정)'; }
+    if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ Already Verified (Manager Confirmed)'; }
     // ★ 2026-09-01 버그 수정 — forcePvComplete와 동일한 이유. 강제확정 버튼 자체를 잠금.
-    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ 이미 확정됨'; }
+    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ Already Confirmed'; }
     printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 강제확정 시에도 자동 인쇄
   } else {
-    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ 관리자 강제확정'; }
-    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
+    alert('Failed: ' + (res.error || 'Unknown error'));
   }
 }
 
@@ -7821,7 +7821,7 @@ function populatePvInvoiceSelect(){
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
   // ★ 2026-09-04 긴급 버그 수정 — 위 psv와 동일한 이유로 option 복구.
-  sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + candidates.map(c =>
+  sel.innerHTML = '<option value="">— Select an order —</option>' + candidates.map(c =>
     `<option value="${c.invoice}">${c.invoice}</option>`
   ).join('');
   if(prevSelected && candidates.some(c => c.invoice === prevSelected)) sel.value = prevSelected;
@@ -7830,9 +7830,9 @@ function populatePvInvoiceSelect(){
     value: c.invoice,
     invHtml: c.invoice,
     subHtml: `SLOT ${c.slotNum} · ${c.shipVia ? `<b style="color:#3EB8F5;">[${c.shipVia}]</b> ` : ''}${(c.customer||'').replace(/</g,'&lt;')}`,
-    badgeHtml: c.verified ? '<span class="badge">🟣 검증완료</span>' : '',
+    badgeHtml: c.verified ? '<span class="badge">🟣 Verified</span>' : '',
   }));
-  renderTriggerOptList('pvInvoiceSelect', pvRows, '— 오더를 선택하세요 —');
+  renderTriggerOptList('pvInvoiceSelect', pvRows, '— Select an order —');
 }
 
 function populatePvWorkerSelect(){
@@ -7840,9 +7840,9 @@ function populatePvWorkerSelect(){
   if(!sel) return;
   if(document.activeElement === sel) return; // 드롭다운 열려있는 동안은 건드리지 않음(scan&sort와 동일 원칙)
   const all = [...state.workers]; // ★ 2026-09-01 — 재직 상태 필드 제거로 정렬 기준도 제거(등록 순서 그대로)
-  const optsHtml = '<option value="">— 선택 안 함 —</option>' + all.map(w =>
+  const optsHtml = '<option value="">— Select —</option>' + all.map(w =>
     `<option value="${w.name}">${w.name}</option>`
-  ).join('') + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+  ).join('') + '<option value="__manual__">✎ Not on the list — enter manually</option>';
   const savedWorker = localStorage.getItem('sk_pack_verify_worker'); // ★ 피킹 작업자 저장키(sk_scan_worker)와 완전히 다른 별도 키
   const prev = (pvCurrentWorker === null || pvCurrentWorker === undefined) ? savedWorker : pvCurrentWorker;
   sel.innerHTML = optsHtml;
@@ -7889,30 +7889,30 @@ async function onPvInvoiceChange(){
   document.getElementById('pvMsg').style.display = 'none';
   const input = document.getElementById('pvScanInput');
   input.disabled = false;
-  input.placeholder = '바코드를 스캔하세요...';
+  input.placeholder = 'Scan a barcode...';
   document.getElementById('pvCompleteBtn').disabled = true;
-  document.getElementById('pvCompleteBtn').textContent = '🟣 최종 2차 검증완료 확정';
-  document.getElementById('pvLines').innerHTML = '<div class="empty-log">불러오는 중...</div>';
+  document.getElementById('pvCompleteBtn').textContent = '🟣 Confirm Final Verification (2nd)';
+  document.getElementById('pvLines').innerHTML = '<div class="empty-log">Loading...</div>';
   await refreshPvState();
   // ★ 2026-08-24 신규 — 이미 검증완료된(정상 스캔이든 관리자 강제확정이든) 오더를
   //   다시 선택했을 때도, 처음 볼 때와 똑같이 "완료됨" 상태가 바로 보이게 함.
   if(state.packVerifiedInvoices.has(invoice)){
     _pvForceVerified = !(_pvState && _pvState.complete);
     input.disabled = true;
-    input.placeholder = _pvForceVerified ? '이미 관리자 강제확정으로 완료된 오더입니다' : '이미 스캔으로 검증완료된 오더입니다';
+    input.placeholder = _pvForceVerified ? 'Already completed via manager force confirm' : 'Already verified by scan';
     const completeBtn = document.getElementById('pvCompleteBtn');
     completeBtn.disabled = true;
-    completeBtn.textContent = _pvForceVerified ? '✅ 이미 검증완료됨 (관리자 확정)' : '✅ 이미 검증완료됨 (스캔 100%)';
+    completeBtn.textContent = _pvForceVerified ? '✅ Already Verified (Manager Confirmed)' : '✅ Already Verified (100% Scanned)';
     // ★ 2026-09-01 버그 수정 — 이미 검증완료된 오더를 다시 선택했을 때 완료
     //   버튼은 잠기는데 정작 "관리자 강제확정" 버튼은 안 잠겨서, 이미 확정된
     //   오더에 대해 확인창을 또 띄우고 또 누를 수 있었음. 완료 버튼과 똑같이 잠금.
     const forceBtn = document.getElementById('pvForceBtn');
-    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ 이미 확정됨'; }
+    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ Already Confirmed'; }
   } else {
     input.value = '';
     setTimeout(() => input.focus(), 60);
     const forceBtn = document.getElementById('pvForceBtn');
-    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ 관리자 강제확정'; }
+    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
   }
 }
 
@@ -7920,7 +7920,7 @@ async function refreshPvState(){
   if(!_pvInvoice) return;
   const res = await gasQueryWithRetry('getPackScanState', { batchId: state.batchId, invoice: _pvInvoice });
   if(!res.ok){
-    document.getElementById('pvLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
+    document.getElementById('pvLines').innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`;
     return;
   }
   _pvState = res;
@@ -7951,8 +7951,8 @@ function renderPvBody(){
     if(pb) pb.style.display = isTk ? 'flex' : 'none';
     const toggleBtn = document.getElementById('pvModeToggleBtn');
     if(toggleBtn) toggleBtn.textContent = isTk
-      ? (_pvPalletModeOverride !== null ? '🚚→📦 박스로 전환됨' : '🚚→📦 박스 전환')
-      : (_pvPalletModeOverride !== null ? '📦→🚚 팔렛으로 전환됨' : '📦→🚚 팔렛 전환');
+      ? (_pvPalletModeOverride !== null ? '🚚→📦 Switched to Box' : '🚚→📦 Switch to Box')
+      : (_pvPalletModeOverride !== null ? '📦→🚚 Switched to Pallet' : '📦→🚚 Switch to Pallet');
   }
   const pct = st.totalReq > 0 ? Math.min(100, Math.round(st.totalPacked / st.totalReq * 100)) : 0;
   document.getElementById('pvProgressText').textContent = `${st.totalPacked.toLocaleString()} / ${st.totalReq.toLocaleString()} pcs`;
@@ -7973,27 +7973,27 @@ function renderPvBody(){
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
-        <div class="pv-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}${
+        <div class="pv-line-meta">${l.sku} · Barcode ${l.barcode}${l.issueQty > 0 ? ` · Issue deducted ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="이 ${isTk ? '팔렛' : '박스'} 조각만 수정·재분할">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty}개 ✎</span>`).join('')
-            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="이 상품의 ${isTk ? '팔렛' : '박스'} 번호 수정">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="Edit/re-split just this ${isTk ? 'pallet' : 'box'} portion">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty} pcs ✎</span>`).join('')
+            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="Edit this item's ${isTk ? 'pallet' : 'box'} number">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
         }</div>
       </div>
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
-        <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="Report an issue found during 2nd inspection / view or cancel existing issue">${l.issueQty > 0 ? `⚠ Issue(${l.issueQty})` : '⚠ Issue'}</button>
       </div>
-    </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
+    </div>`).join('') || `<div class="empty-log">No items registered for this invoice</div>`;
 
   const activeHistory = (st.history || []).filter(h => h.status !== 'undone');
   const historyHtml = activeHistory.length ? `
-    <div class="pv-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ 스캔 이력 보기 (${activeHistory.length}건)</div>
+    <div class="pv-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ View Scan History (${activeHistory.length})</div>
     <div style="display:none;">
       ${activeHistory.slice(0, 30).map(h => `
         <div class="pv-history-row ${h.result !== 'pass' ? h.result : ''}">
-          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (중복)':''}${h.qty>1?' x'+h.qty:''}</span>
-          <span class="pv-history-undo" onclick="undoPvScanEntry('${h.packScanId}')">되돌리기</span>
+          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · Barcode ${h.barcode}${h.result==='wrong'?' (different customer\'s item)':h.result==='over'?' (duplicate)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span class="pv-history-undo" onclick="undoPvScanEntry('${h.packScanId}')">Undo</span>
         </div>`).join('')}
     </div>` : '';
 
@@ -8024,7 +8024,7 @@ function flashScannedIntoInput(inputEl, code){
   if(!inputEl) return;
   const original = inputEl.getAttribute('data-orig-ph') || inputEl.placeholder;
   inputEl.setAttribute('data-orig-ph', original);
-  inputEl.placeholder = '인식됨 ✓ ' + code;
+  inputEl.placeholder = 'Recognized ✓ ' + code;
   inputEl.classList.add('pv-input-flash');
   const wrap = inputEl.closest('.pv-scan-input-wrap');
   if(wrap) wrap.classList.add('pv-flash-capture');
@@ -8047,7 +8047,7 @@ function submitPvScan(){
   //   큐에 쌓인 스캔마다 각각 alert()가 떠서(alert는 화면을 막는 모달이라) 확인
   //   버튼을 계속 눌러야 하는 상황이 생길 수 있었음. 큐에 넣기 전에 여기서 미리
   //   확인해서, 한 번만 알리고 끝냄(아직 처리 안 된 스캔은 큐에 들어가지 않음).
-  if(!currentPvWorker()){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  if(!currentPvWorker()){ alert('Please select a worker first'); input.focus(); return; }
   input.value = '';
   flashScannedIntoInput(input, barcode); // 서버 응답과 무관하게 즉시 표시
   _pvScanQueue.push(barcode);
@@ -8070,7 +8070,7 @@ async function processPvScanQueue(){
 async function doPvScanOne(barcode){
   const input = document.getElementById('pvScanInput');
   const worker = currentPvWorker();
-  if(!worker){ alert('작업자를 먼저 선택하세요'); return; }
+  if(!worker){ alert('Please select a worker first'); return; }
   // ★ 2026-08-24 재설계 — qty를 더 이상 클라이언트가 보내지 않음. 서버가
   //   "이 바코드에 남은 필요수량 전체"를 알아서 계산해서 한 번에 채움
   //   (스캔 1번 = 그 상품 전체 수량 확인, 실제 물류 현장 표준 방식).
@@ -8080,7 +8080,7 @@ async function doPvScanOne(barcode){
   const res = await gasCallWithRetry('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode, box: _pvCurrentBox, pallet: _pvCurrentPallet });
   if(!res.ok){
     flashPv('bad'); beepPv(false);
-    showPvMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    showPvMsg('Error: ' + (res.error || 'Unknown error'), 'bad');
     return;
   }
   if(res.result === 'pass'){
@@ -8096,28 +8096,28 @@ async function doPvScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku} · 바코드 ${barcode}` : `바코드 ${barcode}`) + (complete ? ' · 이 상품 완료' : ' · 확인됨'),
+      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed'),
       qty: `${packed}/${required}`,
-      action: { label: '⚠ 이슈 등록', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
+      action: { label: '⚠ Report Issue', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
     refreshPvState().then(() => scrollToAndHighlightLine_('pvLines', barcode)); // 백그라운드 — 목록/진행률만 뒤이어 갱신, 카드 표시를 기다리게 하지 않음
     return;
   } else if(res.result === 'wrong'){
     flashPv('bad'); beepPv(false);
-    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
-    showPvMsg({ kind:'bad', icon:'🚫', title:'다른 고객사 물건입니다', sub:`실제로는 [${owners}] 것 — 상자에서 빼주세요` });
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : 'Unknown';
+    showPvMsg({ kind:'bad', icon:'🚫', title:'This item belongs to a different customer', sub:`Actually belongs to [${owners}] — remove it from the box` });
   } else if(res.result === 'over'){
     flashPv('bad'); beepPv(false);
     // ★ 2026-09-09 신규 — psv와 동일한 이유. 박스·팔렛 정보를 보여줌.
     const boxes = res.existingBoxes || [];
     const boxSub = boxes.length
-      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty}개)`).join(' / ')
+      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty} pcs)`).join(' / ')
       : '';
     showPvMsg({
       kind:'bad', icon:'⚠',
       title: res.name || res.sku || barcode,
-      sub: `바코드 ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? '이슈 처리되어 필요수량 없음' : '중복 스캔'}`,
-      action: { label: '⚠ 이슈 등록', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
+      sub: `Barcode ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan'}`,
+      action: { label: '⚠ Report Issue', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
   await refreshPvState().then(() => scrollToAndHighlightLine_('pvLines', barcode));
@@ -8171,7 +8171,7 @@ function showPvMsg(msgOrOpts, kind){
   const actionBtn = document.getElementById('pvMsgActionBtn');
   if(actionBtn){
     if(action){
-      actionBtn.textContent = action.label || '⚠ 이슈 등록';
+      actionBtn.textContent = action.label || '⚠ Report Issue';
       actionBtn.style.display = 'block';
       window.__pvMsgActionHandler = action.onClick;
     } else {
@@ -8227,19 +8227,19 @@ function playScanResultSound(ok){
 function beepPv(ok){ playScanResultSound(ok); }
 
 async function undoPvScanEntry(packScanId){
-  if(!confirm('이 스캔을 취소하시겠습니까?')) return;
+  if(!confirm('Undo this scan?')) return;
   const res = await gasCallWithRetry('undoPackScan', { packScanId });
   if(res.ok) await refreshPvState();
-  else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+  else alert('Undo failed: ' + (res.error || 'Unknown error'));
 }
 
 async function completePvVerify(){
   if(!_pvInvoice) return;
   const btn = document.getElementById('pvCompleteBtn');
-  btn.disabled = true; btn.textContent = '처리 중...';
+  btn.disabled = true; btn.textContent = 'Processing...';
   const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified' });
   if(res.ok){
-    showPvMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
+    showPvMsg('🟣 Final Verification (2nd) complete — switched to purple status', 'ok');
     state.packVerifiedInvoices.add(_pvInvoice);
     // ★ 2026-09-01 버그 수정 — forcePvComplete()엔 이미 있던 처리(버튼을 "완료됨"으로
     //   확정 표시 + 스캔 입력 잠금)가 정작 정상 스캔 완료 경로인 여기엔 빠져 있었음.
@@ -8248,13 +8248,13 @@ async function completePvVerify(){
     //   목록만 다시 그릴 뿐 지금 열려있는 패널의 onchange를 자동으로 다시 안 부르므로,
     //   버튼/입력 상태는 반드시 여기서 직접 확정해줘야 함.
     const input = document.getElementById('pvScanInput');
-    if(input){ input.disabled = true; input.placeholder = '이미 검증완료된 오더입니다'; }
-    btn.disabled = true; btn.textContent = '✅ 검증완료됨 (스캔 100%)';
+    if(input){ input.disabled = true; input.placeholder = 'This order is already verified'; }
+    btn.disabled = true; btn.textContent = '✅ Already Verified (100% Scanned)';
     populatePvInvoiceSelect();
     printPvSlip();
   } else {
-    btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
-    alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
+    btn.disabled = false; btn.textContent = '🟣 Confirm Final Verification (2nd)';
+    alert('Failed to switch status: ' + (res.error || 'Unknown error'));
     await refreshPvState();
   }
 }
@@ -8262,17 +8262,17 @@ async function completePvVerify(){
 async function forcePvComplete(){
   if(!_pvInvoice) return;
   const worker = currentPvWorker();
-  if(!worker){ alert('작업자를 먼저 선택하세요(감사 기록용으로 필요합니다)'); return; }
-  if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.\n\n남은 상품은 전량 "확인됨"으로 자동 기록되어, 화면과 패킹슬립이 항상 일치하게 됩니다.')) return;
+  if(!worker){ alert('Please select a worker first (needed for the audit record)'); return; }
+  if(!confirm('⚠ Verification isn\'t finished yet — force this to "Final Verification (2nd) Complete" using manager authority?\n\nThis bypasses the mis-ship prevention safeguard, so only use it if you have already physically confirmed the items.\n\nAll remaining items will be automatically recorded as "confirmed", so the screen and packing slip always stay in sync.')) return;
   const forceBtn = document.getElementById('pvForceBtn');
-  if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '처리 중...'; }
+  if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = 'Processing...'; }
   // ★ 2026-09-01 신규 — 강제확정 전에 남은 수량을 실제로 PackScanLog에 채워서,
   //   화면(목록·진행률)과 패킹슬립이 항상 일치하게 함(예전엔 슬립만 100%로
   //   찍히고 화면은 계속 0으로 남아 서로 안 맞았음).
   await gasCallWithRetry('forceCompletePackScan', { batchId: state.batchId, invoice: _pvInvoice, worker });
   const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
   if(res.ok){
-    showPvMsg('⚠ 관리자 강제확정 — 남은 수량은 전량 확인된 것으로 기록됐습니다', 'ok');
+    showPvMsg('⚠ Manager force confirm — all remaining quantity recorded as confirmed', 'ok');
     state.packVerifiedInvoices.add(_pvInvoice);
     _pvForceVerified = true; // ★ 2026-08-24 신규 — 슬립 판정 및 화면 잠금에 사용
     await refreshPvState(); // ★ 신규 — 방금 채운 수량을 화면(목록·진행률)에 즉시 반영
@@ -8281,17 +8281,17 @@ async function forcePvComplete(){
     //   강제확정됐는데도 스캔칸·완료버튼이 그대로 "미완료"처럼 보여 혼란을 줬음.
     //   이제 스캔 입력을 잠그고, 완료 버튼도 "이미 완료됨"으로 명확히 표시.
     const input = document.getElementById('pvScanInput');
-    if(input){ input.disabled = true; input.placeholder = '이미 관리자 강제확정으로 완료된 오더입니다'; }
+    if(input){ input.disabled = true; input.placeholder = 'Already completed via manager force confirm'; }
     const completeBtn = document.getElementById('pvCompleteBtn');
-    if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ 이미 검증완료됨 (관리자 확정)'; }
+    if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ Already Verified (Manager Confirmed)'; }
     // ★ 2026-09-01 버그 수정 — 강제확정 버튼 자체는 잠긴 적이 없어서, 이미
     //   확정된 오더를 다시 열어도(또는 안 나가고 그대로) 또 누를 수 있었음.
     //   지금 이 자리에서 확정한 경우에도 즉시 잠금.
-    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ 이미 확정됨'; }
+    if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ Already Confirmed'; }
     printPvSlip(); // ★ 2026-08-24 버그 수정 — 강제확정 때는 슬립 인쇄가 아예 빠져있었음
   } else {
-    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ 관리자 강제확정'; }
-    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
+    alert('Failed: ' + (res.error || 'Unknown error'));
   }
 }
 
@@ -8379,7 +8379,7 @@ function getActualMaxBoxOrPallet_(st, isPallet){
   return max;
 }
 function triggerPrintPalletLabelPv(){
-  if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  if(!_pvInvoice){ alert('Please select an order first'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
   const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
@@ -8387,19 +8387,19 @@ function triggerPrintPalletLabelPv(){
   printPalletLabel(cf ? cf.meta.customer : '', autoCount, autoCount, sv, _pvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
 }
 function triggerPrintPalletLabelPvManual(){
-  if(!_pvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  if(!_pvInvoice){ alert('Please select an order first'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const sv = _pvPalletModeOverride === null ? (cf ? cf.meta.ship_via : '') : (_pvPalletModeOverride ? 'TK' : 'UPS');
   const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
   const autoCount = getActualMaxBoxOrPallet_(_pvState, isPallet);
-  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 실제 스캔 데이터 기준 ${isPallet ? '팔렛' : '박스'} 최대 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
+  const v = prompt(`Enter the number of labels to print\n(Auto-calculated: max ${isPallet ? 'pallet' : 'box'} number from actual scan data = ${autoCount} — change this if one ${isPallet ? 'pallet' : 'box'} was actually split into several)`, autoCount);
   if(v === null) return;
   const n = parseInt(v, 10);
-  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
   printPalletLabel(cf ? cf.meta.customer : '', autoCount, autoCount, sv, _pvInvoice, n);
 }
 function triggerPrintPalletLabelPsv(){
-  if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  if(!_psvInvoice){ alert('Please select an order first'); return; }
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
   const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
@@ -8407,15 +8407,15 @@ function triggerPrintPalletLabelPsv(){
   printPalletLabel(ord ? ord.customer : '', autoCount, autoCount, sv, _psvInvoice); // manualCount 없음 → 자동 계산값 그대로 바로 인쇄
 }
 function triggerPrintPalletLabelPsvManual(){
-  if(!_psvInvoice){ alert('먼저 오더를 선택하세요'); return; }
+  if(!_psvInvoice){ alert('Please select an order first'); return; }
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const sv = _psvPalletModeOverride === null ? (ord ? ord.shipVia : '') : (_psvPalletModeOverride ? 'TK' : 'UPS');
   const isPallet = String(sv || '').trim().toUpperCase() === 'TK';
   const autoCount = getActualMaxBoxOrPallet_(_psvState, isPallet);
-  const v = prompt(`인쇄할 라벨 매수를 입력하세요\n(자동 계산: 실제 스캔 데이터 기준 ${isPallet ? '팔렛' : '박스'} 최대 번호 = ${autoCount}장 — 한 ${isPallet ? '팔렛' : '박스'}에 실제로 여러 개가 나뉘어 담겼다면 숫자를 바꾸세요)`, autoCount);
+  const v = prompt(`Enter the number of labels to print\n(Auto-calculated: max ${isPallet ? 'pallet' : 'box'} number from actual scan data = ${autoCount} — change this if one ${isPallet ? 'pallet' : 'box'} was actually split into several)`, autoCount);
   if(v === null) return;
   const n = parseInt(v, 10);
-  if(!n || n < 1){ alert('1 이상의 숫자를 입력하세요'); return; }
+  if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
   printPalletLabel(ord ? ord.customer : '', autoCount, autoCount, sv, _psvInvoice, n);
 }
 function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualCount){
@@ -8445,7 +8445,7 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
       <div class="label-footer">${shipVia || ''} &nbsp;·&nbsp; ${invoice || ''} &nbsp;·&nbsp; ${printedAt}</div>
     </div>`).join('');
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Labels · ${totalCount}장</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Labels · ${totalCount} sheets</title>
   <style>
     @page{ size: 6in 4in; margin: 0.1in; }
     html,body{ margin:0; padding:0; }
@@ -8481,7 +8481,7 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
   </body></html>`;
 
   const win = window.open('', '_blank', 'width=420,height=620');
-  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
   setTimeout(() => { win.focus(); win.print(); }, 400);
@@ -8490,7 +8490,7 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
 function printPvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _pvInvoice;
-  if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
+  if(!invoice){ alert('Please select an order first'); return; }
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
   const slotObj = state.slots.find(s => s.assignedTo === invoice);
   const st = _pvState;
@@ -8689,7 +8689,7 @@ function printPvSlip(format, forceFlat){
   </body></html>`;
 
   const win = window.open('', '_blank', 'width=820,height=1000');
-  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
   setTimeout(() => { win.focus(); win.print(); }, 300);
@@ -8705,7 +8705,7 @@ function printPvSlip(format, forceFlat){
 async function printPsvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _psvInvoice;
-  if(!invoice){ alert('먼저 오더를 선택하세요'); return; }
+  if(!invoice){ alert('Please select an order first'); return; }
   const order = _standaloneOrders.find(o => o.invoice === invoice);
   const st = _psvState;
   const lines = (st && st.lines) ? st.lines : [];
@@ -8884,7 +8884,7 @@ async function printPsvSlip(format, forceFlat){
   </body></html>`;
 
   const win = window.open('', '_blank', 'width=820,height=1000');
-  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
   setTimeout(() => { win.focus(); win.print(); }, 300);
