@@ -1770,6 +1770,14 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
   const res = await gasQueryWithRetry('getOpenBatches', {});
   if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
   const list = res.batches || [];
+  // ★ 2026-09-11 신규 — 서버(getOpenBatches)가 최신순 정렬해서 주지만(재배포
+  //   전 기기 대비, 그리고 지난 배치 목록에도 이미 적용된 것과 동일한 방어),
+  //   클라이언트에서도 한 번 더 실제 시각값으로 방어적 재정렬.
+  list.sort((a, b) => {
+    let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+    let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+    return tb - ta;
+  });
   if(!list.length){
     dd.innerHTML = `<div class="tb-switch-empty">조회 가능한 미완료 배치가 없습니다</div>`;
     return;
