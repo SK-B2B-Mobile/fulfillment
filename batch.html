@@ -6731,7 +6731,7 @@ function renderSsBody(){
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
-        <button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이슈 등록 / 이미 등록된 이슈 확인·취소">⚠ 이슈</button>
+        <button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
       </div>
     </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 }
@@ -6744,9 +6744,15 @@ async function openSsIssueModal(sku, barcode, name){
   document.getElementById('ssIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
   const reasonSel = document.getElementById('ssIssueReason');
   reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
+  // ★ 2026-09-11 신규(현장 요청) — 사유는 이미 기본값이 선택돼 있어서 보통
+  //   바로 수량부터 고쳐 넣으므로, 모달이 열리면 수량 입력칸에 커서를 자동으로
+  //   놓고 기존 값(1)을 선택 상태로 둠(그냥 타이핑하면 바로 덮어써짐). 사유를
+  //   바꾼 뒤에도 다시 수량으로 자동 이동 — 매번 손으로 클릭할 필요 없게 함.
+  reasonSel.onchange = () => { const q = document.getElementById('ssIssueQty'); if(q){ q.focus(); q.select(); } };
   document.getElementById('ssIssueQty').value = 1;
   document.getElementById('ssIssueNote').value = '';
   document.getElementById('ssIssueModal').classList.add('open');
+  setTimeout(() => { const q = document.getElementById('ssIssueQty'); if(q){ q.focus(); q.select(); } }, 50);
   await refreshSsExistingIssues();
 }
 // ★ 2026-09-01 신규(매니저 요청) — "이슈를 잘못 등록했는데 고칠 방법이 없다"는
@@ -6819,9 +6825,12 @@ async function openPsvIssueModal(sku, barcode, name){
   document.getElementById('psvIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
   const reasonSel = document.getElementById('psvIssueReason');
   reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
+  // ★ 2026-09-11 신규 — 04(ssIssueModal)와 동일한 커서 자동 이동.
+  reasonSel.onchange = () => { const q = document.getElementById('psvIssueQty'); if(q){ q.focus(); q.select(); } };
   document.getElementById('psvIssueQty').value = 1;
   document.getElementById('psvIssueNote').value = '';
   document.getElementById('psvIssueModal').classList.add('open');
+  setTimeout(() => { const q = document.getElementById('psvIssueQty'); if(q){ q.focus(); q.select(); } }, 50);
   await refreshPsvExistingIssues();
 }
 async function refreshPsvExistingIssues(){
@@ -6890,9 +6899,12 @@ async function openPvIssueModal(sku, barcode, name){
   document.getElementById('pvIssueTargetInfo').textContent = `${name || sku} · ${sku} · 바코드 ${barcode}`;
   const reasonSel = document.getElementById('pvIssueReason');
   reasonSel.innerHTML = ISSUE_REASONS.map(r => `<option value="${r.v}">${r.label}</option>`).join('');
+  // ★ 2026-09-11 신규 — 04(ssIssueModal)와 동일한 커서 자동 이동.
+  reasonSel.onchange = () => { const q = document.getElementById('pvIssueQty'); if(q){ q.focus(); q.select(); } };
   document.getElementById('pvIssueQty').value = 1;
   document.getElementById('pvIssueNote').value = '';
   document.getElementById('pvIssueModal').classList.add('open');
+  setTimeout(() => { const q = document.getElementById('pvIssueQty'); if(q){ q.focus(); q.select(); } }, 50);
   await refreshPvExistingIssues();
 }
 async function refreshPvExistingIssues(){
@@ -7586,7 +7598,7 @@ function renderPsvBody(){
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
-        <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">⚠ 이슈</button>
+        <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
       </div>
     </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 
@@ -7970,7 +7982,7 @@ function renderPvBody(){
       <div class="pv-line-actions">
         <span class="pv-line-qty">${l.packed}/${l.effectiveReq}</span>
         <span>${l.complete ? '✅' : '⏳'}</span>
-        <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">⚠ 이슈</button>
+        <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="2차 검수 중 발견한 이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
       </div>
     </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 
