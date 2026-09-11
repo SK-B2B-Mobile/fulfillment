@@ -8440,7 +8440,7 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
   const pagesHtml = Array.from({ length: totalCount }, (_, i) => i + 1).map((num, i, arr) => `
     <div class="label-page"${i < arr.length - 1 ? ' style="page-break-after:always;"' : ''}>
       <div class="label-brand lbl-brand">StyleKorean</div>
-      <div class="label-pallet lbl-pallet">${labelKind} # ${num}</div>
+      <div class="label-pallet lbl-pallet">${labelKind} ${num}/${totalCount}</div>
       <div class="label-customer lbl-customer">${customer || '-'}</div>
       <div class="label-footer">${shipVia || ''} &nbsp;·&nbsp; ${invoice || ''} &nbsp;·&nbsp; ${printedAt}</div>
     </div>`).join('');
