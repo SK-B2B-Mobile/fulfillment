@@ -2619,7 +2619,13 @@ function logIssue(data) {
   //   여러 시트를 통째로 다시 읽는 무거운 함수라, 락 안에서 실행하면 이슈 등록
   //   1건마다 다른 모든 저장 작업이 그 뒤에서 기다려야 함. 락 해제 후로 옮김.
   if (needsSync) {
-    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 */ }
+    // ★ 2026-09-11 버그 수정(현장 발견) — force=true로 바꿈. 예전엔 "값(개수
+    //   문구)이 이전과 같으면 저장 생략"하는 최적화 때문에, 이슈를 새로
+    //   등록해도 우연히 전체 이슈 개수가 그대로면(예: 다른 이슈가 취소되면서
+    //   숫자가 상쇄됨) Jobs 시트 노트(상세 이슈 목록)가 갱신 안 되고 옛
+    //   내용 그대로 남는 사고가 있었음. 이슈 등록은 항상 실제 데이터가
+    //   바뀌는 동작이므로 무조건 다시 씀.
+    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker, true); } catch (e) { /* 무시 */ }
   }
   return result;
 }
@@ -2704,9 +2710,93 @@ function undoIssue(data) {
   }
   // ★ 2026-09-03 긴급 성능수정 — logScan/logIssue와 동일한 이유로 락 밖에서 처리
   if (syncArgs) {
-    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2]); } catch (e) { /* 무시 */ }
+    // ★ 2026-09-11 버그 수정(현장 발견) — force=true로 바꿈. logIssue와 동일한
+    //   이유 — 이슈 취소는 항상 실제 데이터가 바뀌는 동작이므로, 전체 개수가
+    //   우연히 같더라도 Jobs 시트 노트(상세 이슈 목록)를 무조건 다시 씀.
+    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], true); } catch (e) { /* 무시 */ }
   }
   return result;
+}
+
+/* ===================== diagnoseAndFixInvoiceInspection (★ 2026-09-11 신규) =====================
+ * 목적: 04/Psv/Pv 화면의 "이슈 취소" 기능(undoIssue) 대신 구글시트를 직접 수동으로
+ * 건드린 경우(IssueLog 행 삭제 + Jobs.Inspection 텍스트 직접 수정), 화면들끼리
+ * 서로 다른 숫자/내용을 보여주는 사고가 생김. 이 함수는 그 인보이스 하나를
+ * 지정해서:
+ *   1) IssueLog에 지금 실제로 남아있는 것(active/undone 전부)을 그대로 보여주고,
+ *   2) Jobs 시트에 지금 적혀있는 값/노트를 보여주고,
+ *   3) (DRY_RUN=false일 때만) syncInspectionFromPicking_을 force=true로 강제
+ *      실행해서 Jobs 시트를 "지금 IssueLog에 실제로 있는 것" 기준으로 다시 씀
+ *      (값 문구 + 상세 노트 전부 새로 계산 — 수동 편집으로 생긴 불일치를 없앰).
+ * 사용법: DRY_RUN=true로 먼저 실행해서 로그로 확인 → 문제없으면 false로 바꿔서
+ *         다시 실행.
+ * 입력: INVOICE_TO_FIX (아래에서 직접 바꿔서 실행)
+ * ================================================================================ */
+function diagnoseAndFixInvoiceInspection() {
+  const DRY_RUN = true;               // ← 확인 끝나면 false로 바꿔서 한 번 더 실행
+  const INVOICE_TO_FIX = 'IN00474429'; // ← 고칠 인보이스 번호로 바꿔서 실행
+
+  const invoice = String(INVOICE_TO_FIX).trim();
+
+  // 1) batchId 찾기 — BatchCustomers에 있으면 그 배치, 없으면 단독오더로 간주
+  let batchId = STANDALONE_BATCH_ID;
+  try {
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    if (bcLast >= 2) {
+      const bcRows = bc.getRange(2, 1, bcLast - 1, 2).getValues();
+      for (let i = 0; i < bcRows.length; i++) {
+        if (String(bcRows[i][1]).trim() === invoice) { batchId = String(bcRows[i][0]); break; }
+      }
+    }
+  } catch (e) { /* best-effort */ }
+
+  // 2) IssueLog에 지금 실제로 남아있는 것 전부(active + undone) 보여줌
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const issueRows = [];
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach((r, idx) => {
+      if (String(r[7]).trim() !== invoice) return;
+      issueRows.push({
+        row: idx + 2, batchId: String(r[0]), issueId: r[1], barcode: String(r[4]), sku: String(r[5]),
+        name: String(r[6]), reason: r[9], qty: Number(r[10]) || 0, note: r[11], status: r[12] || 'active'
+      });
+    });
+  }
+
+  // 3) Jobs 시트 현재 값/노트
+  const jobsSS = ss_();
+  const jobsSheet = jobsSS.getSheetByName(JOBS_SHEET);
+  const jobsLast = jobsSheet.getLastRow();
+  let jobsRow = -1;
+  const invCol = jobsSheet.getRange(2, 1, jobsLast - 1, 1).getValues();
+  for (let i = 0; i < invCol.length; i++) {
+    if (String(invCol[i][0]).trim() === invoice) { jobsRow = i + 2; break; }
+  }
+  const beforeVal = jobsRow > 0 ? String(jobsSheet.getRange(jobsRow, 19).getValue() || '') : '(인보이스를 Jobs 시트에서 못 찾음)';
+  const beforeNote = jobsRow > 0 ? String(jobsSheet.getRange(jobsRow, 19).getNote() || '') : '';
+
+  Logger.log('=== 인보이스 검수결과 진단: ' + invoice + ' (batchId=' + batchId + ', DRY_RUN=' + DRY_RUN + ') ===');
+  Logger.log('IssueLog 실제 행(' + issueRows.length + '개, active+undone 전부):');
+  Logger.log(JSON.stringify(issueRows, null, 2));
+  Logger.log('Jobs 시트 현재 값: ' + beforeVal);
+  Logger.log('Jobs 시트 현재 노트:\n' + beforeNote);
+
+  if (DRY_RUN) {
+    Logger.log('⚠ DRY_RUN=true — 아직 아무것도 안 바꿨습니다. 위 내용 확인 후 DRY_RUN=false로 바꿔서 다시 실행하세요.');
+    return { ok: true, dryRun: true, issueRows: issueRows, beforeVal: beforeVal, beforeNote: beforeNote };
+  }
+
+  clearInvoiceCache_(batchId, invoice);
+  syncInspectionFromPicking_(batchId, invoice, 'Admin Repair', true);
+
+  const afterVal = jobsRow > 0 ? String(jobsSheet.getRange(jobsRow, 19).getValue() || '') : '';
+  const afterNote = jobsRow > 0 ? String(jobsSheet.getRange(jobsRow, 19).getNote() || '') : '';
+  Logger.log('✅ 강제 재계산 완료.');
+  Logger.log('바뀐 후 값: ' + afterVal);
+  Logger.log('바뀐 후 노트:\n' + afterNote);
+  return { ok: true, dryRun: false, beforeVal: beforeVal, afterVal: afterVal, beforeNote: beforeNote, afterNote: afterNote };
 }
 
 /* ===================== ④-4 editIssue (★ 2026-07-22 신규) =====================
@@ -2767,7 +2857,8 @@ function editIssue(data) {
   }
   // ★ 2026-09-03 긴급 성능수정 — logScan/logIssue/undoIssue와 동일한 이유로 락 밖에서 처리
   if (syncArgs) {
-    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2]); } catch (e) { /* 무시 */ }
+    // ★ 2026-09-11 버그 수정(현장 발견) — force=true로 바꿈. 위 두 함수와 동일한 이유.
+    try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], true); } catch (e) { /* 무시 */ }
   }
   return result;
 }
