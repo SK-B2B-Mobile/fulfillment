@@ -640,8 +640,8 @@ const CONFIG = {
 };
 const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
 
-const REASON_LABEL = {EXP:'Expired', NF:'Not Found In Stock', DMG:'Damaged', OOS:'Out of Stock', SKUMIS:'SKU Mismatch', MISS:'Not Scanned (Picked OK)'};
-const REAL_ISSUE = ['EXP','NF','DMG','OOS','SKUMIS'];
+const REASON_LABEL = {EXP:'Expired', NF:'Not Found In Stock', DMG:'Damaged', OOS:'Out of Stock', SKUMIS:'SKU Mismatch', MISS:'Not Scanned (Picked OK)', CANC:'Sales Cancel Request'};
+const REAL_ISSUE = ['EXP','NF','DMG','OOS','SKUMIS','CANC'];
 
 function idLineHtml(i){
   const sku = String(i.sku||'').trim();
