@@ -4103,8 +4103,20 @@ function getOpenBatches() {
       b.doneCustomers = doneCustByBatch[b.batchId] || 0;
     });
 
-    // 최신 생성순
-    open.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    // ★ 2026-09-11 버그 수정(현장 발견) — createdAt이 시트에 따라 실제 Date
+    //   객체로 저장돼 있으면 String(dateObj)가 "Thu Aug 25 2026 10:32:15..."처럼
+    //   요일 이름부터 시작하는 문자열이 되고, 이걸 localeCompare로 비교하면
+    //   요일 이름 알파벳 순서(Fri/Mon/Sat/Sun/Thu/Tue/Wed)로 뒤섞여서 실제
+    //   생성 시각과 무관하게 최신순 정렬이 완전히 뒤죽박죽됨(TV "⇄ 다른 배치"
+    //   드롭다운에서 실제로 확인됨). getBatchHistoryList()에서 9/4에 이미 고친
+    //   것과 똑같은 원인 — new Date()로 실제 시각값 비교하도록 동일하게 수정.
+    open.sort((a, b) => {
+      let ta = new Date(a.createdAt).getTime();
+      if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+      let tb = new Date(b.createdAt).getTime();
+      if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+      return tb - ta;
+    });
 
     const _result = { ok: true, batches: open };
     try {
