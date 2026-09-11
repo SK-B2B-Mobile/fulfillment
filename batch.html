@@ -528,7 +528,12 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-flash.show-bad{background:rgba(239,68,68,0.4); opacity:1;}
 .pv-actions{display:flex; gap:10px; margin-top:16px;}
 .pv-actions button{flex:1; padding:14px; border-radius:10px; font-size:14px; font-weight:800; cursor:pointer; border:none;}
-.pv-btn-print{background:var(--surface3); color:var(--text); border:1px solid var(--border2) !important;}
+.pv-btn-print{background:var(--surface3); color:var(--text); border:1px solid var(--border2) !important; transition:background 0.15s, transform 0.1s;}
+/* ★ 2026-09-11 신규(현장 요청) — 패킹슬립 인쇄 버튼을 눌러도 눌렀다는 느낌이
+   전혀 없다는 지적 → 클릭 즉시 잠깐 눌린 것처럼 보이게(색 반전 + 살짝 축소),
+   그리고 "🖨 Printing..."으로 텍스트를 바꿔서 실제로 처리 중이라는 걸
+   확실히 알려줌(flashPrintFeedback() 참고). */
+.pv-btn-print.print-flash{background:var(--purple); color:#fff; transform:scale(0.97);}
 .pv-print-group{position:relative; flex:1; display:flex;}
 .pv-print-group .pv-btn-print{flex:1; border-radius:10px 0 0 10px !important;}
 .pv-print-toggle{width:34px; flex:0 0 34px; background:var(--surface3); border:1px solid var(--border2); border-left:none; border-radius:0 10px 10px 0; color:var(--text-dim); cursor:pointer; font-size:11px;}
@@ -1421,8 +1426,8 @@ select option:disabled{color:var(--text-dim2);}
         <div id="pvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
           <button class="pv-btn-force" id="pvForceBtn" onclick="forcePvComplete()">⚠ Manager Force Confirm</button>
-          <button class="pv-btn-print" onclick="printPvSlip('letter')">🖨 Print Packing Slip</button>
-          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPvSlip('letter', true)" title="Print full list only, without box/pallet numbers">📋</button>
+          <button class="pv-btn-print" id="pvSlipBtn" onclick="flashPrintFeedback(this); printPvSlip('letter')">🖨 Print Packing Slip</button>
+          <button class="pv-btn-print" id="pvSlipFlatBtn" style="flex:0 0 68px; padding:0; font-size:11px; letter-spacing:-0.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" onclick="flashPrintFeedback(this); printPvSlip('letter', true)" title="Print full list only, without box/pallet numbers">📋 Flat List</button>
           <button class="pv-btn-complete" id="pvCompleteBtn" disabled onclick="completePvVerify()">🟣 Confirm Final Verification (2nd)</button>
         </div>
       </div>
@@ -1495,8 +1500,8 @@ select option:disabled{color:var(--text-dim2);}
         <div id="psvLines" style="margin-top:14px;"></div>
         <div class="pv-actions">
           <button class="pv-btn-force" id="psvForceBtn" onclick="forcePsvComplete()">⚠ Manager Force Confirm</button>
-          <button class="pv-btn-print" onclick="printPsvSlip('letter')">🖨 Print Packing Slip</button>
-          <button class="pv-btn-print" style="flex:0 0 44px; padding:0;" onclick="printPsvSlip('letter', true)" title="Print full list only, without box/pallet numbers">📋</button>
+          <button class="pv-btn-print" id="psvSlipBtn" onclick="flashPrintFeedback(this); printPsvSlip('letter')">🖨 Print Packing Slip</button>
+          <button class="pv-btn-print" id="psvSlipFlatBtn" style="flex:0 0 68px; padding:0; font-size:11px; letter-spacing:-0.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" onclick="flashPrintFeedback(this); printPsvSlip('letter', true)" title="Print full list only, without box/pallet numbers">📋 Flat List</button>
           <button class="pv-btn-complete" id="psvCompleteBtn" disabled onclick="completePsvVerify()">🟣 Confirm Final Verification (2nd)</button>
         </div>
       </div>
@@ -8485,6 +8490,23 @@ function printPalletLabel(customer, boxNum, palletNum, shipVia, invoice, manualC
   win.document.write(html);
   win.document.close();
   setTimeout(() => { win.focus(); win.print(); }, 400);
+}
+
+// ★ 2026-09-11 신규(현장 요청) — "패킹슬립 인쇄" 버튼을 눌러도 아무 반응이
+//   없어서 눌렀는지 확신이 안 든다는 지적. 실제로는 새 창이 뜨는 데 약간
+//   시간이 걸리거나(특히 단독 Psv는 이슈 조회를 한 번 더 기다림), 팝업이
+//   백그라운드 탭으로 열려서 눈에 안 띄는 경우도 있어서, 버튼 자체에 "방금
+//   눌렀다"는 시각적 신호(보라색 반전 + 살짝 축소 + "Printing..." 텍스트)를
+//   0.9초간 보여줌 — 실제 인쇄/팝업 로직과는 무관하게 항상 즉시 실행됨.
+function flashPrintFeedback(btn){
+  if(!btn || btn.classList.contains('print-flash')) return;
+  const orig = btn.textContent;
+  btn.classList.add('print-flash');
+  btn.textContent = '⏳ Printing...';
+  setTimeout(() => {
+    btn.classList.remove('print-flash');
+    btn.textContent = orig;
+  }, 900);
 }
 
 function printPvSlip(format, forceFlat){
