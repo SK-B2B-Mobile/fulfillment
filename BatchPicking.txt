@@ -2068,7 +2068,11 @@ function getPackScanState(batchId, invoice, round) {
         // ★ 2026-09-14 신규 — 서로 다른 SKU 2개 이상이 같은 바코드로 묶인
         //   경우만 채워짐(보통은 빈 배열). 각 SKU의 원본 바코드 값을 그대로
         //   담아서, 정말 데이터에 같은 바코드로 들어있는지 화면에서 확인 가능.
-        skuBreakdown: l.items.length > 1 ? l.items : [],
+        // ★ 2026-09-14 버그 수정(현장 발견) — 같은 SKU가 피킹 위치 분할 등의
+        //   이유로 여러 줄로 나뉘어 있을 뿐인 정상 케이스(예: 60개+60개=120개)
+        //   까지 "서로 다른 SKU"로 잘못 경고하던 문제. 실제로 SKU 값 자체가
+        //   서로 다른 경우에만 경고를 띄우도록 제한.
+        skuBreakdown: (new Set(l.items.map(it => it.sku))).size > 1 ? l.items : [],
       };
     });
     lines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
