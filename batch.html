@@ -8138,8 +8138,8 @@ function pushRecentScan(containerId, name){
   item.appendChild(ageEl);
   container.insertBefore(item, container.firstChild);
   // 2초 뒤 "Just now" → "a few seconds ago"로 살짝 흐리게, 5초 뒤 완전히 제거.
-  setTimeout(() => { ageEl.textContent = 'A few seconds ago'; item.classList.add('rs-fade'); }, 2000);
-  setTimeout(() => { item.remove(); }, 5000);
+  setTimeout(() => { ageEl.textContent = 'A few seconds ago'; item.classList.add('rs-fade'); }, 4000);
+  setTimeout(() => { item.remove(); }, 9000);
   // 화면이 어수선해지지 않게 최대 4개까지만 유지(그 이상은 바로 제거).
   while(container.children.length > 4) container.removeChild(container.lastChild);
 }
