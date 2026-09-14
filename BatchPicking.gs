@@ -1989,13 +1989,21 @@ function getPackScanState(batchId, invoice, round) {
     //   사실상 공짜(캐시 히트)가 됨.
     const rawLines = getInvoiceBatchItemsCached_(batchId, invoice);
     // 패킹검증은 바코드 단위로 매칭하므로, 같은 바코드를 쓰는 줄들을 하나로 합침
+    // ★ 2026-09-14 버그 수정(현장 발견) — 서로 완전히 다른 SKU·제품명·바코드인데
+    //   화면에는 두 상품이 이름/SKU가 이어붙여진 채 하나로 합쳐져 나타나고, 그중
+    //   하나는 독립된 줄로 아예 안 보이는 사고가 있었음. 이 병합 로직 자체(같은
+    //   바코드=한 줄) 때문인데, 지금까지는 병합돼도 화면엔 전혀 티가 안 나서
+    //   "왜 합쳐졌는지" 확인할 방법이 없었음. 이제 병합이 일어나면 원본 각
+    //   SKU의 실제 바코드 값까지 그대로 skuBreakdown에 담아서 내려줌 — 화면에서
+    //   "이 두 SKU가 정말 같은 바코드로 등록돼 있는지" 바로 확인 가능해짐.
     const linesByBarcode = {};
     rawLines.forEach(l => {
       const k = normBarcode_(l.barcode);
-      if (!linesByBarcode[k]) linesByBarcode[k] = { barcode: l.barcode, skus: [], names: [], reqQty: 0 };
+      if (!linesByBarcode[k]) linesByBarcode[k] = { barcode: l.barcode, skus: [], names: [], reqQty: 0, items: [] };
       linesByBarcode[k].skus.push(l.sku);
       linesByBarcode[k].names.push(l.name);
       linesByBarcode[k].reqQty += l.reqQty;
+      linesByBarcode[k].items.push({ sku: l.sku, name: l.name, barcode: l.barcode, reqQty: l.reqQty });
     });
 
     const invoiceIssues = getInvoiceIssueQtyCached_(batchId, invoice);
@@ -2057,6 +2065,10 @@ function getPackScanState(batchId, invoice, round) {
         box: bp.box, pallet: bp.pallet,
         // ★ 2026-09-08 신규 — 박스가 2개 이상으로 나뉜 경우만 채워짐(보통은 빈 배열).
         boxBreakdown: breakdownList.length > 1 ? breakdownList : [],
+        // ★ 2026-09-14 신규 — 서로 다른 SKU 2개 이상이 같은 바코드로 묶인
+        //   경우만 채워짐(보통은 빈 배열). 각 SKU의 원본 바코드 값을 그대로
+        //   담아서, 정말 데이터에 같은 바코드로 들어있는지 화면에서 확인 가능.
+        skuBreakdown: l.items.length > 1 ? l.items : [],
       };
     });
     lines.sort((a, b) => String(a.name).localeCompare(String(b.name)));
