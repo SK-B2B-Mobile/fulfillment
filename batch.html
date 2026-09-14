@@ -6727,7 +6727,26 @@ function renderSsBody(){
   //   딱 "그 줄 하나만" 완료 그룹으로 자연스럽게 내려감.
   const sortedLines = sortLinesByScanOrder_(st.lines, st.history);
 
-  document.getElementById('ssLines').innerHTML = sortedLines.map(l => `
+  document.getElementById('ssLines').innerHTML = sortedLines.map(l => {
+    // ★ 2026-09-14 신규(현장 발견 버그 대응) — 서로 다른 SKU가 같은 바코드로
+    //   묶여서 조용히 하나로 합쳐지던 사고 방지. 합쳐진 경우, 평범한 상품
+    //   줄이 아니라 눈에 띄는 경고 블록으로 각 SKU를 전부 따로 보여줌.
+    if (l.skuBreakdown && l.skuBreakdown.length > 1) {
+      return `
+    <div class="pv-line" data-barcode="${normBarcode(l.barcode)}" style="border:1px solid #ef4444; background:rgba(239,68,68,0.08); display:block;">
+      <div style="color:#ef4444; font-weight:700; font-size:12.5px; margin-bottom:8px;">⚠ 서로 다른 SKU ${l.skuBreakdown.length}개가 같은 바코드로 등록돼 있습니다 — 원본 데이터 확인 필요</div>
+      ${l.skuBreakdown.map(it => `
+      <div style="font-size:12.5px; padding:6px 0; border-top:1px dashed rgba(239,68,68,0.3);">
+        <b>${it.name || it.sku}</b><br>
+        <span style="color:var(--text-dim);">${it.sku} · 바코드 ${it.barcode} · 필요수량 ${it.reqQty}개</span>
+      </div>`).join('')}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+        <span class="pv-line-qty">${l.packed}/${l.effectiveReq} (합산)</span>
+        <button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
+      </div>
+    </div>`;
+    }
+    return `
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
@@ -6738,7 +6757,8 @@ function renderSsBody(){
         <span>${l.complete ? '✅' : '⏳'}</span>
         <button class="btn btn-ghost btn-sm" onclick="openSsIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\'")}')" title="이슈 등록 / 이미 등록된 이슈 확인·취소">${l.issueQty > 0 ? `⚠ 이슈(${l.issueQty})` : '⚠ 이슈'}</button>
       </div>
-    </div>`).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
+    </div>`;
+  }).join('') || `<div class="empty-log">이 인보이스에 등록된 상품이 없습니다</div>`;
 }
 
 // ── 04 단독 1차 검수 — 이슈 등록 ──────────────────────────────
@@ -7590,7 +7610,26 @@ function renderPsvBody(){
   //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
   //   화면이 어수선하게 재배치되지 않음). 이슈 걸린 미완료 항목은 빨간색 강조.
   const psvSortedLines = sortLinesByScanOrder_(st.lines, st.history);
-  const linesHtml = psvSortedLines.map(l => `
+  const linesHtml = psvSortedLines.map(l => {
+    // ★ 2026-09-14 신규(현장 발견 버그 대응) — 서로 다른 SKU가 같은 바코드로
+    //   묶여서 조용히 하나로 합쳐지던 사고 방지. 합쳐진 경우, 평범한 상품
+    //   줄이 아니라 눈에 띄는 경고 블록으로 각 SKU를 전부 따로 보여줌.
+    if (l.skuBreakdown && l.skuBreakdown.length > 1) {
+      return `
+    <div class="pv-line" data-barcode="${normBarcode(l.barcode)}" style="border:1px solid #ef4444; background:rgba(239,68,68,0.08); display:block;">
+      <div style="color:#ef4444; font-weight:700; font-size:12.5px; margin-bottom:8px;">⚠ ${l.skuBreakdown.length} different SKUs share this barcode — check for a data error</div>
+      ${l.skuBreakdown.map(it => `
+      <div style="font-size:12.5px; padding:6px 0; border-top:1px dashed rgba(239,68,68,0.3);">
+        <b>${it.name || it.sku}</b><br>
+        <span style="color:var(--text-dim);">${it.sku} · Barcode ${it.barcode} · Needs ${it.reqQty} pcs</span>
+      </div>`).join('')}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+        <span class="pv-line-qty">${l.packed}/${l.effectiveReq} (combined)</span>
+        <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="Report an issue found during 2nd inspection / view or cancel existing issue">${l.issueQty > 0 ? `⚠ Issue(${l.issueQty})` : '⚠ Issue'}</button>
+      </div>
+    </div>`;
+    }
+    return `
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
@@ -7605,7 +7644,8 @@ function renderPsvBody(){
         <span>${l.complete ? '✅' : '⏳'}</span>
         <button class="btn btn-ghost btn-sm" onclick="openPsvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="Report an issue found during 2nd inspection / view or cancel existing issue">${l.issueQty > 0 ? `⚠ Issue(${l.issueQty})` : '⚠ Issue'}</button>
       </div>
-    </div>`).join('') || `<div class="empty-log">No items registered for this invoice</div>`;
+    </div>`;
+  }).join('') || `<div class="empty-log">No items registered for this invoice</div>`;
 
   const activeHistory = (st.history || []).filter(h => h.status !== 'undone');
   const historyHtml = activeHistory.length ? `
@@ -7974,7 +8014,26 @@ function renderPvBody(){
   //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
   //   화면이 어수선하게 재배치되지 않음). 이슈 걸린 미완료 항목은 빨간색 강조.
   const pvSortedLines = sortLinesByScanOrder_(st.lines, st.history);
-  const linesHtml = pvSortedLines.map(l => `
+  const linesHtml = pvSortedLines.map(l => {
+    // ★ 2026-09-14 신규(현장 발견 버그 대응) — 서로 다른 SKU가 같은 바코드로
+    //   묶여서 조용히 하나로 합쳐지던 사고 방지. 합쳐진 경우, 평범한 상품
+    //   줄이 아니라 눈에 띄는 경고 블록으로 각 SKU를 전부 따로 보여줌.
+    if (l.skuBreakdown && l.skuBreakdown.length > 1) {
+      return `
+    <div class="pv-line" data-barcode="${normBarcode(l.barcode)}" style="border:1px solid #ef4444; background:rgba(239,68,68,0.08); display:block;">
+      <div style="color:#ef4444; font-weight:700; font-size:12.5px; margin-bottom:8px;">⚠ ${l.skuBreakdown.length} different SKUs share this barcode — check for a data error</div>
+      ${l.skuBreakdown.map(it => `
+      <div style="font-size:12.5px; padding:6px 0; border-top:1px dashed rgba(239,68,68,0.3);">
+        <b>${it.name || it.sku}</b><br>
+        <span style="color:var(--text-dim);">${it.sku} · Barcode ${it.barcode} · Needs ${it.reqQty} pcs</span>
+      </div>`).join('')}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+        <span class="pv-line-qty">${l.packed}/${l.effectiveReq} (combined)</span>
+        <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="Report an issue found during 2nd inspection / view or cancel existing issue">${l.issueQty > 0 ? `⚠ Issue(${l.issueQty})` : '⚠ Issue'}</button>
+      </div>
+    </div>`;
+    }
+    return `
     <div class="pv-line ${l.complete ? 'done' : ''} ${(!l.complete && l.issueQty > 0) ? 'has-issue' : ''}" data-barcode="${normBarcode(l.barcode)}">
       <div class="pv-line-info">
         <div class="pv-line-name">${l.name || l.sku}</div>
@@ -7989,7 +8048,8 @@ function renderPvBody(){
         <span>${l.complete ? '✅' : '⏳'}</span>
         <button class="btn btn-ghost btn-sm" onclick="openPvIssueModal('${l.sku}','${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}')" title="Report an issue found during 2nd inspection / view or cancel existing issue">${l.issueQty > 0 ? `⚠ Issue(${l.issueQty})` : '⚠ Issue'}</button>
       </div>
-    </div>`).join('') || `<div class="empty-log">No items registered for this invoice</div>`;
+    </div>`;
+  }).join('') || `<div class="empty-log">No items registered for this invoice</div>`;
 
   const activeHistory = (st.history || []).filter(h => h.status !== 'undone');
   const historyHtml = activeHistory.length ? `
