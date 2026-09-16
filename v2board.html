@@ -1,0 +1,2217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SK Fulfillment · 총량피킹 현황판</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#05070D; --surface:#0D1220; --surface2:#131B30;
+  --border:#212B45;
+  --border2:#2A3555;
+  --text:#EDF1F9; --text-dim:#8A93AC;
+  --amber:#F59E0B; --amber-bg:rgba(245,158,11,0.12);
+  --green:#22C55E; --green-bg:rgba(34,197,94,0.12);
+  --gray:#3A4560; --gray-bg:rgba(58,69,96,0.25);
+  --sans:'Inter',-apple-system,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -webkit-font-smoothing:antialiased; height:100%; overflow:hidden;}
+
+/* ═══════════════ 상단 헤더 ═══════════════ */
+.topbar{display:flex; align-items:center; justify-content:space-between; padding:22px 40px; border-bottom:2px solid var(--border); background:var(--surface);}
+.tb-left{display:flex; align-items:center; gap:20px;}
+.tb-logo{width:52px; height:52px; border-radius:12px; background:linear-gradient(135deg,#8B5CF6,#3B82F6); display:flex; align-items:center; justify-content:center; font-weight:900; font-size:22px;}
+.tb-title{font-size:26px; font-weight:800; letter-spacing:-0.01em;}
+.tb-sub{font-family:var(--mono); font-size:14px; color:var(--text-dim); margin-top:2px;}
+.tb-right{display:flex; align-items:center; gap:36px;}
+.tb-stat{text-align:right;}
+.tb-stat-label{font-family:var(--mono); font-size:12px; color:var(--text-dim); letter-spacing:0.08em; text-transform:uppercase;}
+.tb-stat-value{font-family:var(--mono); font-size:34px; font-weight:800; line-height:1.1;}
+.tb-clock{font-family:var(--mono); font-size:30px; font-weight:700; color:var(--text-dim); min-width:200px; text-align:right;}
+.tb-progress-outer{width:280px;}
+.tb-progress-bar{height:10px; background:var(--surface2); border-radius:5px; overflow:hidden; margin-top:6px;}
+.tb-progress-bar > div{height:100%; background:linear-gradient(90deg,var(--amber),var(--green)); transition:width 0.6s;}
+
+.status-dot{width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:8px;}
+.status-dot.live{background:var(--green); box-shadow:0 0 12px var(--green);}
+.status-dot.off{background:var(--gray);}
+.status-dot.manual{background:var(--amber); box-shadow:0 0 12px var(--amber);}
+
+/* ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 버튼/드롭다운
+   (batch.html의 활성 배치 전환과 별개 · 여기서 배치를 골라도
+   다른 기기/작업자 폰에는 전혀 영향 없음, TV 혼자만 조회) */
+.tb-switch-wrap{position:relative; margin-left:14px;}
+.tb-switch-btn{font-family:var(--sans); font-size:13px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:7px 14px; cursor:pointer;}
+.tb-switch-btn:hover{background:var(--border); color:var(--text);}
+.tb-switch-dd{display:none; position:absolute; top:calc(100% + 8px); left:0; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px; min-width:340px; box-shadow:0 10px 30px rgba(0,0,0,0.5); max-height:calc(100vh - 160px); overflow-y:auto;}
+.tb-switch-dd.open{display:block;}
+.tb-switch-row{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 8px; border-radius:8px; cursor:pointer;}
+.tb-switch-row:hover{background:var(--surface2);}
+.tb-switch-row .tb-sw-id{font-family:var(--mono); font-weight:800; font-size:14px;}
+.tb-switch-row .tb-sw-meta{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:2px;}
+.tb-switch-row .tb-sw-tag{font-size:10px; font-weight:800; padding:2px 7px; border-radius:5px; white-space:nowrap;}
+.tb-switch-empty{padding:12px 8px; font-size:12px; color:var(--text-dim);}
+.tb-switch-more{padding:10px 8px; margin-top:4px; border-top:1px solid var(--border); font-size:12px; color:#3EB8F5; text-align:center; cursor:pointer;}
+/* ★ 2026-09-04 신규(현장 요청) — "1년 전체"를 끝없이 스크롤하는 목록 대신
+   달력으로. 데이터는 지금과 완전히 동일하게 한 번만 받아오고(getBatchHistoryList
+   days=365), 화면에서 날짜별로 묶어서 그리는 것뿐이라 서버 호출·속도엔 영향 없음. */
+.tb-cal-header{display:flex; align-items:center; justify-content:space-between; padding:2px 2px 8px;}
+.tb-cal-nav{background:transparent; border:1px solid var(--border); border-radius:6px; color:var(--text); padding:4px 10px; cursor:pointer; font-size:12px;}
+.tb-cal-nav:hover{border-color:#3EB8F5; color:#3EB8F5;}
+.tb-cal-title{font-size:13px; font-weight:700;}
+.tb-cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px;}
+.tb-cal-wd{font-size:10px; color:var(--text-dim); text-align:center; padding:2px 0;}
+.tb-cal-cell{position:relative; aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:6px; font-size:12px; color:var(--text-dim2);}
+.tb-cal-cell.tb-cal-empty{visibility:hidden;}
+.tb-cal-cell.has-batch{background:rgba(62,184,245,0.12); color:var(--text); cursor:pointer; font-weight:700;}
+.tb-cal-cell.has-batch:hover{background:rgba(62,184,245,0.22);}
+.tb-cal-cell.is-today{box-shadow:inset 0 0 0 1px var(--amber);}
+.tb-cal-cell.is-selected{background:#3EB8F5; color:#04283B;}
+.tb-cal-dot{font-size:9px; margin-top:1px; line-height:1;}
+.tb-switch-more:hover{text-decoration:underline;}
+.manual-banner{display:none; align-items:center; flex-wrap:wrap; row-gap:6px; gap:10px; background:var(--amber-bg); border:1px solid var(--amber); color:var(--amber); font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px;}
+.manual-banner.show{display:flex;}
+.manual-banner button{font-family:var(--sans); font-size:12px; font-weight:700; background:none; border:1px solid var(--amber); color:var(--amber); border-radius:6px; padding:4px 10px; cursor:pointer;}
+.manual-banner button:hover{background:var(--amber); color:#1a1300;}
+
+/* ═══════════════ 미배분 경보 배너 (★ 2026-08-05 신규) ═══════════════
+   "다른 고객사에겐 스캔됐는데 이 고객사는 완전히 0인" 패턴을 발견하면 뜸.
+   빨간 계열로 눈에 확 띄게 — 방치하면 며칠씩 안 채워진 채 숨어있던 문제라
+   조용한 배지가 아니라 확실히 알아차릴 수 있는 배너가 필요함. */
+.unfulfilled-banner{display:none; align-items:center; gap:10px; background:rgba(239,68,68,0.14); border:1px solid #FF4D6D; color:#FF4D6D; font-family:var(--mono); font-weight:700; font-size:13px; padding:8px 16px; border-radius:8px; margin-top:8px; cursor:pointer;}
+.unfulfilled-banner.show{display:flex;}
+.unfulfilled-banner:hover{background:rgba(239,68,68,0.22);}
+.unfulfilled-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9000; align-items:center; justify-content:center;}
+.unfulfilled-modal-overlay.show{display:flex;}
+.unfulfilled-modal{background:var(--surface); border:1px solid #FF4D6D; border-radius:14px; width:min(720px, 92vw); max-height:80vh; display:flex; flex-direction:column; overflow:hidden;}
+.unfulfilled-modal-head{padding:18px 22px; border-bottom:1px solid var(--border2); display:flex; align-items:center; justify-content:space-between;}
+.unfulfilled-modal-head h3{margin:0; color:#FF4D6D; font-size:16px;}
+.unfulfilled-modal-head button{background:none; border:none; color:var(--text-dim); font-size:20px; cursor:pointer; line-height:1;}
+.unfulfilled-modal-body{padding:14px 22px; overflow-y:auto;}
+.unfulfilled-modal-note{font-size:12px; color:var(--text-dim); line-height:1.6; margin-bottom:14px; padding:10px 12px; background:var(--surface2); border-radius:8px;}
+.unfulfilled-row{padding:10px 0; border-bottom:1px solid var(--border2); font-size:13px;}
+.unfulfilled-row .ur-top{display:flex; justify-content:space-between; font-weight:700;}
+.unfulfilled-row .ur-slot{color:var(--amber); font-family:var(--mono);}
+.unfulfilled-row .ur-meta{color:var(--text-dim); font-size:12px; margin-top:3px; font-family:var(--mono);}
+
+/* ═══════════════ 슬롯 그리드 ═══════════════ */
+/* ★ 2026-08-18 신규 — 하단 여백(padding-bottom)을 넉넉히 줌. 배치 고객사가
+   30개를 넘어 "추가 배정 구역"(31번 이상)이 생기면, 스크롤을 끝까지 내려도
+   그 마지막 줄의 "패킹존 이동" 체크박스가 화면 맨 아래 가장자리에 거의 딱
+   붙어버려서(여유 공간 없음) 터치가 잘 안 먹는 문제가 있었음. */
+.board{padding:26px 36px 200px 36px; height:calc(100vh - 108px); overflow-y:auto;}
+.zone-label{font-family:var(--mono); font-size:15px; color:var(--text-dim); letter-spacing:0.1em; margin:18px 0 12px; text-transform:uppercase;}
+.zone-label:first-child{margin-top:0;}
+.grid{display:grid; grid-template-columns:repeat(5, 1fr); gap:16px;}
+.grid.small{grid-template-columns:repeat(5, 1fr);}
+
+.card{background:var(--surface); border:2px solid var(--border); border-radius:16px; padding:18px 20px; min-height:190px; display:flex; flex-direction:column; transition:all 0.4s;}
+.card.waiting{opacity:0.55;}
+.card.active{border-color:var(--amber); background:var(--amber-bg); animation:pulse 1.5s ease-in-out infinite;}
+/* ★ 2026-07-13 변경: 완료 슬롯을 테두리만 초록으로 강조하던 것에서, 칸 전체를
+   초록색으로 꽉 채우도록 변경 — 멀리서도(TV 화면 특성상) 한눈에 "다 됐다"가
+   확 들어오도록. 텍스트는 초록 배경 위에서 잘 읽히는 진한 색으로 전부 맞춤. */
+.card.done{border-color:var(--green); background:var(--green);}
+.card.flash{animation:flashDone 1.8s ease-out 2;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.4);} 50%{box-shadow:0 0 0 10px rgba(245,158,11,0);}}
+@keyframes flashDone{0%{box-shadow:0 0 40px var(--green);} 100%{box-shadow:0 0 0 rgba(34,197,94,0);}}
+
+.card-top{display:flex; justify-content:space-between; align-items:flex-start;}
+.card-slot{font-family:var(--mono); font-size:48px; font-weight:800; color:var(--text-dim);}
+.card.active .card-slot{color:var(--amber);}
+.card.done .card-slot{color:#04140D;}
+.card-ship{font-family:var(--mono); font-size:19px; font-weight:800; padding:6px 12px; border-radius:6px; letter-spacing:0.04em;}
+/* ★ 2026-07-13 신규: 배송타입(UPS/PU/TK)별 색상 구분 — batch.html과 동일한 배색 사용 */
+.card-ship.ship-UPS{background:rgba(139,92,246,0.18); color:#B39CFF;}
+.card-ship.ship-PU{background:rgba(34,211,238,0.18); color:#67E4F5;}
+.card-ship.ship-TK{background:rgba(245,158,11,0.18); color:#FBBF4E;}
+.card-ship.ship-other{background:rgba(58,69,96,0.35); color:var(--text-dim);}
+.card.done .card-ship{background:rgba(4,20,13,0.18); color:#04140D;}
+.card-cust{font-size:30px; font-weight:700; margin-top:10px; line-height:1.2; flex:1; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+.card.done .card-cust{color:#04140D;}
+/* ★ 2026-07-23 신규 — 인보이스 번호는 실물 박스 라벨과 대조하는 용도라 TV에도 필요하다는
+   현장 요청으로 추가. card-cust(고객사명)보다는 작지만, 다른 메타 정보보다는 눈에 띄게. */
+.card-invoice{font-family:var(--mono); font-size:20px; font-weight:800; color:var(--text-dim); margin-top:2px; letter-spacing:0.02em;}
+.card.done .card-invoice{color:#04140D; opacity:0.85;}
+.card-bottom{margin-top:12px;}
+.card-qty{font-family:var(--mono); font-size:26px; font-weight:700; color:var(--text-dim); margin-bottom:8px;}
+.card.active .card-qty, .card.done .card-qty{color:var(--text);}
+.card.done .card-qty{color:#04140D;}
+.card-metarow{display:flex; justify-content:space-between; font-family:var(--mono); font-size:24px; font-weight:700; color:var(--text-dim); margin-bottom:8px;}
+.card.active .card-metarow, .card.done .card-metarow{color:var(--text);}
+.card.done .card-metarow{color:#04140D;}
+.card-sku{opacity:0.85;}
+.card-bar{height:11px; background:rgba(255,255,255,0.08); border-radius:5px; overflow:hidden;}
+.card-bar > div{height:100%; background:var(--amber); transition:width 0.5s;}
+.card.done .card-bar{background:rgba(4,20,13,0.18);}
+.card.done .card-bar > div{background:#04140D;}
+/* ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 (구 .card-done-tag 정적 문구를 대체).
+   clearSlot(슬롯비우기)과 무관한 순수 표시용 상태. 체크하면 카드 전체가 블루로
+   바뀌어서, 초록(=완료했지만 아직 패킹존으로 안 옮김, 신경 써야 함)과 한눈에 구분됨. */
+.card-pack-check{display:none; align-items:center; gap:8px; cursor:pointer; margin-top:10px;}
+.card.done .card-pack-check{display:flex;}
+.card.done .card-pack-check .label{font-family:var(--mono); font-size:18px; font-weight:800; color:#04140D; white-space:nowrap;}
+/* ★ 2026-07-24 수정 — 완료(초록) 카드와 똑같은 방식: 테두리만이 아니라
+   카드 전체 배경을 진한 핑크로 꽉 채움(라인=배경 완전히 통일). 텍스트도
+   초록카드처럼 어두운 색으로. 애니메이션도 훨씬 강하고 눈에 띄게(밝기+그림자
+   크게 진동, 주기도 짧게). */
+.card.done.moved{background:#EC4899; border-color:#EC4899;
+  animation: packMovedGlow 1.6s ease-in-out infinite;
+}
+@keyframes packMovedGlow{
+  0%, 100%{ background:#EC4899; border-color:#EC4899; box-shadow: 0 0 10px 2px rgba(236,72,153,0.35); }
+  50%{ background:#FF6FBF; border-color:#FFB3DD; box-shadow: 0 0 45px 12px rgba(255,111,191,0.95); }
+}
+.card.done.moved .card-slot, .card.done.moved .card-cust, .card.done.moved .card-invoice,
+.card.done.moved .card-metarow, .card.done.moved .card-sku{color:#04140D !important;}
+.card-pack-check .box{width:22px; height:22px; border-radius:5px; border:2px solid #04140D; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+.card.done.moved .card-pack-check .box{border-color:#04140D; background:#04140D;}
+.card-pack-check .box svg{display:none; width:14px; height:14px;}
+.card.done.moved .card-pack-check .box svg{display:block;}
+.card.done.moved .card-pack-check .label{color:#04140D !important;}
+/* ★ 2026-08-04 신규 — 3단계째: 출고 작업자가 실제로 가져간 상태(taken).
+   핑크 카드를 한 번 더 누르면 이 상태가 됨. 초록/핑크와 같은 설계 언어
+   (밝은 배경 + 진한 글자)를 유지해서 글씨·숫자가 확실히 보이게 함.
+   요청대로 애니메이션 없음 — 가만히 있는 고정 파란색. */
+.card.done.taken{background:#3EB8F5; border-color:#3EB8F5; animation:none;}
+.card.done.taken .card-slot, .card.done.taken .card-cust, .card.done.taken .card-invoice,
+.card.done.taken .card-metarow, .card.done.taken .card-sku{color:#04140D !important;}
+.card.done.taken .card-bar{background:rgba(4,20,13,0.18);}
+.card.done.taken .card-bar > div{background:#04140D;}
+.card.done.taken .card-issue-badge{color:#04140D; background:rgba(4,20,13,0.18); border-color:rgba(4,20,13,0.4);}
+.card.done.taken .card-pack-check .box{border-color:#04140D; background:#04140D;}
+.card.done.taken .card-pack-check .box svg{display:block;}
+.card.done.taken .card-pack-check .label{color:#04140D !important;}
+/* ★ 2026-08-24 신규 — 오출고 방지: 최종 4단계째 "2ND VERIFICATION COMPLETE"(보라).
+   ★★★ 파랑(taken)의 기존 의미는 절대 안 바뀜 — .card.done.taken 클래스는 그대로
+   유지된 채, 이 규칙이 그 위에 색만 오버라이드해서 얹힘(선택자 우선순위로 이김).
+   파랑 다음의 마지막 단계이며, 검증이 끝나야만 붙는 class="verified"로만 켜짐.
+   ★ 주황(진행중 active 상태와 색이 겹쳐 헷갈릴 수 있음)이 아니라 보라를 사용 —
+   기존 5색(회색/주황/초록/핑크/파랑) 어디와도 안 겹치는 "인증 완료" 느낌의 색. */
+.card.done.taken.verified{background:#8B5CF6; border-color:#8B5CF6; animation:none;}
+.card.done.taken.verified .card-slot, .card.done.taken.verified .card-cust, .card.done.taken.verified .card-invoice,
+.card.done.taken.verified .card-metarow, .card.done.taken.verified .card-sku{color:#FFFFFF !important;}
+.card.done.taken.verified .card-bar{background:rgba(255,255,255,0.22);}
+.card.done.taken.verified .card-bar > div{background:#FFFFFF;}
+.card.done.taken.verified .card-issue-badge{color:#FFFFFF; background:rgba(255,255,255,0.2); border-color:rgba(255,255,255,0.45);}
+.card.done.taken.verified .card-pack-check .box{border-color:#FFFFFF; background:#FFFFFF;}
+.card.done.taken.verified .card-pack-check .box svg{display:block; stroke:#8B5CF6 !important;}
+.card.done.taken.verified .card-pack-check .label{color:#FFFFFF !important;}
+.card-empty{display:flex; align-items:center; justify-content:center; height:100%; font-family:var(--mono); font-size:20px; color:var(--text-dim); opacity:0.4;}
+
+.empty-state{display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh; gap:16px;}
+.empty-state h2{font-size:28px; color:var(--text-dim);}
+.empty-state p{font-family:var(--mono); font-size:16px; color:var(--text-dim); opacity:0.6;}
+
+/* ★ 2026-07-16 신규 — 이슈(EXP/NF/Damaged/OOS) 뱃지 + 상세 모달 */
+.card-top-right{display:flex; align-items:center; gap:8px;}
+.card-issue-badge{font-family:var(--mono); font-size:16px; font-weight:800; color:#FF4D6D; background:rgba(255,77,109,0.15); border:1.5px solid rgba(255,77,109,0.5); border-radius:8px; padding:3px 9px; cursor:pointer;}
+.card-issue-badge:hover{background:rgba(255,77,109,0.28);}
+.card.done .card-issue-badge{color:#04140D; background:rgba(4,20,13,0.18); border-color:rgba(4,20,13,0.4);}
+
+.issue-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:100; align-items:center; justify-content:center;}
+.issue-modal-overlay.open{display:flex;}
+.issue-modal{background:var(--surface); border:2px solid var(--border); border-radius:18px; width:min(920px, 94vw); max-height:86vh; display:flex; flex-direction:column; overflow:hidden;}
+.issue-modal-head{display:flex; justify-content:space-between; align-items:center; padding:22px 26px; border-bottom:2px solid var(--border);}
+.issue-modal-head h3{font-size:24px; font-weight:800;}
+.issue-modal-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:38px; height:38px; border-radius:10px; font-size:16px; cursor:pointer;}
+.issue-modal-body{padding:18px 26px; overflow-y:auto; display:flex; flex-direction:column; gap:12px;}
+.issue-modal-row{background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:12px; padding:14px 18px;}
+.issue-modal-row-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+.issue-modal-reason{font-family:var(--mono); font-size:15px; font-weight:800; color:#FF4D6D;}
+.issue-modal-qty{font-family:var(--mono); font-size:20px; font-weight:800;}
+.issue-modal-name{font-size:17px; font-weight:700; margin-bottom:4px;}
+.issue-modal-meta{font-family:var(--mono); font-size:13px; color:var(--text-dim);}
+.issue-modal-note{margin-top:6px; font-size:14px; color:var(--text-dim); font-style:italic;}
+.issue-modal-edit-btn{margin-top:10px; width:100%; padding:9px; background:none; border:1px solid var(--border2); border-radius:8px; color:var(--text-dim); font-size:13px; font-weight:700; cursor:pointer;}
+.issue-modal-edit-btn:hover{background:rgba(255,255,255,0.06); color:var(--text);}
+
+/* ★ 2026-07-23 신규 — TV에서도 카드를 클릭해 이슈를 조회/추가할 수 있게 함
+   (기존엔 이미 이슈가 있는 카드의 배지를 눌러야만 "조회"만 가능했음) */
+.card{cursor:pointer;}
+.issue-modal-empty{font-size:14px; color:var(--text-dim); text-align:center; padding:10px 0;}
+.issue-new-form{background:rgba(255,255,255,0.03); border:1px solid var(--border2); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:10px; margin-top:4px;}
+.issue-new-form-title{font-size:13px; color:var(--text-dim); font-weight:800;}
+.issue-new-form label{font-size:12px; color:var(--text-dim); font-weight:700;}
+.issue-new-form select, .issue-new-form input{width:100%; padding:10px 12px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:14px; font-family:var(--sans); margin-top:4px;}
+.issue-new-form-row{display:flex; gap:10px;}
+.issue-new-form-row > div{flex:1;}
+.issue-new-form-submit{margin-top:2px; padding:12px; background:rgba(255,77,109,0.15); border:1px solid #FF4D6D; color:#FF4D6D; border-radius:8px; font-size:14px; font-weight:800; cursor:pointer;}
+.issue-new-form-submit:hover{background:rgba(255,77,109,0.25);}
+.issue-edit-form{margin-top:10px; display:flex; flex-direction:column; gap:8px;}
+.issue-edit-form select, .issue-edit-form input{width:100%; padding:9px 10px; background:var(--bg); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-size:14px; box-sizing:border-box;}
+.issue-edit-actions{display:flex; gap:8px;}
+.issue-edit-cancel, .issue-edit-save{flex:1; padding:9px; border-radius:6px; border:none; font-weight:700; font-size:13px; cursor:pointer;}
+.issue-edit-cancel{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
+.issue-edit-save{background:#FF4D6D; color:#fff;}
+.issue-edit-save:disabled{opacity:0.6;}
+.issue-edit-delete{margin-top:4px; width:100%; padding:8px; background:none; border:1px dashed rgba(255,77,109,0.4); border-radius:6px; color:#FF4D6D; font-size:12px; font-weight:600; cursor:pointer;}
+.issue-edit-delete:hover{background:rgba(255,77,109,0.1);}
+.issue-edit-delete:disabled{opacity:0.6;}
+
+/* ═══════════════ ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지) ═══════════════ */
+.pack-modal-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,0.78); z-index:200; align-items:center; justify-content:center;}
+.pack-modal-overlay.open{display:flex;}
+.pack-modal{background:var(--surface); border:2px solid #8B5CF6; border-radius:18px; width:min(880px, 94vw); max-height:92vh; display:flex; flex-direction:column; overflow:hidden;}
+.pack-modal-head{padding:20px 26px; border-bottom:2px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+.pack-modal-head h3{font-size:22px; font-weight:800;}
+.pack-modal-head .sub{font-family:var(--mono); font-size:13px; color:var(--text-dim); margin-top:4px;}
+.pack-modal-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:38px; height:38px; border-radius:10px; font-size:16px; cursor:pointer;}
+.pack-modal-scanrow{padding:16px 26px; border-bottom:1px solid var(--border2); display:flex; gap:10px; align-items:center; background:rgba(139,92,246,0.08);}
+.pack-modal-scanrow input{flex:1; padding:16px 18px; font-size:20px; font-family:var(--mono); font-weight:700; background:var(--bg); border:2px solid #8B5CF6; border-radius:10px; color:var(--text);}
+.pack-modal-scanrow input:focus{outline:none; box-shadow:0 0 0 3px rgba(139,92,246,0.35);}
+.pack-modal-progress{padding:12px 26px; display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:14px; font-weight:700; color:var(--text-dim); border-bottom:1px solid var(--border2);}
+.pack-modal-progress .n{font-size:22px; color:var(--text); font-weight:800;}
+.pack-modal-progress-bar{height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; margin:0 26px;}
+.pack-modal-progress-bar > div{height:100%; background:linear-gradient(90deg,#F59E0B,#8B5CF6); transition:width 0.4s;}
+.pack-modal-body{padding:14px 26px; overflow-y:auto; flex:1;}
+.pack-line{display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-radius:10px; border:1px solid var(--border2); margin-bottom:8px; background:rgba(255,255,255,0.02);}
+.pack-line.done{border-color:rgba(139,92,246,0.5); background:rgba(139,92,246,0.1);}
+.pack-line-name{font-size:15px; font-weight:700;}
+.pack-line-meta{font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-top:2px;}
+.pack-line-qty{font-family:var(--mono); font-size:18px; font-weight:800; white-space:nowrap;}
+.pack-line.done .pack-line-qty{color:#8B5CF6;}
+.pack-line-check{font-size:20px; margin-left:10px;}
+.pack-modal-flash{position:fixed; inset:0; pointer-events:none; z-index:9999; opacity:0; transition:opacity 0.15s;}
+.pack-modal-flash.show-ok{background:rgba(139,92,246,0.4); opacity:1;}
+.pack-modal-flash.show-bad{background:rgba(239,68,68,0.45); opacity:1;}
+.pack-modal-msg{padding:10px 26px; font-size:14px; font-weight:700; text-align:center;}
+.pack-modal-msg.ok{color:#A78BFA;}
+.pack-modal-msg.bad{color:#FF4D6D;}
+.pack-modal-footer{padding:16px 26px; border-top:2px solid var(--border); display:flex; gap:10px;}
+.pack-modal-footer button{flex:1; padding:14px; border-radius:10px; font-size:15px; font-weight:800; cursor:pointer; border:none;}
+.pack-btn-print{background:var(--surface2); color:var(--text); border:1px solid var(--border2) !important;}
+.pack-print-group{position:relative; flex:1; display:flex;}
+.pack-print-group .pack-btn-print{flex:1; border-radius:10px 0 0 10px !important;}
+.pack-print-toggle{width:34px; flex:0 0 34px; background:var(--surface2); border:1px solid var(--border2); border-left:none; border-radius:0 10px 10px 0; color:var(--text-dim); cursor:pointer; font-size:11px;}
+.pack-print-menu{display:none; position:absolute; bottom:100%; left:0; right:0; margin-bottom:6px; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; overflow:hidden; z-index:20;}
+.pack-print-menu.open{display:block;}
+.pack-print-menu button{width:100%; text-align:left; padding:10px 12px; background:none; border:none; color:var(--text); font-size:12.5px; cursor:pointer; border-radius:0 !important;}
+.pack-print-menu button:hover{background:rgba(255,255,255,0.08);}
+.pack-btn-complete{background:#8B5CF6; color:#FFFFFF;}
+.pack-btn-complete:disabled{opacity:0.35; cursor:not-allowed;}
+.pack-btn-force{background:none; border:1px dashed rgba(255,77,109,0.5) !important; color:#FF4D6D; font-size:11px !important; font-weight:600 !important; flex:0 0 auto !important; padding:14px 12px !important;}
+.pack-worker-row{padding:10px 26px 0; display:flex; gap:10px; align-items:center;}
+.pack-worker-row label{font-size:12px; color:var(--text-dim); font-weight:700; white-space:nowrap;}
+.pack-worker-row select, .pack-worker-row input{flex:1; padding:8px 10px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:13px;}
+.pack-history-toggle{font-size:12px; color:var(--text-dim); cursor:pointer; text-decoration:underline; margin:6px 0 10px;}
+.pack-history-row{font-family:var(--mono); font-size:11px; color:var(--text-dim); padding:4px 0; display:flex; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.05);}
+.pack-history-row.wrong{color:#FF4D6D;}
+.pack-history-row.over{color:#F59E0B;}
+.pack-history-undo{cursor:pointer; text-decoration:underline; margin-left:8px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="tb-left">
+    <div class="tb-logo">SK</div>
+    <div>
+      <div class="tb-title">총량피킹 현황판</div>
+      <div class="tb-sub" id="batchLabel"><span class="status-dot off" id="liveDot"></span>연결 대기중...</div>
+      <div style="font-size:10px; color:var(--text-dim2); margin-top:1px;">Built by David Kim · 2026</div>
+      <div class="manual-banner" id="manualBanner">
+        <span style="white-space:nowrap;">🔍 <b>지난 배치를 보는 중입니다</b> — 창고 진행과 별개로 고정돼 있습니다</span>
+        <span id="backToLiveCountdown" style="font-family:var(--mono); font-weight:800; white-space:nowrap;"></span>
+        <button id="btnPinViewOnly" style="background:var(--surface2); border:1px solid var(--border2); color:var(--text-dim); border-radius:6px; padding:5px 10px; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;">📌 계속 보기</button>
+        <button id="btnBackToLive" style="white-space:nowrap;">지금 작업 중인 배치로 →</button>
+      </div>
+      <!-- ★ 2026-08-05 신규 — 미배분 경보: 다른 고객사에겐 스캔됐는데 이 고객사만
+           완전히 빠진 상품이 있으면 뜸. 클릭하면 상세 목록 모달. -->
+      <div class="unfulfilled-banner" id="unfulfilledBanner">
+        ⚠️ <span id="unfulfilledBannerText">미배분 제품 확인 필요</span>
+      </div>
+    </div>
+    <div class="tb-switch-wrap">
+      <button class="tb-switch-btn" id="btnSwitchBatchTV">⇄ 다른 배치</button>
+      <div class="tb-switch-dd" id="switchBatchDropdownTV"></div>
+    </div>
+    <div class="tb-switch-wrap">
+      <button class="tb-switch-btn" id="btnBatchHistoryTV">📅 지난 배치 (최근 14일)</button>
+      <div class="tb-switch-dd" id="batchHistoryDropdownTV"></div>
+    </div>
+  </div>
+  <div class="tb-right">
+    <div class="tb-stat">
+      <div class="tb-stat-label">완료 슬롯</div>
+      <div class="tb-stat-value" id="doneCount">-- / --</div>
+      <div class="tb-progress-outer"><div class="tb-progress-bar"><div id="doneBar" style="width:0%"></div></div></div>
+    </div>
+    <div class="tb-clock" id="clock">--:--:--</div>
+  </div>
+</div>
+
+<!-- ★ 2026-08-05 신규 — 미배분 경보 상세 모달 -->
+<div class="unfulfilled-modal-overlay" id="unfulfilledModalOverlay">
+  <div class="unfulfilled-modal">
+    <div class="unfulfilled-modal-head">
+      <h3>⚠️ 미배분 제품 목록</h3>
+      <button id="btnCloseUnfulfilledModal">✕</button>
+    </div>
+    <div class="unfulfilled-modal-body" id="unfulfilledModalBody"></div>
+  </div>
+</div>
+
+<div class="board" id="board">
+  <div class="empty-state">
+    <h2>오늘의 배치를 기다리는 중...</h2>
+    <p id="emptyMsg">CONFIG.GAS_URL 확인 중</p>
+  </div>
+</div>
+
+<!-- ★ 2026-07-16 신규 — 이슈(⚠) 뱃지 클릭 시 상세 목록 모달 -->
+<div class="issue-modal-overlay" id="issueModalOverlay">
+  <div class="issue-modal">
+    <div class="issue-modal-head">
+      <h3 id="issueModalTitle">이슈 목록</h3>
+      <button class="issue-modal-close" onclick="closeIssueModal()">✕</button>
+    </div>
+    <div class="issue-modal-body" id="issueModalBody"></div>
+  </div>
+</div>
+
+<!-- ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지): 핑크/검증중 카드 클릭 시 열림 -->
+<div class="pack-modal-flash" id="packModalFlash"></div>
+<div class="pack-modal-overlay" id="packModalOverlay">
+  <div class="pack-modal">
+    <div class="pack-modal-head">
+      <div>
+        <h3 id="packModalTitle">2차 검증 (최종)</h3>
+        <div class="sub" id="packModalSub"></div>
+      </div>
+      <button class="pack-modal-close" onclick="closePackVerifyModal()">✕</button>
+    </div>
+    <div class="pack-worker-row">
+      <label>작업자</label>
+      <select id="packWorkerSelect" onchange="document.getElementById('packWorkerManual').style.display=(this.value==='__manual__')?'block':'none';"></select>
+      <input type="text" id="packWorkerManual" placeholder="이름 직접 입력" style="display:none;">
+    </div>
+    <div class="pack-modal-scanrow">
+      <input type="text" id="packScanInput" placeholder="📷 바코드를 스캔하세요..." autocomplete="off">
+    </div>
+    <div class="pack-modal-msg" id="packModalMsg" style="display:none;"></div>
+    <div class="pack-modal-progress">
+      <span>진행률</span>
+      <span class="n" id="packProgressText">0 / 0 pcs</span>
+    </div>
+    <div class="pack-modal-progress-bar"><div id="packProgressBar" style="width:0%"></div></div>
+    <div class="pack-modal-body" id="packModalBody"></div>
+    <div class="pack-modal-footer">
+      <button class="pack-btn-force" id="packForceBtn" onclick="forceCompletePackVerify()">⚠ 관리자 강제확정</button>
+      <div class="pack-print-group">
+        <button class="pack-btn-print" onclick="printPackingSlip('letter')">🖨 패킹슬립 인쇄 (Letter)</button>
+        <button class="pack-print-toggle" onclick="event.stopPropagation(); document.getElementById('packPrintMenu').classList.toggle('open');" title="다른 용지 크기">▾</button>
+        <div class="pack-print-menu" id="packPrintMenu">
+          <button onclick="document.getElementById('packPrintMenu').classList.remove('open'); printPackingSlip('letter');">📄 Letter (일반 A4/레터 용지)</button>
+          <button onclick="document.getElementById('packPrintMenu').classList.remove('open'); printPackingSlip('label');">🏷 4×6 라벨 (라벨 프린터)</button>
+        </div>
+      </div>
+      <button class="pack-btn-complete" id="packCompleteBtn" disabled onclick="completePackVerify()">🟣 최종 2차 검증완료 확정</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ★ 2026-09 신규 — Firestore 미러 구독 (v2 부분 이전)
+     ------------------------------------------------------------
+     board.html이 실제로 호출하던 getActiveBatch/getBatch/getOpenBatches/
+     getSlotProgress/getUnfulfilledSkuAlerts 함수의 "로직"은 전혀 안 바꿈.
+     Apps Script(FirestoreSync.gs)가 1분마다 그 함수들의 결과를 그대로
+     Firestore mirror/* 문서에 복사해두고, 이 페이지는 그 문서를 실시간
+     구독(onSnapshot)만 함 — 원본 계산은 여전히 Google Sheets 기준.
+     이 스크립트는 type="module"이라 문서 파싱이 끝난 뒤(하단 classic
+     <script>보다 실행이 늦을 수도 빠를 수도 있음) 실행되므로, 아래 classic
+     스크립트 쪽에서는 window._subscribeMirror가 아직 없을 수 있다고 보고
+     짧은 간격으로 기다렸다가 붙는 방식(_waitForMirrorInit)을 씀.
+     ═══════════════════════════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBG4HmlCg4CoJPoCbOi-ZE6wQwY2u88XeA",
+    authDomain: "sk-b2b-fulfillment.firebaseapp.com",
+    projectId: "sk-b2b-fulfillment",
+    storageBucket: "sk-b2b-fulfillment.firebasestorage.app",
+    messagingSenderId: "1053449174138",
+    appId: "1:1053449174138:web:d1f81b0c05abe6fcf4cfc3",
+    measurementId: "G-QBTQ1E86Y6"
+  };
+
+  try {
+    const fbApp = initializeApp(firebaseConfig);
+    const db = getFirestore(fbApp);
+
+    // classic <script>(아래)에서 이 함수를 통해 mirror 문서를 구독함.
+    // docPath 예: 'board_activeBatch', 'board_batch', 'board_slotProgress' 등.
+    window._subscribeMirror = function(docPath, onUpdate){
+      const ref = doc(db, 'mirror', docPath);
+      onSnapshot(ref, (snap) => {
+        if(!snap.exists()) return;
+        try{
+          const payload = JSON.parse(snap.data().data);
+          onUpdate(payload);
+        }catch(e){ console.error('[mirror] JSON 파싱 실패 (' + docPath + '):', e); }
+      }, (err) => {
+        console.error('[mirror] onSnapshot 에러 (' + docPath + '):', err);
+      });
+    };
+    console.log('✅ Firestore 미러 연결 준비 완료');
+  } catch(e) {
+    // Firestore 연결 자체가 실패해도(네트워크 차단 등) 이 페이지가 완전히
+    // 멈추면 안 되므로, window._subscribeMirror를 그냥 안 만들어두고 끝냄.
+    // 아래 classic 스크립트가 이걸 감지해서 예전 방식(Apps Script 직접
+    // 폴링)으로 자동으로 계속 동작함.
+    console.error('❌ Firestore 초기화 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다:', e);
+  }
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// ★★★ CONFIG — 반드시 채워야 작동합니다 (batch.html과 동일한 값) ★★★
+// ═══════════════════════════════════════════════════════════
+const CONFIG = {
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec',
+};
+const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
+
+// ★ 2026-09 신규 — Firestore 미러 캐시. window._subscribeMirror가 데이터를
+// 채워주고, 아래 pollOnce()/pollUnfulfilledAlerts()는 (연결에 성공했으면)
+// 네트워크 호출 대신 이 캐시를 읽음. FIRESTORE_MIRROR_OK가 true일 때만
+// 캐시를 신뢰하고, 그렇지 않으면 기존 gasQuery 직접 호출로 자동 대체됨.
+let FIRESTORE_MIRROR_OK = false;
+let _mirrorCache = { activeBatch:null, batch:null, openBatches:null, slotProgress:null, unfulfilledAlerts:null };
+
+function _waitForMirrorInit(tries){
+  tries = tries || 0;
+  if(window._subscribeMirror){
+    FIRESTORE_MIRROR_OK = true;
+    window._subscribeMirror('board_activeBatch', (p) => { _mirrorCache.activeBatch = p; if(!manualBatchOverride) pollOnce(); });
+    window._subscribeMirror('board_batch',        (p) => { _mirrorCache.batch = p; });
+    window._subscribeMirror('board_openBatches',  (p) => { _mirrorCache.openBatches = p; });
+    window._subscribeMirror('board_slotProgress', (p) => { _mirrorCache.slotProgress = p; if(!manualBatchOverride) pollOnce(); });
+    window._subscribeMirror('board_unfulfilledAlerts', (p) => { _mirrorCache.unfulfilledAlerts = p; if(!manualBatchOverride && typeof pollUnfulfilledAlerts === 'function') pollUnfulfilledAlerts(); });
+    console.log('✅ Firestore 미러 구독 시작 — 실시간 모드로 동작합니다');
+    return;
+  }
+  if(tries > 100){ // 약 5초 기다려도 안 뜨면 예전 방식(Apps Script 직접 폴링)으로 계속
+    console.warn('⚠ Firestore 미러 연결 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다');
+    return;
+  }
+  setTimeout(() => _waitForMirrorInit(tries + 1), 50);
+}
+_waitForMirrorInit();
+
+// ★ 2026-09 신규 — 아래 4개는 pollOnce()/pollUnfulfilledAlerts() 안에서 쓰이는
+// "데이터 가져오기" 부분만 감싼 래퍼. FIRESTORE_MIRROR_OK가 true면 Firestore
+// 캐시(실시간 구독으로 이미 채워져 있음)를 그대로 읽고, 아니면 예전처럼
+// Apps Script를 직접 호출함 — 호출하는 쪽(pollOnce 등)의 나머지 로직은
+// 전혀 안 바뀜(어떤 op의 결과를 어떻게 화면에 반영하는지는 100% 동일).
+async function getActiveBatchData_(){
+  if(FIRESTORE_MIRROR_OK) return _mirrorCache.activeBatch || { ok:false };
+  return await gasQuery('getActiveBatch', {});
+}
+async function getBatchData_(){
+  if(FIRESTORE_MIRROR_OK) return _mirrorCache.batch || { ok:false };
+  return await gasQuery('getBatch', {});
+}
+async function getOpenBatchesData_(){
+  if(FIRESTORE_MIRROR_OK) return _mirrorCache.openBatches || { ok:false };
+  return await gasQuery('getOpenBatches', {});
+}
+async function getSlotProgressLiveData_(batchId){
+  // ★ manualBatchOverride(TV에서 임의의 다른 배치를 고른 상태)는 Firestore
+  // 미러 대상이 아닌(미러는 "현재 활성 배치"만 담음) 임의 배치일 수 있으므로
+  // 이 경로는 절대 캐시를 쓰지 않고 항상 직접 조회함 — pollOnce() 쪽에서
+  // manualBatchOverride일 때는 이 함수를 호출하지 않고 gasQuery를 직접 씀.
+  if(FIRESTORE_MIRROR_OK) return _mirrorCache.slotProgress || { ok:false };
+  return await gasQuery('getSlotProgress', { batchId });
+}
+async function getUnfulfilledAlertsData_(batchId){
+  if(FIRESTORE_MIRROR_OK && !manualBatchOverride) return _mirrorCache.unfulfilledAlerts || { ok:false };
+  return await gasQuery('getUnfulfilledSkuAlerts', { batchId });
+}
+// ★ 2026-08-19 수정(현장 확인) — 서버(Apps Script)에 여러 기기의 요청이
+//   몰려 간헐적으로 응답 실패하는 게 확인돼서, 8초→12초로 완화. TV는 실시간성이
+//   더 중요하긴 하지만, 12초 정도는 체감 차이가 크지 않고 서버 부담은 확실히 줄어듦.
+// ★ 2026-09-03 신규(매니저 확정) — 12초→20초로 완화. TV 현황판은 사람이
+// 계속 쳐다보는 화면이 아니라 가끔 확인하는 용도라, 8초 늦어져도 체감상
+// "실시간"으로 계속 느껴짐. batch.html/sales.html과 서버를 같이 쓰는데 이
+// 화면도 계속 폴링하고 있었던 게 전체 부담에 한몫했음.
+const POLL_MS = 30000; // ★ 2026-09-03 재수정 — 20초→30초(최종 완화)
+
+/* ★ 2026-08-11 신규 — TV를 새로고침했을 때 즉시 화면이 뜨도록,
+ * 마지막으로 보던 배치 번호를 이 기기에 기억해둠. 데이터가 아니라
+ * "어느 배치를 보고 있었는가"만 저장하므로 안전함(하루 지나면 자동 폐기). */
+const LAST_BATCH_KEY = 'tvLastBatchId';
+let BOOT_FAST = true;
+let LAST_BATCH_ID = null;
+try{
+  const raw = JSON.parse(localStorage.getItem(LAST_BATCH_KEY) || 'null');
+  if(raw && raw.id && (Date.now() - raw.at) < 24*60*60*1000) LAST_BATCH_ID = raw.id;
+}catch(e){}
+function rememberBatch(id){
+  try{ localStorage.setItem(LAST_BATCH_KEY, JSON.stringify({ id: id, at: Date.now() })); }catch(e){}
+}
+
+// ★ 2026-08-19 신규(긴급) — 오늘 하루 종일 batch.html/board.html/sk-worker
+//   전부에서 "Access to fetch ... blocked by CORS policy" 에러가 간헐적으로
+//   발생. 직접 주소 접속(navigation)은 항상 정상 응답하는데 fetch()만 계속
+//   막히는 걸로 봐서, Apps Script의 script.google.com→script.googleusercontent.com
+//   리다이렉트 구간에서 CORS 허용 헤더가 불안정하게 실리는 구글 쪽 고질적인
+//   문제로 보임(서버 자체는 정상 — 직접 접속하면 항상 200 OK가 나옴).
+//   <script> 태그로 데이터를 받아오는 JSONP 방식은 애초에 CORS 검사 대상이
+//   아니라서 이 문제를 원천적으로 피해감. sk-worker에 이미 있던 방식과 동일.
+//   서버(Code.gs json_())가 이미 callback= 파라미터를 지원하고 있어서 별도
+//   서버 수정 없이 바로 적용 가능.
+let _jsonpCounter = 0;
+function jsonpGet(url, timeoutMs){
+  return new Promise((res, rej) => {
+    const cbName = '__jsonp_' + (++_jsonpCounter) + '_' + Date.now();
+    const timer = setTimeout(() => { cleanup(); rej(new Error('jsonp timeout')); }, timeoutMs || 15000);
+    function cleanup(){
+      clearTimeout(timer);
+      try{ delete window[cbName]; }catch(e){}
+      const s = document.getElementById(cbName);
+      if(s && s.parentNode) s.parentNode.removeChild(s);
+    }
+    window[cbName] = (data) => { cleanup(); res(data); };
+    const script = document.createElement('script');
+    script.id = cbName;
+    script.onerror = () => { cleanup(); rej(new Error('jsonp error')); };
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    script.src = url + sep + 'callback=' + cbName;
+    document.head.appendChild(script);
+  });
+}
+
+async function gasQueryWithRetry(op, params, retries){
+  // ★ 2026-08-19 재수정(긴급) — 재시도 2번(총 3번 시도)이 혼잡할 때 요청을
+  //   과도하게 증폭시키는 게 확인돼서, 1번(총 2번 시도)으로 줄이고 지터를
+  //   크게 넣어서 여러 기기가 정확히 같은 타이밍에 몰려서 재시도하지 않게 함.
+  //   이제 이 함수는 "사람이 직접 누른 동작"(다른 배치 선택, 슬롯 클릭 등)에만
+  //   쓰임 — 반복 폴링 안에서는 안 씀(그쪽은 다음 폴링이 알아서 재시도 역할을 함).
+  const maxRetries = (retries === undefined) ? 1 : retries;
+  let res = await gasQuery(op, params);
+  for(let attempt = 1; !res.ok && attempt <= maxRetries; attempt++){
+    const jitter = Math.floor(Math.random() * 2000);
+    await new Promise(r => setTimeout(r, 3000 * attempt + jitter)); // 3초+지터
+    res = await gasQuery(op, params);
+  }
+  return res;
+}
+
+async function gasQuery(op, params){
+  if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
+  const qs = new URLSearchParams(Object.assign({op, _ts: Date.now()}, params||{})).toString();
+  try{
+    // ★ 2026-07-17 수정: TV처럼 오래 켜두는 화면에서 브라우저가 예전 응답을
+    //   캐싱해서 재사용하는 바람에 데이터가 안 바뀌는 것처럼 보이던 문제 수정.
+    //   매번 다른 타임스탬프를 붙이고, fetch 자체도 캐시를 쓰지 말라고 명시.
+    const res = await fetch(`${CONFIG.GAS_URL}?${qs}`, { cache: 'no-store' });
+    return await res.json();
+  }catch(e){
+    // ★ 2026-08-19 신규 — fetch가 CORS 등으로 실패하면 JSONP로 한 번 더 시도
+    console.warn('gasQuery fetch 실패, JSONP로 재시도:', op, e);
+    try{
+      return await jsonpGet(`${CONFIG.GAS_URL}?${qs}`);
+    }catch(e2){
+      console.error('gasQuery 완전 실패(fetch+JSONP 둘다):', op, e2);
+      return { ok:false, error:String(e2) };
+    }
+  }
+}
+// ★ 2026-07-22 신규 — 이슈 되돌리기(undoIssue) 등 저장/변경 작업용 POST 호출
+async function gasCall(op, data){
+  if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
+  try{
+    const fd = new FormData();
+    fd.append('op', op);
+    fd.append('data', JSON.stringify(data || {}));
+    // ★ 2026-07-22 신규: 타임아웃이 없어서 서버 응답이 늦으면 "처리 중..."
+    //   상태로 무한정 멈춰있던 문제 수정 — 20초 넘으면 실패로 보고 사용자가
+    //   다시 시도할 수 있게 함.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd, signal: controller.signal });
+    clearTimeout(timer);
+    return await res.json();
+  }catch(e){
+    console.error('gasCall failed:', op, e);
+    const msg = (e && e.name === 'AbortError') ? '서버 응답이 너무 늦어서 중단했습니다(20초 초과). 다시 시도해주세요.' : String(e);
+    return { ok:false, error: msg };
+  }
+}
+
+let currentBatchId = null;
+let prevStatus = {}; // slotNum -> 'waiting'|'active'|'done' (완료 순간 감지용 flash 처리)
+
+// ★ 2026-08-25 신규(버그 수정) — currentBatchId는 override 모드에 들어가면
+// override 배치ID로 덮어써지므로, "진짜 지금 실제로 진행 중인 활성 배치가
+// 뭔지"를 override와 무관하게 항상 따로 기억해둘 변수가 필요함. 이게 없어서
+// "다른 배치"/"지난 배치" 목록에서 마침 지금 작업 중인 배치를 그대로 클릭해도
+// 무조건 "지난 배치를 보는 중입니다"로 잘못 들어가는 버그가 있었음(실제 현장
+// 사진으로 확인됨 — 오늘 만든 배치를 보고 있는데 "지난 배치" 배너가 뜸).
+let liveBatchId = null;
+
+// ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 모드.
+// null이면 평소대로 getActiveBatch(매니저가 batch.html에서 정한 활성 배치)를 실시간으로 따라감.
+// 값이 있으면 그 배치만 고정으로 조회하며, getActiveBatch 폴링은 건너뜀
+// (다른 기기에는 절대 영향 없음 — setActiveBatch를 호출하지 않는 순수 조회 전용).
+let manualBatchOverride = null; // { batchId, date } | null
+
+function fmtClock(){
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+}
+setInterval(fmtClock, 1000); fmtClock();
+
+function shipLabel(v){ return v || '-'; }
+// ★ 2026-07-13: UPS/PU/TK가 아닌 값이 들어와도 스타일이 깨지지 않도록 안전하게 클래스 결정
+function shipClass(v){
+  return (v === 'UPS' || v === 'PU' || v === 'TK') ? 'ship-' + v : 'ship-other';
+}
+
+let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상세 조회용
+// ★ 2026-07-28 신규 — 패킹존 이동 체크가 8초 폴링에 되돌아가던 경쟁상태 버그 수정용.
+// 클릭 직후 서버 저장이 아직 안 끝난 상태에서 폴링이 먼저 돌면, 폴링이 가져온
+// "아직 안 바뀐" 값으로 화면을 통째로 덮어써서 핑크가 다시 초록으로 되돌아갔음.
+// 저장 요청을 보낸 인보이스는 여기 기록해두고, renderBoard가 폴링 데이터로 화면을
+// 새로 그릴 때 "서버 값이 아직 이 값을 안 따라왔으면" 보류값을 그대로 유지하도록 함.
+// ★ 2026-08-14 긴급 수정(매니저 발견) — 이 "보류" 상태에 만료시간이 없어서,
+//   서버 저장이 실제로는 실패했거나 나중에 그 값이 다른 이유로 지워져도 화면은
+//   영원히 가짜 값을 계속 우겨서 보여주고 있었음(TV는 계속 파랑인데, 01 Batch
+//   탭의 "출고 대기" 안내는 서버 원본을 그대로 읽어서 정직하게 "27건 미출고"라고
+//   서로 다르게 말하는 불일치 발생). 이제 { stage, ts } 형태로 설정 시각을 같이
+//   기록하고, PENDING_MAX_MS(30초)가 지나도록 서버가 못 따라오면 더는 우기지
+//   않고 서버의 실제 값을 그대로 인정한다(+콘솔에 경고 남김, 진단용).
+let _pendingPackMoves = {}; // invoice -> { stage:'moved'|'taken', ts:Number }
+const PENDING_PACK_MAX_MS = 50000; // ★ 2026-09-03 재수정 — POLL_MS를 30초로 늘리면서 여유가 없어져(30초=30초) 함께 50초로 늘림(1.5배 이상 여유 유지). 이 시간 넘도록 서버가 확인 안 해주면 서버 값을 신뢰
+
+// ★ 2026-08-14 신규 — 패킹존 이동 상태가 서버와 30초 넘게 안 맞을 때 눈에 보이게 알림.
+//   콘솔 경고만으로는 창고 TV 앞에서 아무도 못 봄.
+function showSyncFailToast(customerName){
+  const id = 'syncFailToast';
+  let el = document.getElementById(id);
+  if(!el){
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = 'position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:9999; background:#7a0000; color:#fff; padding:14px 22px; border-radius:10px; font-size:14px; font-weight:700; box-shadow:0 6px 24px rgba(0,0,0,0.5); border:1px solid #ff4d4d; max-width:80vw; text-align:center;';
+    document.body.appendChild(el);
+  }
+  el.textContent = `⚠️ "${customerName}" 패킹존 이동 표시가 서버에 저장되지 않았습니다 — 다시 눌러주세요`;
+  el.style.display = 'block';
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 8000);
+}
+
+// ★ 2026-08-04 신규 — 슬롯의 현재 패킹 단계: none(초록) / moved(핑크) / taken(파랑)
+function packStageOf(slot){
+  return slot.takenOut ? 'taken' : slot.movedToPacking ? 'moved' : 'none';
+}
+
+// ★ 2026-07-23 신규 — "패킹존 이동" 체크박스 토글. clearSlot(슬롯비우기)과 무관한
+// 순수 표시용 상태 변경이라, 서버에 저장만 하고 슬롯 재배정 로직은 전혀 안 건드림.
+// ★ 2026-08-04 확장 — 2단계(초록↔핑크 토글)에서 3단계로 확장:
+//   초록(완료) →클릭→ 핑크("패킹존 이동 필요" = 출고팀이 가져가야 함)
+//   →클릭→ 파랑("패킹존 이동 완료" = 출고팀이 실제로 가져감) — ★ 기존 의미 그대로
+//   서버에는 stage('moved'|'taken')로 전달 — 기존 setPackingMoved op를 확장한 것이라
+//   Code.gs 라우팅 수정 없이 동작. (moved 파라미터만 보내는 옛 클라이언트도 계속 호환됨)
+// ★ 2026-08-24 재설계(오출고 방지) — 파랑(taken) 상태에서 한 번 더 누르는 동작은
+//   이제 이 함수를 거치지 않고(document click 위임에서 먼저 가로채서) 대신
+//   "최종 2차 검증" 모달을 엶. 이 함수는 오직 none→moved, moved→taken 두 전진
+//   방향만 담당 — 아래 cur==='taken' 되돌리기 확인 분기는 이 함수가 그 상태로
+//   호출되는 경로가 없어져서 사실상 도달 불가능하지만, 혹시 모를 예외적 호출
+//   경로에 대비해 안전장치로 그대로 남겨둠(제거해도 되지만 방어적으로 유지).
+async function togglePackingMoved(invoice){
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  const cur = packStageOf(slot);
+  const next = (cur === 'none') ? 'moved' : (cur === 'moved') ? 'taken' : 'moved';
+  // ★ 2026-08-14 신규(매니저 요청) — 파랑("이동 완료" = 출고팀이 실제로 가져감)
+  //   상태에서 그 자리를 한 번 더 누르면 아무 확인 없이 조용히 핑크로 되돌아갔음.
+  //   TV가 터치스크린이라 지나가던 사람이 스치듯 건드리거나 확인차 한 번 더
+  //   눌러도 그대로 취소돼버린 사고가 실제로 있었음(8/12). "이미 출고 완료로
+  //   표시된 걸 취소"하는 방향만 확인을 받고, 앞으로 진행하는 방향(초록→핑크,
+  //   핑크→블루)은 지금처럼 그대로 바로 처리되게 둠.
+  if(cur === 'taken'){
+    if(!confirm(`정말 되돌리시겠습니까?\n\n"${slot.customer || invoice}"는 이미 출고팀이 가져간 것으로(블루) 표시돼 있습니다.\n다시 누르면 "이동 필요"(핑크) 상태로 돌아가서, 출고팀이 다시 가져가야 하는 것처럼 보이게 됩니다.`)) return;
+  }
+  const prevMoved = slot.movedToPacking, prevTaken = slot.takenOut;
+  _pendingPackMoves[invoice] = { stage: next, ts: Date.now() }; // ★ 폴링이 이 값을 되돌리지 못하게 보류 등록(만료시간 포함)
+  slot.movedToPacking = true;               // moved/taken 둘 다 "이동 표시는 켜진" 상태
+  slot.takenOut = (next === 'taken');
+  renderBoard(Object.values(_slotsByInvoice)); // 낙관적 갱신 — 서버 응답 기다리지 않고 즉시 화면 반영
+  // ★ 2026-08-18 신규 — 배치 막바지에 여러 슬롯이 짧은 시간 안에 몰려서 눌리면,
+  //   서버 쪽 문서 락 경합으로 첫 시도가 "일시적으로" 실패하는 경우가 있었음
+  //   (32개가 거의 동시에 완료되며 실제로 발생). 곧바로 초록으로 되돌리지 않고,
+  //   짧은 간격을 두고 최대 2번 더 자동 재시도한 뒤에도 계속 실패해야만
+  //   원래 값으로 되돌림 — 대부분의 일시적 경합은 재시도 안에서 조용히 복구됨.
+  let res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
+  for(let attempt = 1; !res.ok && attempt <= 2; attempt++){
+    await new Promise(r => setTimeout(r, 1200 * attempt)); // 1.2초, 2.4초 대기 후 재시도
+    res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: next });
+  }
+  if(!res.ok){
+    // ★ 2026-09-01 긴급 수정 — "블루로 바뀌었다가 잠시 후 다시 핑크로 돌아간다"는
+    //   현장 사고의 진짜 원인. gasCall(POST)이 실패로 보여도(TypeError: Failed to
+    //   fetch 등, CORS/네트워크 문제로 응답만 못 받은 경우 포함) 실제로는 서버에
+    //   이미 저장이 끝났을 수 있음 — 이 경우 저장은 성공했는데 클라이언트만 실패로
+    //   착각해서 화면을 되돌리면, 다음 폴링에서 서버의 진짜 값(taken)이 다시
+    //   와도 이미 되돌려진 화면과 안 맞아 깜빡이거나(이번 경우처럼) 신뢰가 깨짐.
+    //   그래서 진짜로 되돌리기 전에, 조회(GET — JSONP 우회가 이미 있어 POST보다
+    //   훨씬 안정적)로 서버의 실제 현재 상태를 한 번 더 직접 확인함. 이미
+    //   반영돼 있으면 절대 되돌리지 않고 성공으로 인정하고 끝냄.
+    let actuallySucceeded = false;
+    try{
+      const check = await gasQuery('getSlotProgress', { batchId: currentBatchId });
+      const checkSlot = check && check.ok && (check.slots || []).find(s => s.invoice === invoice);
+      const checkStage = checkSlot ? (checkSlot.takenOut ? 'taken' : checkSlot.movedToPacking ? 'moved' : 'none') : null;
+      actuallySucceeded = (checkStage === next);
+    }catch(e){ /* 확인 자체도 실패하면 안전하게 아래에서 되돌림 */ }
+    if(actuallySucceeded){
+      console.warn('⚠ setPackingMoved 응답은 실패였지만 서버 확인 결과 이미 정상 반영되어 있어 되돌리지 않음:', invoice);
+      // _pendingPackMoves는 그대로 둠 — 다음 정상 폴링이 확인하고 스스로 정리함
+      return;
+    }
+    console.warn('⚠ setPackingMoved 재시도 후에도 실패:', invoice, res.error);
+    delete _pendingPackMoves[invoice]; // 실패 시 보류 해제하고 원상복구
+    slot.movedToPacking = prevMoved;
+    slot.takenOut = prevTaken;
+    renderBoard(Object.values(_slotsByInvoice));
+  }
+  // 성공 시엔 _pendingPackMoves를 여기서 지우지 않음 — 다음 폴링이 서버 값을 읽어와서
+  // 이 값과 실제로 일치하는 걸 renderBoard 안에서 확인하는 순간 자동으로 정리됨.
+  // 이렇게 해야 폴링 타이밍과 무관하게 항상 정확한(그리고 절대 되돌아가지 않는) 화면 유지.
+}
+
+function cardHtml(slot){
+  if(!slot){
+    return `<div class="card"><div class="card-empty">비어있음</div></div>`;
+  }
+  // ★ 2026-07-23 신규 — 예전엔 여기서 slot.totalQty(이슈 반영 전 원래 수량)를 분모로
+  //   썼는데, 완료(초록) 판정 자체는 서버가 effectiveTotal(이슈로 빠진 수량 뺀 실제
+  //   필요수량) 기준으로 이미 계산해서 보내주고 있어서, "초록불인데 숫자는 100%가
+  //   아닌" 것처럼 보이거나 batch.html(웹)과 분모 숫자가 서로 달라 혼란스러웠음.
+  //   이제 TV도 effectiveTotal을 분모로 써서 웹과 항상 같은 숫자를 보여줌.
+  const target = (slot.effectiveTotal !== undefined && slot.effectiveTotal !== null) ? slot.effectiveTotal : slot.totalQty;
+  const pct = target > 0 ? Math.min(100, slot.scanned / target * 100) : 0;
+  const flashClass = (prevStatus[slot.slotNum] && prevStatus[slot.slotNum] !== 'done' && slot.status === 'done') ? ' flash' : '';
+  const numLabel = /^\d+$/.test(String(slot.slotNum)) ? String(slot.slotNum).padStart(2,'0') : String(slot.slotNum);
+  // ★ 2026-07-16 신규: 이슈(EXP/NF/Damaged/OOS)가 하나라도 있으면 뱃지 표시.
+  //   클릭하면 어떤 바코드가 몇 개 빠졌는지 상세 목록 팝업.
+  const issueBadge = slot.issueQty > 0
+    ? `<span class="card-issue-badge" data-invoice="${slot.invoice}">⚠ ${slot.issueQty.toLocaleString()}</span>`
+    : '';
+  // ★ 2026-08-24 신규(오출고 방지 재설계) — 초록/핑크/파랑의 기존 의미와 전환
+  //   방식은 절대 안 바꿈(takenOut = "패킹존으로 물리적으로 가져감", 원래 그대로).
+  //   주황(verified)은 파랑 위에 "얹는" 마지막 단계일 뿐 — 클래스도 taken은
+  //   그대로 유지하고 verified만 추가로 붙여서 색만 오버라이드함.
+  const packStage = slot.packVerified ? 'verified' : (slot.takenOut ? 'taken' : slot.movedToPacking ? 'moved' : 'none');
+  const verifiedClass = slot.packVerified ? ' verified' : '';
+  let packLabel = '검수완료 · 이동준비';
+  if(packStage === 'moved') packLabel = '패킹존 이동 필요';
+  else if(packStage === 'taken') packLabel = '패킹존 이동 완료'; // ★ 2026-08-24 원복 — 원래 짧은 문구 그대로(길게 붙였다가 카드 높이가 들쭉날쭉해져서 레이아웃이 깨졌음). 2차 검증은 눌러보면 바로 알 수 있음.
+  else if(packStage === 'verified') packLabel = '최종 2차 검증완료'; // ★ 짧은 한글 라벨로 변경(영문 긴 문구도 같은 문제 유발)
+  return `<div class="card ${slot.status}${slot.takenOut?' taken':slot.movedToPacking?' moved':''}${verifiedClass}${flashClass}" data-invoice="${slot.invoice}">
+    <div class="card-top">
+      <span class="card-slot">${numLabel}</span>
+      <div class="card-top-right">
+        ${issueBadge}
+        <span class="card-ship ${shipClass(slot.shipVia)}">${shipLabel(slot.shipVia)}</span>
+      </div>
+    </div>
+    <div class="card-cust">${slot.customer || ''}</div>
+    <div class="card-invoice">${slot.invoice || ''}</div>
+    <div class="card-bottom">
+      <div class="card-metarow">
+        <span class="card-sku">SKU ${slot.doneSku||0}/${slot.totalSku||0}</span>
+        <span>${slot.scanned.toLocaleString()} / ${target.toLocaleString()} pcs</span>
+      </div>
+      <div class="card-bar"><div style="width:${pct}%"></div></div>
+      <div class="card-pack-check" data-pack-invoice="${slot.invoice}" data-pack-stage="${packStage}">
+        <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
+        <span class="label">${packLabel}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ★ 2026-07-16 신규 — 이슈 뱃지 클릭 시 상세 팝업
+const ISSUE_REASON_OPTS = [
+  {v:'EXP', label:'EXP · 유통기한'}, {v:'NF', label:'NF · 재고없음'},
+  {v:'DMG', label:'DMG · 파손'}, {v:'OOS', label:'OOS · 품절'},
+  {v:'SKUMIS', label:'SKUMIS · SKU 불일치'},
+  // ★ 2026-07-24 신규 — 실제로는 정상 출고됐는데 작업자가 스캔만 깜빡한 경우.
+  //   진짜 결품/품질 문제와 헷갈리지 않게 별도 사유로 구분.
+  {v:'MISS', label:'MISS · 스캔 누락(실제 출고됨)'},
+  // ★ 2026-08-18 신규 — 세일즈팀이 출고 직전/도중에 특정 제품만 빼달라고
+  //   요청하는 경우. 이미 피킹은 됐지만 출고는 안 되고 회수(go-back)해야
+  //   하는 물건이라, 다른 사유들과 동일하게 필요수량에서 제외됨.
+  {v:'CANC', label:'CANC · 세일즈 취소요청(피킹 후 회수)'},
+];
+// ★ 2026-07-23 신규 — 배치 전체 아이템(고객사별 SKU 목록)을 한 번만 받아서 캐싱.
+//   "새 이슈 등록" 폼의 SKU 드롭다운을 채우는 데만 씀 (진행률 폴링과는 별개).
+let _batchItemsCache = { batchId: null, byInvoice: {} };
+// ★ 2026-07-24 신규 — "작업자(발견자)"를 직접 타이핑하지 않고, 이미 등록된
+// 작업자 명단(batch.html "Workers" 탭에서 관리하는 것과 동일한 명단)에서
+// 골라 쓰도록 함. 오타 방지 + 나중에 KPI 집계할 때 이름이 정확히 일치하게.
+let _workersCache = null; // null=아직 안 불러옴, [] 이상은 불러온 것
+async function ensureWorkersLoaded(){
+  if(_workersCache !== null) return; // 이미 한 번 불러왔으면 재사용 (배치 중 자주 안 바뀜)
+  // ★ 2026-08-19 수정(현장 확인) — 재시도까지 다 실패했을 때 빈 배열을 그대로
+  //   캐싱해버리면, _workersCache가 null이 아니게 되어 이후로 다시는 재시도를
+  //   안 함(서버가 나중에 정상으로 돌아와도 영구히 "작업자 없음" 상태로 고정됨).
+  //   실패했을 땐 캐싱하지 않고 그대로 둬서, 다음에 모달을 열 때 다시 시도되게 함.
+  try{
+    const res = await gasQueryWithRetry('getBatchWorkers', {});
+    if(res.ok && Array.isArray(res.workers)){
+      _workersCache = res.workers;
+    }
+  }catch(e){ /* 캐싱 안 함 — 다음 시도에서 재조회 */ }
+}
+let _newIssueItemsSorted = []; // ★ 2026-07-24 신규: 검색창 필터링을 위해 정렬된 전체 목록을 따로 보관
+
+// ★ 2026-07-24 신규 — SKU를 상품명보다 앞에 표시(요청사항). items는 이미 SKU
+// 알파벳순으로 정렬되어 들어온다고 가정(renderIssueModalBody에서 정렬).
+function renderSkuOptionsHtml(items){
+  if(!items.length) return '<option>상품 목록을 불러올 수 없습니다</option>';
+  return items.map(it => {
+    const st = _invoiceItemStatusByBarcode[String(it.barcode)+'|'+String(it.sku)];
+    let statusTxt = `${it.req_qty}pcs`;
+    let prefix = '';
+    let color = ''; // ★ 2026-07-24 신규: 부족/이슈처리/완료를 색으로도 구분(빨강=부족, 눈에 확 띄게)
+    if(st){
+      const short = (st.short != null) ? st.short : Math.max(0, (st.reqQty||0) - (st.scannedQty||0) - (st.issueQty||0));
+      const issueQty = st.issueQty || 0;
+      if(short > 0){
+        statusTxt = `⚠ ${st.scannedQty||0}/${st.reqQty||it.req_qty} · 미스캔(${short}개) → 실물 찾아 스캔하세요`;
+        prefix = '⚠ ';
+        color = '#FF4D6D'; // 빨강 — 아직 스캔 안 된, 진짜 확인이 필요한 상품
+      } else if(issueQty > 0){
+        // ★ 2026-07-24 신규 — 스캔이 아니라 이슈(EXP 등)로 필요수량이 이미 채워진
+        //   경우를 "완료"와 구분해서 명확히 보여줌 (계속 헷갈렸던 부분)
+        statusTxt = `✓ 이슈로 처리됨(${issueQty}pcs)`;
+        prefix = '✓ ';
+        color = '#F59E0B'; // 앰버 — 스캔은 아니지만 이슈로 이미 결론난 상품
+      } else {
+        statusTxt = `✓ 완료`;
+        prefix = '✓ ';
+        color = '#6B8F87'; // 차분한 초록 — 정상 스캔 완료(눈에 안 띄어도 됨, 이미 끝난 것)
+      }
+    }
+    const styleAttr = color ? ` style="color:${color};${color==='#FF4D6D'?' font-weight:800;':''}"` : '';
+    return `<option value="${it.barcode}" data-name="${String(it.name||'').replace(/"/g,'&quot;')}" data-sku="${it.sku||''}"${styleAttr}>${prefix}${it.sku || '(SKU없음)'} · ${it.name} · ${statusTxt}</option>`;
+  }).join('');
+}
+// ★ 2026-07-24 신규 — 검색창에 입력할 때마다 SKU/상품명/바코드 전체를 대상으로
+// 실시간 필터링(가장 정확한 건 SKU라고 안내드렸지만, 못 외운 경우 대비 전체 검색).
+function filterNewIssueSkuOptions(query){
+  const sel = document.getElementById('newIssueSku');
+  if(!sel) return;
+  const q = (query || '').trim().toLowerCase();
+  const filtered = !q ? _newIssueItemsSorted : _newIssueItemsSorted.filter(it =>
+    String(it.sku||'').toLowerCase().includes(q) ||
+    String(it.name||'').toLowerCase().includes(q) ||
+    String(it.barcode||'').toLowerCase().includes(q)
+  );
+  sel.innerHTML = filtered.length ? renderSkuOptionsHtml(filtered) : '<option>검색 결과 없음</option>';
+}
+async function ensureBatchItemsLoaded(){
+  if(_batchItemsCache.batchId === currentBatchId) return; // 이미 이 배치 걸로 캐싱됨
+  // ★ 2026-08-19 수정(현장 확인) — 실패해도 그대로 캐싱해버려서, 서버가 나중에
+  //   정상으로 돌아와도 "상품 목록을 불러올 수 없습니다"가 영구히 고정되던 문제.
+  //   재시도 적용 + 실패 시엔 캐싱하지 않아서 다음번엔 다시 시도되게 함.
+  const res = await gasQueryWithRetry('getBatch', { batchId: currentBatchId });
+  if(!res.ok) return; // 캐싱 안 함 — 다음 호출에서 재조회
+  const byInvoice = {};
+  if(Array.isArray(res.customers)){
+    res.customers.forEach(c => { byInvoice[c.invoice] = c.items || []; });
+  }
+  _batchItemsCache = { batchId: currentBatchId, byInvoice };
+}
+
+let _invoiceItemStatusByBarcode = {}; // ★ 2026-07-24 신규: barcode -> {scannedQty, issueQty, short}
+async function openIssueModal(invoice){
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  _issueModalInvoice = invoice;
+  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${(slot.issues||[]).length}건`;
+  document.getElementById('issueModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
+  document.getElementById('issueModalOverlay').classList.add('open');
+  await ensureBatchItemsLoaded();
+  await ensureWorkersLoaded();
+  // ★ 2026-07-24 신규 — "어떤 SKU가 부족한지 모르겠다"는 피드백: SKU별 스캔 상태를
+  //   따로 조회해서, 목록에서 미완료 SKU를 바로 찾을 수 있게 함.
+  _invoiceItemStatusByBarcode = {};
+  try{
+    const statusRes = await gasQueryWithRetry('getInvoiceItemStatus', { batchId: currentBatchId, invoice });
+    if(statusRes.ok && Array.isArray(statusRes.items)){
+      // ★ 2026-07-29 긴급 수정 — 바코드만으로 캐싱하면, 같은 바코드에 서로 다른
+      //   SKU가 걸려있는 경우(어제 발견된 사고 케이스와 동일 원인) 하나가 다른
+      //   하나를 덮어써서 잘못된 진행률이 표시될 수 있었음. 바코드+SKU 조합으로 키 변경.
+      statusRes.items.forEach(it => { _invoiceItemStatusByBarcode[String(it.barcode)+'|'+String(it.sku)] = it; });
+    }
+  }catch(e){ /* 상태 조회 실패해도 목록 자체는 그대로 보여줌(수량 표시만 안 나옴) */ }
+  renderIssueModalBody();
+}
+function renderIssueModalBody(){
+  const invoice = _issueModalInvoice;
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  // ★ 2026-08-18 수정 — 예전엔 여기 별도로 라벨을 하드코딩해뒀는데, 위
+  //   ISSUE_REASON_OPTS(사유 등록 드롭다운)를 고쳐도 여긴 안 따라와서
+  //   "MISS · 스캔누락"만 뜨고 "(실제 출고됨)"이 빠진 채 표시되는 문제가
+  //   있었음(영업팀이 실제로 출고 안 된 것으로 오해할 수 있음). 사유 목록을
+  //   하나로 합쳐서, 앞으로는 ISSUE_REASON_OPTS만 고치면 둘 다 같이 반영됨.
+  const reasonLabel = {}; ISSUE_REASON_OPTS.forEach(r => reasonLabel[r.v] = r.label);
+  const issues = slot.issues || [];
+  const rowsHtml = issues.length ? issues.map((i, idx) => `
+    <div class="issue-modal-row" id="issueRow-${idx}">
+      <div class="issue-modal-row-top">
+        <span class="issue-modal-reason">${reasonLabel[i.reason] || i.reason}</span>
+        <span class="issue-modal-qty">${Number(i.qty).toLocaleString()}pcs</span>
+      </div>
+      <div class="issue-modal-name">${i.name || i.sku || ''}</div>
+      <div class="issue-modal-meta">SKU #${i.sku || '-'} · 바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time||'').slice(5,16)}</div>
+      ${i.note ? `<div class="issue-modal-note">"${i.note}"</div>` : ''}
+      <button class="issue-modal-edit-btn" data-idx="${idx}">✎ 수정</button>
+      <div class="issue-edit-form" id="issueEditForm-${idx}" style="display:none">
+        <select id="issueEditReason-${idx}">
+          ${ISSUE_REASON_OPTS.map(r => `<option value="${r.v}" ${r.v===i.reason?'selected':''}>${r.label}</option>`).join('')}
+        </select>
+        <input type="number" id="issueEditQty-${idx}" min="1" value="${i.qty}" placeholder="수량">
+        <input type="text" id="issueEditNote-${idx}" value="${String(i.note||'').replace(/"/g,'&quot;')}" placeholder="메모(선택)">
+        <div class="issue-edit-actions">
+          <button class="issue-edit-cancel" data-idx="${idx}">닫기</button>
+          <button class="issue-edit-save" data-idx="${idx}" data-issue-id="${i.issueId}">저장</button>
+        </div>
+        <button class="issue-edit-delete" data-idx="${idx}" data-issue-id="${i.issueId}">🗑 이 이슈 전체 취소(삭제)</button>
+      </div>
+    </div>`).join('') : `<div class="issue-modal-empty">등록된 이슈 없음</div>`;
+
+  // ★ 2026-07-23 신규 — "+ 새 이슈 등록" 폼: 스캔 시점이 아니어도(예: 나중에 실물
+  //   확인하다 유통기한 지난 걸 발견) TV에서 바로 이슈를 등록할 수 있게 함.
+  // ★ 2026-07-24 수정 — SKU가 200개까지도 있어서 하나하나 찾기 어렵다는 피드백:
+  //   (1) 표시 순서를 "SKU 먼저" + SKU 알파벳순 정렬로 바꾸고
+  //   (2) 옆에 검색창을 추가해서 SKU/상품명/바코드로 실시간 필터링되게 함.
+  // ★ 2026-07-29 긴급 수정 — BatchItems 원본에 같은 SKU가 여러 줄(분할입고 등)로
+  //   나뉘어 있으면, 예전엔 병합 없이 그대로 나열해서 후보 목록에 같은 상품이
+  //   두 번(또는 그 이상) 중복으로 뜨는 버그가 있었음. 시스템 다른 계산 로직은
+  //   전부 바코드+SKU 기준으로 병합해서 쓰는데 이 목록만 빠져 있었음.
+  //   바코드+SKU가 같은 줄은 수량을 합산해서 하나로 병합한 뒤에 정렬함.
+  const mergedByKey = {};
+  (_batchItemsCache.byInvoice[invoice] || []).forEach(it => {
+    const key = String(it.barcode) + '|' + String(it.sku);
+    if(!mergedByKey[key]) mergedByKey[key] = Object.assign({}, it, { req_qty: 0 });
+    mergedByKey[key].req_qty += (Number(it.req_qty) || 0);
+  });
+  _newIssueItemsSorted = Object.values(mergedByKey)
+    .sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
+  const newFormHtml = `
+    <div class="issue-new-form">
+      <div class="issue-new-form-title">+ 새 이슈 등록</div>
+      <div style="font-size:12px; color:var(--text-dim); background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:8px 10px; margin-bottom:2px;">
+        💡 <b style="color:#F59E0B">⚠ 미스캔</b>은 실물을 찾아 <b>먼저 스캔</b>해보세요. 실물이 정말 없거나 문제(유통기한·파손 등)가 확인됐을 때만, 또는 <b>이미 출고됐는데 스캔만 깜빡했을 때</b>(사유: MISS·스캔누락)만 아래에서 골라 이슈로 등록하세요.
+      </div>
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label>상품 (SKU)</label>
+          <input type="text" id="newIssueSkuSearch" placeholder="🔍 SKU 검색..." style="width:55%; padding:6px 10px; font-size:13px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text);">
+        </div>
+        <select id="newIssueSku" size="9" style="height:auto; font-size:15px;">${renderSkuOptionsHtml(_newIssueItemsSorted)}</select>
+      </div>
+      <div class="issue-new-form-row">
+        <div>
+          <label>사유</label>
+          <select id="newIssueReason">${ISSUE_REASON_OPTS.map(r => `<option value="${r.v}">${r.label}</option>`).join('')}</select>
+        </div>
+        <div>
+          <label>수량</label>
+          <input type="number" id="newIssueQty" min="1" placeholder="pcs">
+        </div>
+      </div>
+      <div>
+        <label>작업자(발견자)</label>
+        <select id="newIssueWorker" onchange="document.getElementById('newIssueWorkerManual').style.display = (this.value==='__manual__') ? 'block' : 'none';">${(_workersCache && _workersCache.length)
+          ? _workersCache.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
+          : '<option value="">등록된 작업자 없음</option>'}<option value="__manual__">✎ 명단에 없음 — 직접 입력</option></select>
+        <input type="text" id="newIssueWorkerManual" placeholder="이름 직접 입력" style="display:none; margin-top:8px;">
+      </div>
+      <div>
+        <label>메모(선택)</label>
+        <input type="text" id="newIssueNote" placeholder="예: 검수 중 발견, 유통기한 2026-06-01">
+      </div>
+      <button class="issue-new-form-submit" id="newIssueSubmitBtn">⚠ 이슈 등록</button>
+    </div>`;
+
+  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${issues.length}건`;
+  document.getElementById('issueModalBody').innerHTML = rowsHtml + newFormHtml;
+}
+async function submitNewIssueFromBoard(){
+  const invoice = _issueModalInvoice;
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  const skuSel = document.getElementById('newIssueSku');
+  const opt = skuSel.options[skuSel.selectedIndex];
+  const barcode = skuSel.value;
+  const name = opt ? opt.dataset.name : '';
+  const sku = opt ? opt.dataset.sku : '';
+  const reason = document.getElementById('newIssueReason').value;
+  const qty = parseInt(document.getElementById('newIssueQty').value, 10);
+  const workerSel = document.getElementById('newIssueWorker').value;
+  const worker = (workerSel === '__manual__')
+    ? document.getElementById('newIssueWorkerManual').value.trim()
+    : workerSel.trim();
+  const note = document.getElementById('newIssueNote').value.trim();
+
+  if(!barcode){ alert('상품을 선택하세요'); return; }
+  if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
+  if(!worker){ alert('작업자(발견자)를 입력해주세요'); return; }
+
+  const btn = document.getElementById('newIssueSubmitBtn');
+  btn.disabled = true; btn.textContent = '등록 중...';
+  const res = await gasCall('logIssue', {
+    batchId: currentBatchId, worker: worker,
+    barcode: barcode, sku: sku, name: name,
+    invoice: invoice, customer: slot.customer,
+    reason: reason, qty: qty, note: note,
+  });
+  if(res.ok){
+    // ★ 2026-08-21 긴급 신규 — 근본 원인 수정: 예전엔 등록 성공해도 아무 알림이
+    //   없어서, 작업자가 "등록이 안 됐나?"하고 헷갈려 같은 내용을 처음부터 다시
+    //   반복 입력하는 사고가 실제로 발생함(같은 이슈가 짧은 시간에 2~3번 중복
+    //   등록됨). 이제 성공 시 눈에 띄는 초록색 알림을 잠깐 띄워서 명확히 알려줌.
+    //   (서버 쪽에도 이중 안전장치로 최근 2분 내 완전 동일 이슈는 자동으로
+    //   걸러내도록 별도 추가함 — logIssue 참고)
+    showIssueToast(res.duplicate ? '이미 등록된 이슈입니다 (중복 방지됨)' : '✓ 이슈가 등록되었습니다', res.duplicate ? 'warn' : 'ok');
+    await pollOnce();
+    if(_issueModalInvoice) renderIssueModalBody();
+  } else {
+    btn.disabled = false; btn.textContent = '⚠ 이슈 등록';
+    alert('등록 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+// ★ 2026-08-21 신규 — 이슈 등록 성공/중복 알림용 간단 토스트
+function showIssueToast(msg, type){
+  let t = document.getElementById('issueToast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'issueToast';
+    t.style.cssText = 'position:fixed; left:50%; bottom:32px; transform:translateX(-50%) translateY(20px); z-index:99999; padding:12px 22px; border-radius:999px; font-size:14px; font-weight:700; white-space:nowrap; box-shadow:0 8px 28px rgba(0,0,0,0.5); opacity:0; transition:opacity .25s ease, transform .25s ease; pointer-events:none;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = type === 'warn' ? '#3a2a10' : '#0f2e1a';
+  t.style.border = type === 'warn' ? '1px solid #d97706' : '1px solid #22c55e';
+  t.style.color = type === 'warn' ? '#fbbf24' : '#4ade80';
+  requestAnimationFrame(() => {
+    t.style.opacity = '1';
+    t.style.transform = 'translateX(-50%) translateY(0)';
+  });
+  clearTimeout(t._hideTimer);
+  t._hideTimer = setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(-50%) translateY(20px)';
+  }, 2600);
+}
+function closeIssueModal(){
+  document.getElementById('issueModalOverlay').classList.remove('open');
+  _issueModalInvoice = null;
+}
+let _issueModalInvoice = null; // ★ 2026-07-22 신규: 지금 열려있는 이슈 모달이 어느 고객사(invoice) 것인지
+
+// ★ 2026-07-22 신규 — "✎ 수정": 잘못 입력한 이슈를 취소하는 게 아니라
+//   사유/수량/메모를 그 자리에서 직접 고쳐서 저장. 저장하면 그 차이만큼
+//   고객사의 완료 판정 기준(필요수량)도 자동으로 다시 계산됨.
+async function saveIssueEdit(issueId, idx){
+  const reason = document.getElementById(`issueEditReason-${idx}`).value;
+  const qty = parseInt(document.getElementById(`issueEditQty-${idx}`).value, 10);
+  const note = document.getElementById(`issueEditNote-${idx}`).value.trim();
+  if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
+  const saveBtn = document.querySelector(`.issue-edit-save[data-idx="${idx}"]`);
+  saveBtn.disabled = true;
+  saveBtn.textContent = '저장 중...';
+  const res = await gasCall('editIssue', { issueId, reason, qty, note });
+  if(res.ok){
+    await pollOnce(); // 최신 상태(완료 판정 등) 즉시 반영
+    if(_issueModalInvoice) renderIssueModalBody(); // 모달도 수정된 값으로 다시 그림
+  } else {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '저장';
+    alert('수정 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
+// ★ 2026-07-22 신규 — "🗑 이 이슈 전체 취소(삭제)": 값을 고치는 게 아니라
+//   이 이슈 자체를 완전히 없던 일로 만듦. 취소하면 그 수량만큼 다시 고객사의
+//   필요수량에 포함되어(완료 판정에서 다시 빠짐), 현황판이 정확한 상태로 갱신됨.
+async function deleteIssueFromBoard(issueId, idx){
+  if(!confirm('이 이슈를 완전히 취소하시겠습니까?\n다시 이 고객사의 필요수량에 포함되어 완료 처리되지 않은 상태로 돌아갑니다.\n(수량/사유만 고치려면 "닫기"를 누르고 값을 수정한 뒤 저장하세요)')) return;
+  const delBtn = document.querySelector(`.issue-edit-delete[data-idx="${idx}"]`);
+  delBtn.disabled = true;
+  delBtn.textContent = '취소하는 중...';
+  const res = await gasCall('undoIssue', { issueId });
+  if(res.ok){
+    await pollOnce(); // 최신 상태 즉시 반영
+    if(_issueModalInvoice) renderIssueModalBody(); // 모달도 최신 목록으로 다시 그림(이 건은 빠짐)
+  } else {
+    delBtn.disabled = false;
+    delBtn.textContent = '🗑 이 이슈 전체 취소(삭제)';
+    alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지 핵심 기능)
+ * 검수(ScanLog)와 완전히 별개로, 패킹존에서 실제 물건을 바코드로 한 번 더
+ * 확인한다. 서버(logPackScan)가 "이 인보이스 것이 맞는지/이미 다 찼는지"를
+ * 즉시 판정해서 돌려주고, 100% 다 맞아야만(또는 관리자 강제확정) 파랑(출고
+ * 가능)으로 넘어갈 수 있게 서버가 직접 막는다(setPackingMoved 참고).
+ * ═══════════════════════════════════════════════════════════ */
+let _packModalInvoice = null;
+let _packModalState = null;
+let _packAudioCtx = null;
+
+async function openPackVerifyModal(invoice){
+  const slot = _slotsByInvoice[invoice];
+  if(!slot) return;
+  // ★ 2026-08-24 신규 — 이 모달은 반드시 파랑(패킹존 이동완료) 이후에만 열려야 함.
+  //   (문서 click 위임에서 이미 taken 상태일 때만 호출하지만, 방어적으로 한 번 더 확인)
+  if(!slot.takenOut){ alert('먼저 패킹존 이동(파랑) 표시부터 완료해주세요'); return; }
+  _packModalInvoice = invoice;
+  _packModalState = null;
+  document.getElementById('packModalTitle').textContent = `${slot.customer || invoice} · 최종 2차 검증`;
+  document.getElementById('packModalSub').textContent = `${invoice} · SLOT ${slot.slotNum}`;
+  document.getElementById('packModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
+  document.getElementById('packModalMsg').style.display = 'none';
+  document.getElementById('packCompleteBtn').disabled = true;
+  document.getElementById('packCompleteBtn').textContent = '🟠 최종 2차 검증완료 확정';
+  document.getElementById('packModalOverlay').classList.add('open');
+  await ensureWorkersLoaded();
+  populatePackWorkerSelect();
+  const input = document.getElementById('packScanInput');
+  input.value = '';
+  setTimeout(() => input.focus(), 60);
+  await refreshPackModalState();
+}
+
+function populatePackWorkerSelect(){
+  const sel = document.getElementById('packWorkerSelect');
+  const opts = (_workersCache && _workersCache.length)
+    ? _workersCache.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
+    : '<option value="">등록된 작업자 없음</option>';
+  sel.innerHTML = opts + '<option value="__manual__">✎ 명단에 없음 — 직접 입력</option>';
+}
+function currentPackWorker(){
+  const sel = document.getElementById('packWorkerSelect').value;
+  if(sel === '__manual__') return document.getElementById('packWorkerManual').value.trim();
+  return (sel || '').trim();
+}
+
+async function refreshPackModalState(){
+  const invoice = _packModalInvoice;
+  if(!invoice) return;
+  const res = await gasQueryWithRetry('getPackScanState', { batchId: currentBatchId, invoice });
+  if(!res.ok){
+    document.getElementById('packModalBody').innerHTML = `<div class="issue-modal-empty">불러오기 실패: ${res.error||''}</div>`;
+    return;
+  }
+  _packModalState = res;
+  renderPackModalBody();
+}
+
+function renderPackModalBody(){
+  const state = _packModalState;
+  if(!state || _packModalInvoice === null) return;
+  const pct = state.totalReq > 0 ? Math.min(100, Math.round(state.totalPacked / state.totalReq * 100)) : 0;
+  document.getElementById('packProgressText').textContent = `${state.totalPacked.toLocaleString()} / ${state.totalReq.toLocaleString()} pcs`;
+  document.getElementById('packProgressBar').style.width = pct + '%';
+  document.getElementById('packCompleteBtn').disabled = !state.complete;
+
+  const linesHtml = (state.lines || []).map(l => `
+    <div class="pack-line ${l.complete ? 'done' : ''}">
+      <div>
+        <div class="pack-line-name">${l.name || l.sku}</div>
+        <div class="pack-line-meta">${l.sku} · 바코드 ${l.barcode}${l.issueQty > 0 ? ` · 이슈차감 ${l.issueQty}` : ''}</div>
+      </div>
+      <div style="display:flex; align-items:center;">
+        <span class="pack-line-qty">${l.packed}/${l.effectiveReq}</span>
+        <span class="pack-line-check">${l.complete ? '✅' : '⏳'}</span>
+      </div>
+    </div>`).join('') || `<div class="issue-modal-empty">이 인보이스에 등록된 상품이 없습니다</div>`;
+
+  const activeHistory = (state.history || []).filter(h => h.status !== 'undone');
+  const historyHtml = activeHistory.length ? `
+    <div class="pack-history-toggle" onclick="const b=this.nextElementSibling; b.style.display = b.style.display==='none' ? 'block' : 'none';">▾ 스캔 이력 보기 (${activeHistory.length}건)</div>
+    <div style="display:none;">
+      ${activeHistory.slice(0, 30).map(h => `
+        <div class="pack-history-row ${h.result !== 'pass' ? h.result : ''}">
+          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (중복)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span class="pack-history-undo" onclick="undoPackScanEntry('${h.packScanId}')">되돌리기</span>
+        </div>`).join('')}
+    </div>` : '';
+
+  document.getElementById('packModalBody').innerHTML = linesHtml + historyHtml;
+}
+
+async function submitPackScan(){
+  const input = document.getElementById('packScanInput');
+  const barcode = input.value.trim();
+  if(!barcode) return;
+  input.value = '';
+  const worker = currentPackWorker();
+  if(!worker){ alert('작업자를 먼저 선택하세요'); input.focus(); return; }
+  // ★ 2026-08-24 재설계 — qty를 더 이상 클라이언트가 보내지 않음. 서버가
+  //   "이 바코드에 남은 필요수량 전체"를 알아서 계산해서 한 번에 채움
+  //   (스캔 1번 = 그 상품 전체 수량 확인, 실제 물류 현장 표준 방식).
+  const res = await gasCall('logPackScan', { batchId: currentBatchId, invoice: _packModalInvoice, worker, barcode });
+  if(!res.ok){
+    flashPackModal('bad'); beepPack(false);
+    showPackModalMsg('오류: ' + (res.error || '알 수 없는 오류'), 'bad');
+    input.focus();
+    return;
+  }
+  if(res.result === 'pass'){
+    flashPackModal('ok'); beepPack(true);
+    showPackModalMsg(`✓ ${res.name || res.sku || barcode} ${(res.filled||0).toLocaleString()}개 확인됨`, 'ok');
+  } else if(res.result === 'wrong'){
+    flashPackModal('bad'); beepPack(false);
+    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : '알 수 없음';
+    showPackModalMsg(`🚫 이 물건은 이 고객사 것이 아닙니다! → 실제로는 [${owners}] 것입니다. 상자에서 빼주세요.`, 'bad');
+  } else if(res.result === 'over'){
+    flashPackModal('bad'); beepPack(false);
+    showPackModalMsg(res.note === 'excluded' ? '⚠ 이 상품은 이슈 처리되어 이제 필요수량이 없습니다' : '⚠ 이미 확인 완료된 상품입니다 (중복 스캔)', 'bad');
+  }
+  await refreshPackModalState();
+  input.focus();
+}
+
+function flashPackModal(kind){
+  const el = document.getElementById('packModalFlash');
+  el.className = 'pack-modal-flash show-' + kind;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'pack-modal-flash'; }, 350);
+}
+function showPackModalMsg(msg, kind){
+  const el = document.getElementById('packModalMsg');
+  el.textContent = msg;
+  el.className = 'pack-modal-msg ' + kind;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+// ★ 외부 오디오 파일 없이 WebAudio로 즉석 생성 — 성공(높은 짧은음) / 실패(낮은 두번음)
+function beepPack(ok){
+  try{
+    const ctx = _packAudioCtx || (_packAudioCtx = new (window.AudioContext || window.webkitAudioContext)());
+    function tone(freq, start, dur){
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = freq; o.type = 'sine';
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.001, ctx.currentTime + start);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+      o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur + 0.02);
+    }
+    if(ok){ tone(1200, 0, 0.12); } else { tone(280, 0, 0.16); tone(280, 0.19, 0.16); }
+  }catch(e){ /* 오디오 실패해도 스캔 자체엔 지장 없음 */ }
+}
+
+async function undoPackScanEntry(packScanId){
+  if(!confirm('이 스캔을 취소하시겠습니까?')) return;
+  const res = await gasCall('undoPackScan', { packScanId });
+  if(res.ok) await refreshPackModalState();
+  else alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
+}
+
+async function completePackVerify(){
+  const invoice = _packModalInvoice;
+  if(!invoice) return;
+  const btn = document.getElementById('packCompleteBtn');
+  btn.disabled = true; btn.textContent = '처리 중...';
+  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'verified' });
+  if(res.ok){
+    showPackModalMsg('🟣 최종 2차 검증완료 — 보라 상태로 전환됐습니다', 'ok');
+    await pollOnce();
+    printPackingSlip();
+    setTimeout(() => closePackVerifyModal(), 900);
+  } else {
+    btn.disabled = false; btn.textContent = '🟣 최종 2차 검증완료 확정';
+    alert('전환 실패: ' + (res.error || '알 수 없는 오류'));
+    await refreshPackModalState();
+  }
+}
+
+async function forceCompletePackVerify(){
+  const invoice = _packModalInvoice;
+  if(!invoice) return;
+  if(!confirm('⚠ 검증이 끝나지 않았는데 관리자 권한으로 강제로 "최종 2차 검증완료"로 넘기시겠습니까?\n\n이 동작은 오출고 방지 안전장치를 우회하는 것이므로, 실물을 이미 직접 확인한 경우에만 사용하세요.')) return;
+  const res = await gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'verified', force: true });
+  if(res.ok){
+    showPackModalMsg('⚠ 관리자 강제확정으로 최종 검증완료 처리됐습니다', 'warn');
+    await pollOnce(); // ★ slot.packVerified를 최신으로 받아와야 슬립에 정확한 상태가 찍힘
+    printPackingSlip(); // ★ 2026-08-24 버그 수정 — 강제확정 때는 슬립 인쇄가 아예 빠져있었음
+    setTimeout(() => closePackVerifyModal(), 900);
+  } else {
+    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
+  }
+}
+
+function closePackVerifyModal(){
+  document.getElementById('packModalOverlay').classList.remove('open');
+  _packModalInvoice = null;
+  _packModalState = null;
+}
+
+// ★ 패킹 슬립 인쇄 — StyleKorean 헤더/주소 포함, 새 창에서 브라우저 인쇄 다이얼로그 사용
+// (전용 프린터가 없어도 어디서나 동작하고, "PDF로 저장"도 그대로 가능)
+// ★ 2026-08-24 신규 — 4x6 라벨 프린터 지원. format: 'letter'(기본) 또는 'label'.
+function printPackingSlip(format){
+  format = format || 'letter';
+  const invoice = _packModalInvoice;
+  const slot = _slotsByInvoice[invoice];
+  const state = _packModalState;
+  if(!slot){ alert('먼저 패킹 검증 모달을 여세요'); return; }
+  const lines = (state && state.lines) ? state.lines : [];
+  const issues = slot.issues || [];
+  // ★ 2026-08-24 버그 수정 — 예전엔 스캔 진행률(state.complete)만 보고 판정해서,
+  //   "관리자 강제확정"으로 넘어간 오더는 실제로 검증완료 상태인데도 스캔
+  //   기록이 없으니 슬립엔 계속 "NOT FULLY VERIFIED"로 잘못 찍혔음.
+  //   이제 slot.packVerified(실제 최종 상태, 강제확정 포함)를 최우선으로 보고,
+  //   스캔 100%로 정상 검증된 것과 관리자가 강제로 넘긴 것을 구분해서 표시함.
+  const scanComplete = state ? !!state.complete : false;
+  const verified = !!slot.packVerified;
+  const forcedVerify = verified && !scanComplete;
+  const worker = currentPackWorker() || '-';
+  const printedAt = new Date().toLocaleString('en-US');
+
+  const badgeClass = verified ? (forcedVerify ? 'verify-forced' : 'verify-ok') : 'verify-bad';
+  const badgeText = verified
+    ? (forcedVerify ? '⚠ 2ND VERIFICATION — ADMIN OVERRIDE (not scan-checked)' : '✓ 2ND VERIFICATION COMPLETE — 100% SCAN-CHECKED')
+    : '⚠ NOT FULLY VERIFIED (2nd check pending)';
+
+  // ★ 2026-08-24 버그 수정 — 강제확정된 오더는 실제로 스캔을 안 했으니
+  //   Packed 열에 "0"을 그대로 찍으면 "물건이 하나도 없다"처럼 오해될 수
+  //   있음. 실제로는 물건이 있는데 개수 확인만 안 한 것이므로, "0"이 아니라
+  //   "확인 안 됨"이라는 게 명확히 드러나도록 대시(—)로 표시.
+  const rowsHtml = lines.map(l => `
+    <tr>
+      <td>${l.barcode}</td>
+      <td>${l.name || ''}</td>
+      <td style="text-align:center;">${l.reqQty}</td>
+      <td style="text-align:center;">${l.issueQty || 0}</td>
+      <td style="text-align:center; font-weight:700;">${forcedVerify ? l.reqQty : l.packed}</td>
+    </tr>`).join('');
+
+  const forcedNote = ''; // ★ 2026-08-24 수정(매니저 판단) — 이 슬립은 결국 고객이 보는 문서라, 내부 스캔 여부 각주는 불필요한 의심만 줌. 하단의 ADMIN OVERRIDE 배지 하나로 감사 목적은 충분히 유지됨.
+
+  const issuesHtml = issues.length ? `
+    <h4 class="issues-h4">Issues / Shortages</h4>
+    <table class="slip-table"><thead><tr><th>Reason</th><th>Product</th><th style="text-align:center;">Qty</th></tr></thead><tbody>
+    ${issues.map(i => `<tr><td>${i.reason}</td><td>${i.name || i.sku || ''}</td><td style="text-align:center;">${i.qty}</td></tr>`).join('')}
+    </tbody></table>` : '';
+
+  const letterCss = `
+    @page{ size: letter; margin: 12mm; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:36px; max-width:760px; margin:0 auto; font-size:13px;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:16px; margin-bottom:20px;}
+    .slip-logo{font-size:26px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:12px; color:#555; margin-top:4px; line-height:1.5;}
+    .slip-title{font-size:20px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:12px; color:#555; text-align:right; margin-top:4px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; font-size:13px;}
+    .slip-info div b{display:block; font-size:11px; color:#777; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:2px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;}
+    table.slip-table th{background:#111; color:#fff; padding:8px 10px; text-align:left; font-size:11px; text-transform:uppercase;}
+    table.slip-table td{padding:8px 10px; border-bottom:1px solid #ddd;}
+    .issues-h4{margin-top:18px; font-size:13px; text-transform:uppercase; color:#555;}
+    .verify-badge{display:inline-block; padding:6px 14px; border-radius:6px; font-weight:800; font-size:13px; margin-top:18px;}
+    .slip-footer{margin-top:28px; padding-top:14px; border-top:1px solid #ccc; font-size:11px; color:#777; display:flex; justify-content:space-between;}
+  `;
+  const labelCss = `
+    /* ★ 2026-08-24 수정 — 라벨이 오른쪽으로 치우쳐 보이던 문제. margin:auto로
+       "중앙정렬"에 맡기면 라벨 프린터마다 있는 좌우 인쇄 여백 편차 때문에
+       한쪽으로 쏠려 보일 수 있음. auto 대신 왼쪽 여백을 확실히 줄이고
+       고정시켜서, 프린터 드라이버 차이와 무관하게 항상 왼쪽에 붙게 함. */
+    @page{ size: 4in 6in; margin: 0.1in 0.12in 0.1in 0.05in; }
+    body{font-family:'Helvetica Neue',Arial,sans-serif; color:#111; padding:0; width:3.8in; margin:0; font-size:9px; line-height:1.3;}
+    .slip-head{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1.5px solid #111; padding-bottom:5px; margin-bottom:7px;}
+    .slip-logo{font-size:15px; font-weight:800; letter-spacing:-0.02em;}
+    .slip-addr{font-size:7px; color:#555; margin-top:2px; line-height:1.3;}
+    .slip-title{font-size:11px; font-weight:800; text-align:right;}
+    .slip-meta{font-size:7px; color:#555; text-align:right; margin-top:2px;}
+    .slip-info{display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px; font-size:8.5px;}
+    .slip-info div b{display:block; font-size:6.5px; color:#777; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:1px;}
+    table.slip-table{width:100%; border-collapse:collapse; font-size:8px; margin-top:4px;}
+    table.slip-table th{background:#111; color:#fff; padding:2.5px 4px; text-align:left; font-size:6.5px; text-transform:uppercase;}
+    table.slip-table td{padding:2.5px 4px; border-bottom:0.5px solid #ddd;}
+    .issues-h4{margin-top:7px; font-size:7.5px; text-transform:uppercase; color:#555;}
+    .verify-badge{display:inline-block; padding:3px 7px; border-radius:4px; font-weight:800; font-size:7px; margin-top:7px;}
+    .slip-footer{margin-top:10px; padding-top:5px; border-top:0.5px solid #ccc; font-size:6.5px; color:#777; display:flex; justify-content:space-between;}
+  `;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Packing Slip · ${invoice}</title>
+  <style>
+    .verify-ok{background:#ede9fe; color:#5b21b6; border:1px solid #8b5cf6;}
+    .verify-forced{background:#fef3c7; color:#92400e; border:1px solid #f59e0b;}
+    .verify-bad{background:#fee2e2; color:#991b1b; border:1px solid #dc2626;}
+    .forced-note{font-size:0.85em; color:#92400e; margin-top:6px; font-style:italic;}
+    ${format === 'label' ? labelCss : letterCss}
+  </style></head><body>
+    <div class="slip-head">
+      <div>
+        <div class="slip-logo">StyleKorean</div>
+        <div class="slip-addr">5609 River Way, Buena Park, CA 90621</div>
+      </div>
+      <div>
+        <div class="slip-title">PACKING SLIP</div>
+        <div class="slip-meta">Batch ${currentBatchId || '-'}<br>Printed ${printedAt}</div>
+      </div>
+    </div>
+    <div class="slip-info">
+      <div><b>Customer</b>${slot.customer || '-'}</div>
+      <div><b>Invoice #</b>${invoice}</div>
+      <div><b>Ship Via</b>${slot.shipVia || '-'}</div>
+      <div><b>Slot</b>${slot.slotNum}</div>
+    </div>
+    <table class="slip-table"><thead><tr><th>Barcode</th><th>Product</th><th style="text-align:center;">Ordered</th><th style="text-align:center;">Issue</th><th style="text-align:center;">Packed</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table>
+    ${issuesHtml}
+    ${forcedNote}
+    <div class="verify-badge ${badgeClass}">${badgeText}</div>
+    <div class="slip-footer">
+      <span>Verified by: ${worker}</span>
+      <span>StyleKorean B2B Fulfillment System</span>
+    </div>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=820,height=1000');
+  if(!win){ alert('팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 300);
+}
+
+// ★ 2026-08-24 신규 — 패킹슬립 용지 선택 드롭업 메뉴, 바깥 클릭 시 닫힘
+document.addEventListener('click', e => {
+  const menu = document.getElementById('packPrintMenu');
+  if(!menu || !menu.classList.contains('open')) return;
+  if(!e.target.closest('.pack-print-group')) menu.classList.remove('open');
+});
+
+document.getElementById('packScanInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){ e.preventDefault(); submitPackScan(); }
+});
+document.getElementById('packModalOverlay').addEventListener('click', e => {
+  if(e.target.id === 'packModalOverlay') closePackVerifyModal();
+});
+
+// ★ 2026-07-24 신규 — 이슈 등록 폼의 SKU 검색창은 매번 다시 그려지므로
+// document 레벨 위임으로 입력 이벤트를 잡음 (직접 바인딩하면 재렌더링마다 유실됨)
+document.addEventListener('input', e => {
+  if(e.target.id === 'newIssueSkuSearch') filterNewIssueSkuOptions(e.target.value);
+});
+document.addEventListener('click', e => {
+  // ★ 2026-07-23 신규: "패킹존 이동" 체크박스는 카드 안에 있지만 완전히 다른 동작
+  //   (이슈 모달을 열지 않고 그 자리에서 바로 토글) — 카드 클릭 판정보다 먼저 처리.
+  const packCheck = e.target.closest('.card-pack-check');
+  if(packCheck){
+    const invoice = packCheck.dataset.packInvoice;
+    const slot = _slotsByInvoice[invoice];
+    if(!slot) return;
+    // ★ 2026-08-24 신규(오출고 방지 재설계) — 기존 약속(초록→핑크→파랑)은 절대
+    //   안 바꿈: none→moved, moved→taken은 지금까지와 완전히 동일하게 클릭 한 번에
+    //   즉시 전환(togglePackingMoved 그대로). 파랑(taken) 상태에서 한 번 더 누르면
+    //   더 이상 곧장 핑크로 안 돌아가고, "최종 2차 검증" 모달이 열림 — 이 모달
+    //   안에서 100% 스캔 확인이 끝나야만 주황(verified, 최종)으로 넘어감.
+    //   주황 상태에서 누르면(실수 정정용) 파랑으로 되돌리는 확인창만 뜸.
+    if(slot.packVerified){
+      if(!confirm(`정말 되돌리시겠습니까?\n\n"${slot.customer || invoice}"는 이미 최종 2차 검증완료(주황)된 상태입니다.\n다시 누르면 검증 전(파랑) 상태로 돌아갑니다.`)) return;
+      gasCall('setPackingMoved', { batchId: currentBatchId, invoice, stage: 'taken' }).then(res => {
+        if(res.ok) pollOnce();
+        else alert('되돌리기 실패: ' + (res.error || '알 수 없는 오류'));
+      });
+      return;
+    }
+    if(packStageOf(slot) === 'taken'){ openPackVerifyModal(invoice); return; }
+    togglePackingMoved(invoice); // none→moved, moved→taken은 기존 그대로
+    return;
+  }
+  // ★ 2026-07-23 수정: 이슈 배지뿐 아니라 카드 전체 아무 곳이나 눌러도 모달이 열리도록 확장
+  //   (이슈가 0건이어도 열려서 새로 등록할 수 있어야 하므로)
+  const card = e.target.closest('.card[data-invoice]');
+  if(card && !e.target.closest('.issue-modal, .issue-new-form')){ openIssueModal(card.dataset.invoice); return; }
+  const editBtn = e.target.closest('.issue-modal-edit-btn');
+  if(editBtn){
+    const idx = editBtn.dataset.idx;
+    document.getElementById(`issueEditForm-${idx}`).style.display = 'flex';
+    editBtn.style.display = 'none';
+    return;
+  }
+  const cancelBtn = e.target.closest('.issue-edit-cancel');
+  if(cancelBtn){
+    const idx = cancelBtn.dataset.idx;
+    document.getElementById(`issueEditForm-${idx}`).style.display = 'none';
+    document.querySelector(`.issue-modal-edit-btn[data-idx="${idx}"]`).style.display = '';
+    return;
+  }
+  const saveBtn = e.target.closest('.issue-edit-save');
+  if(saveBtn){ saveIssueEdit(saveBtn.dataset.issueId, saveBtn.dataset.idx); return; }
+  const deleteBtn = e.target.closest('.issue-edit-delete');
+  if(deleteBtn){ deleteIssueFromBoard(deleteBtn.dataset.issueId, deleteBtn.dataset.idx); return; }
+  const newIssueBtn = e.target.closest('#newIssueSubmitBtn');
+  if(newIssueBtn){ submitNewIssueFromBoard(); return; }
+  if(e.target.id === 'issueModalOverlay') closeIssueModal();
+});
+
+function renderBoard(slots, fromPoll){
+  const board = document.getElementById('board');
+  // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 참조할 수 있도록 invoice 기준으로 캐싱
+  _slotsByInvoice = {};
+  (slots || []).forEach(s => {
+    if(!s.invoice) return;
+    // ★ 2026-07-28 신규 — 보류중인 패킹존 이동 값이 있으면(방금 클릭해서 서버에
+    //   저장 요청을 보냈지만 아직 반영 안 됐을 수 있는 경우), 실제 서버 폴링
+    //   데이터(fromPoll=true)일 때만 비교해서 정리함. 클릭 직후 자체 낙관적
+    //   재렌더링(fromPoll 없음)에서는 절대 여기서 지우지 않음 — 그 호출은 항상
+    //   방금 세팅한 값 그대로라 비교하면 즉시(너무 이르게) 지워져버리기 때문.
+    // ★ 2026-08-04 확장 — boolean 대신 3단계(stage) 값으로 비교 (moved/taken)
+    if(fromPoll && Object.prototype.hasOwnProperty.call(_pendingPackMoves, s.invoice)){
+      const serverStage = s.takenOut ? 'taken' : s.movedToPacking ? 'moved' : 'none';
+      const pendingEntry = _pendingPackMoves[s.invoice];
+      const pending = pendingEntry.stage;
+      const age = Date.now() - pendingEntry.ts;
+      if(serverStage === pending){
+        delete _pendingPackMoves[s.invoice]; // 서버가 따라옴 — 정상 종료
+      } else if(age > PENDING_PACK_MAX_MS){
+        // ★ 2026-08-14 신규 — 30초가 지나도록 서버가 이 값을 확인해주지 않음.
+        //   저장이 실패했거나 나중에 다른 이유로 지워진 것 — 더는 우기지 않고
+        //   서버의 실제 값을 그대로 인정한다(s.movedToPacking/s.takenOut을 안 건드림).
+        console.warn('⚠ 패킹존 이동 상태 동기화 실패 — 서버 값으로 되돌림:', s.invoice, '기대값:', pending, '실제값:', serverStage);
+        showSyncFailToast(s.customer || s.invoice);
+        delete _pendingPackMoves[s.invoice];
+      } else {
+        s.movedToPacking = (pending !== 'none');
+        s.takenOut = (pending === 'taken');
+      }
+    }
+    _slotsByInvoice[s.invoice] = s;
+  });
+  if(!slots || slots.length === 0){
+    board.innerHTML = `<div class="empty-state"><h2>오늘의 배치를 기다리는 중...</h2><p>슬롯이 배정되면 여기 자동으로 표시됩니다</p></div>`;
+    return;
+  }
+  const large = slots.filter(s => s.slotNum <= 15).sort((a,b) => a.slotNum - b.slotNum);
+  const small = slots.filter(s => s.slotNum > 15).sort((a,b) => a.slotNum - b.slotNum);
+
+  let html = '';
+  if(large.length){
+    html += `<div class="zone-label">대량 오더 구역 · SLOT 01-15</div><div class="grid">`;
+    for(let n=1; n<=15; n++){
+      const s = large.find(x => x.slotNum === n);
+      html += cardHtml(s);
+    }
+    html += `</div>`;
+  }
+  if(small.length){
+    html += `<div class="zone-label">소량 오더 구역 · SLOT 16-30</div><div class="grid small">`;
+    for(let n=16; n<=30; n++){
+      const s = small.find(x => x.slotNum === n);
+      html += cardHtml(s);
+    }
+    html += `</div>`;
+  }
+
+  // ★ 2026-07-13 신규: 30번을 초과하는 슬롯(31, 32... 또는 "임시A" 같은
+  //   매니저 수동 배정 라벨)은 기존엔 TV 화면에서 통째로 누락됐음.
+  //   고객사가 30개를 넘는 배치(예: 47개 고객사)에서 작업자가 31번째부터는
+  //   TV로 확인할 방법이 아예 없던 문제 — 여기 세번째 구역으로 추가.
+  const overflow = slots.filter(s => !(Number(s.slotNum) >= 1 && Number(s.slotNum) <= 30));
+  overflow.sort((a,b) => String(a.slotNum).localeCompare(String(b.slotNum), undefined, {numeric:true}));
+  if(overflow.length){
+    html += `<div class="zone-label">추가 배정 구역 · 31번 이상 / 수동 배정 (${overflow.length}개)</div><div class="grid small">`;
+    overflow.forEach(s => { html += cardHtml(s); });
+    html += `</div>`;
+  }
+
+  board.innerHTML = html;
+
+  // 완료 상태 기록 갱신 (다음 폴링에서 flash 판단용)
+  const next = {};
+  slots.forEach(s => { next[s.slotNum] = s.status; });
+  prevStatus = next;
+}
+
+// ★ 2026-08-03 신규 — "다른 배치 조회"에서 배치를 고르면 즉시 pollOnce()를
+// 한 번 더 부르는데(빠른 반영 목적), 이때 하필 그 직전에 시작된 "예전 배치
+// 기준" 폴링 요청이 아직 응답을 안 받은 상태라면, 그 낡은 응답이 나중에
+// 도착하면서 방금 고른 새 배치 화면을 예전 배치로 덮어써버리는 경쟁상태가
+// 있었음(그래서 새 배치→예전 배치→다음 폴링에 다시 새 배치로 깜빡이는 것처럼
+// 보였음). 매 polling마다 세대(generation) 번호를 매겨서, 응답이 왔을 때
+// "그사이 더 최신 요청이 이미 시작됐으면" 그 낡은 응답은 화면에 반영하지
+// 않고 조용히 버리도록 함.
+let pollSeq = 0;
+async function pollOnce(){
+  const mySeq = ++pollSeq;
+  try{
+    if(!GAS_READY){
+      document.getElementById('emptyMsg').textContent = 'CONFIG.GAS_URL이 설정되지 않았습니다';
+      return;
+    }
+    // ★ 2026-07-23 신규: 매니저가 TV에서 직접 "다른 배치"를 골라 조회 중이면
+    //   (manualBatchOverride) 활성 배치 자동 추적을 건너뛰고 그 배치만 고정 조회.
+    //   이 모드는 다른 기기(작업자 폰 등)에는 전혀 영향을 주지 않는 TV 전용 조회.
+    if(manualBatchOverride){
+      currentBatchId = manualBatchOverride.batchId;
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot manual"></span>배치 ${currentBatchId} · ${manualBatchOverride.date}`;
+    } else {
+    // ★ 2026-07-23 신규: "오늘 배치"만 찾던 것을, 매니저가 서버에 기록해둔
+    //   "활성 배치"를 우선 확인하도록 변경 — batch.html에서 매니저가 배치를
+    //   새로 시작하거나 "이어서 작업하기"를 누르면 서버에 기록되는데, TV
+    //   현황판도 그 기록을 그대로 따라감 (어제 배치든 오늘 배치든 무관).
+    //   TV는 하루 종일 안 끄고 켜두는 경우가 많아서, 이미 배치를 하나 물고
+    //   있어도 매 폴링(8초)마다 계속 재확인함 — 매니저가 중간에 다른 배치로
+    //   전환하면 TV도 곧바로 자동으로 따라가게 하기 위함.
+    // ★ 2026-08-11 속도 개선(매니저 지적) — 새로고침할 때마다 "연결 대기중..."이
+    //   한참 이어지던 문제. 원인은 서버 왕복을 순서대로 기다렸기 때문:
+    //     getActiveBatch → (없으면 getBatch → getOpenBatches) → getSlotProgress
+    //   각 호출이 1~3초라 화면이 뜨기까지 최대 10초 가까이 걸렸음.
+    //   → 마지막으로 본 배치 번호를 이 TV에 기억해두고, 새로고침 직후에는
+    //     그 번호로 슬롯을 곧바로 불러와 화면을 먼저 채움. 활성 배치 확인은
+    //     그다음에 이어서 하고, 배치가 바뀌었으면 그때 갱신함.
+    if (BOOT_FAST && LAST_BATCH_ID){
+      BOOT_FAST = false;
+      currentBatchId = LAST_BATCH_ID;
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · 확인 중…`;
+      // 슬롯을 먼저 그리고, 활성 배치 확인은 아래 폴링에서 이어감
+      try{
+        const fast = await gasQuery('getSlotProgress', { batchId: currentBatchId });
+        if(mySeq === pollSeq && fast && fast.ok){
+          document.getElementById('doneCount').textContent = `${fast.doneCount} / ${fast.totalCount}`;
+          document.getElementById('doneBar').style.width =
+            (fast.totalCount > 0 ? (fast.doneCount / fast.totalCount * 100) : 0) + '%';
+          renderBoard(fast.slots, true);
+        }
+      }catch(e){ /* 실패해도 아래 정상 경로가 이어서 확인 */ }
+    }
+    const activeRes = await getActiveBatchData_();
+    if(mySeq !== pollSeq) return; // ★ 신규: await 도중 더 최신 폴링이 시작됐으면 여기서 중단
+    if(activeRes.ok && activeRes.batch && activeRes.batch.batchId !== currentBatchId){
+      currentBatchId = activeRes.batch.batchId;
+      rememberBatch(currentBatchId); // ★ 2026-08-11 — 다음 새로고침 때 즉시 띄우기 위해 기억
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${activeRes.batch.date}`;
+    } else if(!currentBatchId){
+      // 활성 배치 기록이 아직 없으면(아무도 안 정했으면) 예전처럼 오늘자 배치라도 확인
+      const b = await getBatchData_();
+      if(mySeq !== pollSeq) return; // ★ 신규
+      if(!b.ok || !b.batch){
+        // ★ 2026-08-04 신규 — batch.html에서 어제 적용한 것과 동일한 안전장치.
+        //   활성 배치 기록도 없고 "오늘 생성된" 배치도 없으면(=날짜가 바뀐
+        //   다음날 아침 등), 완료 안 된 배치가 정확히 1개뿐일 때만 자동으로
+        //   그 배치를 TV에 띄움. 2개 이상이면 헷갈릴 수 있으니 절대 임의로
+        //   고르지 않고 "진행중인 배치 없음"으로 두어 매니저가 다른 배치 버튼으로
+        //   직접 고르게 함.
+        let resolved = null;
+        try{
+          // ★ 2026-08-19 재수정(긴급) — 여기 재시도(gasQueryWithRetry)를 썼던 게
+          //   오히려 서버 혼잡을 키운 원인으로 확인됨. 이 코드는 pollOnce() 안,
+          //   즉 12초마다 자동으로 다시 실행되는 반복 폴링 경로라서, 그 안에서
+          //   또 재시도(최대 3번)를 하면 혼잡한 순간에 요청이 3배로 늘어나며
+          //   혼잡을 더 키우고 더 오래 끌게 만듦. 반복 폴링 경로는 "실패하면
+          //   다음 폴링(12초 후)에 알아서 다시 시도된다"는 게 이미 보장돼
+          //   있으므로, 여기서 자체 재시도는 불필요하고 오히려 해로움 — 일반
+          //   호출로 되돌림. (사람이 직접 누르는 "다른 배치" 버튼 등은 반복
+          //   폴링이 아니라서 재시도를 그대로 둠)
+          const openRes = await getOpenBatchesData_();
+          if(mySeq !== pollSeq) return;
+          // ★ 2026-08-05 신규 — getOpenBatches가 "완료된 지 1시간 안 된 배치"도
+          //   같이 내려주므로, 이 자동표시 판단에서는 반드시 제외해야 함.
+          const trulyOpen = (openRes.batches || []).filter(b => !b.recentlyCompleted);
+          if(openRes.ok && trulyOpen.length === 1){
+            resolved = trulyOpen[0];
+          }
+        }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
+        if(!resolved){
+          const dot0 = document.getElementById('liveDot');
+          if(dot0) dot0.className = 'status-dot off';
+          document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
+          return;
+        }
+        currentBatchId = resolved.batchId;
+        document.getElementById('batchLabel').innerHTML =
+          `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${resolved.date}`;
+      } else {
+      currentBatchId = b.batch.batchId;
+      rememberBatch(currentBatchId); // ★ 2026-08-11
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
+      }
+    }
+    // ★ 2026-08-25 신규(버그 수정) — 위 else 블록(비-override 상태) 안에서
+    //   확정된 currentBatchId를 "진짜 실제 활성 배치"로 항상 같이 기억해둠.
+    //   override 모드로 들어가도 이 값은 안 바뀌므로, "다른 배치"/"지난 배치"
+    //   목록에서 이 값과 같은 배치를 다시 클릭했을 때 "그건 이미 지금 보고
+    //   있는 실제 배치니까 override 모드로 들어갈 필요 없다"를 판단할 수 있음.
+    liveBatchId = currentBatchId;
+    }
+
+    // ★ 2026-09 신규 — override 모드(TV에서 임의의 다른 배치를 골라 보는 중)는
+    //   Firestore 미러가 담고 있지 않은 배치일 수 있으므로 항상 직접 조회.
+    //   라이브 모드(평소)는 미러 캐시를 쓰되, 연결 실패 시 자동으로 직접 조회로 대체됨.
+    const res = manualBatchOverride
+      ? await gasQuery('getSlotProgress', { batchId: currentBatchId })
+      : await getSlotProgressLiveData_(currentBatchId);
+    if(mySeq !== pollSeq) return; // ★ 신규 — 핵심 가드: 이 응답이 도착하기 전에 더 최신 폴링(예: 방금 고른 다른 배치)이
+                                  //   이미 시작됐다면, 이 낡은 응답은 절대 화면에 반영하지 않고 버림.
+    if(!res.ok){
+      const dot = document.getElementById('liveDot');
+      if(dot) dot.className = 'status-dot off';
+      return;
+    }
+    // ★ 2026-07-23 수정: manual 모드일 땐 batchLabel에 id='liveDot'인 도트가 없으므로
+    //   (amber 'manual' 도트로 대체됨) null 체크 후 있을 때만 갱신.
+    const dot = document.getElementById('liveDot');
+    if(dot) dot.className = 'status-dot live';
+    document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
+    document.getElementById('doneBar').style.width =
+      (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
+    renderBoard(res.slots, true);
+  }catch(e){
+    // ★ 2026-07-17 신규: 폴링 중 예상 못한 오류가 나도 콘솔에만 남기고
+    //   다음 8초 뒤 폴링은 그대로 이어지게 함(화면이 아예 멈추지 않도록)
+    console.error('pollOnce failed:', e);
+  }
+}
+
+pollOnce();
+setInterval(pollOnce, POLL_MS);
+
+// ★ 2026-08-13 신규(batch.html과 동일한 이유로 추가) — 이 TV 화면도 화면보호기/
+//   디스플레이 절전, 원격 접속으로 다른 창을 보다 돌아오는 경우 등으로 브라우저
+//   타이머가 늦어질 수 있음. 화면이 다시 보이는 즉시 강제로 한 번 더 갱신해서,
+//   타이머가 알아서 돌아오길 기다리지 않게 함.
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState !== 'visible') return;
+  console.log('👁 화면 복귀 감지 — 즉시 재동기화');
+  pollOnce();
+  if(typeof pollUnfulfilledAlerts === 'function' && GAS_READY && currentBatchId) pollUnfulfilledAlerts();
+});
+
+/* ═══════════════ ★ 2026-08-05 신규 — 미배분 경보 폴링 ═══════════════
+ * "다른 고객사에겐 스캔됐는데 이 고객사만 완전히 0인" 패턴을 30초마다 확인.
+ * 슬롯 진행률(pollOnce, 8초)보다 느리게 도는 이유: 이 조회는 배치 전체
+ * BatchItems/ScanLog/IssueLog를 다 훑는 무거운 계산이라, 8초마다 돌리면
+ * 서버 부담이 커짐 — 경보 성격상 30초 지연은 문제 없음.
+ * ═══════════════════════════════════════════════════════════════ */
+let _unfulfilledAlerts = [];
+async function pollUnfulfilledAlerts(){
+  if(!GAS_READY || !currentBatchId) return;
+  try{
+    const res = await getUnfulfilledAlertsData_(currentBatchId);
+    if(!res.ok) return;
+    _unfulfilledAlerts = res.alerts || [];
+    const banner = document.getElementById('unfulfilledBanner');
+    const text = document.getElementById('unfulfilledBannerText');
+    if(_unfulfilledAlerts.length > 0){
+      text.textContent = `미배분 제품 ${_unfulfilledAlerts.length}건 — 다른 고객사엔 이미 배분됐는데 이 제품만 빠짐 (클릭해서 확인)`;
+      banner.classList.add('show');
+    } else {
+      banner.classList.remove('show');
+    }
+  }catch(e){ console.error('pollUnfulfilledAlerts failed:', e); }
+}
+function renderUnfulfilledModal(){
+  const body = document.getElementById('unfulfilledModalBody');
+  if(_unfulfilledAlerts.length === 0){
+    body.innerHTML = '<div class="unfulfilled-modal-note">현재 미배분 경보가 없습니다.</div>';
+    return;
+  }
+  const rowsHtml = _unfulfilledAlerts.map(a => `
+    <div class="unfulfilled-row">
+      <div class="ur-top">
+        <span>${a.customer || a.invoice} <span class="ur-slot">${a.slotNum ? '· 슬롯 ' + String(a.slotNum).padStart(2,'0') : ''}</span></span>
+        <span>${a.reqQty}pcs 필요</span>
+      </div>
+      <div class="ur-meta">${a.sku} · ${a.name} · 바코드 ${a.barcode} · 인보이스 ${a.invoice}</div>
+    </div>`).join('');
+  body.innerHTML = `
+    <div class="unfulfilled-modal-note">
+      아래 제품들은 배치 안 <b>다른 고객사에게는 이미 정상적으로 스캔·배분됐지만</b>,
+      나열된 고객사에는 스캔·이슈 기록이 전혀 없습니다. 실물 창고에 해당 상품이
+      남아있는지 확인해 주세요.<br><br>
+      · 재고가 있다면 → 마저 피킹해서 슬롯에 넣고 다시 스캔하면 정상 반영됩니다.<br>
+      · 재고가 전혀 없다면(이미 다 나감) → 해당 슬롯 카드에서 "이슈 등록" →
+      사유 <b>MISS·스캔 누락(실제 출고됨)</b>으로 등록하면 정산됩니다.
+    </div>
+    ${rowsHtml}`;
+}
+document.getElementById('unfulfilledBanner').addEventListener('click', () => {
+  renderUnfulfilledModal();
+  document.getElementById('unfulfilledModalOverlay').classList.add('show');
+});
+document.getElementById('btnCloseUnfulfilledModal').addEventListener('click', () => {
+  document.getElementById('unfulfilledModalOverlay').classList.remove('show');
+});
+document.getElementById('unfulfilledModalOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'unfulfilledModalOverlay') document.getElementById('unfulfilledModalOverlay').classList.remove('show');
+});
+setTimeout(pollUnfulfilledAlerts, 2000); // 배치ID가 확정될 시간을 조금 준 뒤 첫 조회
+setInterval(pollUnfulfilledAlerts, 90000); // ★ 2026-09-03 재수정: 60초→90초(최종 완화)
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-07-23 신규 — TV "다른 배치 조회" 드롭다운
+// ─────────────────────────────────────────────────────────────
+// batch.html의 "⇄ 다른 배치"와 이름은 같지만 동작은 완전히 다름:
+// 여기서 배치를 골라도 setActiveBatch를 호출하지 않으므로
+// 작업자 폰/다른 TV 등 어떤 기기에도 영향을 주지 않는 순수 조회 전용.
+// (완료 처리된 배치는 목록에 안 뜸 — getOpenBatches가 미완료 배치만 반환)
+// ═══════════════════════════════════════════════════════════
+document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
+  e.stopPropagation();
+  const dd = document.getElementById('switchBatchDropdownTV');
+  if(dd.classList.contains('open')){ dd.classList.remove('open'); return; }
+
+  dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
+  dd.classList.add('open');
+
+  const res = await gasQueryWithRetry('getOpenBatches', {});
+  if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
+  const list = res.batches || [];
+  // ★ 2026-09-11 신규 — 서버(getOpenBatches)가 최신순 정렬해서 주지만(재배포
+  //   전 기기 대비, 그리고 지난 배치 목록에도 이미 적용된 것과 동일한 방어),
+  //   클라이언트에서도 한 번 더 실제 시각값으로 방어적 재정렬.
+  list.sort((a, b) => {
+    let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+    let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+    return tb - ta;
+  });
+  if(!list.length){
+    dd.innerHTML = `<div class="tb-switch-empty">조회 가능한 미완료 배치가 없습니다</div>`;
+    return;
+  }
+  const today = new Date().toISOString().slice(0,10);
+  dd.innerHTML = list.map(b => {
+    const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+    // ★ 2026-08-05 신규 — 완료된 지 1시간 안 된 배치는 "완료됨" 태그를 최우선으로
+    //   보여줌(지금 보는 중이 아닌 한). 스캔 100% 끝난 직후 배치번호가 아무 표시
+    //   없이 갑자기 목록에서 사라지던 것과 달리, 1시간 동안은 상태가 명확히
+    //   보이다가 그 다음부터 목록에서 빠짐(서버 getOpenBatches가 그렇게 걸러줌).
+    const tag = isCurrent
+      ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+      : b.recentlyCompleted
+      ? (b.pendingTakeOut
+          ? `<span class="tb-sw-tag" style="background:rgba(139,92,246,0.15); color:#8B5CF6">🟣 2차 검증 대기 ${b.pendingTakeOut}건</span>`
+          : `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">✅ 완료됨 · ${b.completedMinutesAgo}분 전</span>`)
+      : (b.date === today ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">오늘</span>` : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">다른 날짜</span>`);
+    return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
+      <div>
+        <div class="tb-sw-id">${b.batchId}</div>
+        <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · 스캔 통과 ${Number(b.scannedPass||0).toLocaleString()}건</div>
+      </div>
+      ${tag}
+    </div>`;
+  }).join('');
+  dd.querySelectorAll('[data-batch]').forEach(row => {
+    row.onclick = () => {
+      // ★ 2026-08-25 신규(버그 수정) — 목록에서 고른 배치가 사실은 지금 실제로
+      //   작업 중인 배치(liveBatchId)와 같은 것이면, "지난 배치를 보는 중"이
+      //   아니라 그냥 원래 실시간 모드 그대로 둬야 함. 예전엔 이걸 구분 안 해서
+      //   현장 사진처럼 "오늘 만든 진짜 진행 중인 배치"를 봐도 "지난 배치를
+      //   보는 중입니다" 배너가 잘못 뜨는 사고가 있었음.
+      if(row.dataset.batch === liveBatchId){
+        backToLiveNow();
+        dd.classList.remove('open');
+        return;
+      }
+      manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
+      document.getElementById('manualBanner').classList.add('show');
+      dd.classList.remove('open');
+      startViewOnlyTimer(); // ★ 2026-08-07 — 10분 뒤 자동 복귀 카운트다운 시작
+      pollOnce(); // 고른 배치로 즉시 갱신
+    };
+  });
+};
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('switchBatchDropdownTV');
+  if(dd && dd.classList.contains('open') && !e.target.closest('#btnSwitchBatchTV') && !e.target.closest('#switchBatchDropdownTV')){
+    dd.classList.remove('open');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-08-25 신규(매니저 요청) — "지난 배치 전체" 조회.
+// 위 "⇄ 다른 배치"는 일부러 미완료 배치만 보여주도록 설계돼 있어서(그게
+// 정상 동작), 몇 주 전에 이미 정상적으로 끝난 배치의 고객사별 진행상황을
+// 다시 보고 싶어도 볼 방법이 없었음. 이건 완료 여부와 무관하게 전체 배치를
+// 최신순으로 보여주는 별도 목록 — 완전히 조회 전용(다른 기기에 영향 없음,
+// 위 "다른 배치"와 완전히 같은 방식으로 manualBatchOverride만 켜줌).
+// ═══════════════════════════════════════════════════════════
+document.getElementById('btnBatchHistoryTV').onclick = async (e) => {
+  e.stopPropagation();
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  if(dd.classList.contains('open')){ dd.classList.remove('open'); return; }
+  loadBatchHistoryList(14);
+};
+let _tvHistoryFullList = [];
+let _tvCalendarMonth = null;
+let _tvCalendarSelectedDate = null;
+
+function tvHistoryDateKey_(b){ return String(b.date).slice(0, 10); }
+function tvTodayKey_(){
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function tvHistoryRowHtml_(b){
+  const isCurrent = manualBatchOverride ? b.batchId === manualBatchOverride.batchId : (!manualBatchOverride && b.batchId === currentBatchId);
+  const tag = isCurrent
+    ? `<span class="tb-sw-tag" style="background:var(--green-bg); color:var(--green)">지금 보는 중</span>`
+    : b.status === 'completed'
+    ? `<span class="tb-sw-tag" style="background:var(--gray-bg); color:var(--text-dim)">완료됨</span>`
+    : `<span class="tb-sw-tag" style="background:var(--amber-bg); color:var(--amber)">진행중</span>`;
+  return `<div class="tb-switch-row" data-batch="${b.batchId}" data-date="${b.date}">
+    <div>
+      <div class="tb-sw-id">${b.batchId}</div>
+      <div class="tb-sw-meta">${b.date} · ${Number(b.totalSku).toLocaleString()} SKU · ${Number(b.totalQty).toLocaleString()} pcs</div>
+    </div>
+    ${tag}
+  </div>`;
+}
+function tvHistoryWireRows_(container){
+  container.querySelectorAll('[data-batch]').forEach(row => {
+    row.onclick = () => {
+      // ★ 2026-08-25 신규(버그 수정) — 위 "다른 배치"와 동일한 이유. "지난 배치"
+      //   목록에서 골라도, 그게 사실 지금 실제로 작업 중인 배치라면 override로
+      //   들어가지 않고 실시간 모드를 그대로 유지함.
+      if(row.dataset.batch === liveBatchId){
+        backToLiveNow();
+        document.getElementById('batchHistoryDropdownTV').classList.remove('open');
+        return;
+      }
+      manualBatchOverride = { batchId: row.dataset.batch, date: row.dataset.date };
+      document.getElementById('manualBanner').classList.add('show');
+      document.getElementById('batchHistoryDropdownTV').classList.remove('open');
+      startViewOnlyTimer(); // ★ 10분 뒤 자동 복귀 카운트다운 시작(계속 보기로 고정도 가능)
+      pollOnce(); // 고른 배치로 즉시 갱신
+    };
+  });
+}
+
+async function loadBatchHistoryList(days){
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
+  dd.classList.add('open');
+
+  const res = await gasQueryWithRetry('getBatchHistoryList', { days });
+  if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
+  const list = res.batches || [];
+  // ★ 2026-09-04 신규 — 서버가 이미 최신순 정렬해서 주지만(재배포 전 기기 대비)
+  //   클라이언트에서도 한 번 더 실제 시각값으로 방어적 재정렬.
+  list.sort((a, b) => {
+    let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+    let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+    return tb - ta;
+  });
+
+  if(days >= 365){
+    // ★ 2026-09-04 신규(현장 요청) — 1년치를 끝없이 스크롤하는 목록 대신 달력으로
+    //   보여줌. 서버 호출은 지금(days=365)과 완전히 동일하게 딱 한 번만 하고,
+    //   그 결과를 화면에서 날짜별로 묶어서 달력으로 그리는 것뿐이라 속도엔
+    //   전혀 영향 없음.
+    _tvHistoryFullList = list;
+    const mostRecentKey = list.length ? tvHistoryDateKey_(list[0]) : tvTodayKey_();
+    _tvCalendarMonth = new Date(mostRecentKey + 'T00:00:00');
+    _tvCalendarSelectedDate = null;
+    renderTvHistoryCalendar();
+    return;
+  }
+
+  // ★ 2026-08-25 신규(매니저 요청) — 계속 쌓이면 지저분하니 기본은 최근 14일치만.
+  //   그래도 더 예전 것이 필요한 드문 경우를 위해 맨 아래에 "더 예전 배치 찾기"를
+  //   달아둠(누르면 달력으로 전환).
+  const moreBtn = `<div class="tb-switch-more" id="tbHistoryMoreBtn">🔍 더 예전 배치 찾기 (달력에서 날짜로 찾기)</div>`;
+  if(!list.length){
+    dd.innerHTML = `<div class="tb-switch-empty">최근 ${days}일 안에 배치 기록이 없습니다</div>${moreBtn}`;
+  } else {
+    dd.innerHTML = list.map(b => tvHistoryRowHtml_(b)).join('') + moreBtn;
+  }
+  tvHistoryWireRows_(dd);
+  const moreEl = document.getElementById('tbHistoryMoreBtn');
+  if(moreEl) moreEl.onclick = (ev) => { ev.stopPropagation(); loadBatchHistoryList(365); };
+}
+
+function renderTvHistoryCalendar(){
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  const y = _tvCalendarMonth.getFullYear();
+  const m = _tvCalendarMonth.getMonth();
+
+  const countsByDay = {};
+  _tvHistoryFullList.forEach(b => {
+    const key = tvHistoryDateKey_(b);
+    countsByDay[key] = (countsByDay[key] || 0) + 1;
+  });
+
+  const first = new Date(y, m, 1);
+  const startWeekday = first.getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayKey = tvTodayKey_();
+
+  let cells = '';
+  for(let i = 0; i < startWeekday; i++) cells += `<div class="tb-cal-cell tb-cal-empty"></div>`;
+  for(let d = 1; d <= daysInMonth; d++){
+    const key = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    const cnt = countsByDay[key] || 0;
+    const cls = ['tb-cal-cell'];
+    if(cnt > 0) cls.push('has-batch');
+    if(key === todayKey) cls.push('is-today');
+    if(key === _tvCalendarSelectedDate) cls.push('is-selected');
+    cells += `<div class="${cls.join(' ')}" ${cnt > 0 ? `data-day="${key}"` : ''}>
+      <span>${d}</span>
+      ${cnt > 0 ? `<span class="tb-cal-dot">${cnt}건</span>` : ''}
+    </div>`;
+  }
+
+  const weekdayLabels = ['일','월','화','수','목','금','토'].map(w => `<div class="tb-cal-wd">${w}</div>`).join('');
+
+  let listHtml;
+  if(_tvCalendarSelectedDate){
+    const dayBatches = _tvHistoryFullList.filter(b => tvHistoryDateKey_(b) === _tvCalendarSelectedDate);
+    listHtml = !dayBatches.length
+      ? `<div class="tb-switch-empty">이 날짜엔 배치 기록이 없습니다</div>`
+      : `<div style="margin-top:10px; border-top:1px solid var(--border); padding-top:10px;">
+          <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">${_tvCalendarSelectedDate} · ${dayBatches.length}건</div>
+          ${dayBatches.map(b => tvHistoryRowHtml_(b)).join('')}
+        </div>`;
+  } else {
+    listHtml = `<div class="tb-switch-empty" style="padding-top:10px;">배치가 있는 날짜(파란색 표시)를 눌러보세요</div>`;
+  }
+
+  dd.innerHTML = `
+    <div class="tb-cal-header">
+      <button class="tb-cal-nav" id="tbCalPrev" type="button">◀</button>
+      <div class="tb-cal-title">${y}년 ${m + 1}월</div>
+      <button class="tb-cal-nav" id="tbCalNext" type="button">▶</button>
+    </div>
+    <div class="tb-cal-grid">${weekdayLabels}${cells}</div>
+    ${listHtml}
+    <div class="tb-switch-more" id="tbHistoryBackBtn">← 최근 14일 목록으로</div>
+  `;
+
+  document.getElementById('tbCalPrev').onclick = (e) => { e.stopPropagation(); _tvCalendarMonth = new Date(y, m - 1, 1); _tvCalendarSelectedDate = null; renderTvHistoryCalendar(); };
+  document.getElementById('tbCalNext').onclick = (e) => { e.stopPropagation(); _tvCalendarMonth = new Date(y, m + 1, 1); _tvCalendarSelectedDate = null; renderTvHistoryCalendar(); };
+  document.getElementById('tbHistoryBackBtn').onclick = (e) => { e.stopPropagation(); loadBatchHistoryList(14); };
+  dd.querySelectorAll('[data-day]').forEach(cell => {
+    cell.onclick = (e) => { e.stopPropagation(); _tvCalendarSelectedDate = cell.dataset.day; renderTvHistoryCalendar(); };
+  });
+  tvHistoryWireRows_(dd);
+}
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  if(dd && dd.classList.contains('open') && !e.target.closest('#btnBatchHistoryTV') && !e.target.closest('#batchHistoryDropdownTV')){
+    dd.classList.remove('open');
+  }
+});
+
+/* ★ 2026-08-07 신규(매니저 요청) — 지난 배치를 보는 상태로 TV를 켜둔 채
+ * 잊어버리는 것을 막는 자동 복귀. TV 현황판은 작업자들이 보면서 물건을 넣는
+ * 화면이라, 옛날 배치가 떠 있으면 엉뚱한 슬롯에 넣는 사고로 이어질 수 있음.
+ *  · 10분이 지나면 자동으로 "지금 작업 중인 배치"로 돌아감
+ *  · 남은 시간을 초 단위로 보여줘서 갑자기 바뀌어도 당황하지 않게 함
+ *  · 화면을 만지면(클릭·터치·키·마우스 이동) 다시 10분으로 초기화 —
+ *    사람이 보고 있는 동안에는 바뀌지 않음
+ *  · 버튼을 누르면 기다리지 않고 즉시 복귀 (예전 그대로)
+ * ★ 2026-08-24 신규 — 작업자가 "📌 계속 보기" 버튼으로 자동복귀를 아예 꺼둘 수
+ *   있음(예: 옛날 배치 이슈를 오래 들여다봐야 할 때). TV 자체는 터치·마우스
+ *   이동이 거의 없어서(사람이 그냥 서서 보기만 함) 위 "화면을 만지면 초기화"
+ *   방식만으로는 실제로 매 10분마다 되돌아가는 불편이 있었음 — 그 보완책.
+ *   켜져 있는 동안엔 배너에 "고정됨"이 계속 표시돼서, 매니저가 다른 배치 화면인
+ *   걸 잊고 방치하는 원래 사고 방지 목적은 여전히 유지됨(그냥 숨기지 않음).
+ */
+const VIEW_ONLY_AUTO_BACK_MS = 10 * 60 * 1000; // 10분
+let viewOnlyDeadline = 0;
+let viewOnlyTimer = null;
+let viewOnlyPinned = false; // ★ 2026-08-24 신규 — true면 자동복귀 카운트다운을 멈추고 계속 고정 표시
+
+function backToLiveNow(){
+  manualBatchOverride = null;
+  currentBatchId = null; // ★ 강제 초기화해야 다음 폴링이 배치가 바뀐 걸로 인식해서 라벨을 다시 그림
+  document.getElementById('manualBanner').classList.remove('show');
+  stopViewOnlyTimer();
+  viewOnlyPinned = false; // 복귀했으니 고정 상태도 초기화(다음에 다른 배치 볼 때 기본값부터 시작)
+  updatePinButtonUI();
+  pollOnce();
+}
+
+function stopViewOnlyTimer(){
+  if(viewOnlyTimer){ clearInterval(viewOnlyTimer); viewOnlyTimer = null; }
+  const el = document.getElementById('backToLiveCountdown');
+  if(el) el.textContent = '';
+}
+
+function updatePinButtonUI(){
+  const btn = document.getElementById('btnPinViewOnly');
+  if(!btn) return;
+  if(viewOnlyPinned){
+    btn.textContent = '📌 고정됨(해제하기)';
+    btn.style.background = 'var(--amber-bg)';
+    btn.style.color = 'var(--amber)';
+    btn.style.borderColor = 'var(--amber)';
+  } else {
+    btn.textContent = '📌 계속 보기';
+    btn.style.background = 'var(--surface2)';
+    btn.style.color = 'var(--text-dim)';
+    btn.style.borderColor = 'var(--border2)';
+  }
+}
+
+function togglePinViewOnly(){
+  viewOnlyPinned = !viewOnlyPinned;
+  updatePinButtonUI();
+  if(viewOnlyPinned){
+    const el = document.getElementById('backToLiveCountdown');
+    if(el) el.textContent = '(고정됨 · 자동복귀 꺼짐)';
+  } else {
+    viewOnlyDeadline = Date.now() + VIEW_ONLY_AUTO_BACK_MS; // 다시 켜면 10분부터 재시작
+  }
+}
+document.getElementById('btnPinViewOnly').onclick = togglePinViewOnly;
+
+function startViewOnlyTimer(){
+  viewOnlyDeadline = Date.now() + VIEW_ONLY_AUTO_BACK_MS;
+  viewOnlyPinned = false; // 새로 다른 배치를 선택할 때마다 고정은 기본 꺼짐 상태로 시작
+  updatePinButtonUI();
+  if(viewOnlyTimer) clearInterval(viewOnlyTimer);
+  viewOnlyTimer = setInterval(() => {
+    if(!manualBatchOverride){ stopViewOnlyTimer(); return; }
+    if(viewOnlyPinned) return; // ★ 고정된 동안은 카운트다운도, 자동복귀도 멈춤
+    const left = viewOnlyDeadline - Date.now();
+    const el = document.getElementById('backToLiveCountdown');
+    if(left <= 0){ backToLiveNow(); return; }
+    if(el){
+      const m = Math.floor(left/60000), sec = Math.floor(left/1000)%60;
+      el.textContent = '(' + m + ':' + String(sec).padStart(2,'0') + ' 후 자동 복귀)';
+    }
+  }, 1000);
+}
+
+// 사람이 화면을 보고 조작 중이면 자동 복귀를 미룸 (고정 중엔 어차피 카운트 안 하므로 무해)
+['click','touchstart','keydown','mousemove'].forEach(ev => {
+  document.addEventListener(ev, () => {
+    if(manualBatchOverride && !viewOnlyPinned) viewOnlyDeadline = Date.now() + VIEW_ONLY_AUTO_BACK_MS;
+  }, { passive: true });
+});
+
+document.getElementById('btnBackToLive').onclick = backToLiveNow;
+
+</script>
+</body>
+</html>
