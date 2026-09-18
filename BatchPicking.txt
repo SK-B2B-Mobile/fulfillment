@@ -981,6 +981,8 @@ const STANDALONE_BATCH_ID = 'STANDALONE_ORDERS';
 function addStandaloneOrder(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
+  let result;
+  let orderDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     const invoice = String((data && data.invoice) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
@@ -1015,11 +1017,13 @@ function addStandaloneOrder(data) {
     // ★ 2026-09-02 신규 — 14번째 컬럼(CreatedAt)에 지금 등록 시각을 같이 기록.
     //   재업로드도 위에서 기존 행을 완전히 지우고 새로 쓰므로, 자연스럽게
     //   "가장 최근 등록/재등록 시각"이 항상 정확하게 남음.
+    // ★ 세션C 신규 — 시트와 Firestore에 동일한 시각을 쓰기 위해 한 번만 계산.
+    const nowStr = batchNow_();
     const bcNewRow = bc.getLastRow() + 1;
     bc.getRange(bcNewRow, 1, 1, 10).setValues([[
       STANDALONE_BATCH_ID, invoice, customer, shipDate, shipVia, totalQty, totalSku, '', '', ''
     ]]);
-    bc.getRange(bcNewRow, 14).setValue(batchNow_());
+    bc.getRange(bcNewRow, 14).setValue(nowStr);
 
     const itemRows = items.map(it => [STANDALONE_BATCH_ID, invoice, it.sku || '', it.name || '', it.barcode || '', Number(it.req_qty) || 0, it.rack || '']);
     const startRow = bi.getLastRow() + 1;
@@ -1030,12 +1034,28 @@ function addStandaloneOrder(data) {
     // ★ 2026-09-01 신규 — 이 인보이스의 BatchItems 캐시(20초)를 즉시 비움.
     //   재업로드 직후에도 옛 상품 목록이 캐시에 남아있지 않도록.
     clearInvoiceCache_(STANDALONE_BATCH_ID, invoice);
-    return { ok: true, invoice: invoice, totalSku: totalSku, totalQty: totalQty };
+    // ★ 세션C 신규 — 구글시트에 실제로 쓴 것과 동일한 내용으로 Firestore
+    //   이중쓰기용 문서를 준비. items는 writeStandaloneOrderDoc_ 주석에서
+    //   설명한 이유로 JSON 문자열로 안전하게 담음. 락 안에서는 절대 Firestore를
+    //   직접 호출하지 않음(다른 작업자의 등록·수정이 기다리지 않도록).
+    orderDocForFirestore = {
+      invoice: invoice, customer: customer, shipDate: shipDate, shipVia: shipVia,
+      totalQty: totalQty, totalSku: totalSku, itemsJson: JSON.stringify(items),
+      createdAt: nowStr, updatedBy: data.worker || '',
+    };
+    result = { ok: true, invoice: invoice, totalSku: totalSku, totalQty: totalQty };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션C 신규 — "①번 이중쓰기" 패턴을 addStandaloneOrder에도 동일하게 적용.
+  //   구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
+  //   단독오더 등록 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  if (orderDocForFirestore) {
+    try { writeStandaloneOrderDoc_(orderDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+  }
+  return result;
 }
 
 /* getStandaloneOrders — 지금까지 등록된 단독 오더 전체 목록(진행상태 포함). */
@@ -1314,6 +1334,7 @@ function setPackingMoved(data) {
   let result;
   let syncArgs = null; // ★ 2026-09-03 — 락 밖에서 처리(logScan과 동일한 이유)
   let mirrorInvoice = null; // ★ 세션A 신규 — 락 밖에서 상세조회 미러 갱신하기 위해 스코프 확장
+  let packingDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     const batchId = data.batchId, invoice = data.invoice;
     mirrorInvoice = invoice;
@@ -1402,6 +1423,15 @@ function setPackingMoved(data) {
         }
       }
       found = true;
+      // ★ 세션C 신규 — 방금 쓴 K/L/M(MovedAt/TakenAt/VerifiedAt) 실제 값을
+      //   그대로 다시 읽어서 Firestore 이중쓰기용 문서를 준비. 추측으로 채우지
+      //   않고 시트에 실제로 남은 값을 그대로 복사(감사기록 정확성 원칙).
+      const klm = bc.getRange(row, 11, 1, 3).getValues()[0];
+      packingDocForFirestore = {
+        batchId: batchId, invoice: invoice, stage: stage,
+        movedAt: String(klm[0] || ''), takenAt: String(klm[1] || ''), verifiedAt: String(klm[2] || ''),
+        updatedBy: data.worker || '', updatedAt: batchNow_(),
+      };
       break;
     }
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
@@ -1426,6 +1456,12 @@ function setPackingMoved(data) {
   //   락 밖에서, 원래 저장이 끝난 뒤에 best-effort로 처리.
   if (mirrorInvoice) {
     try { syncSalesInvoiceDetailMirror_(mirrorInvoice); } catch (eMirror) { /* 무시 */ }
+  }
+  // ★ 세션C 신규 — "①번 이중쓰기" 패턴을 setPackingMoved에도 동일하게 적용.
+  //   구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
+  //   패킹존 이동 처리 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  if (packingDocForFirestore) {
+    try { writePackingStatusDoc_(packingDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
   return result;
 }
@@ -2736,6 +2772,7 @@ function undoIssue(data) {
   lock.waitLock(10000);
   let result;
   let syncArgs = null;
+  let issueDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     const issueId = data.issueId;
     if (!issueId) return { ok: false, error: 'issueId required' };
@@ -2749,9 +2786,26 @@ function undoIssue(data) {
         sh.getRange(i + 2, 13).setValue('undone');
         // ★ 2026-07-24 신규: 이슈 취소로 필요수량이 다시 늘어나 완료 상태가
         //   풀릴 수도, 반대로(다른 이슈 겹침 등) 그대로 완료일 수도 있음 — 재확인
-        const rowVals = sh.getRange(i + 2, 1, 1, 8).getValues()[0]; // A~H
+        // ★ 세션C 수정 — 예전엔 A~H(8개 컬럼)만 읽었음. Firestore 이중쓰기용
+        //   전체 문서를 다시 만들려면 I~M(customer/reason/qty/note/status)도
+        //   필요해서 13개 컬럼 전체로 확장. 기존 rowVals 인덱스(0,3,7)는 그대로
+        //   유효하므로 기존 로직에는 전혀 영향 없음.
+        const rowVals = sh.getRange(i + 2, 1, 1, 13).getValues()[0]; // A~M
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
+        // ★ 세션C 신규 — logIssue()와 완전히 같은 필드 구조로 Firestore
+        //   이중쓰기용 문서를 준비(이번엔 status만 'undone'으로 바뀐 전체 문서).
+        //   writeIssueLogDoc_()가 createDocument 실패 시 updateDocument로
+        //   대체하는데, updateDocument는 넘긴 필드로 문서 전체를 덮어쓰므로
+        //   반드시 "전체" 필드를 다시 채워서 넘겨야 함(부분 필드만 넘기면
+        //   나머지 필드가 사라지는 사고가 날 수 있음) — 그래서 8개가 아니라
+        //   13개 컬럼을 전부 읽도록 위에서 확장한 것.
+        issueDocForFirestore = {
+          batchId: rowVals[0], issueId: String(rowVals[1]), timestamp: String(rowVals[2]), worker: rowVals[3] || '',
+          barcode: rowVals[4] || '', sku: rowVals[5] || '', name: rowVals[6] || '',
+          invoice: rowVals[7], customer: rowVals[8] || '', reason: rowVals[9] || 'ETC',
+          qty: Number(rowVals[10]) || 0, note: rowVals[11] || '', status: 'undone',
+        };
         bumpVersion_();
         found = true;
         break;
@@ -2772,6 +2826,12 @@ function undoIssue(data) {
     // ★ 세션A 신규 — 이슈 취소도 상세조회 결과(이슈 목록/완료여부)를 바꾸므로
     //   같이 갱신. logIssue와 동일한 이유·동일한 패턴.
     try { syncSalesInvoiceDetailMirror_(syncArgs[1]); } catch (eMirror) { /* 무시 */ }
+    // ★ 세션C 신규 — "①번 이중쓰기" 패턴을 undoIssue에도 동일하게 적용.
+    //   구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서
+    //   실패해도 이슈 취소 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+    if (issueDocForFirestore) {
+      try { writeIssueLogDoc_(issueDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    }
   }
   return result;
 }
@@ -2868,6 +2928,7 @@ function editIssue(data) {
   lock.waitLock(10000);
   let result;
   let syncArgs = null;
+  let issueDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     const issueId = data.issueId;
     if (!issueId) return { ok: false, error: 'issueId required' };
@@ -2900,9 +2961,22 @@ function editIssue(data) {
         }
         bumpVersion_();
         // ★ 2026-07-24 신규: 수량/사유를 고치면 완료 여부가 바뀔 수 있음 — 재확인
-        const rowVals = sh.getRange(row, 1, 1, 8).getValues()[0]; // A~H
+        // ★ 세션C 수정 — 예전엔 A~H(8개 컬럼)만 읽었음. 여기서 이미 J~L(사유/
+        //   수량/메모)을 위에서 새로 써놓은 뒤라, 13개 컬럼 전체로 다시 읽으면
+        //   방금 수정한 최신 값이 그대로 포함됨 — Firestore 이중쓰기용 완전한
+        //   문서를 만들기 위해 필요. 기존 rowVals 인덱스(0,3,7)는 그대로
+        //   유효하므로 기존 로직에는 전혀 영향 없음.
+        const rowVals = sh.getRange(row, 1, 1, 13).getValues()[0]; // A~M (수정된 값 포함)
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
+        // ★ 세션C 신규 — logIssue()/undoIssue()와 동일한 패턴으로 Firestore
+        //   이중쓰기용 전체 문서 준비(방금 수정된 reason/qty/note 반영됨).
+        issueDocForFirestore = {
+          batchId: rowVals[0], issueId: String(rowVals[1]), timestamp: String(rowVals[2]), worker: rowVals[3] || '',
+          barcode: rowVals[4] || '', sku: rowVals[5] || '', name: rowVals[6] || '',
+          invoice: rowVals[7], customer: rowVals[8] || '', reason: rowVals[9] || 'ETC',
+          qty: Number(rowVals[10]) || 0, note: rowVals[11] || '', status: rowVals[12] || 'active',
+        };
         found = true;
         break;
       }
@@ -2919,6 +2993,11 @@ function editIssue(data) {
     try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], true); } catch (e) { /* 무시 */ }
     // ★ 세션A 신규 — 이슈 수정도 상세조회 결과를 바꾸므로 같이 갱신.
     try { syncSalesInvoiceDetailMirror_(syncArgs[1]); } catch (eMirror) { /* 무시 */ }
+    // ★ 세션C 신규 — "①번 이중쓰기" 패턴을 editIssue에도 동일하게 적용.
+    //   best-effort — 실패해도 이슈 수정 결과 자체엔 전혀 영향 없음.
+    if (issueDocForFirestore) {
+      try { writeIssueLogDoc_(issueDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    }
   }
   return result;
 }
