@@ -726,10 +726,12 @@ function updateOrderMethod(data) {
     }
 
     bumpVersion_();
-    // ★ 2026-08-31 — getSalesInvoiceDetail은 인보이스별로 6초 캐시가 있어서,
-    //   수정 직후 화면을 새로고침해도 옛날 배송방법이 잠깐 보일 수 있음.
-    //   그 캐시 키를 여기서 바로 지워서, 수정하자마자 항상 최신값이 보이게 함.
-    try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
+    // ★ 세션A 수정 — 예전엔 여기서 salesInvDetail_v1_{invoice} 캐시만 직접
+    //   지웠음. 이제 syncSalesInvoiceDetailMirror_(FirestoreSync.gs)로 교체해서,
+    //   캐시 삭제와 동시에 Firestore mirror/salesInvDetail_{invoice} 문서도
+    //   최신 값으로 다시 씀 — 세션A 이전에는 배송방법을 바꿔도 상세조회를
+    //   구독 중인 다른 기기 화면이 실시간으로 안 바뀌었음.
+    try { syncSalesInvoiceDetailMirror_(invoice); } catch (e) { /* best-effort */ }
     return { ok: true, method: method, oldMethod: oldMethod };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -910,7 +912,10 @@ function updatePaymentStatus(data) {
       return { ok: false, error: '저장이 반영되지 않았습니다(확인 실패) — 다시 시도해주세요' };
     }
 
-    try { CacheService.getScriptCache().remove('salesInvDetail_v1_' + invoice); } catch (e) {}
+    // ★ 세션A 수정 — 예전엔 salesInvDetail_v1_{invoice} 캐시만 직접 지웠음.
+    //   syncSalesInvoiceDetailMirror_로 교체해서 캐시 삭제 + Firestore 미러
+    //   갱신을 동시에 함.
+    try { syncSalesInvoiceDetailMirror_(invoice); } catch (e) { /* best-effort */ }
     return { ok: true, paid: verifiedPaid };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1356,6 +1361,11 @@ function setManualPackingMoved(data) {
     if (cBy) sh.getRange(row, cBy).setValue(moved ? by : '');
 
     bumpVersion_();
+    // ★ 세션A 신규 — 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
+    //   건드렸음(신규 발견 버그). 단독 오더 패킹존 이동 표시를 바꿔도 상세조회
+    //   결과의 movedToPacking/packStage 필드가 최대 30초간 예전 값으로 보일 수
+    //   있었던 잠복 버그를 여기서 같이 고침.
+    try { syncSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort */ }
     return { ok: true, moved: moved };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1625,15 +1635,24 @@ function calcWorkHours(startISO, endISO) {
   let safety = 0;
   while (currentDay <= endDay && safety < 60) {
     safety++;
-    for (const seg of SEGMENTS) {
-      const segStart = new Date(currentDay);
-      segStart.setHours(seg.startH, seg.startM, 0, 0);
-      const segEnd = new Date(currentDay);
-      segEnd.setHours(seg.endH, seg.endM, 0, 0);
-      const overlapStart = start > segStart ? start : segStart;
-      const overlapEnd = end < segEnd ? end : segEnd;
-      if (overlapEnd > overlapStart) {
-        totalMs += overlapEnd - overlapStart;
+    // ★ 2026-09-18 세션B 신규 — 예전엔 토·일과 공휴일도 전부 포함해서 계산하고 있었음
+    //   (sk-worker의 calcWorkingMins에서 발견된 것과 완전히 동일한 유형의 버그).
+    //   이 값은 Jobs 시트의 Processing Minutes 컬럼에 실제로 저장되므로, sk-worker의
+    //   화면표시용 버그보다 영향 범위가 큼. 아래 isHoliday_()는 이미 이 파일에 있는
+    //   11개 공휴일 판정 함수(jobArchiveCheck_ 등이 쓰는 것과 동일)를 그대로 재사용 —
+    //   BatchPicking.gs의 calcWorkMinutes_와 결과가 항상 일치하도록 통일.
+    const dow = currentDay.getDay();
+    if (dow !== 0 && dow !== 6 && !isHoliday_(currentDay)) {
+      for (const seg of SEGMENTS) {
+        const segStart = new Date(currentDay);
+        segStart.setHours(seg.startH, seg.startM, 0, 0);
+        const segEnd = new Date(currentDay);
+        segEnd.setHours(seg.endH, seg.endM, 0, 0);
+        const overlapStart = start > segStart ? start : segStart;
+        const overlapEnd = end < segEnd ? end : segEnd;
+        if (overlapEnd > overlapStart) {
+          totalMs += overlapEnd - overlapStart;
+        }
       }
     }
     currentDay.setDate(currentDay.getDate() + 1);
@@ -2097,6 +2116,34 @@ function saveInspection(data) {
     });
 
     bumpVersion_();
+    // ★ 세션A 신규 — targetRows에 실제로 쓰여진 모든 인보이스(분할된 경우
+    //   대표+멤버 전부 포함)의 상세조회 미러를 갱신. 멤버 행은 위에서 방금
+    //   "🔗 대표인보이스" 참조로 바꿔썼을 수 있으므로 반드시 같이 갱신해야
+    //   상세조회 화면이 실제 시트 상태와 어긋나지 않음. 예전엔 이 함수가
+    //   salesInvDetail 캐시/미러를 전혀 안 건드려서, 검수를 해도 상세조회
+    //   결과가 최대 30초간 예전 값(pending 등)으로 보일 수 있었던 잠복 버그가
+    //   있었음 — 여기서 같이 고침.
+    try {
+      var touchedInvoices = targetRows.map(function (r) { return String(invoiceCol[r - 2][0]).trim(); });
+      syncSalesInvoiceDetailMirror_(touchedInvoices);
+    } catch (eMirror) { /* best-effort */ }
+    // ★ 세션D 신규 — 분할 주문(split) 그룹을 Firestore groups 컬렉션에
+    //   이중쓰기. isSplitFallback이 감지된(=인보이스_1, _2... 형태로 여러 줄에
+    //   걸쳐 있는) 경우에만 써서, 분할이 아닌 평범한 검수는 전혀 영향 없음.
+    //   구글시트(Jobs 시트의 "🔗 대표인보이스" 참조)는 그대로 유일한 진짜
+    //   데이터이고, 이건 그 옆에 사본을 하나 더 만들 뿐 — best-effort.
+    if (isSplitFallback && targetRows.length > 1) {
+      try {
+        var groupId = 'split_' + String(data.invoice).trim();
+        writeGroupDoc_(groupId, {
+          type: 'split',
+          baseInvoice: String(data.invoice).trim(),
+          primary: primaryInvoiceText,
+          members: touchedInvoices,
+          updatedAt: batchNow_(),
+        });
+      } catch (eGroup) { /* best-effort */ }
+    }
     return ContentService.createTextOutput(
       JSON.stringify({ ok: true, invoice: data.invoice, rows: targetRows })
     ).setMimeType(ContentService.MimeType.JSON);
@@ -2296,6 +2343,14 @@ function saveInspectionBulk_(dataList) {
     var uH = sheet.getRange(1, 21); if (!uH.getValue()) { uH.setValue('Insp. End'); uH.setFontWeight('bold'); }
 
     bumpVersion_();
+    // ★ 세션A 신규 — 일괄 PASS 처리로 실제 바뀐(ok:true) 인보이스들만 상세조회
+    //   미러를 갱신. 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
+    //   건드려서, 일괄 PASS 후에도 상세조회를 열면 최대 30초간 예전 값
+    //   (Pending 등)이 보일 수 있었던 잠복 버그를 여기서 같이 고침.
+    try {
+      var okInvoices = results.filter(function (r) { return r.ok; }).map(function (r) { return r.invoice; });
+      if (okInvoices.length) syncSalesInvoiceDetailMirror_(okInvoices);
+    } catch (eMirror) { /* best-effort */ }
     return { ok: true, results: results };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -4057,7 +4112,7 @@ function getSalesOverview() {
     for (let i = 0; i < n; i++) {
       if (archVals) {
         const a = String(archVals[i][0] || '').trim().toLowerCase();
-        if (a === 'true' || a === '1' || a === 'y' || a === 'yes') continue;
+        if (a === 'true' || a === '1' || a === 'y') continue;
       }
       const invoice = String(invVals[i][0] || '');
       if (!invoice) continue;
