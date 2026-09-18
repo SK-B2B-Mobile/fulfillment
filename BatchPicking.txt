@@ -548,6 +548,7 @@ function picktimeSheetSafe_() {
   if (!pt.getRange(1, 7).getValue()) pt.getRange(1, 7).setValue('Note');
   return pt;
 }
+
 // ★ 2026-08-18 신규 — 근무시간 기준 소요시간 계산 (예전 SK B2C/SK-NJ-MOIDA
 //   프로젝트에서 이미 확정·검증했던 규칙과 동일하게 재사용).
 //   근무시간: 08:30~12:00(오전 210분) + 13:00~17:30(오후 270분) = 하루 최대 480분.
@@ -1312,8 +1313,10 @@ function setPackingMoved(data) {
   lock.waitLock(25000);
   let result;
   let syncArgs = null; // ★ 2026-09-03 — 락 밖에서 처리(logScan과 동일한 이유)
+  let mirrorInvoice = null; // ★ 세션A 신규 — 락 밖에서 상세조회 미러 갱신하기 위해 스코프 확장
   try {
     const batchId = data.batchId, invoice = data.invoice;
+    mirrorInvoice = invoice;
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
 
     // 신형(stage) / 구형(moved) 호출 모두 지원
@@ -1415,6 +1418,14 @@ function setPackingMoved(data) {
   //   슬롯 여러 개가 짧은 시간에 연달아 눌리는 상황(배치 막바지)에 특히 효과가 큼.
   if (syncArgs) {
     try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], false, syncArgs[3]); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+  }
+  // ★ 세션A 신규 — 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
+  //   건드렸음(신규 발견 버그). 패킹존 이동 상태를 바꾸면 상세조회 결과의
+  //   movedToPacking/packStage 필드가 최대 30초간 예전 값으로 보일 수 있었던
+  //   잠복 버그를 여기서 같이 고침. syncInspectionFromPicking_과 마찬가지로
+  //   락 밖에서, 원래 저장이 끝난 뒤에 best-effort로 처리.
+  if (mirrorInvoice) {
+    try { syncSalesInvoiceDetailMirror_(mirrorInvoice); } catch (eMirror) { /* 무시 */ }
   }
   return result;
 }
@@ -2550,6 +2561,7 @@ function logIssue(data) {
   lock.waitLock(10000);
   let result;
   let needsSync = false;
+  let issueDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
     if (!data.invoice) return { ok: false, error: 'invoice required' };
@@ -2587,6 +2599,10 @@ function logIssue(data) {
       }
     }
     const issueId = Utilities.getUuid();
+    // ★ 세션C 신규 — 시트와 Firestore(아래)에 정확히 동일한 시각을 쓰기 위해
+    //   batchNow_()를 한 번만 계산해서 재사용(예전엔 두 setValues에서 각각 따로
+    //   호출해서, 이론상 몇 밀리초 차이가 날 수 있었음 — 감사기록 정확성을 위해 통일).
+    const nowStr = batchNow_();
     // ★ 2026-08-05 긴급 수정 — logScan과 동일한 이유로, IssueLog의 Barcode(E)/
     //   SKU(F) 컬럼도 appendRow 전에 텍스트로 먼저 고정해서 숫자 자동변환(앞자리
     //   0 소실)을 막음.
@@ -2594,7 +2610,7 @@ function logIssue(data) {
     ensureSheetRoom_(il, ilNewRow); // ★ 2026-08-12 신규
     il.getRange(ilNewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
     il.getRange(ilNewRow, 1, 1, 13).setValues([[
-      data.batchId, issueId, batchNow_(), data.worker || '',
+      data.batchId, issueId, nowStr, data.worker || '',
       data.barcode || '', data.sku || '', data.name || '',
       data.invoice, data.customer || '', data.reason || 'ETC',
       qty, data.note || '', 'active'
@@ -2616,7 +2632,7 @@ function logIssue(data) {
     ensureSheetRoom_(sl2, sl2NewRow); // ★ 2026-08-12 신규
     sl2.getRange(sl2NewRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
     sl2.getRange(sl2NewRow, 1, 1, 12).setValues([[
-      data.batchId, 'ADJ-' + issueId, batchNow_(), data.worker || '',
+      data.batchId, 'ADJ-' + issueId, nowStr, data.worker || '',
       data.barcode || '', data.sku || '', '', data.customer || '',
       data.invoice, 'pass', 'active', -qty
     ]]);
@@ -2625,6 +2641,17 @@ function logIssue(data) {
     //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
     clearInvoiceCache_(data.batchId, data.invoice);
     needsSync = true; // ★ 2026-09-03 — 락 밖에서 처리(아래 설명)
+    // ★ 세션C 신규 — 구글시트에 실제로 쓴 것과 정확히 동일한 필드·값으로
+    //   Firestore 이중쓰기용 문서를 준비. 락 안에서는 절대 Firestore를 직접
+    //   호출하지 않음(외부 API 호출로 락을 붙잡고 있으면 다른 작업자의 스캔·
+    //   이슈등록이 전부 그 뒤에서 기다려야 하므로 — logScan/logIssue의 기존
+    //   성능수정과 동일한 원칙). 락 해제 후 아래에서 best-effort로 씀.
+    issueDocForFirestore = {
+      batchId: data.batchId, issueId: issueId, timestamp: nowStr, worker: data.worker || '',
+      barcode: data.barcode || '', sku: data.sku || '', name: data.name || '',
+      invoice: data.invoice, customer: data.customer || '', reason: data.reason || 'ETC',
+      qty: qty, note: data.note || '', status: 'active',
+    };
     result = { ok: true, issueId: issueId };
   } catch (e) {
     result = { ok: false, error: String(e && e.message || e) };
@@ -2642,6 +2669,18 @@ function logIssue(data) {
     //   내용 그대로 남는 사고가 있었음. 이슈 등록은 항상 실제 데이터가
     //   바뀌는 동작이므로 무조건 다시 씀.
     try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker, true); } catch (e) { /* 무시 */ }
+    // ★ 세션A 신규 — 예전엔 logIssue가 salesInvDetail 캐시/미러를 전혀 안
+    //   건드렸음(신규 발견 버그). 이슈 등록 직후 상세조회를 열면 최대 6초간
+    //   예전 이슈 목록/상태가 보일 수 있었던 잠복 버그를 여기서 같이 고침.
+    //   syncInspectionFromPicking_과 마찬가지로 락 밖에서, best-effort로 처리.
+    try { syncSalesInvoiceDetailMirror_(data.invoice); } catch (eMirror) { /* 무시 */ }
+    // ★ 세션C 신규 — "①번 이중쓰기" 설계의 첫 적용. 구글시트(진짜 데이터)에는
+    //   이미 성공적으로 쓴 뒤이므로, 여기서 실패해도 이슈 등록 결과 자체엔
+    //   전혀 영향이 없음(호출부인 board.html/batch.html은 이 실패를 알 수도
+    //   없고 알 필요도 없음 — 완전한 best-effort).
+    if (issueDocForFirestore) {
+      try { writeIssueLogDoc_(issueDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    }
   }
   return result;
 }
@@ -2730,6 +2769,9 @@ function undoIssue(data) {
     //   이유 — 이슈 취소는 항상 실제 데이터가 바뀌는 동작이므로, 전체 개수가
     //   우연히 같더라도 Jobs 시트 노트(상세 이슈 목록)를 무조건 다시 씀.
     try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], true); } catch (e) { /* 무시 */ }
+    // ★ 세션A 신규 — 이슈 취소도 상세조회 결과(이슈 목록/완료여부)를 바꾸므로
+    //   같이 갱신. logIssue와 동일한 이유·동일한 패턴.
+    try { syncSalesInvoiceDetailMirror_(syncArgs[1]); } catch (eMirror) { /* 무시 */ }
   }
   return result;
 }
@@ -2875,6 +2917,8 @@ function editIssue(data) {
   if (syncArgs) {
     // ★ 2026-09-11 버그 수정(현장 발견) — force=true로 바꿈. 위 두 함수와 동일한 이유.
     try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], true); } catch (e) { /* 무시 */ }
+    // ★ 세션A 신규 — 이슈 수정도 상세조회 결과를 바꾸므로 같이 갱신.
+    try { syncSalesInvoiceDetailMirror_(syncArgs[1]); } catch (eMirror) { /* 무시 */ }
   }
   return result;
 }
@@ -4509,6 +4553,7 @@ function testBatchPickingFlow() {
 
   Logger.log('★ 테스트 데이터 정리하려면 Batches/BatchCustomers/BatchItems/ScanLog/PickTiming 시트에서 batchId="' + batchId + '" 행들을 수동 삭제하세요.');
 }
+
 /* =====================================================================
  * ★★★ 영업 공유 — 오더 검수 상세 조회 + 배송 디멘션 (신규 추가) ★★★
  * 목적: 카톡(이슈 공유)+슬랙(디멘션 공유) 두 채널을 이 페이지 하나로 통합.
@@ -4647,6 +4692,18 @@ function saveDimensions(data) {
       sh.getRange(sh.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
     }
     bumpVersion_();
+    // ★ 세션A 신규 — 디멘션 합산 그룹(linkDimensions로 이 인보이스에 소속된
+    //   다른 인보이스들)이 있으면, 이 인보이스의 디멘션 변경이 그 자식 인보이스
+    //   전체의 상세조회 결과(dimsCount/movedToPacking 등)에도 영향을 주므로
+    //   같이 갱신. 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
+    //   건드려서, 디멘션 저장 직후 상세조회를 열면 최대 6초간 예전 값이
+    //   보일 수 있었던 잠복 버그를 여기서 같이 고침. best-effort — 여기서
+    //   실패해도 디멘션 저장 자체는 이미 성공한 뒤이므로 무시.
+    try {
+      const linksMap = buildDimLinksMap_();
+      const childInvoices = linksMap.primaryToChildren[invoice] || [];
+      syncSalesInvoiceDetailMirror_([invoice].concat(childInvoices));
+    } catch (eMirror) { /* best-effort */ }
     return { ok: true, count: newRows.length };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -5506,6 +5563,11 @@ function linkDimensions(data) {
     }
     bumpVersion_();
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    // ★ 세션A 신규 — 대표(primary)와 새로 편입된 오더 전체(moving)의 상세조회
+    //   미러를 갱신. 그룹 연결은 여러 인보이스의 dimsCount/movedToPacking 표시에
+    //   동시에 영향을 주므로, 관련된 모든 인보이스를 한 번에 갱신해야 함.
+    //   best-effort — 여기서 실패해도 그룹 연결 자체는 이미 성공한 뒤이므로 무시.
+    try { syncSalesInvoiceDetailMirror_([primary].concat(moving)); } catch (eMirror) { /* best-effort */ }
     return { ok: true, primary: primary, linked: moving };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -5527,6 +5589,11 @@ function unlinkDimensions(data) {
   try {
     const invoice = String((data && data.invoice) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
+    // ★ 세션A 신규 — 행을 지우기 전에 "지금까지 속해 있던 대표"를 먼저
+    //   파악해둠. 삭제 후에는 DimLinks에서 이 관계가 사라져서 알아낼 수 없음 —
+    //   그리고 그 대표 쪽 상세조회도 이 오더가 빠졌다는 걸 반영해야 함.
+    let oldPrimary = invoice;
+    try { oldPrimary = resolveDimPrimary_(invoice, buildDimLinksMap_()); } catch (eResolve) { /* best-effort */ }
     const sh = dimLinksSheet_();
     const last = sh.getLastRow();
     let removed = 0;
@@ -5539,6 +5606,9 @@ function unlinkDimensions(data) {
     if (!removed) return { ok: false, error: '이 오더는 어디에도 포함되어 있지 않습니다.' };
     bumpVersion_();
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    // ★ 세션A 신규 — 관계가 끊어진 이 오더 자신과, 예전 대표(oldPrimary)의
+    //   상세조회를 함께 갱신. best-effort — 실패해도 unlink 자체는 이미 성공.
+    try { syncSalesInvoiceDetailMirror_([invoice, oldPrimary]); } catch (eMirror) { /* best-effort */ }
     return { ok: true, removed: removed };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -5596,6 +5666,11 @@ function setDimPrimary(data) {
     }
     bumpVersion_();
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    // ★ 세션A 신규 — 그룹 구성원 전체(members에 oldPrimary + 나머지 child 전부
+    //   포함, invoice 자신도 이미 members 안에 들어있음)의 상세조회를 함께
+    //   갱신. 대표 교체로 모든 구성원의 dimsOwner/dimsLinkedTo 표시가 바뀌므로
+    //   한 명이라도 빠짐없이 갱신해야 함. best-effort.
+    try { syncSalesInvoiceDetailMirror_(members); } catch (eMirror) { /* best-effort */ }
     return { ok: true, primary: invoice, members: members };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
