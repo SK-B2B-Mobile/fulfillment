@@ -5601,6 +5601,9 @@ function findDimCandidates_(me, snapshot, dimsMap, links) {
 function linkDimensions(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let mirrorArgs = null; // ★ 세션D 신규 — 락 밖에서 Firestore 처리하기 위해 스코프 확장
+  let groupDocForFirestore = null;
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const targetRaw = String((data && data.target) || '').trim();
@@ -5669,17 +5672,35 @@ function linkDimensions(data) {
     }
     bumpVersion_();
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
-    // ★ 세션A 신규 — 대표(primary)와 새로 편입된 오더 전체(moving)의 상세조회
-    //   미러를 갱신. 그룹 연결은 여러 인보이스의 dimsCount/movedToPacking 표시에
-    //   동시에 영향을 주므로, 관련된 모든 인보이스를 한 번에 갱신해야 함.
-    //   best-effort — 여기서 실패해도 그룹 연결 자체는 이미 성공한 뒤이므로 무시.
-    try { syncSalesInvoiceDetailMirror_([primary].concat(moving)); } catch (eMirror) { /* best-effort */ }
-    return { ok: true, primary: primary, linked: moving };
+    mirrorArgs = [primary].concat(moving);
+    // ★ 세션D 신규 — packTogether 그룹을 Firestore groups 컬렉션에 이중쓰기.
+    //   groupId=대표 인보이스 번호(DimLinks와 동일한 자연키). best-effort —
+    //   락 밖(아래)에서 처리해서 다른 작업자의 저장을 기다리게 하지 않음.
+    groupDocForFirestore = {
+      groupId: primary,
+      doc: {
+        type: 'packTogether', primary: primary, members: [primary].concat(moving),
+        method: dimMethodKey_(a.method), updatedBy: by, updatedAt: now,
+      },
+    };
+    result = { ok: true, primary: primary, linked: moving };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션A 신규 — 대표(primary)와 새로 편입된 오더 전체(moving)의 상세조회
+  //   미러를 갱신. 그룹 연결은 여러 인보이스의 dimsCount/movedToPacking 표시에
+  //   동시에 영향을 주므로, 관련된 모든 인보이스를 한 번에 갱신해야 함.
+  //   ★ 세션D 재수정 — 예전엔 락 안에서 실행했음(다른 작업자의 저장을 불필요
+  //   하게 기다리게 함). logIssue 등과 동일한 원칙으로 락 해제 후로 이동.
+  if (mirrorArgs) {
+    try { syncSalesInvoiceDetailMirror_(mirrorArgs); } catch (eMirror) { /* best-effort */ }
+  }
+  if (groupDocForFirestore) {
+    try { writeGroupDoc_(groupDocForFirestore.groupId, groupDocForFirestore.doc); } catch (eGroup) { /* best-effort */ }
+  }
+  return result;
 }
 
 /* ---------------------------------------------------------------------
@@ -5692,6 +5713,9 @@ function linkDimensions(data) {
 function unlinkDimensions(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let mirrorArgs = null; // ★ 세션D 신규 — 락 밖에서 Firestore 처리하기 위해 스코프 확장
+  let groupDocForFirestore = null;
   try {
     const invoice = String((data && data.invoice) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
@@ -5711,16 +5735,39 @@ function unlinkDimensions(data) {
     }
     if (!removed) return { ok: false, error: '이 오더는 어디에도 포함되어 있지 않습니다.' };
     bumpVersion_();
+    // ★ 세션D 버그 수정 — 예전엔 방금 바뀐 DimLinks를 다시 읽을 때 이 캐시를
+    //   전혀 안 지워서, 최대 30초간 예전(끊기기 전) 관계가 그대로 보일 수
+    //   있는 잠재 버그가 있었음(이번에 groups 갱신 로직을 만들면서 발견).
+    //   linkDimensions/setDimPrimary도 동일하게 지금 이 세션에서 같이 고침.
+    try { CacheService.getScriptCache().remove('dimLinksMap_v1'); } catch (e) { /* 무시 */ }
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
-    // ★ 세션A 신규 — 관계가 끊어진 이 오더 자신과, 예전 대표(oldPrimary)의
-    //   상세조회를 함께 갱신. best-effort — 실패해도 unlink 자체는 이미 성공.
-    try { syncSalesInvoiceDetailMirror_([invoice, oldPrimary]); } catch (eMirror) { /* best-effort */ }
-    return { ok: true, removed: removed };
+    mirrorArgs = [invoice, oldPrimary];
+    // ★ 세션D 신규 — 그룹에서 빠진 뒤의 최신 구성원으로 groups 컬렉션 갱신.
+    //   방금 캐시를 지웠으므로 이 조회는 항상 최신 DimLinks 상태를 반영함.
+    try {
+      const freshLinks = buildDimLinksMap_();
+      const remainingMembers = [oldPrimary].concat(freshLinks.primaryToChildren[oldPrimary] || []);
+      groupDocForFirestore = {
+        groupId: oldPrimary,
+        doc: { type: 'packTogether', primary: oldPrimary, members: remainingMembers, updatedBy: '', updatedAt: batchNow_() },
+      };
+    } catch (eGroupBuild) { /* best-effort — groups 갱신 실패해도 unlink 자체는 이미 성공 */ }
+    result = { ok: true, removed: removed };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션A 신규 — 관계가 끊어진 이 오더 자신과, 예전 대표(oldPrimary)의
+  //   상세조회를 함께 갱신. best-effort — 실패해도 unlink 자체는 이미 성공.
+  //   ★ 세션D 재수정 — 락 해제 후로 이동(logIssue 등과 동일한 원칙).
+  if (mirrorArgs) {
+    try { syncSalesInvoiceDetailMirror_(mirrorArgs); } catch (eMirror) { /* best-effort */ }
+  }
+  if (groupDocForFirestore) {
+    try { writeGroupDoc_(groupDocForFirestore.groupId, groupDocForFirestore.doc); } catch (eGroup) { /* best-effort */ }
+  }
+  return result;
 }
 
 /* ---------------------------------------------------------------------
@@ -5734,6 +5781,9 @@ function unlinkDimensions(data) {
 function setDimPrimary(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let mirrorArgs = null; // ★ 세션D 신규 — 락 밖에서 Firestore 처리하기 위해 스코프 확장
+  let groupDocForFirestore = null;
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const by = String((data && data.by) || 'Packing').trim();
@@ -5771,18 +5821,37 @@ function setDimPrimary(data) {
       sh.getRange(sh.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
     }
     bumpVersion_();
+    // ★ 세션D 버그 수정 — linkDimensions/unlinkDimensions와 동일한 이유로
+    //   추가(예전엔 방금 바뀐 DimLinks를 다시 읽을 때 이 캐시를 전혀 안 지웠음).
+    try { CacheService.getScriptCache().remove('dimLinksMap_v1'); } catch (e) { /* 무시 */ }
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
-    // ★ 세션A 신규 — 그룹 구성원 전체(members에 oldPrimary + 나머지 child 전부
-    //   포함, invoice 자신도 이미 members 안에 들어있음)의 상세조회를 함께
-    //   갱신. 대표 교체로 모든 구성원의 dimsOwner/dimsLinkedTo 표시가 바뀌므로
-    //   한 명이라도 빠짐없이 갱신해야 함. best-effort.
-    try { syncSalesInvoiceDetailMirror_(members); } catch (eMirror) { /* best-effort */ }
-    return { ok: true, primary: invoice, members: members };
+    mirrorArgs = members;
+    // ★ 세션D 신규 — 대표가 바뀌었으므로 새 대표(invoice) ID로 groups 문서를
+    //   씀. 예전 대표(oldPrimary) ID의 옛 문서는 그대로 남는데(고아 문서),
+    //   지금은 "데이터를 쌓기 시작"하는 게 목적이라 완벽한 정리는 세션E로
+    //   미룸(주석에 명시) — 최신 상태를 보려면 항상 현재 대표 ID로 조회하면 됨.
+    groupDocForFirestore = {
+      groupId: invoice,
+      doc: { type: 'packTogether', primary: invoice, members: members, updatedBy: by, updatedAt: now },
+    };
+    result = { ok: true, primary: invoice, members: members };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션A 신규 — 그룹 구성원 전체(members에 oldPrimary + 나머지 child 전부
+  //   포함, invoice 자신도 이미 members 안에 들어있음)의 상세조회를 함께
+  //   갱신. 대표 교체로 모든 구성원의 dimsOwner/dimsLinkedTo 표시가 바뀌므로
+  //   한 명이라도 빠짐없이 갱신해야 함. best-effort.
+  //   ★ 세션D 재수정 — 락 해제 후로 이동(logIssue 등과 동일한 원칙).
+  if (mirrorArgs) {
+    try { syncSalesInvoiceDetailMirror_(mirrorArgs); } catch (eMirror) { /* best-effort */ }
+  }
+  if (groupDocForFirestore) {
+    try { writeGroupDoc_(groupDocForFirestore.groupId, groupDocForFirestore.doc); } catch (eGroup) { /* best-effort */ }
+  }
+  return result;
 }
 
 /* ---------------------------------------------------------------------
