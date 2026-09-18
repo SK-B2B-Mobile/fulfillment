@@ -40,6 +40,25 @@ const PACK_VERIFY_LAUNCH_MS = new Date(2026, 7, 24, 0, 0, 0).getTime(); // 2026-
 function batchTz_() { return Session.getScriptTimeZone(); }
 function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
 
+/* ===================== fmtSheetTs_ (★ 세션C 버그 수정) =====================
+ * 목적: 구글시트가 'yyyy-MM-dd HH:mm:ss' 형식의 텍스트를 셀에 쓰면, 다시
+ * getValues()로 읽어올 때 자동으로 Date 객체로 바꿔서 돌려주는 경우가 있음
+ * (이 코드베이스 다른 곳에서도 여러 번 발견된 문제 — getSalesOverview의
+ * createdAt 처리 등). 이걸 그냥 String()으로 감싸면 "Fri Sep 18 2026
+ * 10:23:12 GMT-0700 (Pacific Daylight Time)" 같은 JS 기본 형식이 나와서,
+ * batchNow_()가 만드는 'yyyy-MM-dd HH:mm:ss' 형식과 어긋나게 됨 — 실제로
+ * undoIssue()/editIssue()가 Firestore에 이 어긋난 형식을 썼던 버그가
+ * 2026-09-18 세션C 테스트에서 발견됨. 이 헬퍼는 Date 객체면 batchNow_()와
+ * 동일한 형식으로 다시 포맷하고, 이미 문자열이면 그대로 반환해서 항상
+ * 일관된 형식을 보장함.
+ * ============================================================================= */
+function fmtSheetTs_(raw) {
+  if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
+    return Utilities.formatDate(raw, batchTz_(), 'yyyy-MM-dd HH:mm:ss');
+  }
+  return String(raw || '');
+}
+
 /* ===================== normBarcode_ (★ 2026-08-05 긴급 신규) =====================
  * ★★★ 매우 중요 — TV 현황판이 "스캔했는데 완료로 안 뜨는" 버그의 근본 원인 수정 ★★★
  *
@@ -2801,7 +2820,7 @@ function undoIssue(data) {
         //   나머지 필드가 사라지는 사고가 날 수 있음) — 그래서 8개가 아니라
         //   13개 컬럼을 전부 읽도록 위에서 확장한 것.
         issueDocForFirestore = {
-          batchId: rowVals[0], issueId: String(rowVals[1]), timestamp: String(rowVals[2]), worker: rowVals[3] || '',
+          batchId: rowVals[0], issueId: String(rowVals[1]), timestamp: fmtSheetTs_(rowVals[2]), worker: rowVals[3] || '',
           barcode: rowVals[4] || '', sku: rowVals[5] || '', name: rowVals[6] || '',
           invoice: rowVals[7], customer: rowVals[8] || '', reason: rowVals[9] || 'ETC',
           qty: Number(rowVals[10]) || 0, note: rowVals[11] || '', status: 'undone',
@@ -2972,7 +2991,7 @@ function editIssue(data) {
         // ★ 세션C 신규 — logIssue()/undoIssue()와 동일한 패턴으로 Firestore
         //   이중쓰기용 전체 문서 준비(방금 수정된 reason/qty/note 반영됨).
         issueDocForFirestore = {
-          batchId: rowVals[0], issueId: String(rowVals[1]), timestamp: String(rowVals[2]), worker: rowVals[3] || '',
+          batchId: rowVals[0], issueId: String(rowVals[1]), timestamp: fmtSheetTs_(rowVals[2]), worker: rowVals[3] || '',
           barcode: rowVals[4] || '', sku: rowVals[5] || '', name: rowVals[6] || '',
           invoice: rowVals[7], customer: rowVals[8] || '', reason: rowVals[9] || 'ETC',
           qty: Number(rowVals[10]) || 0, note: rowVals[11] || '', status: rowVals[12] || 'active',
