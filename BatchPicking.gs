@@ -2646,7 +2646,15 @@ function logIssue(data) {
         if (String(r[9]||'ETC') !== String(data.reason||'ETC')) continue;
         if (Number(r[10]) !== qty) continue;
         if (String(r[3]||'') !== String(data.worker||'')) continue;
-        const rowTime = new Date(String(r[2]).replace(' ', 'T'));
+        // ★ 2026-09-18 버그 수정 — 구글시트가 저장된 텍스트 시각을 자동으로
+        //   Date 객체로 바꿔버리는 경우, String()으로 감싸면 "Thu Sep 18
+        //   2026 18:10:00 GMT-0700..." 같은 형식이 나와서 .replace(' ','T')가
+        //   엉뚱한 첫 공백만 바꿔 파싱이 실패했음(isNaN → continue) — 그 결과
+        //   이 중복방지 안전장치 자체가 조용히 무력화되어, 같은 이슈가 2분
+        //   안에 여러 번 등록되는 사고(2026-09-18 현장 발견, board.html 15pcs
+        //   중복)로 이어졌음. fmtSheetTs_()로 항상 'yyyy-MM-dd HH:mm:ss'
+        //   형식으로 통일해서 파싱이 항상 성공하도록 고침.
+        const rowTime = new Date(fmtSheetTs_(r[2]).replace(' ', 'T'));
         if (isNaN(rowTime.getTime())) continue;
         if (nowMs - rowTime.getTime() > DUP_WINDOW_MS) continue;
         // 2분 이내에 완전히 동일한 이슈가 이미 등록돼 있음 — 새로 만들지 않고 그 이슈를 그대로 반환
