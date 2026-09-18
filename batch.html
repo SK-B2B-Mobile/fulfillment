@@ -820,7 +820,7 @@ select option:disabled{color:var(--text-dim2);}
 .modal-actions{display:flex; gap:8px; justify-content:flex-end; margin-top:20px;}
 
 /* Toast */
-.toast-container{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:300; display:flex; flex-direction:column; gap:8px; align-items:center;}
+.toast-container{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:9999; display:flex; flex-direction:column; gap:8px; align-items:center;} /* ★ 2026-09-18 버그 수정 — 예전엔 300이라 .retro-issue-overlay(410) 등 열려있는 모달 뒤에 토스트가 가려져서 "등록/취소해도 반응이 안 보인다"는 사고로 이어졌음. 다른 최상위 오버레이(.pv-flash 9999 등)와 같은 수준으로 올려서 어떤 모달이 열려있어도 항상 보이게 함. */
 .toast{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 20px; font-size:12.5px; box-shadow:var(--shadow-lg); animation:slideUp 0.2s;}
 .toast.success{border-color:var(--green); background:var(--green-bg); color:var(--green);}
 .toast.error{border-color:var(--red); background:var(--red-bg); color:var(--red);}
