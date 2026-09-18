@@ -662,7 +662,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 
     window._subscribeMirror = function(docPath, onUpdate){
       const ref = doc(db, 'mirror', docPath);
-      onSnapshot(ref, (snap) => {
+      // ★ 세션A 신규 — onSnapshot의 구독해제 함수를 그대로 반환하도록 변경.
+      //   board_activeBatch 같은 고정 소수 문서 구독(board.html/sales.html
+      //   기존 코드)은 반환값을 그냥 안 받으므로 전혀 영향 없음. 인보이스별로
+      //   동적으로 구독/해제해야 하는 salesInvDetail_{invoice} 같은 경우에만
+      //   이 반환값(unsubscribe 함수)을 실제로 사용함.
+      return onSnapshot(ref, (snap) => {
         if(!snap.exists()) return;
         try{
           const payload = JSON.parse(snap.data().data);
@@ -722,6 +727,35 @@ async function getSalesOverviewData_(){
 async function getSalesTodayListData_(){
   if(FIRESTORE_MIRROR_OK && _mirrorCache.today) return _mirrorCache.today;
   return await gasGet({ op:'getSalesTodayList' });
+}
+
+// ★ 세션A 신규 — getSalesInvoiceDetail은 sales_overview/sales_todayList와 달리
+// 인보이스마다 별도 문서(mirror/salesInvDetail_{invoice})이고 수가 무한히 늘어날
+// 수 있으므로, 이 둘처럼 페이지 로드 시 전부 미리 구독해두지 않는다. 상세 모달을
+// 열 때만 그 인보이스 하나를 구독하고, 모달을 닫거나 다른 인보이스로 넘어가면
+// 반드시 구독을 해제한다(리스너가 계속 쌓이는 것 방지). 서버는 이 인보이스에
+// 영향을 주는 쓰기(검수/이슈/디멘션/패킹상태 등)가 있을 때마다 이 문서를 갱신함
+// (1분 폴링이 아니라 쓰기 시점 전파 — FirestoreSync.gs의 syncSalesInvoiceDetailMirror_ 참고).
+let _invDetailUnsub = null;
+function _stopInvoiceDetailSub(){
+  if (_invDetailUnsub) { try { _invDetailUnsub(); } catch(e){} _invDetailUnsub = null; }
+}
+// 반환: 미러에서 실시간으로 받았으면 true, 못 받았으면(문서가 아직 없거나
+// Firestore 연결 자체가 안 됐으면) false — 호출부가 false일 때만 기존 방식으로 폴백.
+function subscribeInvoiceDetailMirror_(inv, onData){
+  return new Promise((resolve) => {
+    if (!window._subscribeMirror) { resolve(false); return; }
+    let settled = false;
+    _invDetailUnsub = window._subscribeMirror('salesInvDetail_' + inv, (payload) => {
+      if (payload && payload.ok) onData(payload);
+      if (!settled) { settled = true; resolve(true); }
+    });
+    // 문서가 아직 한 번도 안 만들어진(=이 인보이스를 한 번도 조회/수정한 적
+    // 없는) 인보이스일 수 있으므로, 짧게 기다렸다가 응답이 없으면 폴백.
+    // (이 조회 자체가 서버에 최초로 미러 문서를 만들게 되므로, 다음번부터는
+    // 실시간 구독이 정상 작동함.)
+    setTimeout(() => { if (!settled) { settled = true; resolve(false); } }, 400);
+  });
 }
 
 const REASON_LABEL = {EXP:'Expired', NF:'Not Found In Stock', DMG:'Damaged', OOS:'Out of Stock', SKUMIS:'SKU Mismatch', MISS:'Not Scanned (Picked OK)', CANC:'Sales Cancel Request'};
@@ -1544,13 +1578,13 @@ async function doSearch(){
   if (f.length > 1){ st.textContent = f.length + ' matches — pick one from the list below.'; return; }
 
   // 목록에 없음 → 서버 조회
+  // ★ 세션A — 예전엔 여기서 getSalesInvoiceDetail을 직접 호출해서 openInvoice()와
+  //   똑같은 로직(모달 열기+그리기)을 중복 작성하고 있었고, 그 결과 이 경로는
+  //   Firestore 미러 혜택(실시간 갱신)도 못 받았음. openInvoice()를 그대로
+  //   재사용해서 중복도 없애고 미러 혜택도 자동으로 받게 함.
   st.innerHTML = '<span class="spinner"></span> Searching all orders…';
-  const direct = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice:q });
-  if (direct && direct.ok){ st.textContent = ''; CURRENT_ORDER = direct; 
-    document.getElementById('detail-overlay').classList.add('show');
-    document.body.style.overflow = 'hidden';
-    renderDetail(direct);  // 합치기 후보는 renderDetail 끝에서 자동으로 불러옴
-    return; }
+  await openInvoice(q);
+  if (CURRENT_ORDER && CURRENT_ORDER.ok) { st.textContent = ''; return; }
 
   st.innerHTML = '<span class="spinner"></span> Searching by barcode / SKU…';
   const byItem = await gasGet({ op:'getOrdersByItem', q:q });
@@ -1930,6 +1964,8 @@ async function saveDimsReal(){
 async function openInvoice(inv){
   inv = String(inv||'').trim().toUpperCase();
   if (!inv) return;
+  _stopInvoiceDetailSub(); // ★ 세션A — 이전에 열려있던 인보이스 구독은 반드시 먼저 해제
+
   const overlay = document.getElementById('detail-overlay');
   const card = document.getElementById('detail-card');
   overlay.classList.add('show');
@@ -1937,6 +1973,19 @@ async function openInvoice(inv){
   card.classList.add('show');
   card.innerHTML = `<div class="modal-loading"><span class="spinner"></span>${inv} loading…</div>`;
 
+  // ★ 세션A — 미러 문서가 이미 있으면(=한 번이라도 조회/수정된 인보이스) 실시간
+  //   구독으로 즉시 표시. 모달이 열려있는 동안 다른 기기가 이 인보이스를
+  //   검수·이슈등록·디멘션저장 하면 새로고침 없이 이 화면도 자동으로 갱신됨
+  //   (예전엔 30초 캐시 + 수동 새로고침이 있어야만 보였음).
+  const gotLive = await subscribeInvoiceDetailMirror_(inv, (payload) => {
+    CURRENT_ORDER = payload;
+    renderDetail(payload);
+  });
+  if (gotLive) return;
+
+  // 폴백 — 미러 문서가 아직 없거나(최초 조회) Firestore 연결 자체가 안 된 경우.
+  // 이 조회로 서버가 미러 문서를 새로 만들어주므로, 다음번 열람부터는 위
+  // 실시간 구독 경로를 탄다.
   const res = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice: inv });
   if (!res || !res.ok){
     CURRENT_ORDER = null;
@@ -2155,6 +2204,7 @@ function renderDetail(res){
 function closeDetailCard(){
   // ★ 2026-08-06 — 팝업만 닫음. 검색어와 목록 위치는 그대로 두어서,
   //   여러 건을 연속으로 처리할 때 매번 다시 찾지 않아도 되게 함.
+  _stopInvoiceDetailSub(); // ★ 세션A 신규 — 모달을 닫으면 실시간 구독도 반드시 해제(누수 방지)
   document.getElementById('detail-overlay').classList.remove('show');
   document.getElementById('detail-card').classList.remove('show');
   document.body.style.overflow = '';
