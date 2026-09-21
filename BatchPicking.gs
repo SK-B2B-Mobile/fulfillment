@@ -931,6 +931,8 @@ function _findBatchRow_(batchId) {
 function createBatch(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
+  let result;
+  let batchDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
     const batchId = generateBatchId_();
@@ -941,8 +943,12 @@ function createBatch(data) {
     const totalSku = sumItems.length;
     const totalQty = sumItems.reduce((a, it) => a + (Number(it.req_qty) || 0), 0);
 
+    // ★ 세션E 신규 — 시트와 Firestore에 정확히 동일한 생성 시각을 쓰기 위해
+    //   batchNow_()를 한 번만 계산해서 재사용.
+    const nowStr = batchNow_();
+
     const bSh = batchesSheet_();
-    bSh.appendRow([batchId, today, 'active', totalSku, totalQty, batchNow_(), '']);
+    bSh.appendRow([batchId, today, 'active', totalSku, totalQty, nowStr, '']);
     bSh.getRange(bSh.getLastRow(), 2).setNumberFormat('@'); // Date 컬럼 텍스트 고정 (자동 날짜변환 방지)
 
     const bi = bitemsSheet_();
@@ -974,12 +980,29 @@ function createBatch(data) {
     }
 
     bumpVersion_(); // 기존 Code.gs 함수 재사용
-    return { ok: true, batchId: batchId, totalSku: totalSku, totalQty: totalQty };
+    // ★ 세션E 신규 — 구글시트에 실제로 쓴 것과 동일한 내용으로 Firestore
+    //   이중쓰기용 문서를 준비. sumItems/customers는 addStandaloneOrder와 동일한
+    //   이유(FirestoreApp 라이브러리가 중첩 배열/객체를 필드로 직접 다루는 방식이
+    //   검증되지 않음)로 JSON 문자열로 안전하게 담음. 락 안에서는 절대 Firestore를
+    //   직접 호출하지 않음(락 해제 후 아래에서 best-effort로 씀).
+    batchDocForFirestore = {
+      batchId: batchId, date: today, status: 'active', totalSku: totalSku, totalQty: totalQty,
+      createdAt: nowStr, completedAt: '',
+      sumItemsJson: JSON.stringify(sumItems), customersJson: JSON.stringify(customers),
+    };
+    result = { ok: true, batchId: batchId, totalSku: totalSku, totalQty: totalQty };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 createBatch에도 동일하게 적용. 구글시트
+  //   (진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도 배치 생성
+  //   결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  if (result.ok && batchDocForFirestore) {
+    try { writeBatchDoc_(batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+  }
+  return result;
 }
 
 /* ===================== ①-S 단독 오더 등록/조회/삭제 (★ 2026-08-31 신규) =====================
@@ -2557,6 +2580,7 @@ function logScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
   let result;
+  let scanDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
     const scanId = Utilities.getUuid();
@@ -2569,10 +2593,14 @@ function logScan(data) {
     const newRow = sl.getLastRow() + 1;
     ensureSheetRoom_(sl, newRow); // ★ 2026-08-12 신규 — 시트 행 부족 시 자동으로 미리 늘려둠
     sl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+    // ★ 세션E 신규 — 시트와 Firestore(아래)에 정확히 동일한 시각/수량을 쓰기 위해
+    //   한 번만 계산해서 재사용.
+    const nowStr = batchNow_();
+    const qty = Number(data.qty) || 1;
     sl.getRange(newRow, 1, 1, 12).setValues([[
-      data.batchId, scanId, batchNow_(), data.worker || '', data.barcode || '',
+      data.batchId, scanId, nowStr, data.worker || '', data.barcode || '',
       data.sku || '', data.slot || '', data.customer || '', data.invoice || '',
-      data.result || 'pass', 'active', Number(data.qty) || 1
+      data.result || 'pass', 'active', qty
       // ★ 2026-07-13: '스캔 1번 = 낱개 1개'가 아니라 '스캔 1번 = 그 순간 배정된
       //   고객사가 필요한 수량 전체를 분류 완료'로 워크플로우를 변경함에 따라
       //   추가된 컬럼. 총량피킹에서 스캔의 목적은 개수 검수가 아니라 "이 상품을
@@ -2580,6 +2608,17 @@ function logScan(data) {
       //   해당 고객사 몫으로 카운트되어야 함.
     ]]);
     result = { ok: true, scanId: scanId };
+    // ★ 세션E 신규 — 구글시트에 실제로 쓴 것과 동일한 필드·값으로 Firestore
+    //   이중쓰기용 문서를 준비. 락 안에서는 절대 Firestore를 직접 호출하지
+    //   않음(스캔은 창고에서 가장 빈번한 동작이라, 락을 붙잡은 채 외부 API를
+    //   부르면 다른 작업자의 스캔·이슈등록이 전부 그 뒤에서 기다려야 함 —
+    //   위 2026-09-03 성능수정과 동일한 원칙). 락 해제 후 아래에서 best-effort로 씀.
+    scanDocForFirestore = {
+      batchId: data.batchId, scanId: scanId, timestamp: nowStr, worker: data.worker || '',
+      barcode: data.barcode || '', sku: data.sku || '', slot: data.slot || '',
+      customer: data.customer || '', invoice: data.invoice || '',
+      result: data.result || 'pass', status: 'active', qty: qty,
+    };
   } catch (e) {
     result = { ok: false, error: String(e && e.message || e) };
   } finally {
@@ -2597,6 +2636,12 @@ function logScan(data) {
   //   진행됨 — 다른 작업자의 요청이 이걸 기다릴 필요가 없어짐.
   if (result.ok) {
     try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker); } catch (e) { /* 무시 — best-effort, 스캔 자체는 이미 성공 처리됨 */ }
+    // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 logScan에도 동일하게 적용. 구글시트
+    //   (진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도 스캔
+    //   결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+    if (scanDocForFirestore) {
+      try { writeScanDoc_(scanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    }
   }
   return result;
 }
@@ -3142,18 +3187,39 @@ function deleteBatchIfEmpty(data) {
 function completeBatch(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let batchDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     const row = _findBatchRow_(data.batchId);
-    if (!row) return { ok: false, error: 'batch not found' };
-    batchesSheet_().getRange(row, 3).setValue('completed');
-    batchesSheet_().getRange(row, 7).setValue(batchNow_());
-    bumpVersion_();
-    return { ok: true };
+    if (!row) {
+      result = { ok: false, error: 'batch not found' };
+    } else {
+      // ★ 세션E 신규 — 시트와 Firestore에 정확히 동일한 완료 시각을 쓰기 위해
+      //   batchNow_()를 한 번만 계산해서 재사용.
+      const nowStr = batchNow_();
+      batchesSheet_().getRange(row, 3).setValue('completed');
+      batchesSheet_().getRange(row, 7).setValue(nowStr);
+      bumpVersion_();
+      // ★ 세션E 신규 — completeBatch는 status/completedAt 두 필드만 바뀌므로,
+      //   여기선 그 두 필드만 담아 Firestore 이중쓰기용 문서를 준비함(문서
+      //   전체를 새로 만들지 않음). writeBatchDoc_이 기존 문서(createBatch가
+      //   저장해둔 sumItemsJson/customersJson 등)를 먼저 읽어와 이 필드들만
+      //   덮어써서 병합하므로, 다른 필드가 사라지지 않음.
+      batchDocForFirestore = { batchId: data.batchId, status: 'completed', completedAt: nowStr };
+      result = { ok: true };
+    }
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 completeBatch에도 동일하게 적용.
+  //   구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
+  //   배치 완료처리 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  if (result.ok && batchDocForFirestore) {
+    try { writeBatchDoc_(batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+  }
+  return result;
 }
 
 /* ===================== ⑦ logPickTiming =====================
