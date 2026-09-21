@@ -999,8 +999,13 @@ function createBatch(data) {
   // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 createBatch에도 동일하게 적용. 구글시트
   //   (진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도 배치 생성
   //   결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  // ★ 2026-09-21 긴급 재설계 — Firestore를 이 요청 안에서 직접 부르지 않고,
+  //   큐(FirestoreQueue 시트)에 가볍게 한 줄만 남긴다. 실제 Firestore 전송은
+  //   별도의 1분 트리거(processFirestoreQueue_)가 나중에 처리하므로, 작업자가
+  //   기다리는 이 응답 시간에는 Firestore 네트워크 지연이 전혀 끼어들지 않는다.
+  //   (자세한 이유는 FirestoreSync.gs 상단 큐 설계 주석 참고 — 튕김/지연 사고 원인)
   if (result.ok && batchDocForFirestore) {
-    try { writeBatchDoc_(batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    try { queueFirestoreWrite_('batch', batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
   return result;
 }
@@ -1783,8 +1788,15 @@ function logPackScan(data) {
   // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 logPackScan(정상 채움 케이스)에도 동일하게
   //   적용. 구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
   //   패킹 검증 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  // ★ 2026-09-21 긴급 재설계 — logPackScan은 Step 04(Standalone 1차 검수)와
+  //   Pack Verify(2차 검증)에서 스캔마다 매번 호출되고, 특히 Step 04는 서버
+  //   응답을 기다렸다가 화면을 갱신하는 구조라, 여기서 Firestore를 직접 불러
+  //   지연되면 작업자가 스캔이 "튕겨나오는" 것처럼 그대로 느낀다(실제 발생한
+  //   장애 원인). 이제 Firestore 직접 호출 대신 큐(FirestoreQueue 시트)에
+  //   가볍게 한 줄만 남기고, 실제 전송은 1분 트리거(processFirestoreQueue_)가
+  //   요청과 완전히 분리된 시점에 처리한다 — 작업자 응답 속도에는 영향 없음.
   if (result && result.ok && packScanDocForFirestore) {
-    try { writePackScanDoc_(packScanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    try { queueFirestoreWrite_('packScan', packScanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
   return result;
 }
@@ -2662,8 +2674,15 @@ function logScan(data) {
     // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 logScan에도 동일하게 적용. 구글시트
     //   (진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도 스캔
     //   결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+    // ★ 2026-09-21 긴급 재설계 — logScan은 창고에서 초당 여러 번 일어나는 가장
+    //   빈번한 동작(바로 위 syncInspectionFromPicking_ 주석 참고). 이미 무거운
+    //   후속 작업이 있는 함수에 Firestore 네트워크 호출까지 매번 추가로 얹은 것이
+    //   실행시간 누적 → 동시 실행 슬롯 소진 → 다른 요청들까지 지연/실패로 튕겨나오는
+    //   실제 장애의 핵심 원인으로 확인됨. 이제 Firestore 직접 호출 대신 큐
+    //   (FirestoreQueue 시트)에 가볍게 한 줄만 남기고, 실제 전송은 1분 트리거
+    //   (processFirestoreQueue_)가 요청과 완전히 분리된 시점에 처리한다.
     if (scanDocForFirestore) {
-      try { writeScanDoc_(scanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+      try { queueFirestoreWrite_('scan', scanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
     }
   }
   return result;
@@ -3239,8 +3258,13 @@ function completeBatch(data) {
   // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 completeBatch에도 동일하게 적용.
   //   구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
   //   배치 완료처리 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  // ★ 2026-09-21 긴급 재설계 — Firestore 직접 호출 대신 큐(FirestoreQueue 시트)에
+  //   가볍게 한 줄만 남긴다. 큐는 항상 쌓인 순서(=시간 순서) 그대로 처리되므로,
+  //   같은 batchId의 createBatch 큐 항목이 completeBatch 큐 항목보다 먼저 쌓여
+  //   먼저 처리되고, writeBatchDoc_의 기존 문서 병합(read-merge-write) 로직은
+  //   처리 "시점"에 Firestore에서 다시 읽어 병합하므로 지금과 동일하게 정확함.
   if (result.ok && batchDocForFirestore) {
-    try { writeBatchDoc_(batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    try { queueFirestoreWrite_('batch', batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
   return result;
 }
