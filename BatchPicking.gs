@@ -1614,6 +1614,8 @@ function clearInvoiceCache_(batchId, invoice) {
 function logPackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  let result;
+  let packScanDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장(정상 채움 'pass' 케이스만 해당)
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
     if (!data.invoice) return { ok: false, error: 'invoice required' };
@@ -1750,20 +1752,41 @@ function logPackScan(data) {
     const newRow2 = pl.getLastRow() + 1;
     ensureSheetRoom_(pl, newRow2);
     pl.getRange(newRow2, 5, 1, 2).setNumberFormat('@');
+    // ★ 세션E 신규 — 시트와 Firestore(아래)에 정확히 동일한 시각을 쓰기 위해
+    //   한 번만 계산해서 재사용.
+    const nowStr = batchNow_();
     pl.getRange(newRow2, 1, 1, 13).setValues([[
-      data.batchId, packScanId, batchNow_(), data.worker || '', barcode, sku,
+      data.batchId, packScanId, nowStr, data.worker || '', barcode, sku,
       data.invoice, 'pass', 'active', fillQty, round, box, pallet,
     ]]);
     bumpVersion_();
-    return {
+    // ★ 세션E 신규 — 구글시트에 실제로 쓴 것과 동일한 내용으로 Firestore 이중쓰기용
+    //   문서를 준비. Pack Verify의 "정상 채움(pass)" 케이스만 미러링함 — 위쪽의
+    //   'wrong'(다른 인보이스 상품)/'over'(중복·이슈제외/0입력)는 진단성 로그라
+    //   이번 이중쓰기 범위에서 제외함(패킹 상태에 실제 영향을 주는 건 'pass'뿐).
+    //   락 안에서는 절대 Firestore를 직접 호출하지 않음(락 해제 후 아래에서
+    //   best-effort로 씀).
+    packScanDocForFirestore = {
+      batchId: data.batchId, packScanId: packScanId, timestamp: nowStr, worker: data.worker || '',
+      barcode: barcode, sku: sku, name: name, invoice: data.invoice, result: 'pass', status: 'active',
+      qty: fillQty, round: round, box: box, pallet: pallet,
+    };
+    result = {
       ok: true, result: 'pass', packScanId: packScanId, sku: sku, name: name,
       filled: fillQty, packed: already + fillQty, required: effectiveReq, box: box, pallet: pallet,
     };
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 logPackScan(정상 채움 케이스)에도 동일하게
+  //   적용. 구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
+  //   패킹 검증 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
+  if (result && result.ok && packScanDocForFirestore) {
+    try { writePackScanDoc_(packScanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+  }
+  return result;
 }
 
 /* undoPackScan — 잘못 스캔한 것을 취소(실제 삭제 대신 Status를 undone으로)
