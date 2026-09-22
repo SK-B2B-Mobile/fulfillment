@@ -2260,6 +2260,18 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
 
   dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">불러오는 중...</div>`;
   dd.style.display = 'block';
+  // ★ 2026-09-22 긴급 수정 — 현장 보고: "다른 배치" 목록이 열리자마자 아주
+  //   짧게 보였다가 바로 사라진다. 원인 — 이 버튼의 클릭 이벤트 자체는
+  //   e.stopPropagation()으로 막아뒀지만, 트랙패드/일부 마우스·브라우저
+  //   조합에서는 클릭 한 번이 사실상 두 번(빠른 연속 click)으로 잡히거나,
+  //   버튼을 누른 그 순간의 클릭이 완전히 끝나기 전에 밑에 있는 문서 전체
+  //   click 리스너(바로 아래, 바깥 클릭 시 닫기용)가 같은 상호작용을 "바깥
+  //   클릭"으로 잘못 인식해서 열리자마자 바로 닫아버리는 경우가 실제로
+  //   있었음(재현이 기기마다 다름). 여는 순간의 타임스탬프를 남겨두고,
+  //   바깥-클릭 닫기 로직에서 "연 직후 300ms 이내"는 무조건 무시하도록
+  //   방어선을 추가함 — 정상적으로 다른 곳을 눌러 닫는 동작에는 300ms 정도
+  //   지연은 사람이 느낄 수 없어 전혀 불편함이 없음.
+  dd._openedAt = Date.now();
 
   // ★ 2026-09-18 신규(현장 요청) — 고정 비율(vh)로 높이를 제한하던 방식은
   //   화면 크기·배치 목록 길이에 따라 여전히 슬롯 영역(대량 오더 구역)과
@@ -2321,7 +2333,12 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
 };
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('switchBatchDropdown');
-  if(dd && dd.style.display === 'block' && !e.target.closest('#btnSwitchBatch') && !e.target.closest('#switchBatchDropdown')){
+  if(!dd || dd.style.display !== 'block') return;
+  // ★ 2026-09-22 긴급 수정 — 위 btnSwitchBatch 클릭 핸들러의 주석 참고.
+  //   방금(300ms 이내) 연 드롭다운은 "바깥 클릭"으로 절대 안 닫음 — "열리자마자
+  //   바로 사라지는" 현상의 실제 방어선.
+  if(dd._openedAt && (Date.now() - dd._openedAt) < 300) return;
+  if(!e.target.closest('#btnSwitchBatch') && !e.target.closest('#switchBatchDropdown')){
     dd.style.display = 'none';
   }
 });
