@@ -2284,15 +2284,29 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   //   여전히 드롭다운과 겹칠 수 있었음(실제로 겹치는 것이 스크린샷으로 확인됨).
   //   헤더 줄까지 통째로 포함하는 상위 컨테이너(.slot-section.large)를 기준으로
   //   재도록 수정 — 이제 "대량 오더 구역" 글자 시작 지점 바로 위까지만 차지함.
+  // ★ 2026-09-22 긴급 수정 — 현장 보고: "01 Batch"/"03 Scan & Sort" 탭에서는
+  //   목록 박스가 작게(150px) 나오고, "02 Slot Layout" 탭에서만 길게 나온다.
+  //   원인 — .slot-section.large는 Slot Layout 탭 안에만 있는 요소인데, 다른
+  //   탭이 열려있을 땐 그 요소가 display:none으로 숨겨져 있어도 DOM에는 계속
+  //   존재함. 숨겨진 요소의 getBoundingClientRect()는 항상 (0,0,0,0)을
+  //   반환하므로, slotsTop이 0으로 잘못 계산되어 available이 음수가 되고,
+  //   매번 최소값(150px)으로 강제 축소되고 있었음(슬롯과 안 겹치게 하려던
+  //   계산이 "슬롯 탭이 아예 안 보이는 상황"까지는 고려 못 했던 버그).
+  //   → 그 요소가 실제로 화면에 렌더링되어 보이는 중일 때만(offsetParent가
+  //   있을 때만) 이 계산을 적용하고, 그렇지 않은 탭(01/03 등)에서는 기존의
+  //   넉넉한 기본 높이(calc(100vh - 200px), CSS에 이미 정의됨)로 명시적으로
+  //   되돌림 — 예전 값이 남아있지 않도록 매번 새로 정함.
   try {
     const slotsEl = document.querySelector('.slot-section.large');
     const ddTop = dd.getBoundingClientRect().top;
-    if (slotsEl && ddTop) {
+    if (slotsEl && slotsEl.offsetParent !== null && ddTop) {
       const slotsTop = slotsEl.getBoundingClientRect().top;
       const available = slotsTop - ddTop - 12;
       dd.style.maxHeight = Math.max(150, available) + 'px';
+    } else {
+      dd.style.maxHeight = 'calc(100vh - 200px)'; // 슬롯 배치 화면이 아니면(안 겹칠 걱정이 없으므로) 기본 넉넉한 높이 사용
     }
-  } catch (eMeasure) { /* 측정 실패해도 기존 max-height(calc(100vh - 200px))가 안전망으로 남아있음 */ }
+  } catch (eMeasure) { dd.style.maxHeight = 'calc(100vh - 200px)'; /* 측정 실패해도 안전하게 넉넉한 기본 높이로 */ }
 
   const res = await gasQueryWithRetry('getOpenBatches', {});
   if(!res.ok){ dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`; return; }
