@@ -3656,6 +3656,17 @@ document.getElementById('startBatchBtn').onclick = async () => {
   toast(`배치 ${state.batchId} 시작 · 슬롯 자동 배정 완료` + (GAS_READY?' · 저장됨':' · 데모모드(저장안됨)'), 'success');
 };
 
+// ★ 2026-09-22 긴급 수정 — 실제 사고 발견: CMS가 "총량 GROUP PICKING CHECK LIST"와
+//   "고객사별 피킹 리스트"를 뽑을 때 같은 상품의 SKU 코드를 리포트 종류에 따라
+//   대소문자를 다르게 내보내는 경우가 있음(예: 총량엔 "TKBSM05-STICKM", 고객사
+//   리스트엔 "TKBSM05-Stickm"). 바코드는 완전히 같은데 SKU 문자열만 대소문자가
+//   달라서 매칭 실패 → "이 SKU는 어떤 고객사에도 배정되지 않았습니다" 오류로
+//   이어짐(실제 데이터 문제가 아니라 비교 로직이 너무 엄격했던 것). 앞뒤 공백과
+//   대소문자를 무시하고 비교하도록 정규화 함수를 추가.
+function skuNormKey_(s){
+  return String(s == null ? '' : s).trim().toUpperCase();
+}
+
 function buildScanIndex(){
   state.lastStructureSync = Date.now(); // ★ 2026-07-10: 진단용 — 큐가 언제 마지막으로 다시 짜였는지
   // ★ 2026-07-28 대폭 수정 — 실제 사고 발견: 같은 바코드가 서로 다른 두 SKU에
@@ -3667,10 +3678,10 @@ function buildScanIndex(){
   //   같은 바코드에 SKU가 여러 개 걸려있으면 스캔 시 작업자가 직접 골라야
   //   진행되도록 함(doScan의 선택 화면 참고). altVariants가 비어있으면(=99%의
   //   정상 케이스) 예전과 완전히 동일하게 동작함(구조 100% 하위호환).
-  const groupsByBc = {}; // barcode -> { skuCode -> {sku,name,rack,total} }
+  const groupsByBc = {}; // barcode -> { skuNormKey -> {sku,name,rack,total} }
   state.sumFile.items.forEach(it => {
-    const bc = String(it.barcode);
-    const skuKey = String(it.sku);
+    const bc = String(it.barcode).trim();
+    const skuKey = skuNormKey_(it.sku); // ★ 2026-09-22: 대소문자/공백 무시 — 위 skuNormKey_ 설명 참고
     if(!groupsByBc[bc]) groupsByBc[bc] = {};
     if(!groupsByBc[bc][skuKey]) groupsByBc[bc][skuKey] = { sku: it.sku, name: it.name, rack: it.rack, total: 0 };
     groupsByBc[bc][skuKey].total += (it.req_qty || 0);
@@ -3690,7 +3701,10 @@ function buildScanIndex(){
         let mergedNeed = 0;
         let found = false;
         cf.items.forEach(it => {
-          if(String(it.barcode) === bc && String(it.sku) === String(v.sku)){
+          // ★ 2026-09-22 긴급 수정 — SKU는 skuNormKey_()로 대소문자/공백 무시하고 비교
+          //   (바코드는 원래대로 정확히 일치해야 함 — 서로 다른 상품이 같은 바코드를
+          //   쓰는 사고가 실제로 있었으므로 바코드 쪽은 느슨하게 풀면 안 됨).
+          if(String(it.barcode).trim() === bc && skuNormKey_(it.sku) === skuNormKey_(v.sku)){
             mergedNeed += (it.req_qty || 0); found = true;
           }
         });
