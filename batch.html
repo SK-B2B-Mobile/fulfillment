@@ -993,6 +993,13 @@ select option:disabled{color:var(--text-dim2);}
       <!-- ★ 2026-07-10 신규: 매니저가 완료 처리 안 한 배치는 날짜가 바뀌어도 여기 계속 뜸 -->
       <div id="openBatchesPanel" style="display:none; margin-bottom:18px;"></div>
 
+      <!-- ★ 2026-09-23 신규 — 이미 만들어진 배치를 "01 Batch" 탭에서 열 때마다, 총량엔
+           있지만 어느 고객사에도 배정 안 된 SKU가 있는지 서버 데이터로 다시 확인해서
+           눈에 띄게 경고. 오늘 실제로 겪은 사고(DRAS01-SR15/US_MECU05-MPSET이 구글시트에
+           고객사 줄 없이 총량만 있어서 스캔 단계에서야 발견된 것)를 피킹 시작 전에
+           미리 잡기 위한 안전장치. checkBatchDataIntegrityForBatchTab_() 참고. -->
+      <div id="batchIntegrityWarning" style="display:none; margin-bottom:14px;"></div>
+
       <!-- ★ 2026-08-11 신규(매니저 요청) — 이미 진행중인 배치가 로드돼 있으면 업로드 폼 대신
            이 안내 카드를 보여줌. "배치 시작" 버튼이 다시 활성화된 것처럼 보여 혼란을 주던
            문제(8/11 실사고) 해결 — 아래 batchCreateForm 전체를 안내 카드와 서로 배타적으로 표시.
@@ -3416,10 +3423,100 @@ function renderBatchTabMode(){
     formWrap.style.display = 'none';
     notice.style.display = 'block';
     renderActiveBatchNotice();
+    // ★ 2026-09-23 신규 — 이미 만들어진 배치를 열 때마다 고객사 미배정 SKU가
+    //   있는지 서버 최신 데이터로 재확인. await 안 하고 그냥 던짐(백그라운드) —
+    //   이 체크가 늦어져도 "01 Batch" 탭 자체가 뜨는 걸 막으면 안 되기 때문.
+    checkBatchDataIntegrityForBatchTab_();
   } else {
     notice.style.display = 'none';
     notice.innerHTML = '';
     formWrap.style.display = '';
+    const box = document.getElementById('batchIntegrityWarning');
+    if(box){ box.style.display = 'none'; box.innerHTML = ''; }
+  }
+}
+
+// ★ 2026-09-23 신규 — "01 Batch" 탭에 이미 생성된 배치가 로드돼 있을 때, 총량
+//   리스트엔 있지만 고객사(인보이스) 쪽 어디에도 같은 바코드+SKU 조합이 없는
+//   상품이 있으면 피킹 시작 전에 큰 경고로 바로 보여줌.
+//   실제 사고 사례(2026-09-23): DRAS01-SR15·US_MECU05-MPSET 두 상품이 원본
+//   고객사 PDF엔 정상적으로 있었지만, 구글시트(BatchItems)에 옮겨 적는 과정에서
+//   "고객사 줄"(B열=인보이스)이 통째로 빠지고 총량 줄(B열 공백)만 남아있었음 —
+//   그래서 스캔·분류 단계에서야 "고객사 없이 로드됨"으로 뒤늦게 발견됨.
+//   이 함수는 서버(getBatch)에서 최신 데이터를 다시 받아 동일한 문제를 피킹
+//   시작 전에 미리 잡아냄.
+//   ⚠ 중요: 이 함수는 완전히 read-only임 — state.sumFile/state.custFiles를
+//   전혀 건드리지 않음. refreshBatchStructure()/applyBatchStructureResult_()의
+//   view-gate(v-slots/v-scan/v-log/v-workers에서만 구조 반영)와는 완전히 별개의
+//   경로이며, "01 Batch" 탭 전용이라 그 안전장치와 절대 섞이지 않음(2026-07-14
+//   "데이터 짬뽕" 사고 재발 방지 원칙 그대로 유지).
+async function checkBatchDataIntegrityForBatchTab_(){
+  const box = document.getElementById('batchIntegrityWarning');
+  if(!box) return;
+  if(!state.batchId){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  const checkingBatchId = state.batchId; // 응답 도착 전에 배치가 바뀌었는지 판단용
+  try{
+    const res = await gasQuery('getBatch', { batchId: checkingBatchId });
+    // 응답이 오는 사이 다른 배치로 전환됐거나, "01 Batch" 탭을 벗어났으면 무시
+    if(checkingBatchId !== state.batchId) return;
+    const activeView = document.querySelector('.view.active');
+    if(!activeView || activeView.id !== 'v-batch') return;
+    if(!res || !res.ok || !res.batch) return;
+
+    const sumItems = res.sumItems || [];
+    const custItems = (res.customers || []).flatMap(c => c.items || []);
+    const custKeySet = new Set(
+      custItems.map(it => String(it.barcode).trim() + '||' + skuNormKey_(it.sku))
+    );
+
+    const seen = new Set();
+    const unassigned = [];
+    sumItems.forEach(it => {
+      const key = String(it.barcode).trim() + '||' + skuNormKey_(it.sku);
+      if(seen.has(key)) return; // 총량 쪽에 같은 조합이 여러 줄이어도 한 번만 카운트
+      seen.add(key);
+      if((it.req_qty || 0) > 0 && !custKeySet.has(key)){
+        unassigned.push(it);
+      }
+    });
+
+    if(unassigned.length === 0){
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+
+    // 이 파일 다른 곳에도 공용 HTML-escape 헬퍼가 없어서(기존 코드 관례 그대로),
+    // 이 배너 안에서만 쓰는 작은 로컬 이스케이프 함수를 둠 — SKU/상품명에 우연히
+    // <,>,& 같은 문자가 섞여 있어도 배너 레이아웃이 깨지지 않도록 하는 안전장치.
+    const _esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const shown = unassigned.slice(0, 8).map(it => `
+      <div style="font-size:12px; color:var(--text-dim); padding:3px 0; font-family:var(--mono);">
+        · ${_esc(it.sku)} — ${_esc(it.name || '')} (총량 ${it.req_qty}개, 바코드 ${_esc(it.barcode)})
+      </div>`).join('');
+    const more = unassigned.length > 8
+      ? `<div style="font-size:11px; color:var(--text-dim2); margin-top:6px;">외 ${unassigned.length - 8}건 더 있음</div>`
+      : '';
+
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div style="border:1.5px solid var(--red); background:rgba(239,68,68,0.1); border-radius:12px; padding:16px 18px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <span style="font-size:16px;">⚠</span>
+          <span style="font-size:14px; font-weight:700; color:var(--red);">${unassigned.length}개 상품이 고객사 미배정 상태입니다</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">
+          총량 리스트엔 있지만, 이 상품을 주문한 고객사 정보가 구글시트(BatchItems)에 없습니다.
+          이대로 피킹/스캔을 진행하면 분류 단계에서 슬롯 번호가 뜨지 않습니다 —
+          구글시트에 해당 고객사 인보이스 줄을 추가한 뒤 아래에서 다시 확인해주세요.
+        </div>
+        ${shown}${more}
+        <button class="btn btn-ghost btn-sm" id="btnRecheckBatchIntegrity" style="margin-top:12px;">↻ 다시 확인</button>
+      </div>`;
+    const btn = document.getElementById('btnRecheckBatchIntegrity');
+    if(btn) btn.onclick = () => checkBatchDataIntegrityForBatchTab_();
+  }catch(e){
+    console.error('checkBatchDataIntegrityForBatchTab_ 실패:', e);
   }
 }
 
