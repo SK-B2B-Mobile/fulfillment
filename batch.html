@@ -1800,6 +1800,53 @@ select option:disabled{color:var(--text-dim2);}
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════
+     ★ 2026-09-23 신규(Phase 1: 실시간화) — Firestore 미러 구독
+     ------------------------------------------------------------
+     sales_v2.html/board.html(v2)과 완전히 동일한 패턴. batch.html이
+     원래 하던 getOpenBatches/getBatch 호출 "로직" 자체는 전혀 안 바꿈.
+     Apps Script(FirestoreSync.gs)가 1분마다 그 결과를 그대로
+     Firestore mirror/* 문서에 복사해두고, 이 페이지는 그 문서를
+     실시간 구독(onSnapshot)만 함 — 구독 실패 시 기존 폴링으로 자동 폴백.
+     ═══════════════════════════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBG4HmlCg4CoJPoCbOi-ZE6wQwY2u88XeA",
+    authDomain: "sk-b2b-fulfillment.firebaseapp.com",
+    projectId: "sk-b2b-fulfillment",
+    storageBucket: "sk-b2b-fulfillment.firebasestorage.app",
+    messagingSenderId: "1053449174138",
+    appId: "1:1053449174138:web:d1f81b0c05abe6fcf4cfc3",
+    measurementId: "G-QBTQ1E86Y6"
+  };
+
+  try {
+    const fbApp = initializeApp(firebaseConfig);
+    const db = getFirestore(fbApp);
+
+    window._subscribeMirror = function(docPath, onUpdate){
+      const ref = doc(db, 'mirror', docPath);
+      // onSnapshot의 구독해제 함수를 그대로 반환 — batch.html은 배치를 전환할
+      // 때마다 이전 배치의 구독을 반드시 해지해야 하므로(리스너 누수 방지)
+      // 이 반환값(unsubscribe 함수)을 실제로 사용함.
+      return onSnapshot(ref, (snap) => {
+        if(!snap.exists()) return;
+        try{
+          const payload = JSON.parse(snap.data().data);
+          onUpdate(payload);
+        }catch(e){ console.error('[mirror] JSON 파싱 실패 (' + docPath + '):', e); }
+      }, (err) => {
+        console.error('[mirror] onSnapshot 에러 (' + docPath + '):', err);
+      });
+    };
+    console.log('✅ Firestore 미러 연결 준비 완료 (batch.html)');
+  } catch(e) {
+    console.error('❌ Firestore 초기화 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다:', e);
+  }
+</script>
 
 <script>
 // ═══════════════════════════════════════════════════════════
@@ -1813,6 +1860,58 @@ const CONFIG = {
 };
 const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
 const API_READY = CONFIG.API_BASE.startsWith('http');
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-09-23 신규(Phase 1: 실시간화) — 미러 구독 상태 + 폴백 캐시.
+//   sales_v2.html의 FIRESTORE_MIRROR_OK 패턴과 동일. 이 배치 파일이
+//   원래 하던 Apps Script 직접 폴링(checkOpenBatches/refreshBatchStructure)은
+//   코드 한 줄도 안 지움 — 미러가 준비되면 "추가로" 실시간 갱신을 얹고,
+//   미러 연결이 안 되거나 끊기면 기존 폴링만으로도 100% 그대로 동작함.
+// ═══════════════════════════════════════════════════════════
+let FIRESTORE_MIRROR_OK = false;
+let _openBatchesMirrorCache = null;
+let _batchStructMirrorUnsub = null;   // 현재 구독 중인 mirror/batch_{batchId} 구독해제 함수
+let _batchStructMirrorBatchId = null; // 현재 구독 중인 배치ID
+
+function _waitForBatchMirrorInit(tries){
+  tries = tries || 0;
+  if(window._subscribeMirror){
+    FIRESTORE_MIRROR_OK = true;
+    // ★ board_openBatches — board.html/sales.html이 이미 구독 중인 문서를 그대로
+    //   재사용함(동일한 getOpenBatches() 결과이므로 mirror/openBatches라는
+    //   별도 문서를 새로 만들지 않음 — 불필요한 중복 계산/중복 쓰기 방지).
+    window._subscribeMirror('board_openBatches', (p) => {
+      _openBatchesMirrorCache = p;
+      if(p && p.ok && typeof renderOpenBatchesPanel === 'function') renderOpenBatchesPanel(p.batches || []);
+    });
+    console.log('✅ Firestore 미러 구독 시작 (batch.html) — checkOpenBatches 실시간 보강');
+    return;
+  }
+  if(tries > 100){ // 약 5초 기다려도 안 뜨면 기존 방식(Apps Script 직접 폴링)으로 계속
+    console.warn('⚠ Firestore 미러 연결 실패 — 기존 폴링 방식으로 계속 동작합니다');
+    return;
+  }
+  setTimeout(() => _waitForBatchMirrorInit(tries + 1), 50);
+}
+_waitForBatchMirrorInit();
+
+// ★ refreshBatchStructure() 보강 — 현재 배치(state.batchId)의 mirror/batch_{batchId}
+//   문서를 구독. 배치를 전환할 때마다 반드시 이전 구독을 해지하고 새로 구독함
+//   (해지 안 하면 기기 하나가 여러 배치의 리스너를 계속 들고 있는 누수 발생 — 설계
+//   문서에 명시된 필수 테스트 항목).
+function _stopBatchStructMirrorSub(){
+  if(_batchStructMirrorUnsub){ try{ _batchStructMirrorUnsub(); }catch(e){} _batchStructMirrorUnsub = null; }
+  _batchStructMirrorBatchId = null;
+}
+function subscribeBatchStructMirror_(batchId){
+  if(!window._subscribeMirror || !batchId) return;
+  if(_batchStructMirrorBatchId === batchId && _batchStructMirrorUnsub) return; // 이미 같은 배치 구독 중 — 중복 구독 방지
+  _stopBatchStructMirrorSub();
+  _batchStructMirrorBatchId = batchId;
+  _batchStructMirrorUnsub = window._subscribeMirror('batch_' + batchId, (payload) => {
+    if(payload && payload.ok) applyBatchStructureResult_(payload, batchId, true);
+  });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   const bar = document.getElementById('simBar');
@@ -3373,6 +3472,10 @@ function renderActiveBatchNotice(){
 }
 
 function resetBatchFormForNewBatch(){
+  // ★ 2026-09-23 신규(Phase 1: 실시간화) — 이 배치에서 "떠나는" 순간이므로,
+  //   살아있는 mirror/batch_{batchId} 구독이 있으면 반드시 해지함. 안 하면
+  //   기기가 방금 떠난 배치의 리스너를 계속 들고 있게 되는 누수가 생김.
+  _stopBatchStructMirrorSub();
   state.sumFile = null;
   state.custFiles = [];
   state.userHasUploaded = false;
@@ -4028,6 +4131,10 @@ async function refreshBatchStructure(silent){
   //   준비 중인 화면)에서는 완전히 건너뜀. "01 Batch 탭만 피하면 된다"는 식보다
   //   "이 화면들에서만 허용한다"가 더 안전함(새 화면이 추가돼도 실수로 동기화가
   //   켜질 위험이 없음).
+  // ★ 2026-09-23 유지(Phase 1: 실시간화) — 이 가드는 직접 폴링 경로에서 불필요한
+  //   Apps Script 호출을 막기 위한 것. Firestore onSnapshot 푸시로도
+  //   applyBatchStructureResult_가 호출될 수 있으므로, 실제 반영 여부를 최종
+  //   결정하는 동일한 가드를 applyBatchStructureResult_ 안에도 그대로 둠(이중 방어).
   const syncAllowedViews = ['v-slots', 'v-scan', 'v-log', 'v-workers'];
   const activeView = document.querySelector('.view.active');
   if(!activeView || !syncAllowedViews.includes(activeView.id)){
@@ -4036,75 +4143,101 @@ async function refreshBatchStructure(silent){
   try{
     const res = await gasQuery('getBatch', { batchId: state.batchId });
     if(!res.ok || !res.batch) return false;
-    saveBatchCache(res); // ★ 2026-08-04 신규: 30초마다 최신 구조를 캐시에도 반영 → 새로고침 시 최신 화면이 즉시 뜸
-
-    const newSumItems = res.sumItems || [];
-    const newCustomers = res.customers || [];
-    const newCustItemCount = newCustomers.reduce((a,c) => a + (c.items||[]).length, 0);
-
-    // ★ 2026-07-10: 어제 넣었던 "적으면 거부" 안전장치를 제거함.
-    //   그 로직이 한 번 잘못된 기준을 기억하면 그 뒤로 계속 정상 데이터까지
-    //   거부하는 구조적 결함이 있었던 것으로 보임 (실제로 서버는 항상 정상
-    //   데이터를 보내고 있었는데 화면이 계속 거부해서 스캔이 막혔던 것으로 확인됨).
-    //   이제 서버 응답은 항상 그대로 신뢰하고 적용한다. 이상해 보이면 경고만 남김.
-    const curSumCount = state.sumFile ? state.sumFile.items.length : 0;
-    const curCustItemCount = state.custFiles.reduce((a,c) => a + (c.items||[]).length, 0);
-    if(curSumCount > 0 && (newSumItems.length < curSumCount || newCustItemCount < curCustItemCount)){
-      console.warn(`refreshBatchStructure: 서버 응답 개수가 기존과 다름 (sum ${newSumItems.length} vs ${curSumCount} / custItems ${newCustItemCount} vs ${curCustItemCount}) — 그래도 서버 데이터를 신뢰하고 적용함`);
-    }
-
-    state.sumFile = { meta:{}, items: newSumItems };
-    state.custFiles = newCustomers.map(c => ({
-      meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
-      items: c.items || [],
-      totalQty: c.totalQty, totalSkus: c.totalSku,
-    }));
-    state.slots.forEach(s => { s.assignedTo = null; });
-    // ★ 2026-08-07 수정(매니저 지적) — 주기적 갱신이 슬롯 배정만 다시 읽고
-    //   패킹존 이동(핑크)·출고 완료(파랑) 상태는 갱신하지 않았음. 그래서 TV 현황판에서
-    //   출고팀이 파랑으로 바꿔도 이 화면은 페이지를 처음 열었을 때의 색에서 멈춰 있었고,
-    //   새로고침해야만 반영됐음. 이제 갱신할 때마다 두 상태를 서버 기준으로 다시 맞춤.
-    const nextMoved = new Set();
-    const nextTaken = new Set();
-    const nextVerified = new Set(); // ★ 2026-08-24 신규: 최종 2차 검증완료(보라) — Pack Verify 탭용
-    newCustomers.forEach(c => {
-      if(c.movedToPacking) nextMoved.add(c.invoice);
-      if(c.takenOut) nextTaken.add(c.invoice);
-      if(c.packVerified) nextVerified.add(c.invoice);
-      if(!c.slotNum) return;
-      const slot = state.slots.find(s => s.num === Number(c.slotNum));
-      if(slot) slot.assignedTo = c.invoice;
-    });
-    // 이 기기에서 방금 눌러 서버 응답을 기다리는 중인 건은 덮어쓰지 않음
-    //   (낙관적 갱신이 잠깐 되돌아가 보이는 깜빡임 방지)
-    state.movedToPackingInvoices.forEach(inv => { if(_pendingPackToggle[inv]) nextMoved.add(inv); });
-    state.movedToPackingInvoices = nextMoved;
-    state.takenOutInvoices = nextTaken;
-    state.packVerifiedInvoices = nextVerified;
-    // ★ 2026-08-24 신규 — Pack Verify 탭이 열려있는 상태에서 구조가 갱신됐으면
-    //   드롭다운(파랑 오더 목록)도 최신으로 다시 채움
-    if(document.getElementById('v-pack') && document.getElementById('v-pack').classList.contains('active')) populatePvInvoiceSelect();
-
-    buildScanIndex();
-    updateSlotQueueNumbers();
-    await pollScanState(); // 구조를 새로 짰으니 진행률(done)도 즉시 다시 채워넣음
-
-    if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
-    if(!silent) toast('배치 데이터 다시 불러옴 (고객사 · 상품 배정 최신화)', 'success');
-    return true;
+    return await applyBatchStructureResult_(res, state.batchId, silent);
   }catch(e){
     console.error('refreshBatchStructure failed:', e);
     return false;
   }
 }
 
+// ★ 2026-09-23 분리(Phase 1: 실시간화) — getBatch 응답을 화면 state에 반영하는
+//   부분을 함수로 분리. refreshBatchStructure(직접 폴링)와 Firestore onSnapshot
+//   미러 콜백(subscribeBatchStructMirror_) 양쪽에서 동일하게 재사용하기 위함.
+//   반영 로직 자체는 기존 refreshBatchStructure 내부 코드와 완전히 동일 — 한 글자도
+//   안 바꿈. pollScanState()에서 applyScanStateRes를 분리했던 것과 같은 방식.
+async function applyBatchStructureResult_(res, batchId, silent){
+  // 응답이 도착하는 사이 다른 배치로 전환됐으면 무시(오래된/다른 배치 데이터로 덮어쓰기 방지)
+  if(batchId !== state.batchId) return false;
+  // ★ 2026-07-14 안전장치를 그대로 유지 — onSnapshot 푸시 경로에서도 "01 Batch"
+  //   화면(오늘 새 배치 준비 중)에서는 절대 구조를 적용하지 않음.
+  const syncAllowedViews = ['v-slots', 'v-scan', 'v-log', 'v-workers'];
+  const activeView = document.querySelector('.view.active');
+  if(!activeView || !syncAllowedViews.includes(activeView.id)){
+    return false;
+  }
+  saveBatchCache(res); // ★ 2026-08-04 신규: 최신 구조를 캐시에도 반영 → 새로고침 시 최신 화면이 즉시 뜸
+
+  const newSumItems = res.sumItems || [];
+  const newCustomers = res.customers || [];
+  const newCustItemCount = newCustomers.reduce((a,c) => a + (c.items||[]).length, 0);
+
+  // ★ 2026-07-10: 어제 넣었던 "적으면 거부" 안전장치를 제거함.
+  //   그 로직이 한 번 잘못된 기준을 기억하면 그 뒤로 계속 정상 데이터까지
+  //   거부하는 구조적 결함이 있었던 것으로 보임 (실제로 서버는 항상 정상
+  //   데이터를 보내고 있었는데 화면이 계속 거부해서 스캔이 막혔던 것으로 확인됨).
+  //   이제 서버 응답은 항상 그대로 신뢰하고 적용한다. 이상해 보이면 경고만 남김.
+  const curSumCount = state.sumFile ? state.sumFile.items.length : 0;
+  const curCustItemCount = state.custFiles.reduce((a,c) => a + (c.items||[]).length, 0);
+  if(curSumCount > 0 && (newSumItems.length < curSumCount || newCustItemCount < curCustItemCount)){
+    console.warn(`applyBatchStructureResult_: 서버 응답 개수가 기존과 다름 (sum ${newSumItems.length} vs ${curSumCount} / custItems ${newCustItemCount} vs ${curCustItemCount}) — 그래도 서버 데이터를 신뢰하고 적용함`);
+  }
+
+  state.sumFile = { meta:{}, items: newSumItems };
+  state.custFiles = newCustomers.map(c => ({
+    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+    items: c.items || [],
+    totalQty: c.totalQty, totalSkus: c.totalSku,
+  }));
+  state.slots.forEach(s => { s.assignedTo = null; });
+  // ★ 2026-08-07 수정(매니저 지적) — 주기적 갱신이 슬롯 배정만 다시 읽고
+  //   패킹존 이동(핑크)·출고 완료(파랑) 상태는 갱신하지 않았음. 그래서 TV 현황판에서
+  //   출고팀이 파랑으로 바꿔도 이 화면은 페이지를 처음 열었을 때의 색에서 멈춰 있었고,
+  //   새로고침해야만 반영됐음. 이제 갱신할 때마다 두 상태를 서버 기준으로 다시 맞춤.
+  const nextMoved = new Set();
+  const nextTaken = new Set();
+  const nextVerified = new Set(); // ★ 2026-08-24 신규: 최종 2차 검증완료(보라) — Pack Verify 탭용
+  newCustomers.forEach(c => {
+    if(c.movedToPacking) nextMoved.add(c.invoice);
+    if(c.takenOut) nextTaken.add(c.invoice);
+    if(c.packVerified) nextVerified.add(c.invoice);
+    if(!c.slotNum) return;
+    const slot = state.slots.find(s => s.num === Number(c.slotNum));
+    if(slot) slot.assignedTo = c.invoice;
+  });
+  // 이 기기에서 방금 눌러 서버 응답을 기다리는 중인 건은 덮어쓰지 않음
+  //   (낙관적 갱신이 잠깐 되돌아가 보이는 깜빡임 방지)
+  state.movedToPackingInvoices.forEach(inv => { if(_pendingPackToggle[inv]) nextMoved.add(inv); });
+  state.movedToPackingInvoices = nextMoved;
+  state.takenOutInvoices = nextTaken;
+  state.packVerifiedInvoices = nextVerified;
+  // ★ 2026-08-24 신규 — Pack Verify 탭이 열려있는 상태에서 구조가 갱신됐으면
+  //   드롭다운(파랑 오더 목록)도 최신으로 다시 채움
+  if(document.getElementById('v-pack') && document.getElementById('v-pack').classList.contains('active')) populatePvInvoiceSelect();
+
+  buildScanIndex();
+  updateSlotQueueNumbers();
+  await pollScanState(); // 구조를 새로 짰으니 진행률(done)도 즉시 다시 채워넣음
+
+  if(document.getElementById('v-slots') && document.getElementById('v-slots').classList.contains('active')) renderSlots();
+  if(!silent) toast('배치 데이터 다시 불러옴 (고객사 · 상품 배정 최신화)', 'success');
+  return true;
+}
+
 const _pendingPackToggle = {}; // ★ 2026-08-07: 이 기기에서 방금 토글해 서버 응답 대기 중인 인보이스
 let __structPollTimer = null;
 function startStructurePolling(){
+  // ★ 2026-09-23 신규(Phase 1: 실시간화) — 이 함수는 배치가 로드될 때마다
+  //   호출되는 단일 진입점이므로, 여기서 그 배치의 Firestore 미러 구독도
+  //   같이 시작함. 이미 같은 배치를 구독 중이면 subscribeBatchStructMirror_
+  //   내부에서 조용히 무시되므로 여러 번 불러도 안전함(중복 구독 없음).
+  subscribeBatchStructMirror_(state.batchId);
   if(__structPollTimer) return;
   const jitter = Math.floor(Math.random()*6000); // ★ 2026-07-14 신규: 기기간 폴링 충돌 방지
   // ★ 2026-08-19 수정 — 서버 부담 완화를 위해 30초→45초로 완화(현장 확인된 서버 혼잡 대응)
   // ★ 2026-09-03 신규(매니저 확정) — 45초→60초로 완화(전체 서버 부담 경감)
+  // ★ 2026-09-23 유지 — Firestore 미러가 살아있으면 이 폴링은 대부분 "이미 최신"
+  //   상태를 다시 확인하는 셈이 되어 체감상 거의 항상 조용히 지나가지만, 미러 연결이
+  //   끊기거나 실패하는 경우의 안전망으로 그대로 남겨둠(자동 폴백 원칙 — sales_v2.html과 동일).
   __structPollTimer = setInterval(() => refreshBatchStructure(true), 90000+jitter); // ★ 2026-09-03 재수정 — 60초→90초
 }
 
