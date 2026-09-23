@@ -1339,6 +1339,13 @@ function assignSlots(data) {
       updated++;
     }
     bumpVersion_();
+    // ★ 2026-09-23 신규 — getBatch()에 6초 캐시가 있는데(위 getBatch 참고)
+    //   여긴 그동안 무효화가 없었음. 슬롯 배정 직후 곧바로 getBatch가 다시
+    //   불리면(예: 다른 화면 전환, 새로고침) 최대 6초간 방금 저장한 슬롯번호가
+    //   안 보이고 예전 값(미배정)으로 되돌아간 것처럼 보일 수 있었음 — 실제로
+    //   현장에서 "슬롯 배정했는데 새로고침하니 사라졌다"로 보고된 증상과
+    //   정확히 일치하는 경로라 즉시 무효화 추가.
+    try { CacheService.getScriptCache().remove('getBatch_v1_' + batchId); } catch (eCache) { /* 무시 */ }
     return { ok: true, updated: updated };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
