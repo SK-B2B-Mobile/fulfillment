@@ -2043,12 +2043,30 @@ async function gasQuery(op, params, timeoutMs){
 }
 
 // 슬롯 배정 전체를 서버로 동기화 (자동배정/드래그/초기화 후 공통 호출)
+// ★ 2026-09-23 긴급 수정(현장 발견) — 슬롯을 배정하면 화면엔 항상 "배정
+//   완료"가 떴지만, 이 함수가 실제 서버 저장 결과를 전혀 확인하지 않고
+//   버려서(await만 하고 반환값 무시), gasCallWithRetry가 3번 재시도 끝에
+//   완전히 실패해도 아무도 몰랐음 — 화면(로컬 state.slots)엔 이미 반영돼
+//   있으니 그 세션에선 정상으로 보이다가, 새로고침하는 순간 서버(진짜
+//   데이터)엔 애초에 저장된 적이 없던 진짜 상태로 조용히 돌아가는 사고로
+//   이어짐(실제 사례: 6개 고객사 슬롯 배정 후 배포·새로고침하니 미배정으로
+//   복귀). 스캔 저장(2026-08-04)과 동일한 원칙 적용 — 완전히 실패하면 절대
+//   조용히 넘어가지 않고 showSaveFailureBanner로 눈에 띄게 알림.
+//   호출부(assignManualSlot 등)는 그대로 두되(낙관적 UI 유지), 실패 시에는
+//   이 함수 안에서 알아서 경고를 띄움.
 async function syncSlotsToServer(){
-  if(!GAS_READY || !state.batchId) return;
+  if(!GAS_READY || !state.batchId) return { ok: false, error: 'not ready' };
   const assignments = state.slots.filter(s => s.assignedTo).map(s => ({
     invoice: s.assignedTo, slotNum: s.num, slotSize: s.size
   }));
-  await gasCallWithRetry('assignSlots', { batchId: state.batchId, assignments });
+  const res = await gasCallWithRetry('assignSlots', { batchId: state.batchId, assignments });
+  if(!res || !res.ok){
+    showSaveFailureBanner(
+      '⚠ 슬롯 배정 저장 실패 — 새로고침하면 되돌아갑니다',
+      '서버에 슬롯 배정이 저장되지 않았습니다: ' + ((res && res.error) || '알 수 없는 오류') + '. 새로고침하지 말고, 다시 배정을 시도해주세요.'
+    );
+  }
+  return res;
 }
 
 // ═══════════════════════════════════════════════════════════
