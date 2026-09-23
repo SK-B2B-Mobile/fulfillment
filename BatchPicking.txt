@@ -2684,6 +2684,12 @@ function logScan(data) {
     if (scanDocForFirestore) {
       try { queueFirestoreWrite_('scan', scanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
     }
+    // ★ 2026-09-23 신규(batch.html 실시간화 Phase 2) — 이 배치의 스캔 진행률
+    //   미러(mirror/scanState_{batchId})를 20초 뒤 빠르게 갱신 예약. 위
+    //   queueFirestoreWrite_와 마찬가지로 락 해제 후 best-effort로 호출하며,
+    //   FirestoreSync.gs의 scheduleFastScanMirror_ 내부에서 실패를 전부
+    //   흡수하므로 여기서도 절대 스캔 응답에 영향을 주지 않는다.
+    try { scheduleFastScanMirror_(data.batchId); } catch (eSched) { /* 무시 — best-effort */ }
   }
   return result;
 }
