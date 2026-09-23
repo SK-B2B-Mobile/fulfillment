@@ -3472,10 +3472,12 @@ function renderActiveBatchNotice(){
 }
 
 function resetBatchFormForNewBatch(){
-  // ★ 2026-09-23 신규(Phase 1: 실시간화) — 이 배치에서 "떠나는" 순간이므로,
-  //   살아있는 mirror/batch_{batchId} 구독이 있으면 반드시 해지함. 안 하면
-  //   기기가 방금 떠난 배치의 리스너를 계속 들고 있게 되는 누수가 생김.
+  // ★ 2026-09-23 신규(Phase 1/2: 실시간화) — 이 배치에서 "떠나는" 순간이므로,
+  //   살아있는 mirror/batch_{batchId}·mirror/scanState_{batchId} 구독이 있으면
+  //   반드시 해지함. 안 하면 기기가 방금 떠난 배치의 리스너를 계속 들고
+  //   있게 되는 누수가 생김.
   _stopBatchStructMirrorSub();
+  _stopScanStateMirrorSub();
   state.sumFile = null;
   state.custFiles = [];
   state.userHasUploaded = false;
@@ -4050,8 +4052,34 @@ async function pollScanAndPickers(){
   }
 }
 
+// ★ 2026-09-23 신규(Phase 2: 스캔 진행률 실시간화) — mirror/scanState_{batchId}
+//   구독. Phase 1의 subscribeBatchStructMirror_/_stopBatchStructMirrorSub와
+//   완전히 같은 패턴(같은 배치 중복 구독 방지, 배치 전환 시 이전 구독 해지).
+//   설계 문서: handoff_batch_html_phase2_scanstate_design.md
+let _scanStateMirrorUnsub = null;
+let _scanStateMirrorBatchId = null;
+function _stopScanStateMirrorSub(){
+  if(_scanStateMirrorUnsub){ try{ _scanStateMirrorUnsub(); }catch(e){} _scanStateMirrorUnsub = null; }
+  _scanStateMirrorBatchId = null;
+}
+function subscribeScanStateMirror_(batchId){
+  if(!window._subscribeMirror || !batchId) return;
+  if(_scanStateMirrorBatchId === batchId && _scanStateMirrorUnsub) return; // 이미 같은 배치 구독 중
+  _stopScanStateMirrorSub();
+  _scanStateMirrorBatchId = batchId;
+  _scanStateMirrorUnsub = window._subscribeMirror('scanState_' + batchId, (payload) => {
+    if(batchId !== state.batchId) return; // 그 사이 다른 배치로 전환됐으면 무시(Phase 1과 동일한 가드)
+    if(payload && payload.ok) applyScanStateRes(payload); // 기존 렌더링 함수 100% 재사용 — 새 렌더링 코드 없음
+  });
+}
+
 let __scanPollTimer = null;
 function startScanPolling(){
+  // ★ 2026-09-23 신규(Phase 2: 실시간화) — Phase 1의 startStructurePolling()과
+  //   동일한 위치 패턴: 배치가 로드될 때마다 호출되는 단일 진입점이므로,
+  //   여기서 스캔 진행률 미러 구독도 같이 시작함. 이미 같은 배치를 구독
+  //   중이면 subscribeScanStateMirror_ 내부에서 조용히 무시됨(중복 구독 없음).
+  subscribeScanStateMirror_(state.batchId);
   if(__scanPollTimer) return; // 중복 시작 방지
   // ★ 2026-08-19 재수정(긴급, 요청 합치기) — 5초→8초 완화에 이어, 이번엔
   //   "스캔상태(8초)"와 "활성작업자(10초)" 두 개 타이머·두 개 요청을 하나로
