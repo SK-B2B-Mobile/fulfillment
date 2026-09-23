@@ -1616,6 +1616,30 @@ function clearInvoiceCache_(batchId, invoice) {
   } catch (e) { /* 무시 */ }
 }
 
+// ★ 2026-09-23 신규(batch.html 실시간화 Phase 2 — §4-1 재설계, 트리거 없는 버전) —
+//   배경: getScanState()는 캐시가 전혀 없어서, batch.html의 pollScanState()가
+//   5초마다(작업자 여러 명이면 그만큼 곱해져서) 매번 ScanLog 시트 전체를
+//   getRange로 통째로 읽고 있었음(§6-2에서 미리 경고해둔 항목). 예전에
+//   시도했던 "스캔마다 20초 뒤 트리거 예약"(scheduleFastScanMirror_) 방식은
+//   ScriptApp.newTrigger().create() 자체가 무거운 Google 서버 왕복이라, 스캔이
+//   몰리는 시간대에 동시 실행 슬롯을 나눠 쓰다가 스캔 저장 자체가 실패하는
+//   장애로 이어져 롤백함(BatchPicking.gs logScan() 주석 참고).
+//   이번엔 트리거를 전혀 만들지 않는 방식으로 감. getActivePickers/
+//   getOpenBatches와 똑같은 CacheService 짧은-TTL 패턴을 getScanState에도
+//   적용하고(여러 기기의 동시 폴링을 캐시 하나로 묶어서 시트 스캔 횟수 자체를
+//   줄임), 스캔·이슈 등록/취소/수정처럼 실제로 값이 바뀌는 시점마다 이
+//   캐시를 즉시 비워서(clearInvoiceCache_와 동일한 원칙) TTL을 기다리지 않고도
+//   다음 폴링부터 바로 최신 값이 보이게 함. CacheService.remove()는 순수
+//   로컬 캐시 호출이라 ScriptApp 트리거와 달리 Google 실행 슬롯을 전혀 쓰지
+//   않으므로, 스캔 응답 지연 위험이 없음.
+//   TTL은 동시 스캔 중복 배정 방지처럼 정확성에 민감한 데이터라, getActivePickers와
+//   동일하게 짧게(4초)만 줌 — 즉시 무효화가 주력이고 TTL은 "무효화를 놓친
+//   경우의 보조 안전망" 역할만 함.
+function scanStateCacheKey_(batchId) { return 'scanState_v1_' + batchId; }
+function invalidateScanStateCache_(batchId) {
+  try { CacheService.getScriptCache().remove(scanStateCacheKey_(batchId)); } catch (e) { /* 무시 */ }
+}
+
 function logPackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -2643,6 +2667,7 @@ function logScan(data) {
       //   해당 고객사 몫으로 카운트되어야 함.
     ]]);
     result = { ok: true, scanId: scanId };
+    invalidateScanStateCache_(data.batchId); // ★ 2026-09-23 신규 — 이 스캔이 다음 폴링부터 바로 보이게 즉시 무효화
     // ★ 세션E 신규 — 구글시트에 실제로 쓴 것과 동일한 필드·값으로 Firestore
     //   이중쓰기용 문서를 준비. 락 안에서는 절대 Firestore를 직접 호출하지
     //   않음(스캔은 창고에서 가장 빈번한 동작이라, 락을 붙잡은 채 외부 API를
@@ -2807,6 +2832,7 @@ function logIssue(data) {
     // ★ 2026-09-01 신규 — 이 인보이스의 이슈수량 캐시(20초)를 즉시 비움. 이슈
     //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
     clearInvoiceCache_(data.batchId, data.invoice);
+    invalidateScanStateCache_(data.batchId); // ★ 2026-09-23 신규 — ADJ- 상쇄 기록이 doneMap을 바꾸므로 같이 무효화
     needsSync = true; // ★ 2026-09-03 — 락 밖에서 처리(아래 설명)
     // ★ 세션C 신규 — 구글시트에 실제로 쓴 것과 정확히 동일한 필드·값으로
     //   Firestore 이중쓰기용 문서를 준비. 락 안에서는 절대 Firestore를 직접
@@ -2923,6 +2949,7 @@ function undoIssue(data) {
         //   유효하므로 기존 로직에는 전혀 영향 없음.
         const rowVals = sh.getRange(i + 2, 1, 1, 13).getValues()[0]; // A~M
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
+        invalidateScanStateCache_(rowVals[0]); // ★ 2026-09-23 신규 — 이슈 취소로 issueMap이 바뀌므로 같이 무효화
         syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
         // ★ 세션C 신규 — logIssue()와 완전히 같은 필드 구조로 Firestore
         //   이중쓰기용 문서를 준비(이번엔 status만 'undone'으로 바뀐 전체 문서).
@@ -3099,6 +3126,7 @@ function editIssue(data) {
         //   유효하므로 기존 로직에는 전혀 영향 없음.
         const rowVals = sh.getRange(row, 1, 1, 13).getValues()[0]; // A~M (수정된 값 포함)
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
+        invalidateScanStateCache_(rowVals[0]); // ★ 2026-09-23 신규 — 수량 수정이 issueMap/doneMap(ADJ-)을 바꾸므로 같이 무효화
         syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
         // ★ 세션C 신규 — logIssue()/undoIssue()와 동일한 패턴으로 Firestore
         //   이중쓰기용 전체 문서 준비(방금 수정된 reason/qty/note 반영됨).
@@ -3150,6 +3178,10 @@ function undoScan(data) {
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(scanId)) {
         sh.getRange(i + 2, 11).setValue('undone');
+        // ★ 2026-09-23 신규 — 이 스캔의 batchId(A열)를 같이 읽어서 즉시 무효화.
+        //   data엔 scanId만 오고 batchId가 없는 호출부가 있어서, 방금 고친
+        //   바로 그 행에서 직접 읽는 게 가장 확실함.
+        try { invalidateScanStateCache_(sh.getRange(i + 2, 1).getValue()); } catch (eCache) { /* 무시 */ }
         return { ok: true };
       }
     }
@@ -4113,6 +4145,14 @@ function getScanState(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
 
+    // ★ 2026-09-23 신규 — 위 invalidateScanStateCache_ 설명 참고. getActivePickers와
+    //   동일한 get-or-compute 패턴. 스캔/이슈 변경 시 즉시 비워지므로, 여기 히트하는
+    //   경우는 "같은 4초 사이 여러 기기가 같은 배치를 동시에 물어본" 경우뿐임.
+    const _cache = CacheService.getScriptCache();
+    const _cacheKey = scanStateCacheKey_(batchId);
+    const _cached = _cache.get(_cacheKey);
+    if (_cached) return JSON.parse(_cached);
+
     const sl = scanlogSheet_();
     const last = sl.getLastRow();
     const doneMap = {};
@@ -4184,7 +4224,15 @@ function getScanState(batchId) {
     }
     issues.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
 
-    return { ok: true, doneMap: doneMap, scans: scans, issueMap: issueMap, issues: issues };
+    const _result = { ok: true, doneMap: doneMap, scans: scans, issueMap: issueMap, issues: issues };
+    try {
+      const _payload = JSON.stringify(_result);
+      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 4);
+      // ★ 스캔·이슈가 많이 쌓인 배치는 payload가 100KB 캐시 한도를 넘을 수 있음
+      //   (다른 캐시들과 동일한 가드). 그 경우 그냥 캐시를 안 쓰고 매번 새로
+      //   계산될 뿐, 정확성에는 전혀 영향 없음(안전하게 조용히 스킵).
+    } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
