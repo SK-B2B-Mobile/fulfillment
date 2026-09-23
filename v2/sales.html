@@ -1678,6 +1678,7 @@ function renderDimsLinkedCard(order){
     <div class="linked-sub">${order.dimsLinkedToCustomer||order.customer||''} — same customer, shipped together. Edit on the primary order only.</div>
     <div style="margin-top:14px;">${body}</div>
     <div class="linked-actions">
+      ${dims.length ? `<button class="link-btn accent" onclick="printMergedPalletLabel()">🏷️ Print Label</button>` : ''}
       <button class="link-btn" onclick="jumpToInvoice('${p}')">Open primary ↗</button>
       <button class="link-btn" onclick="makeDimPrimary('${order.invoice}')">Make this the primary</button>
       <button class="link-btn danger" onclick="unlinkDim('${order.invoice}', true)">Unlink — ship separately</button>
@@ -1817,7 +1818,10 @@ function renderDimsPanel(order, editing){
     return `<div class="dims-panel">
       <div class="dims-head-row">
         <span class="dims-unit-label">${kidCount?'<span class="role-badge primary">PRIMARY</span> ':''}${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs${kidCount?` <span class="linked-tag">${kidCount} linked</span>`:''}</span>
-        <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
+        <span style="display:flex; gap:8px;">
+          <button class="edit-pencil-btn" onclick="printMergedPalletLabel()">🏷️ Print Label</button>
+          <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
+        </span>
       </div>
       ${rows}
       <div class="dims-meta" style="margin-top:10px;">Entered by ${order.dimsBy||'-'} · ${order.dimsAt||'-'}</div>
@@ -1867,6 +1871,106 @@ function unlinkDim(invoice, isSelf){
 function makeDimPrimary(invoice){
   dimGroupCall('setDimPrimary', { invoice: invoice, by: 'Packing (tablet)' },
     `Make ${invoice} the primary invoice for this group.\n\nSaved dimensions move here and the other orders will be linked to it. Continue?`);
+}
+
+// ★ 2026-09-23 신규(대표님 요청) — batch.html "Final Check(2차 검수)" 완료 시
+//   나가는 팔렛/박스 라벨과 같은 디자인을, Sales Lookup(v2) 오더 디테일에서
+//   Dims 저장이 끝난 뒤 수동으로도 인쇄할 수 있게 함(자동 인쇄 아님 — 조회만
+//   해도 매번 인쇄되면 안 되므로 버튼으로만 동작).
+//   batch.html과 다른 점: 여기는 같은 고객사 인보이스가 최대 4건까지 merge되어
+//   같은 팔렛으로 나가는 경우가 실제로 있음(디멘션 그룹 = renderDimGroupMembers
+//   와 동일한 전제 — order.dimsGroupMembers). 그래서 라벨 맨 아래에
+//   "TK · IN# · 인쇄일시" 줄을 merge된 인보이스 수만큼(보통 1~4개) 쌓아서 전부
+//   기록하고, 줄 수가 늘어나는 만큼 브랜드명은 작아지며 위로 붙고 전체 글자
+//   크기가 단계적으로 줄어드는 레이아웃으로 재배치함. 1건일 때는 batch.html의
+//   원래 라벨과 크기가 완전히 동일함(30/65/40pt).
+function printMergedPalletLabel(order){
+  order = order || CURRENT_ORDER;
+  if (!order){ alert('No order is open.'); return; }
+  const isPallet = order.method === 'TRUCKING' || order.method === 'TK';
+  const shipVia = isPallet ? 'TK' : 'UPS';
+  const labelKind = isPallet ? 'PALLET' : 'BOX';
+
+  // 대표든 포함오더든 order.dims엔 항상 실제(대표) 디멘션이 들어있고
+  // order.dimsGroupMembers엔 이 팔렛에 함께 실린 오더 전체 명단이 들어있음
+  // (renderDimsLinkedCard / renderDimsExtras와 동일한 전제).
+  const totalCount = (order.dims && order.dims.length) ? order.dims.length : 1;
+  if (!order.dims || !order.dims.length){
+    alert('No dimensions saved yet — enter dimensions before printing a label.');
+    return;
+  }
+  const customer = order.dimsLinkedToCustomer || order.customer || '';
+  const members = (order.dimsGroupMembers && order.dimsGroupMembers.length)
+    ? order.dimsGroupMembers
+    : [{ invoice: order.dimsLinkedTo || order.invoice, isPrimary: true }];
+  let invoices = members.map(m => m.invoice).filter(Boolean);
+  if (!invoices.length) invoices = [order.invoice];
+
+  const printedAt = new Date().toLocaleString('en-US');
+  const n = invoices.length;
+
+  // 인보이스 개수별 자동 축소 스케일 — 1건은 batch.html 라벨과 완전히 동일.
+  const scale = n <= 1 ? { brand:30, pallet:65, customer:40, footer:13, gap:4, pad:'0.3in' }
+              : n === 2 ? { brand:22, pallet:60, customer:36, footer:12, gap:4, pad:'0.12in' }
+              : n === 3 ? { brand:18, pallet:55, customer:32, footer:11, gap:3, pad:'0.12in' }
+              :           { brand:16, pallet:50, customer:28, footer:10, gap:3, pad:'0.1in' };
+
+  const footerLinesHtml = invoices.map(inv =>
+    `<div class="lbl-foot-line">${shipVia}&nbsp;&nbsp;·&nbsp;&nbsp;${inv}&nbsp;&nbsp;·&nbsp;&nbsp;${printedAt}</div>`
+  ).join('');
+
+  const pagesHtml = Array.from({ length: totalCount }, (_, i) => i + 1).map((num, i, arr) => `
+    <div class="label-page"${i < arr.length - 1 ? ' style="page-break-after:always;"' : ''}>
+      <div class="label-brand lbl-brand">StyleKorean</div>
+      <div class="label-mid">
+        <div class="label-pallet lbl-pallet">${labelKind} ${num}/${totalCount}</div>
+        <div class="label-customer lbl-customer">${customer || '-'}</div>
+      </div>
+      <div class="label-footer">${footerLinesHtml}</div>
+    </div>`).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Labels · ${totalCount} sheets${n>1?' · '+n+' invoices merged':''}</title>
+  <style>
+    @page{ size: 6in 4in; margin: 0.1in; }
+    html,body{ margin:0; padding:0; }
+    .label-page{
+      font-family:'Helvetica Neue',Arial,sans-serif; color:#111; text-align:center;
+      width:5.8in; height:3.8in; display:flex; flex-direction:column;
+      align-items:center; box-sizing:border-box; padding-top:${scale.pad};
+    }
+    .label-brand{ font-size:${scale.brand}pt; font-weight:800; letter-spacing:0.03em; white-space:nowrap; flex-shrink:0; }
+    .label-mid{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.15in; min-height:0; }
+    .label-pallet{ font-size:${scale.pallet}pt; font-weight:900; line-height:1; letter-spacing:-0.01em; white-space:nowrap; }
+    .label-customer{ font-size:${scale.customer}pt; font-weight:700; line-height:1.15; white-space:nowrap; }
+    .label-footer{ display:flex; flex-direction:column; align-items:center; gap:${scale.gap}px; padding-bottom:0.15in; flex-shrink:0; }
+    .lbl-foot-line{ font-size:${scale.footer}pt; font-weight:600; color:#333; white-space:nowrap; }
+  </style></head><body>
+    ${pagesHtml}
+    <script>
+      function fitOneLine(el, maxWidthIn){
+        const maxPx = maxWidthIn * 96;
+        let size = parseFloat(getComputedStyle(el).fontSize);
+        let guard = 0;
+        while(el.scrollWidth > maxPx && size > 6 && guard < 40){
+          size -= 1;
+          el.style.fontSize = size + 'px';
+          guard++;
+        }
+      }
+      window.onload = function(){
+        document.querySelectorAll('.lbl-brand').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-pallet').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-customer').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-foot-line').forEach(el => fitOneLine(el, 5.6));
+      };
+    <\/script>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=420,height=620');
+  if (!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 400);
 }
 
 function linkByTyping(invoice){
