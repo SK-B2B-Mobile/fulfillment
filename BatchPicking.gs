@@ -2684,12 +2684,23 @@ function logScan(data) {
     if (scanDocForFirestore) {
       try { queueFirestoreWrite_('scan', scanDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
     }
-    // ★ 2026-09-23 신규(batch.html 실시간화 Phase 2) — 이 배치의 스캔 진행률
-    //   미러(mirror/scanState_{batchId})를 20초 뒤 빠르게 갱신 예약. 위
-    //   queueFirestoreWrite_와 마찬가지로 락 해제 후 best-effort로 호출하며,
-    //   FirestoreSync.gs의 scheduleFastScanMirror_ 내부에서 실패를 전부
-    //   흡수하므로 여기서도 절대 스캔 응답에 영향을 주지 않는다.
-    try { scheduleFastScanMirror_(data.batchId); } catch (eSched) { /* 무시 — best-effort */ }
+    // ★ 2026-09-23 신규(batch.html 실시간화 Phase 2) → ★ 2026-09-23 긴급 롤백
+    //   (같은 날) — 원래 여기서 scheduleFastScanMirror_(data.batchId)를
+    //   호출해서 20초 뒤 scanState 미러를 빠르게 갱신하도록 예약했었음.
+    //   그런데 그 함수 내부의 ScriptApp.getProjectTriggers()/newTrigger().create()가
+    //   락은 안 잡지만 실제 Google 서버 왕복이 있는 무거운 호출이라, 스캔
+    //   응답을 반환하기 전에 매번(배치당 25초에 한 번) 동기적으로 실행되면서
+    //   실행시간이 누적됨. 게다가 이렇게 생성된 트리거가 실제로 실행될 때마다
+    //   워커의 스캔 요청과 같은 "동시 실행 슬롯"을 나눠 써서, 스캔이 몰리는
+    //   시간대에 doPost 응답이 지연/타임아웃되어 "TypeError: Failed to fetch"로
+    //   스캔 저장 자체가 실패하는 실제 장애가 발생함(2026-09-21에 Firestore
+    //   직접 호출을 큐 방식으로 바꿨던 것과 완전히 동일한 패턴의 문제).
+    //   scanState 실시간 갱신은 FirestoreSync.gs의 syncOpenBatchScanStateMirrors_
+    //   (1분 주기 syncToFirestore 트리거 안에서 실행, 요청 경로와 완전히 분리됨)
+    //   가 이미 안전하게 처리하고 있으므로, 여기서는 더 이상 아무것도 하지 않음.
+    //   FirestoreSync.gs의 scheduleFastScanMirror_/syncScanStateForBatch_
+    //   함수 자체는 그대로 남겨두되(추후 안전한 방식으로 재설계 가능), 이 호출부만
+    //   제거함 — 앞으로 이 함수들이 새 트리거를 만드는 일은 없음.
   }
   return result;
 }
