@@ -945,8 +945,13 @@ async function openIssueModal(invoice){
   document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${(slot.issues||[]).length}건`;
   document.getElementById('issueModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
   document.getElementById('issueModalOverlay').classList.add('open');
-  await ensureBatchItemsLoaded();
-  await ensureWorkersLoaded();
+  // ★ 2026-09-23 수정(속도) — ensureBatchItemsLoaded()와 ensureWorkersLoaded()는
+  //   서로 전혀 관련 없는 별개 조회인데, 예전엔 순서대로(하나 끝나야 다음 시작)
+  //   기다려서 새로고침 후 처음 여는 팝업이 불필요하게 느렸음(각 호출이 캐싱 전이면
+  //   둘 다 서버 왕복 필요). 아래처럼 동시에 요청하면 두 호출 중 더 느린 쪽
+  //   시간만 기다리면 되므로, 캐싱 전(첫 팝업)에도 체감 대기시간이 크게 줄어듦.
+  //   (둘 다 이미 캐싱돼 있으면 원래도 즉시 반환이라 이 변경으로 달라지는 게 없음)
+  await Promise.all([ ensureBatchItemsLoaded(), ensureWorkersLoaded() ]);
   // ★ 2026-07-24 신규 — "어떤 SKU가 부족한지 모르겠다"는 피드백: SKU별 스캔 상태를
   //   따로 조회해서, 목록에서 미완료 SKU를 바로 찾을 수 있게 함.
   _invoiceItemStatusByBarcode = {};
