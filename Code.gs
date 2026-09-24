@@ -943,7 +943,16 @@ function headerMap_() {
 function getJobsInvoiceRowIndex_() {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'jobsInvRowIdx_v1';
-  const cached = cache.get(cacheKey);
+  // ★ 2026-09-24 수정(핵심) — 예전엔 "너무 크면(95000자 넘으면) 캐싱을 조용히
+  //   건너뛴다"였는데, 정확히 이게 위 주석에서 말한 "상세창 열기 30초 지연의
+  //   핵심 원인" 그 자체가 되어버렸음: Jobs 시트가 지금처럼 커진 상태에서는
+  //   인보이스→행번호 인덱스(idx) JSON이 실제로 95000자를 거의 항상 넘어서,
+  //   이 캐시가 사실상 "한 번도 저장된 적 없는" 상태로 계속 있었음 — 그래서
+  //   상세창을 열 때마다(캐시 미스) Jobs 시트 인보이스 컬럼 전체를 매번 처음부터
+  //   다시 훑고 있었던 것. board.html/batch.html에서 이미 검증된 청크 저장/조회
+  //   (_cacheGetChunked_/_cachePutChunked_, BatchPicking.gs)로 바꿔서 크기 제한
+  //   없이 항상 캐싱되게 함.
+  const cached = _cacheGetChunked_(cache, cacheKey);
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
   }
@@ -963,7 +972,7 @@ function getJobsInvoiceRowIndex_() {
   }
   try {
     const payload = JSON.stringify(idx);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 45); // ★ 2026-09-03 30초→45초
+    _cachePutChunked_(cache, cacheKey, payload, 45); // ★ 2026-09-03 30초→45초 (TTL 그대로, 저장 방식만 청크로)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return idx;
 }
