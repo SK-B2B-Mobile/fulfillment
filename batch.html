@@ -1818,7 +1818,7 @@ select option:disabled{color:var(--text-dim2);}
      ═══════════════════════════════════════════════════════════ -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, doc, onSnapshot, setDoc, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyBG4HmlCg4CoJPoCbOi-ZE6wQwY2u88XeA",
@@ -1849,6 +1849,28 @@ select option:disabled{color:var(--text-dim2);}
         console.error('[mirror] onSnapshot 에러 (' + docPath + '):', err);
       });
     };
+
+    // ★ 2026-09-24 신규(Board 실시간 반영 Phase 1) — 스캔 성공 직후, Apps Script/
+    // Sheets를 전혀 거치지 않고 이 브라우저에서 Firestore로 "슬롯 N에 M개 더
+    // 스캔됨"만 곧바로 더해서(increment) 씀. logScan()의 서버 저장(fetch)과는
+    // 완전히 독립된 별도 채널이라 — 이게 실패하거나 늦어도 스캔 저장 자체(진짜
+    // 데이터)에는 전혀 영향이 없고, 화면에 얼마나 빨리 반영되는지에만 영향을 줌.
+    // (await 하지 않고 흘려보냄: 절대 스캔 흐름을 기다리게/막게 하지 않기 위함)
+    // 정본 값은 여전히 Apps Script의 1분 주기 syncToFirestore()가 계산하며,
+    // 그 주기가 돌 때마다 이 보정치는 _resetScanFastMirror_로 리셋됨 — 즉
+    // 이 값은 "최근 1분 안에 이 배치에서 스캔된 추가분"만 잠깐 보여주는
+    // 낙관적 표시용이고, 매 분 자동으로 스스로 지워짐(self-healing).
+    window._pushFastScan = function(batchId, slot, qty){
+      if(!batchId || slot === null || slot === undefined || !qty) return;
+      try{
+        setDoc(doc(db, 'mirror', 'board_scanFast'), {
+          batchId: String(batchId),
+          slots: { [String(slot)]: increment(Number(qty) || 0) },
+          updatedAt: serverTimestamp()
+        }, { merge: true }).catch(e => console.warn('[fastScan] 전송 실패(무시 — 1분 뒤 정본 값이 어차피 따라잡음):', e));
+      }catch(e){ console.warn('[fastScan] 예외(무시):', e); }
+    };
+
     console.log('✅ Firestore 미러 연결 준비 완료 (batch.html)');
   } catch(e) {
     console.error('❌ Firestore 초기화 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다:', e);
@@ -5423,6 +5445,11 @@ function renderAllTargets(sku, pending, code){
     q.done = q.need;
     _lastTrustedScanDataAt = Date.now(); // ★ 2026-09-23 — 방금 이 기기가 직접 만든 최신 진행률(낙관적 갱신)
     logScan({barcode:code, sku:sku.sku, customer:q.customer, slot:q.slot, invoice:q.invoice, status:'pass', qty:qty});
+    // ★ 2026-09-24 신규(Board 실시간 반영) — Board(TV) 화면의 해당 슬롯 숫자가
+    // 최대 1분까지 안 기다리고 바로 올라가도록, Apps Script/Sheets를 거치지 않는
+    // 별도 채널(Firestore 직접 증분)로 흘려보냄. 실패해도 위 logScan(진짜 저장)에는
+    // 영향 없음 — window._pushFastScan은 fire-and-forget이며 없을 수도 있음(연결 전).
+    if (window._pushFastScan) window._pushFastScan(state.batchId, q.slot, qty);
     return {slot:q.slot, customer:q.customer, qty:qty, ship_via:q.ship_via, ship_date:q.ship_date, invoice:q.invoice};
   });
   scanFeedback('ok');
