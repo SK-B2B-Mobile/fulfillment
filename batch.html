@@ -4191,6 +4191,7 @@ async function pollScanState(){
   try{
     const res = await gasQuery('getScanState', { batchId: state.batchId });
     if(!res.ok) return;
+    _lastTrustedScanDataAt = Date.now(); // ★ 2026-09-23 — 라이브로 직접 확인한 최신 값
     applyScanStateRes(res);
   }catch(e){
     console.error('pollScanState failed:', e);
@@ -4204,7 +4205,10 @@ async function pollScanAndPickers(){
   try{
     const res = await gasQuery('getScanAndPickers', { batchId: state.batchId });
     if(!res.ok) return;
-    if(res.scanState && res.scanState.ok) applyScanStateRes(res.scanState);
+    if(res.scanState && res.scanState.ok){
+      _lastTrustedScanDataAt = Date.now(); // ★ 2026-09-23 — 라이브로 직접 확인한 최신 값
+      applyScanStateRes(res.scanState);
+    }
     if(res.activePickers && res.activePickers.ok){
       state.activePickers = res.activePickers.active || {};
       state.lastPageRange = res.activePickers.lastPageRange || {};
@@ -4225,6 +4229,19 @@ function _stopScanStateMirrorSub(){
   if(_scanStateMirrorUnsub){ try{ _scanStateMirrorUnsub(); }catch(e){} _scanStateMirrorUnsub = null; }
   _scanStateMirrorBatchId = null;
 }
+// ★ 2026-09-23 긴급 수정 — Phase 1(구조 미러)에서 실제로 터졌던 것과 정확히 같은
+//   레이스가 여기(스캔 진행률 미러)에도 그대로 있었음: mirror/scanState_{batchId}는
+//   "빠른 경로"(scheduleFastScanMirror_)가 오늘 중 안전상의 이유로 롤백되어 지금은
+//   1분 주기 안전망(syncOpenBatchScanStateMirrors_)으로만 채워지는데, 배치를 열거나
+//   새로고침한 직후 subscribeScanStateMirror_()가 구독을 시작하면 onSnapshot이
+//   "구독 시작 즉시" 그 문서의 현재 값(최대 1분 전 것일 수 있음)을 한 번 밀어준다.
+//   그 값이 방금 라이브로 정확히 받아온(pollScanState/pollScanAndPickers) 진행률보다
+//   오래됐으면, 화면의 스캔 진행률(%)이 순간적으로 뒤로 되돌아갔다가 다음 폴링/미러
+//   갱신 때 다시 앞으로 튀는 "깜빡임" 사고로 이어짐 — 슬롯 배정 사고와 동일한 원인.
+//   방금 이 기기가 직접 확인했거나(라이브 폴링) 직접 만들었던(스캔 성공 시 낙관적
+//   갱신) 확실히 최신인 값이 있으면, 그 뒤 70초(1분 미러 주기보다 여유있게) 동안은
+//   미러 구독에서 온 값을 건너뛴다.
+let _lastTrustedScanDataAt = 0;
 function subscribeScanStateMirror_(batchId){
   if(!window._subscribeMirror || !batchId) return;
   if(_scanStateMirrorBatchId === batchId && _scanStateMirrorUnsub) return; // 이미 같은 배치 구독 중
@@ -4232,7 +4249,12 @@ function subscribeScanStateMirror_(batchId){
   _scanStateMirrorBatchId = batchId;
   _scanStateMirrorUnsub = window._subscribeMirror('scanState_' + batchId, (payload) => {
     if(batchId !== state.batchId) return; // 그 사이 다른 배치로 전환됐으면 무시(Phase 1과 동일한 가드)
-    if(payload && payload.ok) applyScanStateRes(payload); // 기존 렌더링 함수 100% 재사용 — 새 렌더링 코드 없음
+    if(!payload || !payload.ok) return;
+    if((Date.now() - _lastTrustedScanDataAt) < 70000){
+      console.log('[mirror] 최근(70초 이내) 직접 확인한 스캔 진행률이 있어 미러 푸시를 건너뜀 (batchId=' + batchId + ')');
+      return;
+    }
+    applyScanStateRes(payload); // 기존 렌더링 함수 100% 재사용 — 새 렌더링 코드 없음
   });
 }
 
@@ -5399,6 +5421,7 @@ function renderAllTargets(sku, pending, code){
   const results = pending.map(q => {
     const qty = q.need - q.done;
     q.done = q.need;
+    _lastTrustedScanDataAt = Date.now(); // ★ 2026-09-23 — 방금 이 기기가 직접 만든 최신 진행률(낙관적 갱신)
     logScan({barcode:code, sku:sku.sku, customer:q.customer, slot:q.slot, invoice:q.invoice, status:'pass', qty:qty});
     return {slot:q.slot, customer:q.customer, qty:qty, ship_via:q.ship_via, ship_date:q.ship_date, invoice:q.invoice};
   });
