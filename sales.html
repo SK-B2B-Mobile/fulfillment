@@ -747,8 +747,22 @@ function subscribeInvoiceDetailMirror_(inv, onData){
     if (!window._subscribeMirror) { resolve(false); return; }
     let settled = false;
     _invDetailUnsub = window._subscribeMirror('salesInvDetail_' + inv, (payload) => {
-      if (payload && payload.ok) onData(payload);
-      if (!settled) { settled = true; resolve(true); }
+      // ★ 2026-09-24 버그 수정 — 예전엔 payload.ok가 false(예: 그 당시엔 실제로
+      //   못 찾았거나 일시적 오류였던 경우)여도 무조건 "실시간으로 받았다"로
+      //   처리해서 settled/resolve(true)만 하고 onData는 안 불렀음. 그 결과
+      //   화면은 영원히 "○○ loading…" 스피너에 멈춰 있었음(에러 메시지도 없이) —
+      //   그 인보이스가 실제로 수정(검수/이슈/디멘션 등)되어 미러 문서가 다시
+      //   쓰이기 전까지는 몇 번을 다시 열어도 계속 이 상태. 이제 ok:false면
+      //   "아직 못 받은 것"으로 취급해 resolve(false)로 폴백시켜서, 아래
+      //   openInvoice()의 직접 재조회(gasGetWithRetry) 경로가 이어받아 최신
+      //   상태를 다시 계산하고, 그래도 못 찾으면 제대로 된 에러 카드
+      //   (Close 버튼 포함)를 띄우게 함.
+      if (payload && payload.ok) {
+        onData(payload);
+        if (!settled) { settled = true; resolve(true); }
+      } else if (payload && payload.ok === false) {
+        if (!settled) { settled = true; resolve(false); }
+      }
     });
     // 문서가 아직 한 번도 안 만들어진(=이 인보이스를 한 번도 조회/수정한 적
     // 없는) 인보이스일 수 있으므로, 짧게 기다렸다가 응답이 없으면 폴백.
