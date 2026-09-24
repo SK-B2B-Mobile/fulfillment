@@ -2240,6 +2240,28 @@ function initSlots(){
   }
 }
 initSlots();
+
+// ★ 2026-09-23 긴급 수정 — "미배정 대기 6건이 새로고침하면 계속 되살아난다"의 진짜 원인.
+//   initSlots()는 1~30번 슬롯만 만든다. 31번 이상은 assignManualSlot()이 그 순간
+//   state.slots.push()로 즉석에서 만들어주는 "임시 번호"인데(예: 31~36번 — 매니저가
+//   나머지 배정 구역에서 직접 번호를 매김), 서버(BatchCustomers 시트)에는 정확히
+//   저장되고 board.html(TV 현황판)에도 정확히 나타난다(서버 데이터 자체는 항상 정상).
+//   문제는 batch.html이 새로고침될 때마다 이 30개짜리 배열을 통째로 새로 만들고
+//   나서, 서버가 돌려준 c.slotNum으로 "이미 있는 슬롯을 찾아서" 배정만 채워넣었다는
+//   것 — 31번 이상은 애초에 배열에 없으니 find()가 항상 실패해서 조용히 버려졌다.
+//   그 결과 31번 이상으로 배정했던 고객사만 매번 "미배정 대기"로 돌아간 것이며,
+//   이게 계속 보고됐던 "6건"의 정체다(Firestore 미러 타이밍 문제와는 별개의,
+//   더 근본적인 원인). 복원 시에도 assignManualSlot()과 완전히 동일하게, 슬롯이
+//   없으면 그 자리에서 만들어서 채워넣도록 통일한다.
+function findOrCreateSlotForRestore_(rawSlotNum, slotSize){
+  const numVal = /^\d+$/.test(String(rawSlotNum)) ? Number(rawSlotNum) : rawSlotNum;
+  let slot = state.slots.find(s => String(s.num) === String(numVal));
+  if(!slot){
+    slot = { num: numVal, size: slotSize || 'M', assignedTo: null };
+    state.slots.push(slot);
+  }
+  return slot;
+}
 populateWorkerSelect();
 loadBatchWorkersFromServer(); // ★ 2026-07-16 신규: 하드코딩 대신 서버(구글시트) 명단으로 교체
 
@@ -2779,8 +2801,8 @@ async function continueOpenBatch(batchId, viewOnly){
   state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
     if(!c.slotNum) return;
-    const slot = state.slots.find(s => s.num === Number(c.slotNum));
-    if(slot) slot.assignedTo = c.invoice;
+    const slot = findOrCreateSlotForRestore_(c.slotNum, c.slotSize);
+    slot.assignedTo = c.invoice;
     if(c.cleared) state.clearedInvoices.add(c.invoice);
     if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
@@ -2912,8 +2934,8 @@ function applyBatchPayload(res, opts){
   state.clearedInvoices = new Set(); // ★ 2026-07-14: 서버의 비워짐 상태도 같이 복원
   (res.customers || []).forEach(c => {
     if(!c.slotNum) return;
-    const slot = state.slots.find(s => s.num === Number(c.slotNum));
-    if(slot) slot.assignedTo = c.invoice;
+    const slot = findOrCreateSlotForRestore_(c.slotNum, c.slotSize);
+    slot.assignedTo = c.invoice;
     if(c.cleared) state.clearedInvoices.add(c.invoice);
     if(c.movedToPacking) state.movedToPackingInvoices.add(c.invoice); // ★ 2026-07-23 신규
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
@@ -4379,8 +4401,8 @@ async function applyBatchStructureResult_(res, batchId, silent, fromMirror){
     if(c.takenOut) nextTaken.add(c.invoice);
     if(c.packVerified) nextVerified.add(c.invoice);
     if(!c.slotNum) return;
-    const slot = state.slots.find(s => s.num === Number(c.slotNum));
-    if(slot) slot.assignedTo = c.invoice;
+    const slot = findOrCreateSlotForRestore_(c.slotNum, c.slotSize);
+    slot.assignedTo = c.invoice;
   });
   // 이 기기에서 방금 눌러 서버 응답을 기다리는 중인 건은 덮어쓰지 않음
   //   (낙관적 갱신이 잠깐 되돌아가 보이는 깜빡임 방지)
