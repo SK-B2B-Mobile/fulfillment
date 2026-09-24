@@ -634,11 +634,129 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════
+     ★ 2026-09 신규 — Firestore 미러 구독 (v2 부분 이전)
+     ------------------------------------------------------------
+     sales.html이 실제로 호출하던 getSalesOverview/getSalesTodayList
+     함수의 "로직"은 전혀 안 바꿈. Apps Script(FirestoreSync.gs)가
+     1분마다 그 함수들의 결과를 그대로 Firestore mirror/* 문서에
+     복사해두고, 이 페이지는 그 문서를 실시간 구독(onSnapshot)만 함.
+     ═══════════════════════════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBG4HmlCg4CoJPoCbOi-ZE6wQwY2u88XeA",
+    authDomain: "sk-b2b-fulfillment.firebaseapp.com",
+    projectId: "sk-b2b-fulfillment",
+    storageBucket: "sk-b2b-fulfillment.firebasestorage.app",
+    messagingSenderId: "1053449174138",
+    appId: "1:1053449174138:web:d1f81b0c05abe6fcf4cfc3",
+    measurementId: "G-QBTQ1E86Y6"
+  };
+
+  try {
+    const fbApp = initializeApp(firebaseConfig);
+    const db = getFirestore(fbApp);
+
+    window._subscribeMirror = function(docPath, onUpdate){
+      const ref = doc(db, 'mirror', docPath);
+      // ★ 세션A 신규 — onSnapshot의 구독해제 함수를 그대로 반환하도록 변경.
+      //   board_activeBatch 같은 고정 소수 문서 구독(board.html/sales.html
+      //   기존 코드)은 반환값을 그냥 안 받으므로 전혀 영향 없음. 인보이스별로
+      //   동적으로 구독/해제해야 하는 salesInvDetail_{invoice} 같은 경우에만
+      //   이 반환값(unsubscribe 함수)을 실제로 사용함.
+      return onSnapshot(ref, (snap) => {
+        if(!snap.exists()) return;
+        try{
+          const payload = JSON.parse(snap.data().data);
+          onUpdate(payload);
+        }catch(e){ console.error('[mirror] JSON 파싱 실패 (' + docPath + '):', e); }
+      }, (err) => {
+        console.error('[mirror] onSnapshot 에러 (' + docPath + '):', err);
+      });
+    };
+    console.log('✅ Firestore 미러 연결 준비 완료');
+  } catch(e) {
+    console.error('❌ Firestore 초기화 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다:', e);
+  }
+</script>
+
 <script>
 const CONFIG = {
   GAS_URL: 'https://script.google.com/macros/s/AKfycbykK9DWjem9ORHxfR_mpdZl5DVh-en0D6JpCdIuel305QmfqxoNU_NqSnjkhFk401hI/exec'
 };
 const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
+
+// ★ 2026-09 신규 — Firestore 미러 캐시 + 대체 로직 (board.html과 동일한 패턴)
+let FIRESTORE_MIRROR_OK = false;
+let _mirrorCache = { overview:null, today:null };
+
+function _waitForMirrorInit(tries){
+  tries = tries || 0;
+  if(window._subscribeMirror){
+    FIRESTORE_MIRROR_OK = true;
+    window._subscribeMirror('sales_overview', (p) => {
+      _mirrorCache.overview = p;
+      if(typeof applySheetOverviewResult === 'function') applySheetOverviewResult(p);
+    });
+    window._subscribeMirror('sales_todayList', (p) => {
+      _mirrorCache.today = p;
+      if(typeof applyTodayResult === 'function') applyTodayResult(p);
+    });
+    console.log('✅ Firestore 미러 구독 시작 — 실시간 모드로 동작합니다');
+    return;
+  }
+  if(tries > 100){ // 약 5초 기다려도 안 뜨면 예전 방식(Apps Script 직접 폴링)으로 계속
+    console.warn('⚠ Firestore 미러 연결 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다');
+    return;
+  }
+  setTimeout(() => _waitForMirrorInit(tries + 1), 50);
+}
+_waitForMirrorInit();
+
+// ★ 2026-09 신규 — loadSheetOverview/loadToday/autoSync 안에서 쓰이는
+// "데이터 가져오기" 부분만 감싈 래퍼. 미러 캐시가 아직 안 채워졌으면
+// (null) 자동으로 Apps Script 직접 호출로 대체됨 — 나머지 로직(응답을
+// 어떻게 화면에 반영하는지)은 100% 그대로.
+async function getSalesOverviewData_(){
+  if(FIRESTORE_MIRROR_OK && _mirrorCache.overview) return _mirrorCache.overview;
+  return await gasGet({ op:'getSalesOverview' });
+}
+async function getSalesTodayListData_(){
+  if(FIRESTORE_MIRROR_OK && _mirrorCache.today) return _mirrorCache.today;
+  return await gasGet({ op:'getSalesTodayList' });
+}
+
+// ★ 세션A 신규 — getSalesInvoiceDetail은 sales_overview/sales_todayList와 달리
+// 인보이스마다 별도 문서(mirror/salesInvDetail_{invoice})이고 수가 무한히 늘어날
+// 수 있으므로, 이 둘처럼 페이지 로드 시 전부 미리 구독해두지 않는다. 상세 모달을
+// 열 때만 그 인보이스 하나를 구독하고, 모달을 닫거나 다른 인보이스로 넘어가면
+// 반드시 구독을 해제한다(리스너가 계속 쌓이는 것 방지). 서버는 이 인보이스에
+// 영향을 주는 쓰기(검수/이슈/디멘션/패킹상태 등)가 있을 때마다 이 문서를 갱신함
+// (1분 폴링이 아니라 쓰기 시점 전파 — FirestoreSync.gs의 syncSalesInvoiceDetailMirror_ 참고).
+let _invDetailUnsub = null;
+function _stopInvoiceDetailSub(){
+  if (_invDetailUnsub) { try { _invDetailUnsub(); } catch(e){} _invDetailUnsub = null; }
+}
+// 반환: 미러에서 실시간으로 받았으면 true, 못 받았으면(문서가 아직 없거나
+// Firestore 연결 자체가 안 됐으면) false — 호출부가 false일 때만 기존 방식으로 폴백.
+function subscribeInvoiceDetailMirror_(inv, onData){
+  return new Promise((resolve) => {
+    if (!window._subscribeMirror) { resolve(false); return; }
+    let settled = false;
+    _invDetailUnsub = window._subscribeMirror('salesInvDetail_' + inv, (payload) => {
+      if (payload && payload.ok) onData(payload);
+      if (!settled) { settled = true; resolve(true); }
+    });
+    // 문서가 아직 한 번도 안 만들어진(=이 인보이스를 한 번도 조회/수정한 적
+    // 없는) 인보이스일 수 있으므로, 짧게 기다렸다가 응답이 없으면 폴백.
+    // (이 조회 자체가 서버에 최초로 미러 문서를 만들게 되므로, 다음번부터는
+    // 실시간 구독이 정상 작동함.)
+    setTimeout(() => { if (!settled) { settled = true; resolve(false); } }, 400);
+  });
+}
 
 const REASON_LABEL = {EXP:'Expired', NF:'Not Found In Stock', DMG:'Damaged', OOS:'Out of Stock', SKUMIS:'SKU Mismatch', MISS:'Not Scanned (Picked OK)', CANC:'Sales Cancel Request'};
 const REAL_ISSUE = ['EXP','NF','DMG','OOS','SKUMIS','CANC'];
@@ -842,7 +960,7 @@ function showNamePopover(evt, fullName){
 
 /* ===================== Screen 1: Sheet Preview ===================== */
 async function loadSheetOverview(){
-  const res = await gasGet({ op:'getSalesOverview' });
+  const res = await getSalesOverviewData_();
   applySheetOverviewResult(res);
 }
 // ★ 2026-08-19 신규(긴급, 요청 합치기) — 위 로직을 분리. autoSync()가 통합
@@ -1270,7 +1388,7 @@ let TODAY_PAGE_SIZE = 10;
 let _recentPaymentOverrides = {}; // { invoice: { paid: bool, until: timestamp } }
 
 async function loadToday(){
-  const res = await gasGet({ op:'getSalesTodayList' });
+  const res = await getSalesTodayListData_();
   applyTodayResult(res);
 }
 // ★ 2026-08-19 신규(긴급, 요청 합치기) — 위 로직을 분리. autoSync()가 통합
@@ -1460,13 +1578,13 @@ async function doSearch(){
   if (f.length > 1){ st.textContent = f.length + ' matches — pick one from the list below.'; return; }
 
   // 목록에 없음 → 서버 조회
+  // ★ 세션A — 예전엔 여기서 getSalesInvoiceDetail을 직접 호출해서 openInvoice()와
+  //   똑같은 로직(모달 열기+그리기)을 중복 작성하고 있었고, 그 결과 이 경로는
+  //   Firestore 미러 혜택(실시간 갱신)도 못 받았음. openInvoice()를 그대로
+  //   재사용해서 중복도 없애고 미러 혜택도 자동으로 받게 함.
   st.innerHTML = '<span class="spinner"></span> Searching all orders…';
-  const direct = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice:q });
-  if (direct && direct.ok){ st.textContent = ''; CURRENT_ORDER = direct; 
-    document.getElementById('detail-overlay').classList.add('show');
-    document.body.style.overflow = 'hidden';
-    renderDetail(direct);  // 합치기 후보는 renderDetail 끝에서 자동으로 불러옴
-    return; }
+  await openInvoice(q);
+  if (CURRENT_ORDER && CURRENT_ORDER.ok) { st.textContent = ''; return; }
 
   st.innerHTML = '<span class="spinner"></span> Searching by barcode / SKU…';
   const byItem = await gasGet({ op:'getOrdersByItem', q:q });
@@ -1560,6 +1678,7 @@ function renderDimsLinkedCard(order){
     <div class="linked-sub">${order.dimsLinkedToCustomer||order.customer||''} — same customer, shipped together. Edit on the primary order only.</div>
     <div style="margin-top:14px;">${body}</div>
     <div class="linked-actions">
+      ${dims.length ? `<button class="link-btn accent" onclick="printMergedPalletLabel()">🏷️ Print Label</button>` : ''}
       <button class="link-btn" onclick="jumpToInvoice('${p}')">Open primary ↗</button>
       <button class="link-btn" onclick="makeDimPrimary('${order.invoice}')">Make this the primary</button>
       <button class="link-btn danger" onclick="unlinkDim('${order.invoice}', true)">Unlink — ship separately</button>
@@ -1699,7 +1818,10 @@ function renderDimsPanel(order, editing){
     return `<div class="dims-panel">
       <div class="dims-head-row">
         <span class="dims-unit-label">${kidCount?'<span class="role-badge primary">PRIMARY</span> ':''}${order.dims.length} ${order.dims.length===1?unit:unitPl} · Total ${totalWt} lbs${kidCount?` <span class="linked-tag">${kidCount} linked</span>`:''}</span>
-        <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
+        <span style="display:flex; gap:8px;">
+          <button class="edit-pencil-btn" onclick="printMergedPalletLabel()">🏷️ Print Label</button>
+          <button class="edit-pencil-btn" onclick="startDimsEdit()">✏️ Edit</button>
+        </span>
       </div>
       ${rows}
       <div class="dims-meta" style="margin-top:10px;">Entered by ${order.dimsBy||'-'} · ${order.dimsAt||'-'}</div>
@@ -1749,6 +1871,148 @@ function unlinkDim(invoice, isSelf){
 function makeDimPrimary(invoice){
   dimGroupCall('setDimPrimary', { invoice: invoice, by: 'Packing (tablet)' },
     `Make ${invoice} the primary invoice for this group.\n\nSaved dimensions move here and the other orders will be linked to it. Continue?`);
+}
+
+// ★ 2026-09-23 신규(대표님 요청) — batch.html "Final Check(2차 검수)" 완료 시
+//   나가는 팔렛/박스 라벨과 같은 디자인을, Sales Lookup(v2) 오더 디테일에서
+//   Dims 저장이 끝난 뒤 수동으로도 인쇄할 수 있게 함(자동 인쇄 아님 — 조회만
+//   해도 매번 인쇄되면 안 되므로 버튼으로만 동작).
+//   batch.html과 다른 점: 여기는 같은 고객사 인보이스가 최대 4건까지 merge되어
+//   같은 팔렛으로 나가는 경우가 실제로 있음(디멘션 그룹 = renderDimGroupMembers
+//   와 동일한 전제 — order.dimsGroupMembers). 그래서 라벨 맨 아래에
+//   "TK · IN# · 인쇄일시" 줄을 merge된 인보이스 수만큼(보통 1~4개) 쌓아서 전부
+//   기록하고, 줄 수가 늘어나는 만큼 브랜드명은 작아지며 위로 붙고 전체 글자
+//   크기가 단계적으로 줄어드는 레이아웃으로 재배치함. 1건일 때는 batch.html의
+//   원래 라벨과 크기가 완전히 동일함(30/65/40pt).
+function printMergedPalletLabel(order){
+  order = order || CURRENT_ORDER;
+  if (!order){ alert('No order is open.'); return; }
+  const isPallet = order.method === 'TRUCKING' || order.method === 'TK';
+  const shipVia = isPallet ? 'TK' : 'UPS';
+  const labelKind = isPallet ? 'PALLET' : 'BOX';
+
+  // 대표든 포함오더든 order.dims엔 항상 실제(대표) 디멘션이 들어있고
+  // order.dimsGroupMembers엔 이 팔렛에 함께 실린 오더 전체 명단이 들어있음
+  // (renderDimsLinkedCard / renderDimsExtras와 동일한 전제).
+  const totalCount = (order.dims && order.dims.length) ? order.dims.length : 1;
+  if (!order.dims || !order.dims.length){
+    alert('No dimensions saved yet — enter dimensions before printing a label.');
+    return;
+  }
+  const customer = order.dimsLinkedToCustomer || order.customer || '';
+  const members = (order.dimsGroupMembers && order.dimsGroupMembers.length)
+    ? order.dimsGroupMembers
+    : [{ invoice: order.dimsLinkedTo || order.invoice, isPrimary: true }];
+  let invoices = members.map(m => m.invoice).filter(Boolean);
+  if (!invoices.length) invoices = [order.invoice];
+
+  const printedAt = new Date().toLocaleString('en-US');
+  const n = invoices.length;
+
+  // ★ 2026-09-23 재조정(실물 라벨 2차 피드백) — 1차 수정 때는 위쪽 요소를
+  //   붙여놓고 남는 공간을 전부 맨 아래로 몰아버렸더니, 이번엔 반대로
+  //   "PALLET 1/1↔고객사명", "고객사명↔인보이스 목록" 사이가 너무 붙어
+  //   답답해 보인다는 지적. → 브랜드/PALLET/고객사명/인보이스 블록 네 덩어리를
+  //   라벨 세로 전체에 걸쳐 균등 배분(justify-content:space-evenly)하는
+  //   방식으로 바꿈. 이러면 네 덩어리 사이 간격이 전부 똑같아지고, 맨 아래
+  //   남는 여백도 자동으로 같은 비율만큼 나눠 가짐 — 수동으로 여백 값을
+  //   하나씩 정할 필요가 없어짐.
+  //   건수(n)별 글자 크기도 하드코딩된 4단계 대신 연속 공식으로 바꿔서,
+  //   가끔 나온다는 5건·6건 merge도 미리 정해두지 않아도 자동으로 비율이
+  //   맞게 축소됨. 1건(merge 없음)은 기존 batch.html 라벨과 완전히 동일.
+  let scale;
+  if (n <= 1){
+    scale = { brand:30, pallet:65, customer:40, footer:13, footerGap:4, legacy:true };
+  } else {
+    const k = n - 2; // n=2일 때 0, 건수가 늘수록 커지는 감쇠 계수
+    scale = {
+      brand:     Math.max(30 - k*2.4, 16),
+      pallet:    Math.max(60 - k*4.5, 38),
+      customer:  Math.max(36 - k*3.5, 20),
+      footer:    Math.max(18 - k*1.3, 11),
+      footerGap: Math.max(8  - k*1.0, 3),
+    };
+  }
+
+  const footerLinesHtml = invoices.map(inv => `
+    <div class="lbl-foot-line">
+      <span>${shipVia}</span><span>·</span><span>${inv}</span><span>·</span><span>${printedAt}</span>
+    </div>`).join('');
+
+  const pagesHtml = Array.from({ length: totalCount }, (_, i) => i + 1).map((num, i, arr) => {
+    const palletLine = `${labelKind} ${num}/${totalCount}`;
+    return scale.legacy
+      ? `<div class="label-page legacy"${i < arr.length - 1 ? ' style="page-break-after:always;"' : ''}>
+          <div class="label-brand lbl-brand">StyleKorean</div>
+          <div class="label-mid">
+            <div class="label-pallet lbl-pallet">${palletLine}</div>
+            <div class="label-customer lbl-customer">${customer || '-'}</div>
+          </div>
+          <div class="label-footer">${footerLinesHtml}</div>
+        </div>`
+      : `<div class="label-page merged"${i < arr.length - 1 ? ' style="page-break-after:always;"' : ''}>
+          <div class="label-brand lbl-brand">StyleKorean</div>
+          <div class="label-pallet lbl-pallet">${palletLine}</div>
+          <div class="label-customer lbl-customer">${customer || '-'}</div>
+          <div class="label-footer">${footerLinesHtml}</div>
+        </div>`;
+  }).join('');
+
+  const legacyCss = `
+    .label-page.legacy{ justify-content:flex-start; padding-top:0.3in; }
+    .label-mid{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.15in; min-height:0; }
+    .label-page.legacy .label-footer{ display:flex; flex-direction:column; align-items:center; gap:${scale.footerGap}px; padding-bottom:0.15in; flex-shrink:0; }
+    .label-page.legacy .lbl-foot-line{ font-size:${scale.footer}pt; font-weight:600; color:#333; white-space:nowrap; }
+    .label-page.legacy .lbl-foot-line span{ margin:0 2px; }`;
+
+  // ★ 네 덩어리(브랜드/PALLET/고객사명/인보이스)를 세로 공간에 고르게 분배.
+  //   위·아래 바깥 여백까지 포함해 전부 똑같이 나뉘므로 하단 여백도 자연스럽게 활용됨.
+  const mergedCss = `
+    .label-page.merged{ justify-content:space-evenly; padding:0.1in 0; }
+    .label-page.merged .label-footer{ display:flex; flex-direction:column; align-items:stretch; gap:${scale.footerGap}px; width:5.4in; flex-shrink:0; }
+    .label-page.merged .lbl-foot-line{ font-size:${scale.footer}pt; font-weight:700; color:#111; display:flex; justify-content:space-between; align-items:baseline; white-space:nowrap; }`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${labelKind} Labels · ${totalCount} sheets${n>1?' · '+n+' invoices merged':''}</title>
+  <style>
+    @page{ size: 6in 4in; margin: 0.1in; }
+    html,body{ margin:0; padding:0; }
+    .label-page{
+      font-family:'Helvetica Neue',Arial,sans-serif; color:#111; text-align:center;
+      width:5.8in; height:3.8in; display:flex; flex-direction:column;
+      align-items:center; box-sizing:border-box;
+    }
+    .label-brand{ font-size:${scale.brand}pt; font-weight:800; letter-spacing:0.03em; white-space:nowrap; flex-shrink:0; }
+    .label-pallet{ font-size:${scale.pallet}pt; font-weight:900; line-height:1; letter-spacing:-0.01em; white-space:nowrap; }
+    .label-customer{ font-size:${scale.customer}pt; font-weight:700; line-height:1.15; white-space:nowrap; }
+    ${legacyCss}
+    ${mergedCss}
+  </style></head><body>
+    ${pagesHtml}
+    <script>
+      function fitOneLine(el, maxWidthIn){
+        const maxPx = maxWidthIn * 96;
+        let size = parseFloat(getComputedStyle(el).fontSize);
+        let guard = 0;
+        while(el.scrollWidth > maxPx && size > 6 && guard < 40){
+          size -= 1;
+          el.style.fontSize = size + 'px';
+          guard++;
+        }
+      }
+      window.onload = function(){
+        document.querySelectorAll('.lbl-brand').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-pallet').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-customer').forEach(el => fitOneLine(el, 5.6));
+        document.querySelectorAll('.lbl-foot-line').forEach(el => fitOneLine(el, 5.6));
+      };
+    <\/script>
+  </body></html>`;
+
+  const win = window.open('', '_blank', 'width=420,height=620');
+  if (!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
+  win.document.write(html);
+  win.document.close();
+  setTimeout(() => { win.focus(); win.print(); }, 400);
 }
 
 function linkByTyping(invoice){
@@ -1846,6 +2110,8 @@ async function saveDimsReal(){
 async function openInvoice(inv){
   inv = String(inv||'').trim().toUpperCase();
   if (!inv) return;
+  _stopInvoiceDetailSub(); // ★ 세션A — 이전에 열려있던 인보이스 구독은 반드시 먼저 해제
+
   const overlay = document.getElementById('detail-overlay');
   const card = document.getElementById('detail-card');
   overlay.classList.add('show');
@@ -1853,6 +2119,19 @@ async function openInvoice(inv){
   card.classList.add('show');
   card.innerHTML = `<div class="modal-loading"><span class="spinner"></span>${inv} loading…</div>`;
 
+  // ★ 세션A — 미러 문서가 이미 있으면(=한 번이라도 조회/수정된 인보이스) 실시간
+  //   구독으로 즉시 표시. 모달이 열려있는 동안 다른 기기가 이 인보이스를
+  //   검수·이슈등록·디멘션저장 하면 새로고침 없이 이 화면도 자동으로 갱신됨
+  //   (예전엔 30초 캐시 + 수동 새로고침이 있어야만 보였음).
+  const gotLive = await subscribeInvoiceDetailMirror_(inv, (payload) => {
+    CURRENT_ORDER = payload;
+    renderDetail(payload);
+  });
+  if (gotLive) return;
+
+  // 폴백 — 미러 문서가 아직 없거나(최초 조회) Firestore 연결 자체가 안 된 경우.
+  // 이 조회로 서버가 미러 문서를 새로 만들어주므로, 다음번 열람부터는 위
+  // 실시간 구독 경로를 탄다.
   const res = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice: inv });
   if (!res || !res.ok){
     CURRENT_ORDER = null;
@@ -2071,6 +2350,7 @@ function renderDetail(res){
 function closeDetailCard(){
   // ★ 2026-08-06 — 팝업만 닫음. 검색어와 목록 위치는 그대로 두어서,
   //   여러 건을 연속으로 처리할 때 매번 다시 찾지 않아도 되게 함.
+  _stopInvoiceDetailSub(); // ★ 세션A 신규 — 모달을 닫으면 실시간 구독도 반드시 해제(누수 방지)
   document.getElementById('detail-overlay').classList.remove('show');
   document.getElementById('detail-card').classList.remove('show');
   document.body.style.overflow = '';
@@ -2238,18 +2518,26 @@ async function autoSync(silent){
   if (isBusyEditing()) return;
   try {
     if (!silent) setSync('busy', 'Loading...');
-    // ★ 2026-08-19 신규(긴급, 요청 합치기) — 예전엔 getSalesOverview +
-    //   getSalesTodayList를 각각 따로(Promise.all로 동시에 2개) 불렀는데,
-    //   통합 엔드포인트 하나로 합침. 주기(30초)는 그대로, 요청 개수만 절반.
-    const res = await gasGet({ op:'getSalesOverviewAndToday' });
-    if (res && res.ok){
-      applySheetOverviewResult(res.overview);
-      applyTodayResult(res.today);
+    if (FIRESTORE_MIRROR_OK){
+      // ★ 2026-09 신규 — 미러 모드에서는 이미 onSnapshot 실시간 구독이 계속
+      //   _mirrorCache와 화면을 최신으로 갱신하고 있으므로, 여기서는 네트워크
+      //   호출 없이 캐시를 다시 한 번 반영만 함(아직 첫 스냅샷이 안 왔으면 스킵).
+      if (_mirrorCache.overview) applySheetOverviewResult(_mirrorCache.overview);
+      if (_mirrorCache.today) applyTodayResult(_mirrorCache.today);
     } else {
-      // 통합 요청 자체가 실패했으면, 각 apply 함수가 알아서 로컬 캐시로
-      // 대체 표시하도록 실패 응답을 그대로 넘겨줌(기존 실패 처리 로직 재사용)
-      applySheetOverviewResult(res);
-      applyTodayResult(res);
+      // ★ 2026-08-19 신규(긴급, 요청 합치기) — 예전엔 getSalesOverview +
+      //   getSalesTodayList를 각각 따로(Promise.all로 동시에 2개) 불렀는데,
+      //   통합 엔드포인트 하나로 합침. 주기(30초)는 그대로, 요청 개수만 절반.
+      const res = await gasGet({ op:'getSalesOverviewAndToday' });
+      if (res && res.ok){
+        applySheetOverviewResult(res.overview);
+        applyTodayResult(res.today);
+      } else {
+        // 통합 요청 자체가 실패했으면, 각 apply 함수가 알아서 로컬 캐시로
+        // 대체 표시하도록 실패 응답을 그대로 넘겨줌(기존 실패 처리 로직 재사용)
+        applySheetOverviewResult(res);
+        applyTodayResult(res);
+      }
     }
     setSync('ok', 'Connected · ' + new Date().toLocaleTimeString('en-US', {hour12:false}));
   } catch(e){
