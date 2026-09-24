@@ -3691,6 +3691,44 @@ function getBatchKPI(batchId) {
 var __DIAG__ = [];
 function _diagPush_(msg) { __DIAG__.push(msg); console.log('[진단] ' + msg); }
 
+// ★ 2026-09-24 신규(핵심 수정) — 진단 로그로 실제 원인을 확인함: 배치가 크면
+//   (예: ScanLog 2.7만행, BatchItems 5.5만행) 집계 결과 JSON이 172KB까지 나옴.
+//   CacheService는 값 1개당 약 95~100KB 제한이 있어서, 기존 코드의
+//   `if (payload.length < 95000) cache.put(...)` 조건 때문에 큰 배치는
+//   캐시가 "절대" 저장되지 않고 있었음 — 그래서 TTL을 아무리 조정해도
+//   매번 시트 3개(총 8만 행 이상)를 처음부터 다시 읽고 있었던 것이 진짜 원인.
+//   → 값 1개에 다 넣으려 하지 않고 여러 키로 쪼개서 저장(청크)하도록 변경.
+//   CacheService는 "키 개수"에는 이런 제한이 없으므로 크기와 무관하게 안전하게 캐싱됨.
+function _cacheGetChunked_(cache, baseKey) {
+  const metaRaw = cache.get(baseKey + '_meta');
+  if (!metaRaw) return null;
+  let meta;
+  try { meta = JSON.parse(metaRaw); } catch (e) { return null; }
+  if (!meta || !meta.n) return null;
+  const keys = [];
+  for (let i = 0; i < meta.n; i++) keys.push(baseKey + '_c' + i);
+  const parts = cache.getAll(keys);
+  let combined = '';
+  for (let i = 0; i < meta.n; i++) {
+    const part = parts[baseKey + '_c' + i];
+    if (part == null) return null; // 조각 하나라도 만료/누락되면 캐시 미스로 처리(부분 데이터 방지)
+    combined += part;
+  }
+  return combined;
+}
+function _cachePutChunked_(cache, baseKey, payload, ttlSeconds) {
+  const CHUNK_SIZE = 30000; // 한글 포함 시 UTF-8 바이트가 문자 수의 최대 3배까지 될 수 있어
+                             // 30000자 기준으로 나눠도 청크 1개가 100KB 한도 안에 안전하게 들어감.
+  const n = Math.max(1, Math.ceil(payload.length / CHUNK_SIZE));
+  const obj = {};
+  for (let i = 0; i < n; i++) {
+    obj[baseKey + '_c' + i] = payload.substr(i * CHUNK_SIZE, CHUNK_SIZE);
+  }
+  cache.putAll(obj, ttlSeconds); // 청크 먼저 저장
+  cache.put(baseKey + '_meta', JSON.stringify({ n: n }), ttlSeconds); // meta는 마지막에(부분 상태 방지)
+  return n;
+}
+
 function _buildBatchAggregates_(batchId) {
   // ★ 2026-09-24 신규(진단용, 임시) — 어디서 시간이 새는지 숫자로 확인하기 위한
   //   타임스탬프 로그. 로직은 전혀 안 바뀜, 로그만 추가됨. 확인 끝나면
@@ -3698,13 +3736,13 @@ function _buildBatchAggregates_(batchId) {
   const _t0 = Date.now();
   const _cache = CacheService.getScriptCache();
   const _cacheKey = 'batchAggr_v1_' + batchId;
-  const _cached = _cache.get(_cacheKey);
+  const _cached = _cacheGetChunked_(_cache, _cacheKey);
   const _tAfterCacheGet = Date.now();
   if (_cached) {
-    _diagPush_('_buildBatchAggregates_ CACHE HIT batchId=' + batchId + ' cache.get=' + (_tAfterCacheGet - _t0) + 'ms');
+    _diagPush_('_buildBatchAggregates_ CACHE HIT batchId=' + batchId + ' cache.get(청크)=' + (_tAfterCacheGet - _t0) + 'ms');
     return JSON.parse(_cached);
   }
-  _diagPush_('_buildBatchAggregates_ CACHE MISS batchId=' + batchId + ' cache.get=' + (_tAfterCacheGet - _t0) + 'ms — 실제 시트 읽기 시작');
+  _diagPush_('_buildBatchAggregates_ CACHE MISS batchId=' + batchId + ' cache.get(청크)=' + (_tAfterCacheGet - _t0) + 'ms — 실제 시트 읽기 시작');
 
   // 고객사별/SKU별 스캔 통과(pass) 수량 집계 (undone 제외) — getSlotProgress()와 동일 로직
   const sl = scanlogSheet_();
@@ -3775,26 +3813,27 @@ function _buildBatchAggregates_(batchId) {
   try {
     const _payload = JSON.stringify(aggr);
     const _tAfterStringify = Date.now();
-    _diagPush_('JSON.stringify: ' + (_tAfterStringify - _tAfterBatchItems) + 'ms (payload 크기 ' + _payload.length + '바이트, 95000 미만이어야 캐싱됨)');
-    // ★ 2026-09-24 세 번째 수정(진짜 원인 발견) — 6초→60초→25초로 계속
-    //   맞춰봤는데도 안 빨라진 이유: board.html이 "30초마다 폴링한다"고 해도,
-    //   Firestore 미러가 연결된 정상 상태에서는 그 폴링이 실제 getSlotProgress()
-    //   서버 함수를 직접 호출하지 않음(board.html의 getSlotProgressLiveData_
-    //   참고 — FIRESTORE_MIRROR_OK가 true면 Firestore에 미리 복사된 값만 읽고
-    //   끝남). getSlotProgress()를 실제로 호출해서 이 캐시를 채워주는 건
-    //   1분마다 도는 백그라운드 트리거(FirestoreSync.gs의 syncToFirestore)뿐임.
-    //   즉 진짜 호출 주기는 30초가 아니라 60초였음 — 25초 캐시는 60초 주기의
-    //   대부분(약 35초)을 차갑게 비어있는 채로 보내고 있었던 것.
-    //   → 실제 호출 주기(1분)에 맞춰 55초로 재조정. TV 실시간성은 원래부터
-    //   이 1분 트리거 주기로 정해져 있던 것이라(오늘 제가 건드린 부분이
-    //   아님), 55초 TTL이 이를 더 나쁘게 만들지 않음 — 트리거가 새로 돌 때마다
-    //   캐시는 이미 만료돼 있어 항상 새로 계산되고, 그 1분 창 안의 슬롯
-    //   클릭은 거의 항상 캐시를 재사용해 즉시 응답됨.
-    //   배치가 매우 크면 100KB 캐시 한도를 넘을 수 있음 — 그럴 땐 캐싱만 건너뜀
-    //   (매번 다시 계산되긴 하지만 결과가 틀리진 않음. 기존과 동일한 안전장치).
-    if (_payload.length < 95000) _cache.put(_cacheKey, _payload, 55);
+    _diagPush_('JSON.stringify: ' + (_tAfterStringify - _tAfterBatchItems) + 'ms (payload 크기 ' + _payload.length + '바이트)');
+    // ★ 2026-09-24 세 번째 수정(TTL 재조정) — 6초→60초→25초로 계속 맞춰봤는데도
+    //   안 빨라진 이유: board.html이 "30초마다 폴링한다"고 해도, Firestore
+    //   미러가 연결된 정상 상태에서는 그 폴링이 실제 getSlotProgress() 서버
+    //   함수를 직접 호출하지 않음(board.html의 getSlotProgressLiveData_ 참고 —
+    //   FIRESTORE_MIRROR_OK가 true면 Firestore에 미리 복사된 값만 읽고 끝남).
+    //   getSlotProgress()를 실제로 호출해서 이 캐시를 채워주는 건 1분마다 도는
+    //   백그라운드 트리거(FirestoreSync.gs의 syncToFirestore)뿐임. 즉 진짜
+    //   호출 주기는 30초가 아니라 60초였음 → 실제 호출 주기(1분)에 맞춰
+    //   55초로 재조정. TV 실시간성은 원래부터 이 1분 트리거 주기로 정해져
+    //   있던 것이라(오늘 제가 건드린 부분이 아님), 55초 TTL이 이를 더
+    //   나쁘게 만들지 않음.
+    // ★ 2026-09-24 네 번째 수정(진짜 원인 발견, 핵심) — 진단 로그로 실측한 결과,
+    //   이 배치(ScanLog 2.7만행/BatchItems 5.5만행)는 집계 결과가 172KB까지
+    //   나옴. 기존엔 "95000자 미만일 때만 캐싱" 조건 때문에 이런 큰 배치는
+    //   캐시가 단 한 번도 저장되지 않고 있었음 — TTL을 아무리 조정해도 매번
+    //   시트 3개(8만행 이상)를 처음부터 다시 읽고 있었던 게 실제 원인.
+    //   → _cachePutChunked_로 여러 키에 나눠 담아 크기 제한 없이 캐싱되도록 변경.
+    _cachePutChunked_(_cache, _cacheKey, _payload, 55);
     const _tAfterCachePut = Date.now();
-    _diagPush_('cache.put: ' + (_tAfterCachePut - _tAfterStringify) + 'ms');
+    _diagPush_('cache.put(청크): ' + (_tAfterCachePut - _tAfterStringify) + 'ms');
   } catch (eCache) { /* 캐시 실패해도 정상 계산 결과는 그대로 반환 */ }
   _diagPush_('_buildBatchAggregates_ 전체(캐시 미스 경로) 총 소요: ' + (Date.now() - _t0) + 'ms');
   return aggr;
@@ -3876,7 +3915,10 @@ function getSlotProgress(batchId) {
     //   데이터가 실제로 바뀌면(logScan 등) 최대 6초의 지연만 감수하면 됨.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'slotProgress_v1_' + batchId;
-    const _cached = _cache.get(_cacheKey);
+    // ★ 2026-09-24 수정(핵심) — 아래 cache.put과 마찬가지로, 이 배치처럼
+    //   결과가 커지면(95000자 넘으면) 기존엔 아예 캐시가 저장 안 되고 있었음
+    //   → 청크 저장/조회로 변경(_buildBatchAggregates_와 동일한 방식).
+    const _cached = _cacheGetChunked_(_cache, _cacheKey);
     if (_cached) return JSON.parse(_cached);
 
     // ★ 2026-09-24 수정(속도) — 고객사별/SKU별 스캔·이슈·필요수량 집계를 이 함수
@@ -4053,9 +4095,12 @@ function getSlotProgress(batchId) {
     maybeSyncBatchJobsDone_(batchId, slots);
     const _result = { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
     // ★ 2026-08-19 신규 — 위 캐시 조회와 짝을 이루는 저장. 6초 후 자동 만료.
+    // ★ 2026-09-24 수정(핵심) — 95000자 미만일 때만 저장하던 걸 청크 저장으로
+    //   바꿔서, 배치가 크든 작든 항상 캐시가 실제로 저장되도록 함(TV/여러 기기가
+    //   동시에 몰릴 때의 원래 보호 목적이 큰 배치에서는 무력화되고 있었음).
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 6);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -5160,7 +5205,12 @@ function removeDimensionsCleanupTrigger() {
 function getBatchCustomersInvoiceRowIndex_() {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'bcInvRowIdx_v1';
-  const cached = cache.get(cacheKey);
+  // ★ 2026-09-24 수정(핵심) — getJobsInvoiceRowIndex_(Code.gs)와 완전히 동일한
+  //   버그: BatchCustomers가 커진 지금은 이 인덱스 JSON도 95000자를 넘어서
+  //   "크면 캐싱 건너뛰기" 조건 때문에 사실상 매번 캐시 미스 → 전체 재스캔이
+  //   반복되고 있었음(getSalesInvoiceDetail이 이 함수를 호출하므로 영업 상세창
+  //   느림의 원인 중 하나). 청크 저장/조회로 변경해 크기 제한 없이 항상 캐싱되게 함.
+  const cached = _cacheGetChunked_(cache, cacheKey);
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
   }
@@ -5176,7 +5226,7 @@ function getBatchCustomersInvoiceRowIndex_() {
   }
   try {
     const payload = JSON.stringify(idx);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 45); // ★ 2026-09-03 30초→45초
+    _cachePutChunked_(cache, cacheKey, payload, 45); // ★ 2026-09-03 30초→45초 (TTL 그대로, 저장 방식만 청크로)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return idx;
 }
@@ -5250,6 +5300,8 @@ function getIssueLogRowsCached_() {
 }
 
 function getSalesInvoiceDetail(invoice) {
+  __DIAG__ = []; // ★ 2026-09-24 신규 — 이 호출 한 건의 진단 로그만 담기게 매번 리셋(board.html의 getInvoiceItemStatus와 동일한 방식)
+  const _t0 = Date.now();
   try {
     invoice = String(invoice || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
@@ -5257,10 +5309,22 @@ function getSalesInvoiceDetail(invoice) {
     // ★ 2026-08-19 신규(긴급) — "Too many simultaneous invocations: Spreadsheets"
     //   실제로 발생 확인됨. 이 함수도 여러 시트(Jobs/BatchItems/IssueLog/Dims)를
     //   조합해 계산하는 무거운 함수라, 6초 캐시로 스프레드시트 동시 접근 자체를 줄임.
+    // ★ 2026-09-24 수정(핵심) — 이 캐시 자체도 "95000자 넘으면 저장 안 함" 버그가
+    //   있었음(보통 작지만, 이슈·디멘션이 많은 인보이스는 넘을 수 있어 일관성 있게
+    //   청크 방식으로 통일). 진짜 원인은 아래에서 이 함수가 내부적으로 부르는
+    //   getJobsInvoiceRowIndex_/getBatchCustomersInvoiceRowIndex_ 쪽의 같은 버그였음
+    //   (Jobs/BatchCustomers 전체 인덱스가 훨씬 커서 실제로 매번 걸리고 있었음) —
+    //   그쪽도 같이 고쳤고, 아래 診 로그로 실제 어느 단계가 느렸는지 확인 가능.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'salesInvDetail_v1_' + invoice;
-    const _cached = _cache.get(_cacheKey);
-    if (_cached) return JSON.parse(_cached);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey);
+    if (_cached) {
+      _diagPush_('전체 결과 캐시 HIT — ' + (Date.now() - _t0) + 'ms');
+      const _hit = JSON.parse(_cached);
+      _hit.diag = __DIAG__.slice();
+      return _hit;
+    }
+    _diagPush_('전체 결과 캐시 MISS — 아래부터 새로 계산');
 
     // 1) Jobs 시트에서 기본 정보 + 검수결과
     // ★ 2026-08-03 성능 개선 — 예전엔 인보이스 하나 찾으려고 Jobs 시트 전체
@@ -5279,15 +5343,19 @@ function getSalesInvoiceDetail(invoice) {
     if (!invCol) return { ok: false, error: 'invoice column not found' };
 
     let jobRowIndex = -1;
+    const _tBeforeIdx = Date.now();
     const _invIdx = getJobsInvoiceRowIndex_();
+    _diagPush_('getJobsInvoiceRowIndex_ — ' + (Date.now() - _tBeforeIdx) + 'ms (인덱스 항목 ' + Object.keys(_invIdx).length + '개)');
     if (_invIdx[invoice]) {
       jobRowIndex = _invIdx[invoice];
     } else {
       // 인덱스에 없으면(캐시가 아직 못 따라간 경우) 안전하게 전체 스캔으로 한 번 더 확인
+      const _tBeforeScan = Date.now();
       const invColVals = sh.getRange(2, invCol, lastRow - 1, 1).getValues();
       for (let i = 0; i < invColVals.length; i++) {
         if (String(invColVals[i][0]).trim() === invoice) { jobRowIndex = i + 2; break; }
       }
+      _diagPush_('⚠ 인덱스에 없어서 Jobs 전체 재스캔함 — ' + (Date.now() - _tBeforeScan) + 'ms');
     }
     // ★ 2026-09-03 신규(매니저 요청) — 라이브 Jobs에서 못 찾으면(검수완료 후
     //   30일이 지나 Archive_Jobs로 옮겨졌을 수 있음) 보관함까지 자동으로 이어서
@@ -5376,14 +5444,18 @@ function getSalesInvoiceDetail(invoice) {
     const bcLast = bc.getLastRow();
     let movedToPacking = false;
     let packStage = 'none'; // ★ 2026-08-24 신규 — none/moved/taken/verified (K/L/M 컬럼을 그대로 신뢰)
+    const _tBeforeBcIdx = Date.now();
     const _bcIdx = getBatchCustomersInvoiceRowIndex_();
+    _diagPush_('getBatchCustomersInvoiceRowIndex_ — ' + (Date.now() - _tBeforeBcIdx) + 'ms (인덱스 항목 ' + Object.keys(_bcIdx).length + '개)');
     let bcRow = _bcIdx[invoice] || 0;
     if (!bcRow && bcLast >= 2) {
       // 인덱스에 없으면(캐시가 아직 못 따라간 경우) 안전하게 전체 스캔으로 한 번 더 확인
+      const _tBeforeBcScan = Date.now();
       const bcInvVals = bc.getRange(2, 2, bcLast - 1, 1).getValues();
       for (let i = bcInvVals.length - 1; i >= 0; i--) {
         if (String(bcInvVals[i][0]).trim() === invoice) { bcRow = i + 2; break; }
       }
+      _diagPush_('⚠ 인덱스에 없어서 BatchCustomers 전체 재스캔함 — ' + (Date.now() - _tBeforeBcScan) + 'ms');
     }
     if (bcRow) {
       // ★ 2026-08-05 수정(매니저 요청) — K컬럼(핑크, "이동 필요" 표시 시각) 대신
@@ -5412,7 +5484,9 @@ function getSalesInvoiceDetail(invoice) {
       //   전체를 다시 읽는 건 여전히 무거웠음(이 세션 동안 스캔이 많이 누적된
       //   시트라 더더욱). 15초 짧은 캐시로 원본 데이터를 담아두고, 반복 조회
       //   시(같은 화면에서 여러 오더를 연달아 열어볼 때 등) 다시 안 읽음.
+      const _tBeforeSl = Date.now();
       const slRange = getScanLogInvResultStatusCached_();
+      _diagPush_('getScanLogInvResultStatusCached_ — ' + (Date.now() - _tBeforeSl) + 'ms (' + slRange.length + '행)');
       for (let i = 0; i < slRange.length; i++) {
         if (String(slRange[i][0]).trim() !== invoice) continue;
         if (slRange[i][1] === 'pass' && slRange[i][2] !== 'undone') { hasBatchRecord = true; break; }
@@ -5449,7 +5523,10 @@ function getSalesInvoiceDetail(invoice) {
     //   여전히 IssueLog 전체를 매번 다시 훑고 있었음. 15초 짧은 캐시로 원본
     //   데이터를 담아두고, 반복 조회 시 다시 안 읽음.
     const items = [];
-    getIssueLogRowsCached_().forEach(r => {
+    const _tBeforeIl = Date.now();
+    const _ilRows = getIssueLogRowsCached_();
+    _diagPush_('getIssueLogRowsCached_ — ' + (Date.now() - _tBeforeIl) + 'ms (' + _ilRows.length + '행)');
+    _ilRows.forEach(r => {
       if (String(r[7]).trim() !== invoice) return;
       if (r[12] === 'undone') return;
       items.push({
@@ -5521,9 +5598,11 @@ function getSalesInvoiceDetail(invoice) {
     // 4) 디멘션
     // ★ 2026-08-06 신규 — 디멘션 합산. 이 오더가 다른 오더에 "포함"되어 있으면
     //   자기 디멘션이 아니라 대표 오더의 디멘션을 대신 보여줌(읽기 전용).
+    const _tBeforeDims = Date.now();
     const dimGroup = getDimGroupDetail_(invoice);
     const dimsOwner = dimGroup.dimsLinkedTo || invoice;
     const dimsResult = getDimensions_(dimsOwner);
+    _diagPush_('getDimGroupDetail_+getDimensions_ — ' + (Date.now() - _tBeforeDims) + 'ms');
 
     // ★ 2026-08-06 신규(매니저 요청) — "디멘션이 저장됐는데 Moved는 No"인
     //   앞뒤 안 맞는 상태를 원천 차단. 디멘션(치수/무게)이 하나라도 저장돼
@@ -5563,17 +5642,20 @@ function getSalesInvoiceDetail(invoice) {
       dimsJoinTargets: null,                                // null = 아직 안 불러옴(화면이 비동기로 채움)
       dimsAddCandidates: null
     };
+    _diagPush_('전체 서버 처리 완료 — ' + (Date.now() - _t0) + 'ms');
+    _result.diag = __DIAG__.slice();
     try {
       const _payload = JSON.stringify(_result);
       // ★ 2026-09-03 신규 — 6초 → 20초로 늘림. 쓰기(updatePaymentStatus 등)가
       //   저장 즉시 이 캐시를 직접 지우도록 이미 돼 있어서(정확성은 보장됨),
       //   TTL을 늘려도 "수정했는데 옛날 값이 보이는" 문제는 안 생기고, 대신
       //   "열었다 닫고 다시 여는" 반복 조회가 훨씬 빨라짐.
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 30); // ★ 2026-09-03 20초→30초
+      // ★ 2026-09-24 수정(핵심) — 95000자 넘으면 저장 안 하던 걸 청크 저장으로 변경(위와 동일한 이유).
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 30); // ★ 2026-09-03 20초→30초
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    return { ok: false, error: String(e && e.message || e), diag: __DIAG__.slice() };
   }
 }
 
