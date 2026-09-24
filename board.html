@@ -1760,6 +1760,29 @@ async function pollOnce(){
       document.getElementById('batchLabel').innerHTML =
         `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
       }
+    } else {
+      // ★ 2026-09-23 신규(추가 버그 수정) — "명시적으로 지정된 활성 배치"가
+      //   없는 상태(activeRes.ok=true, activeRes.batch=null — 흔히 있는 정상
+      //   상태)에서 BOOT_FAST가 이미 화면에 배치를 하나 띄워둔 경우, 위
+      //   두 분기 모두 해당이 안 돼서 "확인 중…" placeholder가 영영 안 바뀌던
+      //   문제. 이미 화면에 띄운 currentBatchId의 실제 날짜를 열린 배치
+      //   목록(미러 캐시라 즉시 응답)에서 찾아서 채워줌.
+      try{
+        const openRes2 = await getOpenBatchesData_();
+        if(mySeq !== pollSeq) return;
+        const found2 = (openRes2.batches || []).find(bb => String(bb.batchId) === String(currentBatchId));
+        if(found2){
+          document.getElementById('batchLabel').innerHTML =
+            `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${found2.date}`;
+        } else {
+          const b2 = await getBatchData_();
+          if(mySeq !== pollSeq) return;
+          if(b2.ok && b2.batch && String(b2.batch.batchId) === String(currentBatchId)){
+            document.getElementById('batchLabel').innerHTML =
+              `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b2.batch.date}`;
+          }
+        }
+      }catch(e){ /* 실패해도 다음 폴링에서 다시 시도됨 */ }
     }
     // ★ 2026-08-25 신규(버그 수정) — 위 else 블록(비-override 상태) 안에서
     //   확정된 currentBatchId를 "진짜 실제 활성 배치"로 항상 같이 기억해둠.
