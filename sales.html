@@ -2146,7 +2146,16 @@ async function openInvoice(inv){
   // 폴백 — 미러 문서가 아직 없거나(최초 조회) Firestore 연결 자체가 안 된 경우.
   // 이 조회로 서버가 미러 문서를 새로 만들어주므로, 다음번 열람부터는 위
   // 실시간 구독 경로를 탄다.
+  // ★ 2026-09-24 신규 — board.html에서 썼던 것과 동일한 방식. 서버 응답의
+  //   diag 배열(서버 내부 단계별 소요시간)을 F12 콘솔에 그대로 찍어서, 느릴 때
+  //   Apps Script 실행기록 로그 없이도 여기서 바로 원인(어느 단계가 느린지) 확인 가능.
+  const _clientT0 = performance.now();
   const res = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice: inv });
+  const _clientMs = Math.round(performance.now() - _clientT0);
+  if (Array.isArray(res && res.diag)) {
+    console.log('%c[진단] invoice=' + inv + ' 클라이언트 왕복 총 ' + _clientMs + 'ms (서버 내부 단계별 아래)', 'font-weight:bold;color:#0a7;');
+    res.diag.forEach(line => console.log('  ' + line));
+  }
   if (!res || !res.ok){
     CURRENT_ORDER = null;
     card.innerHTML = `<div class="modal-loading">❌ ${(res && res.error) ? res.error : ('Order not found: '+inv)}
