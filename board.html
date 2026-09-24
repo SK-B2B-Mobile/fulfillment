@@ -1049,12 +1049,7 @@ function renderIssueModalBody(){
   //   있었음(영업팀이 실제로 출고 안 된 것으로 오해할 수 있음). 사유 목록을
   //   하나로 합쳐서, 앞으로는 ISSUE_REASON_OPTS만 고치면 둘 다 같이 반영됨.
   const reasonLabel = {}; ISSUE_REASON_OPTS.forEach(r => reasonLabel[r.v] = r.label);
-  // ★ 2026-09-24 신규(작업자 요청) — 이슈가 많이 쌓인 고객사(예: 22건)는 등록된
-  //   순서(스캔한 순서) 그대로 나열돼서, 아래 "+ 새 이슈 등록" SKU 목록(알파벳순)과
-  //   순서가 달라 작업자가 원하는 제품을 찾기 어려웠음. 아래 새 이슈 등록 목록과
-  //   동일한 기준(SKU 알파벳순, localeCompare)으로 통일 — 수정/삭제는 idx가 아니라
-  //   issueId로 동작하므로 정렬 순서를 바꿔도 안전함.
-  const issues = (slot.issues || []).slice().sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
+  const issues = slot.issues || [];
   const rowsHtml = issues.length ? issues.map((i, idx) => `
     <div class="issue-modal-row" id="issueRow-${idx}">
       <div class="issue-modal-row-top">
