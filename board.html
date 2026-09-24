@@ -945,13 +945,18 @@ async function openIssueModal(invoice){
   document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${(slot.issues||[]).length}건`;
   document.getElementById('issueModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
   document.getElementById('issueModalOverlay').classList.add('open');
-  // ★ 2026-09-23 수정(속도) — ensureBatchItemsLoaded()와 ensureWorkersLoaded()는
-  //   서로 전혀 관련 없는 별개 조회인데, 예전엔 순서대로(하나 끝나야 다음 시작)
-  //   기다려서 새로고침 후 처음 여는 팝업이 불필요하게 느렸음(각 호출이 캐싱 전이면
-  //   둘 다 서버 왕복 필요). 아래처럼 동시에 요청하면 두 호출 중 더 느린 쪽
-  //   시간만 기다리면 되므로, 캐싱 전(첫 팝업)에도 체감 대기시간이 크게 줄어듦.
-  //   (둘 다 이미 캐싱돼 있으면 원래도 즉시 반환이라 이 변경으로 달라지는 게 없음)
-  await Promise.all([ ensureBatchItemsLoaded(), ensureWorkersLoaded() ]);
+  // ★ 2026-09-24 수정(속도, 핵심) — 예전엔 ensureBatchItemsLoaded()로 배치 전체
+  //   36개 고객사의 전체 상품 목록(getBatch, 매우 무거운 호출)을 통째로 불러온
+  //   뒤, 그중 이 고객사(invoice) 것만 골라 SKU 선택 목록을 만들었음. 그런데
+  //   바로 아래에서 어차피 getInvoiceItemStatus로 "이 고객사"의 SKU별
+  //   바코드/상품명/필요수량을 따로 또 불러오고 있어서, 사실상 같은 정보를 두
+  //   번(하나는 배치 전체 규모로 무겁게, 하나는 이 고객사만 가볍게) 가져오고
+  //   있었음. ensureBatchItemsLoaded() 호출을 없애고, 아래 getInvoiceItemStatus
+  //   결과 하나로 SKU 선택 목록(barcode/sku/name/필요수량)과 스캔·이슈 상태를
+  //   동시에 채움 — 슬롯 클릭 시 더 이상 배치 전체를 불러올 필요가 없어짐.
+  //   (작업자 목록은 여전히 필요하므로 ensureWorkersLoaded()만 유지 — 이건
+  //   원래도 가볍고 캐싱돼 있어서 문제였던 적 없음)
+  await ensureWorkersLoaded();
   // ★ 2026-07-24 신규 — "어떤 SKU가 부족한지 모르겠다"는 피드백: SKU별 스캔 상태를
   //   따로 조회해서, 목록에서 미완료 SKU를 바로 찾을 수 있게 함.
   _invoiceItemStatusByBarcode = {};
@@ -1008,16 +1013,14 @@ function renderIssueModalBody(){
   //   (2) 옆에 검색창을 추가해서 SKU/상품명/바코드로 실시간 필터링되게 함.
   // ★ 2026-07-29 긴급 수정 — BatchItems 원본에 같은 SKU가 여러 줄(분할입고 등)로
   //   나뉘어 있으면, 예전엔 병합 없이 그대로 나열해서 후보 목록에 같은 상품이
-  //   두 번(또는 그 이상) 중복으로 뜨는 버그가 있었음. 시스템 다른 계산 로직은
-  //   전부 바코드+SKU 기준으로 병합해서 쓰는데 이 목록만 빠져 있었음.
-  //   바코드+SKU가 같은 줄은 수량을 합산해서 하나로 병합한 뒤에 정렬함.
-  const mergedByKey = {};
-  (_batchItemsCache.byInvoice[invoice] || []).forEach(it => {
-    const key = String(it.barcode) + '|' + String(it.sku);
-    if(!mergedByKey[key]) mergedByKey[key] = Object.assign({}, it, { req_qty: 0 });
-    mergedByKey[key].req_qty += (Number(it.req_qty) || 0);
-  });
-  _newIssueItemsSorted = Object.values(mergedByKey)
+  //   두 번(또는 그 이상) 중복으로 뜨는 버그가 있었음. 바코드+SKU가 같은 줄은
+  //   수량을 합산해서 하나로 병합한 뒤에 정렬함.
+  // ★ 2026-09-24 수정(속도) — 예전엔 이 병합을 위해 배치 전체를 불러온
+  //   _batchItemsCache에서 다시 골라냈는데, 위에서 이미 호출한
+  //   getInvoiceItemStatus 결과(_invoiceItemStatusByBarcode)가 barcode+SKU
+  //   기준으로 이미 병합·집계까지 끝난 값이라 별도 병합이 필요 없음 — 바로 사용.
+  _newIssueItemsSorted = Object.values(_invoiceItemStatusByBarcode)
+    .map(it => Object.assign({}, it, { req_qty: it.reqQty }))
     .sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
   const newFormHtml = `
     <div class="issue-new-form">
