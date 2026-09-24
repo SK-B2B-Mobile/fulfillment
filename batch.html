@@ -1879,6 +1879,20 @@ let FIRESTORE_MIRROR_OK = false;
 let _openBatchesMirrorCache = null;
 let _batchStructMirrorUnsub = null;   // 현재 구독 중인 mirror/batch_{batchId} 구독해제 함수
 let _batchStructMirrorBatchId = null; // 현재 구독 중인 배치ID
+// ★ 2026-09-23 긴급 수정 — "슬롯 배정했는데 새로고침하면 되돌아간다" 사고의 진짜 원인.
+//   Firestore mirror/batch_{batchId} 문서는 1분 주기 syncToFirestore() 트리거가 채워주는데,
+//   페이지를 새로고침(또는 배치 전환)하면 (1) restoreBatchFromServer()/continueOpenBatch()가
+//   getBatch()를 직접 불러서 항상 "지금 이 순간 진짜" 슬롯 배정을 정확히 화면에 그려준 바로
+//   직후에, (2) subscribeBatchStructMirror_()가 그 배치의 미러 구독을 시작하면서 onSnapshot이
+//   "구독 시작 즉시" 그 문서의 현재 값을 한 번 밀어주는데, 그 값이 최대 1분 전(=아직 그
+//   슬롯배정을 반영 못 한) 것일 수 있음. 그러면 방금 (1)에서 정확히 그려놓은 화면을 (2)가
+//   곧바로 헌 값으로 덮어써버림 — 실패 배너도 안 뜨고 콘솔 에러도 없이 조용히 되돌아가는
+//   이유가 바로 이것. 아래 타임스탬프는 "방금 이 기기가 직접 확인했거나 직접 저장한, 확실히
+//   최신인 슬롯 데이터가 있다"는 표시이고, 그 표시가 남아있는 동안(70초 — 1분 미러 주기보다
+//   여유있게)은 미러 구독(onSnapshot) 쪽에서 온 구조 데이터는 적용하지 않고 건너뛴다.
+//   실시간 폴링(refreshBatchStructure, 매번 getBatch()를 직접 불러 항상 최신)이나 사용자가
+//   누른 수동 새로고침은 이 가드와 무관하게 항상 그대로 반영된다(아래 fromMirror 인자 참고).
+let _lastTrustedSlotDataAt = 0;
 
 function _waitForBatchMirrorInit(tries){
   tries = tries || 0;
@@ -1916,7 +1930,7 @@ function subscribeBatchStructMirror_(batchId){
   _stopBatchStructMirrorSub();
   _batchStructMirrorBatchId = batchId;
   _batchStructMirrorUnsub = window._subscribeMirror('batch_' + batchId, (payload) => {
-    if(payload && payload.ok) applyBatchStructureResult_(payload, batchId, true);
+    if(payload && payload.ok) applyBatchStructureResult_(payload, batchId, true, /*fromMirror*/ true);
   });
 }
 
@@ -2065,6 +2079,11 @@ async function syncSlotsToServer(){
       '⚠ 슬롯 배정 저장 실패 — 새로고침하면 되돌아갑니다',
       '서버에 슬롯 배정이 저장되지 않았습니다: ' + ((res && res.error) || '알 수 없는 오류') + '. 새로고침하지 말고, 다시 배정을 시도해주세요.'
     );
+  } else {
+    // ★ 2026-09-23 긴급 수정 — 방금 이 기기가 직접 저장에 성공한 슬롯 배정을,
+    //   최대 1분 지연될 수 있는 Firestore 미러 푸시가 곧바로 헌 값으로 덮어쓰지
+    //   못하게 막는다(새로고침 없이 계속 화면에 있는 경우도 동일하게 보호).
+    _lastTrustedSlotDataAt = Date.now();
   }
   return res;
 }
@@ -2767,6 +2786,8 @@ async function continueOpenBatch(batchId, viewOnly){
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
     if(c.packVerified) state.packVerifiedInvoices.add(c.invoice); // ★ 2026-08-24 신규: 보라(최종 검증완료) 상태도 같이 복원
   });
+  // ★ 2026-09-23 긴급 수정 — applyBatchPayload와 동일한 이유 (아래 주석 참고).
+  _lastTrustedSlotDataAt = Date.now();
 
   buildScanIndex();
   updateSlotQueueNumbers();
@@ -2898,6 +2919,11 @@ function applyBatchPayload(res, opts){
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
     if(c.packVerified) state.packVerifiedInvoices.add(c.invoice); // ★ 2026-08-24 신규: 보라(최종 검증완료) 상태도 같이 복원
   });
+  // ★ 2026-09-23 긴급 수정 — 캐시 부팅(fromCache:true)이 아니라 서버가 방금 확정해준
+  //   진짜 데이터일 때만 "최신 슬롯 데이터 확인 시각"을 갱신. 이게 있어야 곧바로 이어지는
+  //   Firestore 미러 구독(subscribeBatchStructMirror_)의 최초 푸시가, 최대 1분 지연될 수
+  //   있는 오래된 미러 값으로 방금 반영한 이 정확한 화면을 덮어쓰지 못하게 막는다.
+  if(!opts.fromCache) _lastTrustedSlotDataAt = Date.now();
 
   document.getElementById('dropSum').className = 'drop filled';
   document.querySelector('#dropSum .drop-title').textContent = opts.fromCache ? '✓ 총량 리스트 (동기화 중…)' : '✓ 총량 리스트 (복원됨)';
@@ -4286,7 +4312,7 @@ async function refreshBatchStructure(silent){
   try{
     const res = await gasQuery('getBatch', { batchId: state.batchId });
     if(!res.ok || !res.batch) return false;
-    return await applyBatchStructureResult_(res, state.batchId, silent);
+    return await applyBatchStructureResult_(res, state.batchId, silent, /*fromMirror*/ false);
   }catch(e){
     console.error('refreshBatchStructure failed:', e);
     return false;
@@ -4298,9 +4324,17 @@ async function refreshBatchStructure(silent){
 //   미러 콜백(subscribeBatchStructMirror_) 양쪽에서 동일하게 재사용하기 위함.
 //   반영 로직 자체는 기존 refreshBatchStructure 내부 코드와 완전히 동일 — 한 글자도
 //   안 바꿈. pollScanState()에서 applyScanStateRes를 분리했던 것과 같은 방식.
-async function applyBatchStructureResult_(res, batchId, silent){
+async function applyBatchStructureResult_(res, batchId, silent, fromMirror){
   // 응답이 도착하는 사이 다른 배치로 전환됐으면 무시(오래된/다른 배치 데이터로 덮어쓰기 방지)
   if(batchId !== state.batchId) return false;
+  // ★ 2026-09-23 긴급 수정 — Firestore 미러(최대 1분 지연)에서 온 데이터가, 방금 이
+  //   기기가 직접 확인/저장한 더 최신 슬롯 데이터를 오래된 값으로 덮어쓰는 사고 방지.
+  //   fromMirror가 아닌 호출(수동 새로고침·30초 직접 폴링 — 매번 getBatch()를 직접
+  //   불러오므로 항상 최신)은 이 가드와 무관하게 그대로 통과시킨다.
+  if(fromMirror && (Date.now() - _lastTrustedSlotDataAt) < 70000){
+    console.log('[mirror] 최근(70초 이내) 직접 확인한 슬롯 데이터가 있어 미러 푸시를 건너뜀 (batchId=' + batchId + ')');
+    return false;
+  }
   // ★ 2026-07-14 안전장치를 그대로 유지 — onSnapshot 푸시 경로에서도 "01 Batch"
   //   화면(오늘 새 배치 준비 중)에서는 절대 구조를 적용하지 않음.
   const syncAllowedViews = ['v-slots', 'v-scan', 'v-log', 'v-workers'];
@@ -4308,6 +4342,7 @@ async function applyBatchStructureResult_(res, batchId, silent){
   if(!activeView || !syncAllowedViews.includes(activeView.id)){
     return false;
   }
+  if(!fromMirror) _lastTrustedSlotDataAt = Date.now(); // 직접 확인한 최신 데이터 — 기준시각 갱신
   saveBatchCache(res); // ★ 2026-08-04 신규: 최신 구조를 캐시에도 반영 → 새로고침 시 최신 화면이 즉시 뜸
 
   const newSumItems = res.sumItems || [];
