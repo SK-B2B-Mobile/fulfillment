@@ -1705,7 +1705,11 @@ async function pollOnce(){
     }
     const activeRes = await getActiveBatchData_();
     if(mySeq !== pollSeq) return; // ★ 신규: await 도중 더 최신 폴링이 시작됐으면 여기서 중단
-    if(activeRes.ok && activeRes.batch && activeRes.batch.batchId !== currentBatchId){
+    // ★ 2026-09-23 수정(버그) — 예전엔 batchId가 "바뀔 때만" 라벨을 갱신해서,
+    //   BOOT_FAST로 미리 띄워둔 "확인 중…" placeholder가 활성 배치가 그대로
+    //   확인된(=흔한) 경우엔 영영 안 지워지던 문제. batchId 변경 여부와
+    //   무관하게 활성 배치 확인이 성공할 때마다 항상 실제 날짜로 라벨을 갱신함.
+    if(activeRes.ok && activeRes.batch){
       currentBatchId = activeRes.batch.batchId;
       rememberBatch(currentBatchId); // ★ 2026-08-11 — 다음 새로고침 때 즉시 띄우기 위해 기억
       document.getElementById('batchLabel').innerHTML =
@@ -1884,7 +1888,11 @@ document.getElementById('btnSwitchBatchTV').onclick = async (e) => {
   dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
   dd.classList.add('open');
 
-  const res = await gasQueryWithRetry('getOpenBatches', {});
+  // ★ 2026-09-23 수정(속도) — 직접 gasQueryWithRetry로 매번 서버 왕복(느릴 때 최대
+  //   ~15초)하지 않고, 이미 Firestore 미러로 계속 최신 상태를 유지 중인
+  //   getOpenBatchesData_()를 사용 — 미러 연결 중이면 즉시(0초에 가깝게) 뜸.
+  //   미러가 아직 준비 안 됐거나 끊겼으면 그 안에서 자동으로 직접 조회로 대체됨.
+  const res = await getOpenBatchesData_();
   if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
   const list = res.batches || [];
   // ★ 2026-09-11 신규 — 서버(getOpenBatches)가 최신순 정렬해서 주지만(재배포
