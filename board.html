@@ -961,7 +961,17 @@ async function openIssueModal(invoice){
   //   따로 조회해서, 목록에서 미완료 SKU를 바로 찾을 수 있게 함.
   _invoiceItemStatusByBarcode = {};
   try{
+    // ★ 2026-09-24 신규(진단용, 임시) — Apps Script Executions 화면의 로그가
+    //   이 프로젝트에서 안 떠서, 서버가 응답에 실어 보내는 diag를 브라우저
+    //   콘솔(F12 → Console 탭)에 직접 찍음. 확인 끝나면 지워도 되고 당장은
+    //   그냥 둬도 동작에는 영향 없음.
+    const _clientT0 = performance.now();
     const statusRes = await gasQueryWithRetry('getInvoiceItemStatus', { batchId: currentBatchId, invoice });
+    const _clientMs = Math.round(performance.now() - _clientT0);
+    if(Array.isArray(statusRes.diag)){
+      console.log('%c[진단] invoice=' + invoice + ' 클라이언트 왕복 총 ' + _clientMs + 'ms (서버 내부 단계별 아래)', 'font-weight:bold;color:#0a7;');
+      statusRes.diag.forEach(line => console.log('  ' + line));
+    }
     if(statusRes.ok && Array.isArray(statusRes.items)){
       // ★ 2026-07-29 긴급 수정 — 바코드만으로 캐싱하면, 같은 바코드에 서로 다른
       //   SKU가 걸려있는 경우(어제 발견된 사고 케이스와 동일 원인) 하나가 다른
