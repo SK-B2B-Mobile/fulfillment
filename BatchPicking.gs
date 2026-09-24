@@ -3670,6 +3670,103 @@ function getBatchKPI(batchId) {
  * 찾을 수 있게 함. TV(board.html)가 이 함수를 씀 (웹은 이미 로컬 데이터로 계산 가능).
  * 입력: batchId, invoice / 출력: { ok, items:[{sku,name,barcode,reqQty,scannedQty,issueQty,short}] }
  * ================================================================================ */
+// ★ 2026-09-23 신규(속도 개선) — getInvoiceItemStatus()가 슬롯(인보이스) 하나를
+//   열 때마다 ScanLog/IssueLog/BatchItems 시트 "전체"를 처음부터 끝까지 통째로
+//   읽고 나서야 batchId+invoice로 걸러냈음. 그래서 이 세 시트가 커질수록(창고를
+//   오래 운영할수록) 슬롯 하나 클릭할 때마다 점점 느려지는 구조였음(현장에서
+//   슬롯 클릭 시 팝업이 10초 넘게 걸리는 문제로 확인됨).
+//   → 시트 읽기를 "배치 단위"로 한 번만 하고 6초간 캐싱해서, 같은 배치 안에서
+//   슬롯을 연달아 여러 개 눌러도(=여러 invoice) 실제 시트 읽기는 캐시 유효
+//   시간(6초) 안에 딱 한 번만 일어나게 함. 인보이스별로 다시 필터링하는 계산은
+//   메모리 안에서(이미 읽어온 값으로) 처리되므로 사실상 즉시 끝남.
+//   각 함수가 반환하는 데이터·조건(undone/pass 필터 등)은 기존 로직과 완전히 동일 —
+//   "언제 읽어서 언제 거르는지"만 바뀌었을 뿐, 결과값 자체는 바뀌지 않음.
+function getBatchScannedByInvoice_(batchId) {
+  const _cache = CacheService.getScriptCache();
+  const _cacheKey = 'scanByBatch_v1_' + batchId;
+  const _cached = _cache.get(_cacheKey);
+  if (_cached) return JSON.parse(_cached);
+
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  const byInvoice = {};
+  if (slLast >= 2) {
+    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (r[10] === 'undone') return;
+      if (r[9] !== 'pass') return;
+      const inv = String(r[8]);
+      const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_ 적용
+      if (!byInvoice[inv]) byInvoice[inv] = {};
+      byInvoice[inv][key] = (byInvoice[inv][key] || 0) + (Number(r[11]) || 1);
+    });
+    // ★ 2026-07-24 긴급 수정과 동일한 방어 — ADJ 상쇄 기록 때문에 순 스캔량이
+    //   음수가 되면 0으로 고정(인보이스별로 전부 적용).
+    Object.keys(byInvoice).forEach(inv => {
+      Object.keys(byInvoice[inv]).forEach(key => { if (byInvoice[inv][key] < 0) byInvoice[inv][key] = 0; });
+    });
+  }
+  try {
+    const _payload = JSON.stringify(byInvoice);
+    // 배치가 아주 크면(인보이스가 매우 많으면) 100KB 캐시 한도를 넘을 수 있는데,
+    // 그럴 땐 그냥 캐싱을 건너뜀 — 매번 다시 계산될 뿐, 결과가 틀리진 않음.
+    if (_payload.length < 95000) _cache.put(_cacheKey, _payload, 6);
+  } catch (eCache) { /* 캐시 실패해도 정상 계산 결과는 그대로 반환 */ }
+  return byInvoice;
+}
+function getBatchIssueByInvoice_(batchId) {
+  const _cache = CacheService.getScriptCache();
+  const _cacheKey = 'issueByBatch_v1_' + batchId;
+  const _cached = _cache.get(_cacheKey);
+  if (_cached) return JSON.parse(_cached);
+
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const byInvoice = {};
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (r[12] === 'undone') return;
+      const inv = String(r[7]);
+      const key = normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
+      if (!byInvoice[inv]) byInvoice[inv] = {};
+      byInvoice[inv][key] = (byInvoice[inv][key] || 0) + (Number(r[10]) || 0);
+    });
+  }
+  try {
+    const _payload = JSON.stringify(byInvoice);
+    if (_payload.length < 95000) _cache.put(_cacheKey, _payload, 6);
+  } catch (eCache) { /* 캐시 실패해도 정상 계산 결과는 그대로 반환 */ }
+  return byInvoice;
+}
+function getBatchItemsByInvoice_(batchId) {
+  const _cache = CacheService.getScriptCache();
+  const _cacheKey = 'reqByBatch_v1_' + batchId;
+  const _cached = _cache.get(_cacheKey);
+  if (_cached) return JSON.parse(_cached);
+
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const byInvoice = {}; // invoice -> { reqByKey, infoByKey }
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      const inv = String(r[1]);
+      const skuCode = String(r[2]);
+      const bc = String(r[4]); // 원본 표시용(정규화 안 함 — 앞자리 0 그대로 화면에 보여줌)
+      const key = normBarcode_(r[4]) + '|' + skuCode; // ★ 2026-08-05: 키는 정규화, 표시는 원본
+      if (!byInvoice[inv]) byInvoice[inv] = { reqByKey: {}, infoByKey: {} };
+      byInvoice[inv].reqByKey[key] = (byInvoice[inv].reqByKey[key] || 0) + (Number(r[5]) || 0);
+      byInvoice[inv].infoByKey[key] = { sku: r[2], name: r[3], barcode: bc };
+    });
+  }
+  try {
+    const _payload = JSON.stringify(byInvoice);
+    if (_payload.length < 95000) _cache.put(_cacheKey, _payload, 6);
+  } catch (eCache) { /* 캐시 실패해도 정상 계산 결과는 그대로 반환 */ }
+  return byInvoice;
+}
+
 function getInvoiceItemStatus(batchId, invoice) {
   try {
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
@@ -3682,55 +3779,14 @@ function getInvoiceItemStatus(batchId, invoice) {
     const _cached = _cache.get(_cacheKey);
     if (_cached) return JSON.parse(_cached);
 
-    // ★ 2026-07-28 긴급 수정 — 이 함수 전체를 "바코드" 단독 키에서
-    //   "바코드|SKU" 조합 키로 변경. 같은 바코드가 서로 다른 SKU 2개에
-    //   중복으로 쓰이는 경우(실제 사고 사례: Flower Park 12개 / Flower Shop
-    //   24개), 예전엔 이 팝업에서도 두 상품이 하나로 합쳐져서 보였음.
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
-    const scannedByKey = {};
-    if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[8]) !== String(invoice)) return;
-        if (r[10] === 'undone') return;
-        if (r[9] !== 'pass') return;
-        const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_ 적용
-        scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[11]) || 1);
-      });
-      // ★ 2026-07-24 긴급 수정 — 같은 버그: 상쇄용 ADJ 기록 때문에 순 스캔량이
-      //   음수가 되면 "이슈로 이미 처리된 상품"이 "스캔 안 된 상품"처럼 잘못
-      //   보였음(예: "-10/10 (10개 부족)"). SKU별 순 스캔량은 0 밑으로 안 내려가게 고정.
-      Object.keys(scannedByKey).forEach(key => { if (scannedByKey[key] < 0) scannedByKey[key] = 0; });
-    }
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
-    const issueByKey = {};
-    if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[7]) !== String(invoice)) return;
-        if (r[12] === 'undone') return;
-        const key = normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
-        issueByKey[key] = (issueByKey[key] || 0) + (Number(r[10]) || 0);
-      });
-    }
-
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    const reqByKey = {}; // "바코드|SKU" 같은 조합 여러 줄이면 합산(분할입고 등)
-    const infoByKey = {};
-    if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[1]) !== String(invoice)) return;
-        const skuCode = String(r[2]);
-        const bc = String(r[4]); // 원본 표시용(정규화 안 함 — 앞자리 0 그대로 화면에 보여줌)
-        const key = normBarcode_(r[4]) + '|' + skuCode; // ★ 2026-08-05: 키는 정규화, 표시는 원본
-        reqByKey[key] = (reqByKey[key] || 0) + (Number(r[5]) || 0);
-        infoByKey[key] = { sku: r[2], name: r[3], barcode: bc };
-      });
-    }
+    // ★ 2026-09-23 수정(속도) — 시트 3개를 매번 통째로 읽던 것을, 배치 단위로
+    //   6초 캐싱된 헬퍼(위 3개 함수)에서 가져오도록 변경. 여러 슬롯을 연달아
+    //   클릭해도 그 6초 동안은 시트를 다시 읽지 않고 메모리에서 바로 꺼내 씀.
+    const scannedByKey = (getBatchScannedByInvoice_(batchId))[invoice] || {};
+    const issueByKey = (getBatchIssueByInvoice_(batchId))[invoice] || {};
+    const _reqInfo = (getBatchItemsByInvoice_(batchId))[invoice] || { reqByKey: {}, infoByKey: {} };
+    const reqByKey = _reqInfo.reqByKey;
+    const infoByKey = _reqInfo.infoByKey;
 
     const items = Object.keys(reqByKey).map(key => {
       const reqQty = reqByKey[key];
