@@ -3670,6 +3670,94 @@ function getBatchKPI(batchId) {
  * 찾을 수 있게 함. TV(board.html)가 이 함수를 씀 (웹은 이미 로컬 데이터로 계산 가능).
  * 입력: batchId, invoice / 출력: { ok, items:[{sku,name,barcode,reqQty,scannedQty,issueQty,short}] }
  * ================================================================================ */
+// ★ 2026-09-24 신규(속도 개선, 재설계) — 어제 시도했던 "배치 전체를 새 캐시에
+//   따로 저장" 방식은 처리·저장할 데이터量이 오히려 늘어나서 역효과였음(되돌림).
+//   이번엔 다른 접근: getSlotProgress()는 board.html/TV가 8~20초마다 쉬지 않고
+//   호출해서 이미 거의 항상 "따뜻하게" 캐시돼 있는 함수인데, 그 안에서 매번
+//   다시 계산하던 "고객사별/SKU별 스캔·이슈·필요수량 집계"를 getInvoiceItemStatus()도
+//   그대로 재사용할 수 있게 분리함. 슬롯을 클릭하는 시점엔 대부분 이 집계가
+//   이미 계산·캐싱돼 있으므로(TV/보드가 계속 폴링 중이라면) 슬롯 클릭 시 시트를
+//   다시 읽지 않고 즉시 응답 가능. 캐시가 비어있는 드문 경우(예: 배치 시작 직후,
+//   또는 아무 화면도 안 열려 있던 경우)만 기존과 동일하게 실제로 시트를 읽음.
+//   ※ 필터링 조건(undone/pass 판정, ADJ 상쇄, 분할입고 합산 등)은 기존
+//   getSlotProgress()·getInvoiceItemStatus() 두 함수와 완전히 동일 — 결과값은
+//   전혀 바뀌지 않음(합성 데이터로 신구 로직 결과가 정확히 일치함을 별도로
+//   검증했음). "어디서 몇 번 계산하느냐"만 바뀜.
+function _buildBatchAggregates_(batchId) {
+  const _cache = CacheService.getScriptCache();
+  const _cacheKey = 'batchAggr_v1_' + batchId;
+  const _cached = _cache.get(_cacheKey);
+  if (_cached) return JSON.parse(_cached);
+
+  // 고객사별/SKU별 스캔 통과(pass) 수량 집계 (undone 제외) — getSlotProgress()와 동일 로직
+  const sl = scanlogSheet_();
+  const slLast = sl.getLastRow();
+  const scannedByKey = {}; // "invoice|barcode|sku"
+  if (slLast >= 2) {
+    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (r[10] === 'undone') return;
+      if (r[9] !== 'pass') return;
+      const qty = Number(r[11]) || 1;
+      const inv = r[8];
+      const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[5]);
+      scannedByKey[key] = (scannedByKey[key] || 0) + qty;
+    });
+  }
+  Object.keys(scannedByKey).forEach(key => { if (scannedByKey[key] < 0) scannedByKey[key] = 0; });
+
+  // 이슈 집계 — getSlotProgress()와 동일 로직
+  const il = issuelogSheet_();
+  const ilLast = il.getLastRow();
+  const issueQtyByInvoice = {};
+  const issueQtyByKey = {};
+  const issuesByInvoice = {};
+  if (ilLast >= 2) {
+    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (r[12] === 'undone') return;
+      const inv = r[7];
+      const qty = Number(r[10]) || 0;
+      issueQtyByInvoice[inv] = (issueQtyByInvoice[inv] || 0) + qty;
+      const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[5]);
+      issueQtyByKey[key] = (issueQtyByKey[key] || 0) + qty;
+      if (!issuesByInvoice[inv]) issuesByInvoice[inv] = [];
+      issuesByInvoice[inv].push({
+        issueId: r[1], time: r[2], worker: r[3], barcode: r[4],
+        sku: r[5], name: r[6], reason: r[9], qty: qty, note: r[11] || '',
+      });
+    });
+  }
+
+  // 고객사별 필요 SKU 목록 — getSlotProgress()와 동일 로직 + getInvoiceItemStatus()가
+  // 쓰는 상품정보(sku/name/barcode 표시값)만 추가로 같이 담음(getSlotProgress는 그냥 무시).
+  const bi = bitemsSheet_();
+  const biLast = bi.getLastRow();
+  const skuLinesByKey = {}; // "invoice|barcode|sku" -> {invoice, reqQty, sku, name, barcode}
+  if (biLast >= 2) {
+    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      const inv = r[1];
+      if (!inv) return; // 총량 행(Invoice 빈값)은 제외
+      const bcDisplay = String(r[4]); // 원본 표시용(정규화 안 함)
+      const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[2]);
+      if (!skuLinesByKey[key]) {
+        skuLinesByKey[key] = { invoice: inv, reqQty: 0, sku: r[2], name: r[3], barcode: bcDisplay };
+      }
+      skuLinesByKey[key].reqQty += Number(r[5]) || 0;
+    });
+  }
+
+  const aggr = { scannedByKey, issueQtyByInvoice, issueQtyByKey, issuesByInvoice, skuLinesByKey };
+  try {
+    const _payload = JSON.stringify(aggr);
+    // 배치가 매우 크면 100KB 캐시 한도를 넘을 수 있음 — 그럴 땐 캐싱만 건너뜀
+    // (매번 다시 계산되긴 하지만 결과가 틀리진 않음. 기존과 동일한 안전장치).
+    if (_payload.length < 95000) _cache.put(_cacheKey, _payload, 6);
+  } catch (eCache) { /* 캐시 실패해도 정상 계산 결과는 그대로 반환 */ }
+  return aggr;
+}
+
 function getInvoiceItemStatus(batchId, invoice) {
   try {
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
@@ -3682,67 +3770,27 @@ function getInvoiceItemStatus(batchId, invoice) {
     const _cached = _cache.get(_cacheKey);
     if (_cached) return JSON.parse(_cached);
 
-    // ★ 2026-07-28 긴급 수정 — 이 함수 전체를 "바코드" 단독 키에서
-    //   "바코드|SKU" 조합 키로 변경. 같은 바코드가 서로 다른 SKU 2개에
-    //   중복으로 쓰이는 경우(실제 사고 사례: Flower Park 12개 / Flower Shop
-    //   24개), 예전엔 이 팝업에서도 두 상품이 하나로 합쳐져서 보였음.
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
-    const scannedByKey = {};
-    if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[8]) !== String(invoice)) return;
-        if (r[10] === 'undone') return;
-        if (r[9] !== 'pass') return;
-        const key = normBarcode_(r[4]) + '|' + String(r[5]); // barcode|sku ★ 2026-08-05: normBarcode_ 적용
-        scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[11]) || 1);
-      });
-      // ★ 2026-07-24 긴급 수정 — 같은 버그: 상쇄용 ADJ 기록 때문에 순 스캔량이
-      //   음수가 되면 "이슈로 이미 처리된 상품"이 "스캔 안 된 상품"처럼 잘못
-      //   보였음(예: "-10/10 (10개 부족)"). SKU별 순 스캔량은 0 밑으로 안 내려가게 고정.
-      Object.keys(scannedByKey).forEach(key => { if (scannedByKey[key] < 0) scannedByKey[key] = 0; });
-    }
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
-    const issueByKey = {};
-    if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[7]) !== String(invoice)) return;
-        if (r[12] === 'undone') return;
-        const key = normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
-        issueByKey[key] = (issueByKey[key] || 0) + (Number(r[10]) || 0);
-      });
-    }
+    // ★ 2026-09-24 수정(속도) — 시트 3개를 매번 이 함수 혼자 통째로 읽던 것을,
+    //   getSlotProgress()와 공유하는 배치 단위 집계(_buildBatchAggregates_)에서
+    //   가져오도록 변경. TV/보드가 이미 폴링 중이면 대부분 캐시 히트로 즉시 응답됨.
+    const aggr = _buildBatchAggregates_(batchId);
+    const scannedByKey = aggr.scannedByKey;
+    const issueByKey = aggr.issueQtyByKey;
+    const skuLines = aggr.skuLinesByKey;
 
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    const reqByKey = {}; // "바코드|SKU" 같은 조합 여러 줄이면 합산(분할입고 등)
-    const infoByKey = {};
-    if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[1]) !== String(invoice)) return;
-        const skuCode = String(r[2]);
-        const bc = String(r[4]); // 원본 표시용(정규화 안 함 — 앞자리 0 그대로 화면에 보여줌)
-        const key = normBarcode_(r[4]) + '|' + skuCode; // ★ 2026-08-05: 키는 정규화, 표시는 원본
-        reqByKey[key] = (reqByKey[key] || 0) + (Number(r[5]) || 0);
-        infoByKey[key] = { sku: r[2], name: r[3], barcode: bc };
+    const items = Object.keys(skuLines)
+      .filter(key => String(skuLines[key].invoice) === String(invoice))
+      .map(key => {
+        const line = skuLines[key];
+        const reqQty = line.reqQty;
+        const scannedQty = scannedByKey[key] || 0;
+        const issueQty = issueByKey[key] || 0;
+        return {
+          barcode: line.barcode || key.split('|')[1], sku: line.sku || '', name: line.name || '',
+          reqQty: reqQty, scannedQty: scannedQty, issueQty: issueQty,
+          short: Math.max(0, reqQty - scannedQty - issueQty),
+        };
       });
-    }
-
-    const items = Object.keys(reqByKey).map(key => {
-      const reqQty = reqByKey[key];
-      const scannedQty = scannedByKey[key] || 0;
-      const issueQty = issueByKey[key] || 0;
-      const info = infoByKey[key] || {};
-      return {
-        barcode: info.barcode || key.split('|')[0], sku: info.sku || '', name: info.name || '',
-        reqQty: reqQty, scannedQty: scannedQty, issueQty: issueQty,
-        short: Math.max(0, reqQty - scannedQty - issueQty),
-      };
-    });
     const _result = { ok: true, invoice: invoice, items: items };
     try {
       const _payload = JSON.stringify(_result);
@@ -3771,95 +3819,17 @@ function getSlotProgress(batchId) {
     const _cached = _cache.get(_cacheKey);
     if (_cached) return JSON.parse(_cached);
 
-    // 고객사별 스캔 통과(pass) 수량 집계 (undone 제외) — 전체 QTY용, 그리고
-    // invoice+바코드+SKU 조합별로도 따로 집계 — SKU 단위 완료 판정용
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
-    const scannedByKey = {}; // "invoice|barcode|sku"
-    if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (r[10] === 'undone') return;
-        if (r[9] !== 'pass') return; // over/error는 완료 카운트에 안 넣음
-        // ★ 2026-07-13: 스캔 1건 = +1이 아니라, 그 스캔으로 분류된 실제 수량(Qty
-        //   컬럼)만큼 더함. 예전 데이터(Qty 컬럼 없음)는 1로 취급해 하위호환.
-        const qty = Number(r[11]) || 1;
-        const inv = r[8];
-        // ★ 2026-07-28 긴급 수정 — 심각한 사고 발견: 같은 바코드가 서로 다른
-        //   두 SKU에 중복으로 쓰이는 경우(예: 동일 바코드로 "Flower Park"
-        //   12개와 "Flower Shop" 24개), 예전엔 키가 invoice+바코드뿐이라 두
-        //   SKU의 스캔량이 하나로 합쳐져서(36개) 서로 다른 상품인데 진행률을
-        //   나눠 갖는 사고가 있었음. 이제 SKU까지 포함해 완전히 분리 추적.
-        const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // invoice|barcode|sku ★ 2026-08-05: normBarcode_ 적용
-        //   이슈 등록 시 남기는 상쇄 기록(scanId가 'ADJ-'로 시작, 마이너스 수량)은
-        //   "이 SKU를 스캔 안 했는데 총량 스캔 한 번에 모든 고객사가 자동으로
-        //   pass 처리되는 phantom pass"를 되돌리기 위한 것이었음. 그런데 애초에
-        //   phantom pass가 안 생겼던 경우(=그 SKU를 실제로 한 번도 스캔 안 하고
-        //   바로 이슈부터 등록한 경우, 흔한 정상 흐름), 상쇄할 게 없는데 마이너스만
-        //   남아서 그 SKU의 순수 스캔량이 영구적으로 음수가 됨. 이 음수가 "완료
-        //   판정 기준"에서 이슈 수량(effectiveTotal 계산)과 별개로 스캔량(scanned)
-        //   에서도 또 한 번 빠져서, 이슈로 이미 해결된 수량이 "진행량 부족"으로
-        //   이중으로 잡히는 사고가 있었음(예: 21번 슬롯이 실제로는 다 채워졌는데
-        //   계속 미완료로 표시됨). 해결: SKU 하나(=바코드+SKU+인보이스)의 순
-        //   스캔량은 절대 0 밑으로 안 내려가게(음수는 0으로) 고정한 뒤에 합산함.
-        scannedByKey[key] = (scannedByKey[key] || 0) + qty;
-      });
-    }
-    // 위에서 구한 SKU별 순 스캔량을 0 밑으로 안 내려가게 고정 (인보이스 합계는
-    // skuLinesByKey를 구한 뒤 "각 줄의 필요수량으로 캡핑"해서 계산함 — 아래 참고)
-    Object.keys(scannedByKey).forEach(key => {
-      if (scannedByKey[key] < 0) scannedByKey[key] = 0;
-    });
-
-    // ★ 2026-07-16 신규: EXP/NF/Damaged/OOS 등으로 등록된 이슈 수량 집계.
-    //   이 수량만큼은 애초에 "필요하지 않았던 것"처럼 그 고객사(Invoice)의
-    //   완료 판정 기준(totalQty)에서 빼준다 — 100% 못 채워도 완료로 표시되도록.
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
-    const issueQtyByInvoice = {};
-    const issueQtyByKey = {}; // "invoice|barcode|sku"
-    const issuesByInvoice = {};
-    if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (r[12] === 'undone') return;
-        const inv = r[7];
-        const qty = Number(r[10]) || 0;
-        issueQtyByInvoice[inv] = (issueQtyByInvoice[inv] || 0) + qty;
-        // ★ 2026-07-28 수정 — SKU까지 포함한 키로 변경 (scannedByKey와 동일 기준)
-        const key = inv + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
-        issueQtyByKey[key] = (issueQtyByKey[key] || 0) + qty;
-        if (!issuesByInvoice[inv]) issuesByInvoice[inv] = [];
-        issuesByInvoice[inv].push({
-          issueId: r[1], time: r[2], worker: r[3], barcode: r[4],
-          sku: r[5], name: r[6], reason: r[9], qty: qty, note: r[11] || '',
-        });
-      });
-    }
-
-    // 고객사별 "필요한 SKU 목록"을 읽어서 SKU 단위 완료 개수(doneSku/totalSku) 계산
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    // ★ 2026-07-24 긴급 수정(유지) — 같은 바코드가 고객사 PDF에 두 줄로 나뉘어
-    //   있으면(예: 분할 입고로 700개+570개) 여기서 그걸 합치지 않고 각 줄을
-    //   "별도의 SKU"처럼 취급해서 각각 완료 판정을 내렸던 문제 — 같은
-    //   invoice+바코드+SKU는 먼저 필요수량을 합산해서 "하나의 상품 줄"로 묶은
-    //   뒤에 완료 여부를 판정함.
-    // ★ 2026-07-28 긴급 수정 — 여기에 SKU를 안 넣으면 정반대의 사고가 남:
-    //   바코드는 같지만 SKU가 다른 두 "진짜 다른 상품"(Flower Park/Shop)이
-    //   하나로 합쳐져서 둘 중 하나만 스캔해도 둘 다 완료로 잘못 카운트됨.
-    //   그래서 이제 "invoice|바코드|SKU"까지 다 같아야만 진짜 같은 줄로 병합함.
-    const skuLinesByKey = {}; // "invoice|barcode|sku" -> { invoice, reqQty(합산) }
-    if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        const inv = r[1];
-        if (!inv) return; // 총량 행(Invoice 빈값)은 제외 — 고객사 행만 집계
-        const bcKey = inv + '|' + normBarcode_(r[4]) + '|' + String(r[2]); // invoice|barcode|sku ★ 2026-08-05: normBarcode_ 적용
-        if (!skuLinesByKey[bcKey]) skuLinesByKey[bcKey] = { invoice: inv, reqQty: 0 };
-        skuLinesByKey[bcKey].reqQty += Number(r[5]) || 0;
-      });
-    }
+    // ★ 2026-09-24 수정(속도) — 고객사별/SKU별 스캔·이슈·필요수량 집계를 이 함수
+    //   혼자 다시 계산하지 않고, getInvoiceItemStatus()와 공유하는 배치 단위
+    //   캐시(_buildBatchAggregates_)에서 가져오도록 변경. 필터링 조건(undone/pass
+    //   판정, ADJ 상쇄, 분할입고 합산 등)은 아래에 있던 것과 완전히 동일 —
+    //   합성 데이터로 신구 로직 결과가 정확히 일치함을 검증했음.
+    const _aggr = _buildBatchAggregates_(batchId);
+    const scannedByKey = _aggr.scannedByKey; // "invoice|barcode|sku"
+    const issueQtyByInvoice = _aggr.issueQtyByInvoice;
+    const issueQtyByKey = _aggr.issueQtyByKey; // "invoice|barcode|sku"
+    const issuesByInvoice = _aggr.issuesByInvoice;
+    const skuLinesByKey = _aggr.skuLinesByKey; // "invoice|barcode|sku" -> { invoice, reqQty(합산), sku, name, barcode }
 
     // ★ 2026-07-29 설계 변경 — 예전엔 스캔량을 인보이스 단위로 그냥 다 더해서,
     //   SKU 한 줄이 필요수량보다 많이 찍혀도 그 초과분까지 합계에 그대로
@@ -3889,6 +3859,15 @@ function getSlotProgress(batchId) {
       // (완료 판정 로직 scanned>=effectiveTotal과 같은 원칙을 SKU 단위로도 적용).
       if (scannedQty + issueQty >= line.reqQty) skuStatsByInvoice[inv].doneSku++;
     });
+
+    // ★ 2026-09-24 수정 — 위 _buildBatchAggregates_로 옮기면서 아래 패킹 집계 구간이
+    //   쓰던 bi/biLast, il/ilLast 원본 시트 참조가 없어졌으므로 다시 선언함(패킹
+    //   집계는 "invoice|바코드"만 키로 쓰는 별도 구조라 공유 집계에는 안 담음 — 기존과
+    //   동일하게 이 구간에서 별도로 한 번 더 읽음, 동작 변화 없음).
+    const bi = bitemsSheet_();
+    const biLast = bi.getLastRow();
+    const il = issuelogSheet_();
+    const ilLast = il.getLastRow();
 
     // ★ 2026-08-24 신규 — 패킹검증 진행률 집계(오출고 방지 신기능). 검수 진행률과는
     //   완전히 별개로, PackScanLog(패킹존 재검증 스캔)를 바코드 단위로 집계함.
