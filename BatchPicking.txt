@@ -3683,11 +3683,28 @@ function getBatchKPI(batchId) {
 //   getSlotProgress()·getInvoiceItemStatus() 두 함수와 완전히 동일 — 결과값은
 //   전혀 바뀌지 않음(합성 데이터로 신구 로직 결과가 정확히 일치함을 별도로
 //   검증했음). "어디서 몇 번 계산하느냐"만 바뀜.
+// ★ 2026-09-24 신규(진단용, 임시) — Apps Script Executions 화면의 Cloud logs가
+//   이 프로젝트에서 제대로 뜨지 않아서(GCP 프로젝트 연동 문제로 추정), 로그를
+//   Google 쪽 로그 뷰어에 의존하지 않고 API 응답(JSON) 안에 직접 실어서
+//   브라우저 개발자도구 콘솔(F12)에서 바로 보이게 하기 위한 전역 버퍼.
+//   getInvoiceItemStatus 호출 시작 시 비우고, 끝날 때 응답의 diag 필드로 담아 보냄.
+var __DIAG__ = [];
+function _diagPush_(msg) { __DIAG__.push(msg); console.log('[진단] ' + msg); }
+
 function _buildBatchAggregates_(batchId) {
+  // ★ 2026-09-24 신규(진단용, 임시) — 어디서 시간이 새는지 숫자로 확인하기 위한
+  //   타임스탬프 로그. 로직은 전혀 안 바뀜, 로그만 추가됨. 확인 끝나면
+  //   제거해도 되고, 당장은 그대로 둬도 동작에 영향 없음.
+  const _t0 = Date.now();
   const _cache = CacheService.getScriptCache();
   const _cacheKey = 'batchAggr_v1_' + batchId;
   const _cached = _cache.get(_cacheKey);
-  if (_cached) return JSON.parse(_cached);
+  const _tAfterCacheGet = Date.now();
+  if (_cached) {
+    _diagPush_('_buildBatchAggregates_ CACHE HIT batchId=' + batchId + ' cache.get=' + (_tAfterCacheGet - _t0) + 'ms');
+    return JSON.parse(_cached);
+  }
+  _diagPush_('_buildBatchAggregates_ CACHE MISS batchId=' + batchId + ' cache.get=' + (_tAfterCacheGet - _t0) + 'ms — 실제 시트 읽기 시작');
 
   // 고객사별/SKU별 스캔 통과(pass) 수량 집계 (undone 제외) — getSlotProgress()와 동일 로직
   const sl = scanlogSheet_();
@@ -3705,6 +3722,8 @@ function _buildBatchAggregates_(batchId) {
     });
   }
   Object.keys(scannedByKey).forEach(key => { if (scannedByKey[key] < 0) scannedByKey[key] = 0; });
+  const _tAfterScanLog = Date.now();
+  _diagPush_('ScanLog 읽기+집계: ' + (_tAfterScanLog - _tAfterCacheGet) + 'ms (총 ' + (slLast - 1) + '행 읽음)');
 
   // 이슈 집계 — getSlotProgress()와 동일 로직
   const il = issuelogSheet_();
@@ -3728,6 +3747,8 @@ function _buildBatchAggregates_(batchId) {
       });
     });
   }
+  const _tAfterIssueLog = Date.now();
+  _diagPush_('IssueLog 읽기+집계: ' + (_tAfterIssueLog - _tAfterScanLog) + 'ms (총 ' + (ilLast - 1) + '행 읽음)');
 
   // 고객사별 필요 SKU 목록 — getSlotProgress()와 동일 로직 + getInvoiceItemStatus()가
   // 쓰는 상품정보(sku/name/barcode 표시값)만 추가로 같이 담음(getSlotProgress는 그냥 무시).
@@ -3747,10 +3768,14 @@ function _buildBatchAggregates_(batchId) {
       skuLinesByKey[key].reqQty += Number(r[5]) || 0;
     });
   }
+  const _tAfterBatchItems = Date.now();
+  _diagPush_('BatchItems 읽기+집계: ' + (_tAfterBatchItems - _tAfterIssueLog) + 'ms (총 ' + (biLast - 1) + '행 읽음)');
 
   const aggr = { scannedByKey, issueQtyByInvoice, issueQtyByKey, issuesByInvoice, skuLinesByKey };
   try {
     const _payload = JSON.stringify(aggr);
+    const _tAfterStringify = Date.now();
+    _diagPush_('JSON.stringify: ' + (_tAfterStringify - _tAfterBatchItems) + 'ms (payload 크기 ' + _payload.length + '바이트, 95000 미만이어야 캐싱됨)');
     // ★ 2026-09-24 세 번째 수정(진짜 원인 발견) — 6초→60초→25초로 계속
     //   맞춰봤는데도 안 빨라진 이유: board.html이 "30초마다 폴링한다"고 해도,
     //   Firestore 미러가 연결된 정상 상태에서는 그 폴링이 실제 getSlotProgress()
@@ -3768,11 +3793,20 @@ function _buildBatchAggregates_(batchId) {
     //   배치가 매우 크면 100KB 캐시 한도를 넘을 수 있음 — 그럴 땐 캐싱만 건너뜀
     //   (매번 다시 계산되긴 하지만 결과가 틀리진 않음. 기존과 동일한 안전장치).
     if (_payload.length < 95000) _cache.put(_cacheKey, _payload, 55);
+    const _tAfterCachePut = Date.now();
+    _diagPush_('cache.put: ' + (_tAfterCachePut - _tAfterStringify) + 'ms');
   } catch (eCache) { /* 캐시 실패해도 정상 계산 결과는 그대로 반환 */ }
+  _diagPush_('_buildBatchAggregates_ 전체(캐시 미스 경로) 총 소요: ' + (Date.now() - _t0) + 'ms');
   return aggr;
 }
 
 function getInvoiceItemStatus(batchId, invoice) {
+  // ★ 2026-09-24 신규(진단용, 임시) — 어디서 시간이 새는지 숫자로 확인.
+  //   Apps Script Executions 화면의 Cloud logs가 이 프로젝트에서 뜨지 않는
+  //   문제가 있어(GCP 연동 이슈로 추정), 로그를 Google 로그 뷰어에 기대지 않고
+  //   응답 JSON의 diag 필드에 직접 실어 보냄 → 브라우저 콘솔(F12)에서 바로 확인.
+  __DIAG__ = []; // 이 요청 전용으로 초기화
+  const _reqT0 = Date.now();
   try {
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
 
@@ -3782,12 +3816,20 @@ function getInvoiceItemStatus(batchId, invoice) {
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'invItemStatus_v1_' + batchId + '_' + invoice;
     const _cached = _cache.get(_cacheKey);
-    if (_cached) return JSON.parse(_cached);
+    if (_cached) {
+      _diagPush_('getInvoiceItemStatus CACHE HIT(이 인보이스) invoice=' + invoice + ' 총 ' + (Date.now() - _reqT0) + 'ms');
+      const _cachedResult = JSON.parse(_cached);
+      _cachedResult.diag = __DIAG__.slice();
+      return _cachedResult;
+    }
 
     // ★ 2026-09-24 수정(속도) — 시트 3개를 매번 이 함수 혼자 통째로 읽던 것을,
     //   getSlotProgress()와 공유하는 배치 단위 집계(_buildBatchAggregates_)에서
     //   가져오도록 변경. TV/보드가 이미 폴링 중이면 대부분 캐시 히트로 즉시 응답됨.
+    const _tBeforeAggr = Date.now();
     const aggr = _buildBatchAggregates_(batchId);
+    const _tAfterAggr = Date.now();
+    _diagPush_('getInvoiceItemStatus: _buildBatchAggregates_ 호출 소요 ' + (_tAfterAggr - _tBeforeAggr) + 'ms (이 안의 세부 내역은 위 로그들 참고)');
     const scannedByKey = aggr.scannedByKey;
     const issueByKey = aggr.issueQtyByKey;
     const skuLines = aggr.skuLinesByKey;
@@ -3805,14 +3847,18 @@ function getInvoiceItemStatus(batchId, invoice) {
           short: Math.max(0, reqQty - scannedQty - issueQty),
         };
       });
+    const _tAfterItems = Date.now();
+    _diagPush_('getInvoiceItemStatus: items 배열 구성(' + items.length + '개) ' + (_tAfterItems - _tAfterAggr) + 'ms');
     const _result = { ok: true, invoice: invoice, items: items };
     try {
       const _payload = JSON.stringify(_result);
       if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    _diagPush_('getInvoiceItemStatus 전체(캐시 미스 경로) invoice=' + invoice + ' 총 소요 ' + (Date.now() - _reqT0) + 'ms');
+    _result.diag = __DIAG__.slice();
     return _result;
   } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
+    return { ok: false, error: String(e && e.message || e), diag: __DIAG__.slice() };
   }
 }
 
