@@ -2537,7 +2537,31 @@ async function loadBatchWorkersFromServer(){
     }
     state._workersReady = true;
     renderWorkers();
+    // ★ 2026-09-25 버그 수정(현장 재발견) — 이미 로그인된 상태로 페이지를 열면(새로고침,
+    //   재접속 등) doLogin()을 거치지 않고 이 성공 분기가 실행됨. 그런데 부팅 직후
+    //   최초 populateWorkerSelect() 호출은 아직 실제 서버 명단이 도착하기 전(state.workers가
+    //   비어있거나 데모용 기본값)이라, "Helper 1" 같은 실제 이름이 옵션에 없어서
+    //   state.currentWorker가 ''(빈 문자열)로 "오염"됐었음(doLogin() 주석의 포이즈닝
+    //   버그와 완전히 동일한 원인, 다른 진입 경로). 그 뒤 여기서 실제 명단이 도착해
+    //   populateWorkerSelect()를 다시 불러도, currentWorker가 null이 아니라 이미 ''로
+    //   오염돼 있어서 localStorage(sk_scan_worker)의 로그인된 이름으로 복원되지 못하고
+    //   "— 선택 안 함 —"에 그대로 멈춰 있었음(배지엔 "Helper 1"이 뜨는데 03번 탭만
+    //   비어있던 증상의 정확한 원인). doLogin()과 동일하게, 진짜 명단으로 다시 그리기
+    //   직전에 null로 리셋해서 복원 로직이 다시 정상 작동하게 함.
+    state.currentWorker = null;
+    // ★ 2026-09-25 신규 — 03번(workerSelect) 외 나머지 3곳(ssWorkerSelect/pvWorkerSelect/
+    //   psvWorkerSelect)은 자기 값을 스스로 오염시키진 않지만(populate 함수 내부에서
+    //   변수에 sel.value를 강제로 되먹이지 않음), 이미 로그인된 채로 페이지를 열었을 때
+    //   그 탭에 아직 한 번도 안 들어가 봤다면 실제 명단 도착 즉시 자동으로 이름이
+    //   채워지는 게 사용자 기대와 맞음. doLogin()과 동일하게 4곳 모두 다시 채움
+    //   (각 함수는 이미 활성 포커스 중이면 건드리지 않도록 자체 가드가 있어 안전).
+    if(typeof ssCurrentWorker !== 'undefined') ssCurrentWorker = null;
+    if(typeof pvCurrentWorker !== 'undefined') pvCurrentWorker = null;
+    if(typeof psvCurrentWorker !== 'undefined') psvCurrentWorker = null;
     populateWorkerSelect();
+    try{ populateSsWorkerSelect(); }catch(e){}
+    try{ populatePvWorkerSelect(); }catch(e){}
+    try{ populatePsvWorkerSelect(); }catch(e){}
     refreshLoginUI(); // ★ 2026-09-25 신규 — 서버 명단 도착 후: 로그인 전이면 그리드를 실제 명단으로 다시 그리고, 로그인 후면 배지+잠금 유지
   }catch(e){
     console.error('loadBatchWorkersFromServer failed:', e);
