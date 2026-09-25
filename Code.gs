@@ -4070,7 +4070,21 @@ function getSalesTodayList() {
         dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || '',
         // ★ 2026-08-24 신규 — 오출고 방지: 핑크(moved)/파랑(taken)/주황(verified, 최종 2차 검증완료) 4단계.
         //   디멘션이 이미 저장된 건(수기 배송 준비 완료로 간주) taken(파랑)으로 승격.
-        packStage: ((dimsMap[invoice] || {}).count || 0) > 0 ? 'taken' : (packStageMap[invoice] || 'none'),
+        // ★ 2026-09-25 긴급 수정(현장 지적 — "Moved to Packing ↔ 2nd Verification
+        //   Complete가 왔다갔다 한다") — 위 승격 로직이 디멘션이 있으면 무조건
+        //   'taken'으로 "덮어써서" 매겼음. 그런데 2차 검증까지 이미 끝나서
+        //   packStageMap[invoice]가 'verified'인 오더도 디멘션만 있으면 이
+        //   무조건 덮어쓰기 때문에 'taken'으로 강등되고 있었음 — 검증 완료
+        //   문구가 떴다가 디멘션을 저장하는 순간 다시 "Moved to Packing"으로
+        //   되돌아가 보이던 원인이 바로 이것. 이제 "더 진행된 단계는 절대
+        //   되돌리지 않는다"는 원칙으로, 실제 packStageMap 값과 디멘션에 의한
+        //   최소 보장 단계('taken') 중 더 앞선(진행된) 쪽을 취하도록 수정.
+        packStage: (function () {
+          const STAGE_RANK = { none: 0, moved: 1, taken: 2, verified: 3 };
+          const fromMap = packStageMap[invoice] || 'none';
+          const fromDims = ((dimsMap[invoice] || {}).count || 0) > 0 ? 'taken' : 'none';
+          return STAGE_RANK[fromMap] >= STAGE_RANK[fromDims] ? fromMap : fromDims;
+        })(),
         // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인을 목록에도 표시. 값이
         //   없으면(옛날 오더·미입력) 안전하게 false(미납)로 취급.
         paymentPaid: payVals ? (String(payVals[i][0] || '').trim().toLowerCase() === 'paid') : false,
