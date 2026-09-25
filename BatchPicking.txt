@@ -1644,7 +1644,12 @@ function clearInvoiceCache_(batchId, invoice) {
 //   경우의 보조 안전망" 역할만 함.
 function scanStateCacheKey_(batchId) { return 'scanState_v1_' + batchId; }
 function invalidateScanStateCache_(batchId) {
-  try { CacheService.getScriptCache().remove(scanStateCacheKey_(batchId)); } catch (e) { /* 무시 */ }
+  // ★ 2026-09-25 수정 — getScanState()가 청크 캐시(_cacheGetChunked_/_cachePutChunked_)로
+  //   바뀌면서, 무효화도 예전 단일 키가 아니라 청크의 "메타" 키를 지워야 함.
+  //   _cacheGetChunked_는 baseKey+'_meta'가 없으면 무조건 캐시 미스로 처리하므로,
+  //   메타만 지우면 남은 조각(_c0, _c1, ...)이 있어도 다음 조회는 항상 새로 계산됨
+  //   (조각까지 일일이 지울 필요 없음 — 조각은 TTL로 자연 소멸).
+  try { CacheService.getScriptCache().remove(scanStateCacheKey_(batchId) + '_meta'); } catch (e) { /* 무시 */ }
 }
 
 function logPackScan(data) {
@@ -4241,7 +4246,12 @@ function getScanState(batchId) {
     //   경우는 "같은 4초 사이 여러 기기가 같은 배치를 동시에 물어본" 경우뿐임.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = scanStateCacheKey_(batchId);
-    const _cached = _cache.get(_cacheKey);
+    // ★ 2026-09-25 수정 — _buildBatchAggregates_/getJobsInvoiceRowIndex_ 등과 동일하게
+    //   발견된 버그: 스캔·이슈가 많이 쌓인 배치는 doneMap+scans+issueMap+issues를 합친
+    //   JSON이 100KB CacheService 한도를 넘는 경우가 실제로 있음(예: 스캔 2만건대 배치).
+    //   기존 단일 cache.get()은 그런 배치에서 "캐시가 있는 척 하다가 실은 한 번도
+    //   저장된 적 없는" 상태라 매번 전체 시트 재계산 → 팝업/폴링이 느려짐. 청크 캐시로 교체.
+    const _cached = _cacheGetChunked_(_cache, _cacheKey);
     if (_cached) return JSON.parse(_cached);
 
     const sl = scanlogSheet_();
@@ -4318,10 +4328,9 @@ function getScanState(batchId) {
     const _result = { ok: true, doneMap: doneMap, scans: scans, issueMap: issueMap, issues: issues };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 4);
-      // ★ 스캔·이슈가 많이 쌓인 배치는 payload가 100KB 캐시 한도를 넘을 수 있음
-      //   (다른 캐시들과 동일한 가드). 그 경우 그냥 캐시를 안 쓰고 매번 새로
-      //   계산될 뿐, 정확성에는 전혀 영향 없음(안전하게 조용히 스킵).
+      // ★ 2026-09-25 수정 — 95000자 미만일 때만 저장하던 가드 제거. 청크 캐시는
+      //   크기 제한 없이 안전하게 저장되므로, 큰 배치도 이제 정상적으로 캐시가 적용됨.
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 4);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
