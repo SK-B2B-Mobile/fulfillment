@@ -945,6 +945,14 @@ select option:disabled{color:var(--text-dim2);}
    이 오버레이로 이름을 한 번 묻고, 그 뒤로는 5개 탭의 "작업자 이름" 선택란에
    자동으로 채워주는 용도. */
 #loginOverlay{position:fixed; inset:0; z-index:99999; background:var(--bg); display:none; align-items:center; justify-content:center; padding:40px 20px; overflow-y:auto;}
+/* ★ 2026-09-25 버그 수정(현장 재발견) — 중복 로그인 확인 모달(#dupLoginModal)이 일반
+   .modal-bg 규칙의 z-index:200을 그대로 물려받아서, 로그인 화면(#loginOverlay,
+   z-index:99999)보다 훨씬 뒤에 깔려 있었음. 그래서 로그인 화면이 떠 있는 동안(정확히
+   이 모달이 필요한 바로 그 순간) 팝업이 열려도 화면 뒤에 가려 안 보이고, 나중에 다른
+   이름으로 로그인에 성공해 로그인 화면이 사라진 뒤에야(엉뚱한 시점에, 그것도 이전
+   클릭의 오래된 내용으로) 갑자기 나타났음. 로그인 화면보다 항상 위에 뜨도록 별도로
+   더 높은 z-index를 줌. */
+#dupLoginModal{z-index:100000;}
 .login-card{width:100%; max-width:760px; text-align:center;}
 .login-eyebrow{font-size:12px; letter-spacing:2px; color:var(--text-dim2); font-weight:700; margin-bottom:10px;}
 .login-title{font-size:30px; font-weight:800; margin:0 0 28px; color:var(--text);}
