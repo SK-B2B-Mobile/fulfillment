@@ -780,11 +780,19 @@ function getActiveScanWorkers(data) {
  *  - WorkerPresence(이 블록): 배치와 완전히 무관. "기기+화면" 단위로 하트비트를
  *    남기고, Workers 탭은 이름 기준으로 전체를 합쳐서 "지금 어디서든 활성인지"만 봄.
  *
- * 임계값 120초(★ 매니저 확인/확정) — 03의 60초(기기 중복선택 감지 전용, 짧아도
+ * 임계값(★ 매니저 확인/확정) — 03의 60초(기기 중복선택 감지 전용, 짧아도
  * 무방)와 목적이 다름. 이건 사람이 눈으로 보는 상태 표시라, 화면 잠금·탭 전환 같은
  * 짧은 하트비트 공백에 화면이 깜빡이지 않도록 여유를 더 둠.
+ * ★ 2026-09-25 재조정(현장 버그 재발견) — 실제로 계속 일하고 있는 작업자가 로그인
+ *   화면에서 잠깐 비활성(회색)으로 보였다가 시간이 지나면 다시 활성(초록)으로
+ *   돌아오는 증상 발견. 원인: 클라이언트 하트비트 주기(batch.html, 60초)와 이
+ *   임계값(기존 120초)이 정확히 2배라 여유가 전혀 없었음 — 하트비트 한 번만
+ *   지연되거나(pingWorkerPresenceBatch의 lock.tryLock(1000)이 락 경합으로 실패해
+ *   조용히 건너뛰는 경우 포함) 놓쳐도 곧바로 "오래된 신호"로 판정돼 비활성으로
+ *   떨어졌다가, 다음 하트비트가 성공하면 다시 활성으로 돌아옴. 하트비트 주기의
+ *   3배(한 번 놓쳐도 충분히 버틸 여유)로 늘려서 이 흔들림을 크게 줄임.
  * ================================================================================ */
-const WORKER_PRESENCE_THRESHOLD_MS = 120000; // ★ 2026-09-01: 매니저 확정값(120초)
+const WORKER_PRESENCE_THRESHOLD_MS = 180000; // ★ 2026-09-25 재조정 — 120초→180초(하트비트 주기 60초의 3배로 여유 확보)
 
 function workerPresenceSheet_() { return ensureBatchSheet_('WorkerPresence', ['DeviceId','Screen','Worker','LastSeen']); }
 
@@ -835,6 +843,11 @@ function pingWorkerPresenceBatch(data) {
       ensureSheetRoom_(sh, startRow + toAppend.length - 1);
       sh.getRange(startRow, 1, toAppend.length, 4).setValues(toAppend);
     }
+    // ★ 2026-09-25 신규 — 로그아웃 직후 batch.html 로그인 화면의 "Active" 점이 최대
+    //   10초(getActiveWorkersGlobal의 캐시 TTL)까지 옛 상태로 남아있지 않도록, 이
+    //   하트비트로 실제 값이 바뀔 때마다 즉시 무효화. 청크 캐시라 '_meta' 키만 지우면
+    //   다음 조회부터 바로 재계산됨(다른 invalidate*_ 함수들과 동일한 원칙).
+    try { CacheService.getScriptCache().remove('activeWorkersGlobal_v1_meta'); } catch (eCache) { /* 무시 */ }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
