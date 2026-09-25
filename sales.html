@@ -182,10 +182,14 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 }
 
 /* ★ 2026-08-24 신규(오출고 방지) — "최종 2차 검증완료"(파랑 다음 마지막 단계) 배지.
-   board.html의 보라 카드와 색을 맞춤. 주황(진행중 상태와 겹쳐 헷갈릴 수 있음) 대신
-   기존 팔레트 어디와도 안 겹치는 보라를 사용 — "인증 완료" 느낌. */
+ * ★ 2026-09-25 수정(현장 요청) — 원래는 board.html TV현황판의 보라 카드와
+ *   색을 맞췄는데, 이 표는 같은 행에 UPS 방법 태그도 보라 계열(#C4B0FF)이라
+ *   나란히 있으면 서로 헷갈린다는 지적. TV현황판(board.html)은 카드 전체가
+ *   꽉 찬 큰 화면이라 보라를 그대로 두고, 이 작은 텍스트 배지만 이 표
+ *   안에서 안 겹치는 파랑(--blue)으로 바꿈 — Moved to Packing(초록)과도,
+ *   UPS 태그(보라)와도 명확히 구분됨. */
 .badge.moved-final{
-  background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.55);
+  background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.55);
   font-weight:800;
 }
 
@@ -263,6 +267,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .plain-tag.pending{color:#B9C2DC; font-weight:600;}
 .plain-tag.moved-yes{color:var(--green);}
 .plain-tag.moved-no{color:#B9C2DC; font-weight:600;}
+/* ★ 2026-09-25 신규(현장 지적) — "2nd Verification Complete"가 이 목록
+   (Recently Completed / plain-tag 스타일)에서는 색상 규칙이 아예 빠져있어서
+   기본 회색빛으로만 보이고 있었음(초록 Moved to Packing과 구분이 잘 안 됨).
+   파랑(--blue)으로 명확히 구분되게 추가 — UPS 방법 태그의 보라색과도 안
+   겹치도록 일부러 다른 색 계열 선택. */
+.plain-tag.moved-final{color:var(--blue); font-weight:800;}
 .plain-tag.method{color:#B9C2DC; font-weight:600;}
 .plain-tag.method-tk{color:var(--amber); font-weight:700;}
 .plain-tag.method-ups{color:#C4B0FF; font-weight:700;}
@@ -346,8 +356,9 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .status-small.moved-yes{background:var(--green-bg); color:var(--green); position:relative; overflow:hidden; border:1px solid rgba(16,217,126,0.5);}
 .status-small.moved-yes::after{content:''; position:absolute; top:0; left:-60%; width:40%; height:100%; background:linear-gradient(120deg, transparent, rgba(16,217,126,0.55), transparent); animation:sparkleSweep 2.6s ease-in-out infinite;}
 .status-small.moved-no{background:var(--gray-bg); color:var(--text-dim);}
-/* ★ 2026-08-24 신규 — 상세 모달의 "최종 2차 검증완료"(status-small 크기용, 보라) */
-.status-small.moved-final{background:var(--purple-bg); color:var(--purple); border:1px solid rgba(139,92,246,0.55); font-weight:800;}
+/* ★ 2026-08-24 신규 — 상세 모달의 "최종 2차 검증완료"(status-small 크기용)
+ * ★ 2026-09-25 수정 — .badge.moved-final과 동일한 이유로 보라→파랑으로 통일. */
+.status-small.moved-final{background:var(--blue-bg); color:var(--blue); border:1px solid rgba(59,130,246,0.55); font-weight:800;}
 
 .section-title-row{display:flex; align-items:center; justify-content:space-between; margin:22px 0 10px;}
 .section-title-row:first-of-type{margin-top:0;}
@@ -921,8 +932,10 @@ function methodClass(m){
 }
 
 // ★ 2026-08-24 신규(오출고 방지) — 4단계 뱃지: No(회색) / Moved to Packing(초록,
-// 기존 그대로 — 파랑=물리적 이동완료의 원래 의미) / 2nd Verification Complete(금색,
-// 파랑 다음에 얹히는 최종 단계). 서버가 계산해서 보내주는 o.packStage를 우선
+// 기존 그대로 — 파랑=물리적 이동완료의 원래 의미) / 2nd Verification Complete
+// (★ 2026-09-25 수정 — 원래 보라였다가 UPS 태그 보라색과 헷갈린다는 지적으로
+// 파랑(--blue)으로 변경. Moved to Packing의 초록과도 명확히 구분됨), 파랑
+// 다음에 얹히는 최종 단계. 서버가 계산해서 보내주는 o.packStage를 우선
 // 사용하고, 옛 캐시된 응답 등 packStage가 없는 경우엔 기존 movedToPacking
 // 불리언으로 안전하게 대체(하위호환).
 function packStageBadgeHtml(o, cls){
