@@ -37,32 +37,40 @@ function bumpVersion_() {
   PROP.setProperty('jobsVersion', _nowVer_());
   // ★ 2026-07-14 신규: 데이터가 실제로 바뀌면 listJobs 캐시를 즉시 지워서,
   //   다음 조회부터는(캐시 만료 8초를 기다리지 않고) 곧바로 최신 데이터를 읽음
-  try { CacheService.getScriptCache().remove('listJobs_cache_v1'); } catch (e) {}
+  // ★ 2026-09-25 수정 — 아래 캐시들이 전부(또는 이미) 청크 캐시(_cacheGetChunked_/
+  //   _cachePutChunked_)로 바뀌면서, 무효화 대상도 실제로 쓰이는 "메타" 키로
+  //   맞춰야 함. 청크 캐시는 baseKey 자체엔 아무 값도 안 쓰고 baseKey+'_meta'와
+  //   baseKey+'_c0..N'에만 씀 — 예전처럼 baseKey를 그대로 지우면 애초에 존재한
+  //   적 없는 키를 지우는 셈이라 실제로는 아무 효과가 없다(무효화가 조용히
+  //   무력화됨). 이번에 점검하다가 jobsInvRowIdx_v1/bcInvRowIdx_v1 두 곳이 이미
+  //   이 상태(청크로 바뀐 뒤 무효화만 예전 키로 남아있던 것)였던 걸 발견해서
+  //   같이 고침 — 그동안 즉시반영이 아니라 최대 45초 TTL에만 의존하고 있었음.
+  try { CacheService.getScriptCache().remove('listJobs_cache_v1_meta'); } catch (e) {}
   // ★ 2026-07-28 신규 — 영업 공유 페이지(sales.html) 캐시도 같이 비움.
   //   디멘션 저장/검수/패킹존이동 등 거의 모든 쓰기 작업이 이 함수를 거치므로,
   //   여기서 같이 지워주면 "방금 저장했는데 목록에 안 보임" 문제 없이
   //   짧은 캐시(속도용)와 즉시반영(정확성)을 둘 다 챙길 수 있음.
-  try { CacheService.getScriptCache().remove('salesOverview_cache_v1'); } catch (e) {}
-  try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('salesOverview_cache_v1_meta'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('salesToday_cache_v1_meta'); } catch (e) {}
   // ★ 2026-09-03 신규 — 위 인보이스→행번호 인덱스 캐시도 같이 지움. 새 행이
   //   추가되거나 삭제되면(행 번호가 밀림) 즉시 무효화해야 정확함.
-  try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1_meta'); } catch (e) {}
   // ★ 2026-09-03 신규 — BatchCustomers 인보이스→행번호 인덱스 캐시도 같이 지움
   //   (getBatchCustomersInvoiceRowIndex_, BatchPicking.gs). 단독오더 등록·삭제처럼
   //   BatchCustomers에 행이 추가·삭제되는 모든 경로가 결국 이 함수를 거치므로,
   //   여기서 같이 지워주면 별도로 신경 쓸 곳 없이 항상 정확함.
-  try { CacheService.getScriptCache().remove('bcInvRowIdx_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('bcInvRowIdx_v1_meta'); } catch (e) {}
   // ★ 2026-09-03 신규 — Dimensions/DimLinks 캐시(BatchPicking.gs)도 같이 지움.
   //   디멘션 저장·그룹 연결/해제처럼 이 데이터가 바뀌는 모든 경로가 결국
   //   이 함수를 거치므로, 여기서 같이 지워주면 항상 정확함.
-  try { CacheService.getScriptCache().remove('allDimsRows_v1'); } catch (e) {}
-  try { CacheService.getScriptCache().remove('dimLinksMap_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('allDimsRows_v1_meta'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('dimLinksMap_v1_meta'); } catch (e) {}
   // ★ 2026-08-25 신규(안전 확인) — getOpenBatches("다른 배치" 목록) 캐시를 6초→20초로
   //   늘리면서(속도 개선), 방금 2차 검증을 끝냈는데도 목록엔 최대 20초간 예전
   //   숫자("검증 대기 N건")가 보일 위험이 새로 생겼음. 데이터가 실제로 바뀌는
   //   모든 쓰기 작업이 이 함수(bumpVersion_)를 거치므로, 여기서 같이 지워서
   //   "속도는 빠르게, 정확도는 항상 최신"을 둘 다 보장함.
-  try { CacheService.getScriptCache().remove('openBatches_v1'); } catch (e) {}
+  try { CacheService.getScriptCache().remove('openBatches_v1_meta'); } catch (e) {}
 }
 
 // === Header map cache ===
@@ -110,7 +118,7 @@ function doGet(e) {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'listJobs_cache_v1';
     let out;
-    const cached = cache.get(cacheKey);
+    const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시). Jobs가 늘어나 payload가 100KB를 넘어도 이제 항상 정상 캐싱됨
     if (cached) {
       try { out = JSON.parse(cached); } catch (e) { out = null; }
     }
@@ -119,7 +127,7 @@ function doGet(e) {
       out.pickers = getPickers_();
       out.pickerColors = getPickerColors_();
       out.ver = getVersion_();
-      try { cache.put(cacheKey, JSON.stringify(out), 8); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+      try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 8); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
     }
     return json_(out);
   }
@@ -134,6 +142,7 @@ function doGet(e) {
   if (op === 'upsertJob') {
     const data = JSON.parse((e.parameter || {}).data || '{}');
     upsertJob_(data);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
     return json_({ ok: true });
   }
 
@@ -156,6 +165,7 @@ function doGet(e) {
       }
     }
     deleteJob_(invoice);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
     return json_({ ok: true });
   }
   // ★ 2026-08-10 신규 — 규칙을 어기고 보관된 오더 복구
@@ -402,6 +412,7 @@ function doPost(e) {
     }
 
     const result = upsertJob_mergeText_(payload);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
     return json_(Object.assign({}, result, { ver: getVersion_() }));
   }
 
@@ -414,6 +425,7 @@ function doPost(e) {
       if (!chk.eligible) return json_({ ok: false, blocked: true, error: '보관 기준 미달: ' + chk.reason });
     }
     setArchived_(invoice, true);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
     return json_({ ok: true, softDeleted: true });
   }
 
@@ -451,7 +463,9 @@ function doPost(e) {
   }
 
   if (op === 'saveInspection') {
-    return saveInspection(JSON.parse(e.parameter.data || '{}'));
+    const _r = saveInspection(JSON.parse(e.parameter.data || '{}'));
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
+    return _r;
   }
 
   // ★ 2026-07-14 신규 — 여러 건을 체크박스로 선택해서 한번에 PASS 처리할 때,
@@ -461,7 +475,9 @@ function doPost(e) {
   if (op === 'saveInspectionBulk') {
     let list = [];
     try { list = JSON.parse(e.parameter.data || '[]'); } catch (err) { list = []; }
-    return json_(saveInspectionBulk_(list));
+    const _r = saveInspectionBulk_(list);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
+    return json_(_r);
   }
 
   // ★ 2026-07-14 신규 — 여러 작업자가 정확히 같은 순간 완료 버튼을 눌러서 "다음
@@ -469,15 +485,25 @@ function doPost(e) {
   //   있었음(아직 아무도 검수 안 한 오더라 서버가 막을 근거가 없었음). 오더를
   //   열 때 "지금 내가 이거 검수 중" 도장을 찍어두고, 다른 사람이 같은 오더를
   //   열려고 하면 막아주는 선점(claim) 기능.
+  // ★ 2026-09-25 신규 — claim/release도 이제 syncWorkerJobsMirror_로 즉시 미러에
+  //   반영됨. 다른 작업자 화면이 "이 오더 지금 OOO님이 검수 중"을 최대 15~20초
+  //   폴링을 기다리지 않고 몇 초 안에 보게 되어, 동시에 같은 오더를 여는 사고를
+  //   지금보다 더 확실하게 막아줌.
   if (op === 'claimInspection') {
-    return json_(claimInspection_(data));
+    const _r = claimInspection_(data);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ }
+    return json_(_r);
   }
   if (op === 'releaseInspectionClaim') {
-    return json_(releaseInspectionClaim_(data));
+    const _r = releaseInspectionClaim_(data);
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ }
+    return json_(_r);
   }
 
   if (op === 'clearInspection') {
-    return clearInspection(JSON.parse(e.parameter.data || '{}'));
+    const _r = clearInspection(JSON.parse(e.parameter.data || '{}'));
+    try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
+    return _r;
   }
 
   // CMS 데이터 저장 (POST - 북마크릿에서 호출)
@@ -2980,7 +3006,7 @@ function getRevenueSummary() {
     //   캐시로 완화(어차피 30분 주기라 30초 정도는 지연으로 느낄 수준이 아님).
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'revenueSummary_v1';
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const tz = Session.getScriptTimeZone();
@@ -3074,7 +3100,7 @@ function getRevenueSummary() {
     const _result = { ok: true, summary: summary };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 30);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 30); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
 
@@ -3121,7 +3147,7 @@ function getShipSchedule() {
     //   한꺼번에 몰릴 수 있어서 60초 캐시로 완화(5분 주기 대비 충분히 짧음).
     var _cache = CacheService.getScriptCache();
     var _cacheKey = 'shipSchedule_v1';
-    var _cached = _cache.get(_cacheKey);
+    var _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     var tz = Session.getScriptTimeZone(); // America/Los_Angeles
@@ -3340,7 +3366,7 @@ function getShipSchedule() {
     };
     try {
       var _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 60);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 60); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
 
@@ -3971,7 +3997,7 @@ function getSalesTodayList() {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'salesToday_cache_v1';
-    const cached = cache.get(cacheKey);
+    const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     if (cached) {
       try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 그냥 새로 조회 */ }
     }
@@ -4053,7 +4079,7 @@ function getSalesTodayList() {
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
 
     const out = { ok: true, jobs: jobs, date: today };
-    try { cache.put(cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
@@ -4069,7 +4095,7 @@ function getSalesOverview() {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'salesOverview_cache_v1';
-    const cached = cache.get(cacheKey);
+    const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     if (cached) {
       try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 그냥 새로 조회 */ }
     }
@@ -4200,7 +4226,7 @@ function getSalesOverview() {
     jobs.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
 
     const out = { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
-    try { cache.put(cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+    try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
