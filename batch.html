@@ -2567,9 +2567,36 @@ async function doLogin(name){
   applyWorkerSelectLocks_(); // ★ 2026-09-25 신규 — 로그인 이름으로 고정, 다른 이름으로 실수로 안 바뀌게 잠금
 }
 
-function doLogout(){
+// ★ 2026-09-25 신규(현장 재발견 버그 수정) — 로그아웃해도 로그인 화면의 "Active" 점이
+//   바로 안 꺼지고 최대 2분(WORKER_PRESENCE_THRESHOLD_MS, 서버 BatchPicking.gs)까지
+//   그대로 남아있던 문제. 원인: 지금까지 doLogout()은 이 기기의 LOGIN_WORKER_KEY만
+//   지우고 새로고침했을 뿐, 서버(WorkerPresence 시트)에 남아있는 "이 기기가 5초~1분
+//   전까지도 Helper 2로 4개 화면 모두에서 작업 중이었다"는 하트비트 기록은 전혀
+//   지우지 않았음. getActiveWorkersGlobal()은 그 기록의 LastSeen이 120초를 넘기기
+//   전까지는 계속 "Active"로 판정하므로, 실제로는 로그아웃했는데도 로그인 화면엔
+//   한동안 계속 Active로 보였던 것(스캔 작업자 선택란의 "선택 안 함"은 onchange에서
+//   즉시 pingWorkerPresenceNow()로 이 기록을 비우는데, 로그아웃 경로에만 이 처리가
+//   빠져 있었음). 이제 로그아웃 확정 시 4개 화면 전부 worker=''로 서버에 즉시
+//   보고(best-effort, 실패해도 로그아웃 자체는 그대로 진행)한 뒤 새로고침함.
+async function pingWorkerLogoutClear_(){
+  if(!GAS_READY) return;
+  try{
+    await gasCall('pingWorkerPresenceBatch', {
+      deviceId: DEVICE_ID,
+      entries: [
+        { screen: 'scan_sort',              worker: '' },
+        { screen: 'standalone_scan',        worker: '' },
+        { screen: 'pack_verify',            worker: '' },
+        { screen: 'standalone_pack_verify', worker: '' },
+      ]
+    });
+  }catch(e){ /* best-effort — 실패해도 로그아웃은 그대로 진행 */ }
+}
+
+async function doLogout(){
   const cur = getLoginWorker();
   if(!confirm((cur ? (cur + '님 ') : '') + '로그아웃할까요?\n\n지금까지 스캔·입력한 내용은 이미 저장되어 있어 안전합니다.')) return;
+  await pingWorkerLogoutClear_(); // ★ 2026-09-25 신규 — 로그인 화면의 Active 점이 즉시 꺼지도록
   clearLoginWorker();
   location.reload(); // 로그인 화면부터 새로 시작 — 가장 안전하게 모든 화면 상태를 초기화
 }
