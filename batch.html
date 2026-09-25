@@ -952,9 +952,11 @@ select option:disabled{color:var(--text-dim2);}
 .login-worker-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:12px; margin-bottom:22px;}
 .login-worker-tile{display:flex; flex-direction:column; align-items:flex-start; gap:8px; background:var(--surface2); border:1px solid var(--border2); border-radius:12px; padding:16px; cursor:pointer; text-align:left; font-family:var(--sans); min-height:76px;}
 .login-worker-tile:hover, .login-worker-tile:focus-visible{border-color:var(--cyan); background:var(--surface3);}
-.login-worker-dot{width:9px; height:9px; border-radius:50%; background:var(--cyan); display:inline-block;}
+.login-worker-dot{width:9px; height:9px; border-radius:50%; background:var(--text-dim2); display:inline-block;}
+.login-worker-dot.is-active{background:var(--green);}
 .login-worker-name{font-weight:700; font-size:14px; color:var(--text);}
 .login-worker-hint{font-size:11px; color:var(--text-dim2);}
+.login-worker-hint.is-active{color:var(--green);}
 .login-footnote{font-size:12px; color:var(--text-dim2);}
 #loginBadgeWrap{display:none; align-items:center; gap:8px; margin-right:10px;}
 .login-badge-pill{display:flex; align-items:center; gap:8px; background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:6px 14px; font-size:13px; font-weight:700; color:var(--text);}
@@ -2452,13 +2454,23 @@ function renderLoginWorkerGrid(){
     grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-dim2); font-size:13px; padding:20px;">작업자 명단을 불러오는 중…</div>';
     return;
   }
-  grid.innerHTML = all.map(w => `
-    <button type="button" class="login-worker-tile" data-login-worker="${String(w.name).replace(/"/g,'&quot;')}">
-      <span class="login-worker-dot"></span>
+  // ★ 2026-09-25 신규 — Workers 탭(renderWorkers)과 동일한 전역 실시간 재직 신호
+  //   (_globalActiveWorkers, getActiveWorkersGlobal 기준 120초 이내 활동)를 그대로
+  //   재사용해서, 로그인 전 화면에서도 "지금 이 이름으로 다른 기기에서 이미 작업
+  //   중인지"를 점 색깔로 보여줌(초록=활성/회색=비활성). "탭하여 로그인" 안내
+  //   문구는 더 이상 필요 없다는 요청에 따라 제거하고, 그 자리에 같은 정보를
+  //   Active/— 로 대체함.
+  grid.innerHTML = all.map(w => {
+    const isActive = !!_globalActiveWorkers[w.name];
+    const safeName = String(w.name).replace(/"/g,'&quot;');
+    return `
+    <button type="button" class="login-worker-tile" data-login-worker="${safeName}">
+      <span class="login-worker-dot${isActive ? ' is-active' : ''}"></span>
       <span class="login-worker-name">${String(w.name).replace(/</g,'&lt;')}</span>
-      <span class="login-worker-hint">탭하여 로그인</span>
+      <span class="login-worker-hint${isActive ? ' is-active' : ''}">${isActive ? '● Active' : '○ —'}</span>
     </button>
-  `).join('');
+  `;
+  }).join('');
   grid.querySelectorAll('[data-login-worker]').forEach(btn=>{
     btn.onclick = () => doLogin(btn.getAttribute('data-login-worker'));
   });
@@ -2476,6 +2488,19 @@ function hideLoginOverlay(){
 
 function doLogin(name){
   if(!name) return;
+  // ★ 2026-09-25 신규 — 다른 기기에서 이미 이 이름으로 활동 중인 것으로 보이면(_globalActiveWorkers,
+  //   120초 이내 신호 기준) 확인창을 띄움. 완전히 막지는 않음 — 1인 1기기 원칙 위반을 "완전 차단"하면
+  //   기기 고장·배터리 방전 등으로 실제로 기기를 바꿔서 정상적으로 다시 로그인해야 하는 경우까지
+  //   막혀버림(기존 스캔 작업자 선택(workerSelect onchange)에도 동일한 원칙 — 경고 후 확인, 하드 블록
+  //   아님). 단, "방금 이 기기에서 로그아웃하고 같은 사람이 바로 다시 로그인"하는 흔한 경우까지
+  //   매번 물어보면 번거로우므로, 이 기기가 마지막으로 쓰던 이름과 같으면 묻지 않음(로그아웃 시
+  //   LOGIN_WORKER_KEY는 지워도 sk_scan_worker 등 4개 키는 그대로 남겨두므로 비교 가능).
+  const lastUsedOnThisDevice = localStorage.getItem('sk_scan_worker') || '';
+  if(name !== lastUsedOnThisDevice && _globalActiveWorkers[name]){
+    if(!confirm(`⚠ ${name}님은 지금 다른 기기에서 이미 로그인되어 작업 중인 것으로 보입니다.\n\n같은 분이 기기를 바꿔서 다시 로그인하는 경우가 아니라면, 실수로 다른 사람 이름을 고른 것일 수 있습니다.\n\n그래도 이 이름으로 로그인하시겠습니까?`)){
+      return;
+    }
+  }
   setLoginWorker(name);
   hideLoginOverlay();
   updateLoginBadge();
@@ -2518,6 +2543,7 @@ function updateLoginBadge(){
 populateWorkerSelect();
 refreshLoginUI(); // ★ 2026-09-25 신규 — 로그인 안 돼 있으면 여기서 오버레이를 띄움(하드코딩 기본 명단으로 우선 렌더)
 loadBatchWorkersFromServer(); // ★ 2026-07-16 신규: 하드코딩 대신 서버(구글시트) 명단으로 교체
+pollActiveWorkersGlobal(); // ★ 2026-09-25 신규 — 로그인 화면의 초록/회색 점이 기존 50초 폴링 주기를 기다리지 않고 처음부터 정확하게 뜨도록 즉시 한 번 조회(함수 선언은 파일 뒤쪽이지만 함수 선언은 호이스팅되므로 여기서 호출해도 안전)
 
 // ★ 2026-07-16 신규 — 작업자 명단을 서버에서 불러오기. 시트가 비어있으면(최초 1회)
 //   지금 코드에 있는 기본값을 그대로 서버에 저장해서 다음부터는 서버가 기준이 되게 함.
@@ -10009,6 +10035,11 @@ async function pollActiveWorkersGlobal(){
     if(!res || !res.ok) return;
     _globalActiveWorkers = res.active || {};
     if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
+    // ★ 2026-09-25 신규 — 로그인 화면(#loginOverlay)이 지금 보이는 중이면, 각 이름
+    //   타일의 초록/회색 점도 이 최신 데이터로 즉시 다시 그림(로그인 전 화면에
+    //   그대로 머물러 있는 동안에도 다른 기기의 로그인 상태가 반영되도록).
+    const _lo = document.getElementById('loginOverlay');
+    if(_lo && _lo.style.display === 'flex') renderLoginWorkerGrid();
   }catch(e){ /* 조용히 무시 */ }
 }
 // ★ 2026-09-03 신규(매니저 확정) — pollActiveScanWorkers와 동일한 이유로
