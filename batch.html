@@ -939,6 +939,30 @@ select option:disabled{color:var(--text-dim2);}
   .modal{padding:16px; max-width:94vw;}
   .toast{font-size:11px; padding:9px 14px; max-width:88vw;}
 }
+
+/* ★ 2026-09-25 신규 — 작업자 개인 기기 로그인 오버레이 + 상단바 배지.
+   기존 화면·기능은 전혀 바꾸지 않고, 최초 접속(또는 로그아웃 후) 시에만
+   이 오버레이로 이름을 한 번 묻고, 그 뒤로는 5개 탭의 "작업자 이름" 선택란에
+   자동으로 채워주는 용도. */
+#loginOverlay{position:fixed; inset:0; z-index:99999; background:rgba(7,10,20,0.94); display:none; align-items:center; justify-content:center; padding:40px 20px; overflow-y:auto;}
+.login-card{width:100%; max-width:760px; text-align:center;}
+.login-eyebrow{font-size:12px; letter-spacing:2px; color:var(--text-dim2); font-weight:700; margin-bottom:10px;}
+.login-title{font-size:30px; font-weight:800; margin:0 0 28px; color:var(--text);}
+.login-sub{font-size:14px; color:var(--text-dim); margin:0 0 26px; line-height:1.6;}
+.login-worker-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:12px; margin-bottom:22px;}
+.login-worker-tile{display:flex; flex-direction:column; align-items:flex-start; gap:8px; background:var(--surface2); border:1px solid var(--border2); border-radius:12px; padding:16px; cursor:pointer; text-align:left; font-family:var(--sans); min-height:76px;}
+.login-worker-tile:hover, .login-worker-tile:focus-visible{border-color:var(--cyan); background:var(--surface3);}
+.login-worker-dot{width:9px; height:9px; border-radius:50%; background:var(--cyan); display:inline-block;}
+.login-worker-name{font-weight:700; font-size:14px; color:var(--text);}
+.login-worker-hint{font-size:11px; color:var(--text-dim2);}
+.login-footnote{font-size:12px; color:var(--text-dim2);}
+#loginBadgeWrap{display:none; align-items:center; gap:8px; margin-right:10px;}
+.login-badge-pill{display:flex; align-items:center; gap:8px; background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:6px 14px; font-size:13px; font-weight:700; color:var(--text);}
+.login-badge-dot{width:8px; height:8px; border-radius:50%; background:var(--green); display:inline-block;}
+@media (max-width:560px){
+  .login-title{font-size:24px;}
+  .login-worker-grid{grid-template-columns:repeat(auto-fill, minmax(120px,1fr));}
+}
 </style>
 </head>
 <body>
@@ -946,6 +970,17 @@ select option:disabled{color:var(--text-dim2);}
 <div class="sim-bar" id="simBar">
   <span id="simBarText">🧪 <b>SIMULATION</b> · v4.0 · 완결형 시연 · 데이터는 브라우저 세션에만 저장됩니다</span>
   <span id="simDate" style="font-family:var(--mono)"></span>
+</div>
+
+<!-- ★ 2026-09-25 신규 — 작업자 로그인 오버레이. 로그인 전까지 화면 전체를 덮어서
+     반드시 이름을 먼저 선택하게 함. 로그인 후엔 다시 숨김(showLoginOverlay/hideLoginOverlay). -->
+<div id="loginOverlay">
+  <div class="login-card">
+    <div class="login-eyebrow">SK B2B FULFILLMENT · BATCH</div>
+    <h1 class="login-title">SELECT YOUR NAME</h1>
+    <div class="login-worker-grid" id="loginWorkerGrid"></div>
+    <div class="login-footnote">Stays signed in after refresh — tap Logout above to switch.</div>
+  </div>
 </div>
 
 <div class="app">
@@ -959,6 +994,11 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
     <div class="topbar-right">
+      <!-- ★ 2026-09-25 신규 — 로그인한 작업자 배지 + 전환(로그아웃) 버튼. 로그인 전에는 숨김(updateLoginBadge). -->
+      <div id="loginBadgeWrap">
+        <div class="login-badge-pill" title="이 기기에 로그인된 작업자"><span class="login-badge-dot"></span><span id="loginBadgeName">—</span></div>
+        <button class="btn btn-ghost btn-sm" id="btnSwitchWorker" title="Logout" onclick="doLogout()">🔄 Logout</button>
+      </div>
       <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-17:55</span>
       <span style="font-size:10px; color:var(--text-dim2); margin-right:8px;">Built by David Kim · 2026</span>
       <div class="batch-chip" id="batchChip">배치 없음</div>
@@ -2321,7 +2361,114 @@ function findOrCreateSlotForRestore_(rawSlotNum, slotSize){
   }
   return slot;
 }
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-09-25 신규 — 작업자 개인 기기 로그인/로그아웃.
+//   모든 작업자가 각자 개인 스캔 기기로 작업한다는 전제(1인 1기기 확정)라,
+//   기기에서 최초 1회만 이름을 선택하면 그 뒤로는 Slot Layout(피킹)·Scan & Sort·
+//   Standalone Scan·Pack Verify(총량/단독) 5곳의 "작업자 이름" 선택란에 전부
+//   자동으로 채워지게 한다. 화면 구조·기능(담당 페이지 입력, 피킹 시작/종료,
+//   명단에 없음 직접입력, 다른 기기 사용중 경고 등)은 전혀 바꾸지 않는다 —
+//   각 select가 "복원할 이름"을 로그인 시점에 한 번에 맞춰줄 뿐이다.
+//   (populateSsWorkerSelect/populatePvWorkerSelect/populatePsvWorkerSelect가
+//   이미 각자의 localStorage 키로 "이 기기에서 마지막으로 고른 이름"을 복원하는
+//   로직을 갖고 있었으므로, 로그인 시 그 키들을 그대로 채워주는 것만으로 충분함.
+//   Slot Layout(pickWorkerSelect)만 원래 그런 키가 없어서 populateWorkerSelect()
+//   안에서 별도로 로그인 이름을 폴백으로 쓰도록 한 줄 추가함 — 아래 참고.)
+// ═══════════════════════════════════════════════════════════
+const LOGIN_WORKER_KEY = 'sk_batch_login_worker';
+
+function getLoginWorker(){
+  return localStorage.getItem(LOGIN_WORKER_KEY) || '';
+}
+
+function setLoginWorker(name){
+  localStorage.setItem(LOGIN_WORKER_KEY, name);
+  // 기존 4개 탭이 각자 쓰던 복원용 키도 로그인 시점에 전부 이 이름으로 맞춤.
+  // (각 탭 자체의 로직은 전혀 안 건드림 — 그냥 "마지막으로 고른 이름"을 미리 채워두는 것뿐)
+  localStorage.setItem('sk_scan_worker', name);
+  localStorage.setItem('sk_standalone_scan_worker', name);
+  localStorage.setItem('sk_pack_verify_worker', name);
+  localStorage.setItem('sk_standalone_pack_verify_worker', name);
+}
+
+function clearLoginWorker(){
+  localStorage.removeItem(LOGIN_WORKER_KEY);
+}
+
+function refreshLoginUI(){
+  if(getLoginWorker()){
+    hideLoginOverlay();
+    updateLoginBadge();
+  } else {
+    showLoginOverlay(); // state.workers가 아직 기본값이어도 일단 보여주고, 서버 명단 도착 시 다시 그려짐
+  }
+}
+
+function renderLoginWorkerGrid(){
+  const grid = document.getElementById('loginWorkerGrid');
+  if(!grid) return;
+  const all = state.workers || [];
+  if(!all.length){
+    grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-dim2); font-size:13px; padding:20px;">작업자 명단을 불러오는 중…</div>';
+    return;
+  }
+  grid.innerHTML = all.map(w => `
+    <button type="button" class="login-worker-tile" data-login-worker="${String(w.name).replace(/"/g,'&quot;')}">
+      <span class="login-worker-dot"></span>
+      <span class="login-worker-name">${String(w.name).replace(/</g,'&lt;')}</span>
+      <span class="login-worker-hint">탭하여 로그인</span>
+    </button>
+  `).join('');
+  grid.querySelectorAll('[data-login-worker]').forEach(btn=>{
+    btn.onclick = () => doLogin(btn.getAttribute('data-login-worker'));
+  });
+}
+
+function showLoginOverlay(){
+  renderLoginWorkerGrid();
+  const ov = document.getElementById('loginOverlay');
+  if(ov) ov.style.display = 'flex';
+}
+function hideLoginOverlay(){
+  const ov = document.getElementById('loginOverlay');
+  if(ov) ov.style.display = 'none';
+}
+
+function doLogin(name){
+  if(!name) return;
+  setLoginWorker(name);
+  hideLoginOverlay();
+  updateLoginBadge();
+  // 지금 어느 탭이 열려있든 5곳 모두 즉시 새 이름으로 갱신(안 쓰는 select는 함수 안에서 조용히 무시됨)
+  try{ populateWorkerSelect(); }catch(e){}
+  try{ populateSsWorkerSelect(); }catch(e){}
+  try{ populatePvWorkerSelect(); }catch(e){}
+  try{ populatePsvWorkerSelect(); }catch(e){}
+  try{ pingWorkerPresenceNow(); }catch(e){}
+}
+
+function doLogout(){
+  const cur = getLoginWorker();
+  if(!confirm((cur ? (cur + '님 ') : '') + '로그아웃할까요?\n\n지금까지 스캔·입력한 내용은 이미 저장되어 있어 안전합니다.')) return;
+  clearLoginWorker();
+  location.reload(); // 로그인 화면부터 새로 시작 — 가장 안전하게 모든 화면 상태를 초기화
+}
+
+function updateLoginBadge(){
+  const name = getLoginWorker();
+  const wrap = document.getElementById('loginBadgeWrap');
+  const nameEl = document.getElementById('loginBadgeName');
+  if(!wrap || !nameEl) return;
+  if(name){
+    nameEl.textContent = name;
+    wrap.style.display = 'flex';
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
 populateWorkerSelect();
+refreshLoginUI(); // ★ 2026-09-25 신규 — 로그인 안 돼 있으면 여기서 오버레이를 띄움(하드코딩 기본 명단으로 우선 렌더)
 loadBatchWorkersFromServer(); // ★ 2026-07-16 신규: 하드코딩 대신 서버(구글시트) 명단으로 교체
 
 // ★ 2026-07-16 신규 — 작업자 명단을 서버에서 불러오기. 시트가 비어있으면(최초 1회)
@@ -2339,6 +2486,7 @@ async function loadBatchWorkersFromServer(){
     }
     renderWorkers();
     populateWorkerSelect();
+    refreshLoginUI(); // ★ 2026-09-25 신규 — 서버 명단 도착 후: 로그인 전이면 그리드를 실제 명단으로 다시 그리고, 로그인 후면 배지 유지
   }catch(e){
     console.error('loadBatchWorkersFromServer failed:', e);
   }
@@ -9673,7 +9821,11 @@ function populateWorkerSelect(){
     //   대체했는데, 이것도 결국 누군가의 이름이 임의로 선택되는 문제였음.
     //   이제 예전 선택이 여전히 유효할 때만 유지하고, 그 외엔 항상 "선택 안 함"으로.
     const prevStillOk = prevPick && all.some(w => w.name === prevPick);
-    pickSel.value = prevStillOk ? prevPick : '';
+    // ★ 2026-09-25 신규 — 이 기기에 로그인한 작업자가 있으면 그 이름을 기본값으로 사용
+    //   (1인 1기기 전제라 안전함). prevPick(이번 세션에서 이미 고른 값)이 있으면 그게 우선.
+    const loginW = (typeof getLoginWorker === 'function') ? getLoginWorker() : '';
+    const loginOk = !prevStillOk && loginW && all.some(w => w.name === loginW);
+    pickSel.value = prevStillOk ? prevPick : (loginOk ? loginW : '');
     pickSel.onchange = () => onPickWorkerChange(true);
     // ★ 2026-08-17 긴급 수정(현장 사고 — Kevin Kim 사례) — 위에서 이름은 정확히
     //   복원되는데, 그 사람이 이미 피킹 중인지 확인해서 "피킹 종료" 버튼을
