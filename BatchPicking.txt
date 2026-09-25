@@ -1637,6 +1637,56 @@ function clearInvoiceCache_(batchId, invoice) {
   } catch (e) { /* 무시 */ }
 }
 
+/* ===================== getPackScanRowsCached_ / invalidatePackScanCache_ (★ 2026-09-25 신규) =====================
+ * ★★★ "인보이스를 선택하면 데이터 불러오는 시간이 오래 걸린다"는 현장 지적의 핵심 원인 수정 ★★★
+ *
+ * [원인] PackScanLog는 이 시스템이 생긴 이래 있었던 모든 배치·모든 인보이스의
+ * 스캔 시도(성공/오배송/초과/취소 전부 포함)가 한 줄씩 계속 쌓이기만 하고 한
+ * 번도 정리(아카이브)된 적이 없는 시트임. 그런데 1차/2차 검수 화면에서 인보이스를
+ * 하나 고를 때마다 실행되는 getPackScanState()는 물론, 스캔 1번(logPackScan),
+ * 박스/팔렛 수정(updatePackScanBoxPallet), 분할(splitScannedItemBox), 박스·팔렛
+ * 일괄이동(moveBoxOrPallet), 관리자 강제확정(forceCompletePackScan)까지 — 전부
+ * 이 시트 전체를 처음부터 끝까지 getValues()로 읽은 다음에야 그 배치·인보이스에
+ * 해당하는 줄만 걸러내고 있었음. 시트가 커질수록(=이 창고가 오래 쓸수록) 인보이스
+ * 하나 선택하는 것조차 계속 더 느려지는 구조였던 것.
+ *
+ * [해결] getInvoiceBatchItemsCached_/getInvoiceIssueQtyCached_와 완전히 동일한
+ * 원칙(청크 캐시 + 짧은 TTL + 값이 바뀌는 즉시 무효화)을 PackScanLog에도 적용.
+ * 다만 이 시트는 한 인보이스가 아니라 "이 배치 전체"를 배치ID 하나로 캐싱함 —
+ * 같은 배치 안에서 인보이스를 이것저것 옮겨다니며 볼 때(실제 작업 패턴) 매번
+ * 새로 안 읽고 캐시를 재사용하기 위함. 이 배치에 새 스캔·취소·수정이 생기는
+ * 즉시(6곳의 쓰기 지점 전부) invalidatePackScanCache_로 캐시를 비워서, 다음
+ * 조회부터는 바로 최신 값이 반영됨 — 정확성은 그대로 유지하면서, 스캔 없이
+ * 인보이스만 이동/재조회할 때는 시트를 다시 읽지 않아 훨씬 빨라짐. */
+function getPackScanRowsCached_(batchId) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'pkScanRows_v1_' + batchId;
+  const cached = _cacheGetChunked_(cache, cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
+  }
+  const pl = packscanSheetSafe_();
+  const plLast = pl.getLastRow();
+  const rows = [];
+  if (plLast >= 2) {
+    pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      rows.push([
+        r[0], r[1], String(r[2]), r[3], String(r[4]), String(r[5]),
+        r[6], r[7], r[8], Number(r[9]) || 0, Number(r[10]) || 2,
+        String(r[11] || ''), String(r[12] || ''),
+      ]);
+    });
+  }
+  try {
+    _cachePutChunked_(cache, cacheKey, JSON.stringify(rows), 30);
+  } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  return rows;
+}
+function invalidatePackScanCache_(batchId) {
+  try { CacheService.getScriptCache().remove('pkScanRows_v1_' + batchId + '_meta'); } catch (e) { /* 무시 */ }
+}
+
 // ★ 2026-09-23 신규(batch.html 실시간화 Phase 2 — §4-1 재설계, 트리거 없는 버전) —
 //   배경: getScanState()는 캐시가 전혀 없어서, batch.html의 pollScanState()가
 //   5초마다(작업자 여러 명이면 그만큼 곱해져서) 매번 ScanLog 시트 전체를
@@ -1742,33 +1792,31 @@ function logPackScan(data) {
         data.batchId, packScanId, batchNow_(), data.worker || '', barcode, '',
         data.invoice, 'wrong', 'active', 0, round, box, pallet,
       ]]);
+      invalidatePackScanCache_(data.batchId); // ★ 2026-09-25 신규 — 아래 getPackScanRowsCached_ 설명 참고
       return { ok: true, result: 'wrong', packScanId: packScanId, ownerInvoices: Array.from(owners) };
     }
 
     // 이미 이 바코드로 채운 수량(같은 배치+인보이스, pass만, undone 제외)
-    // ★ 이 값은 스캔마다 반드시 바뀌므로 절대 캐싱하지 않고 항상 최신으로 읽음.
-    // ★ 2026-09-09 신규(현장 질문) — 중복 스캔(이미 확인 완료된 상품을 또
-    //   스캔)했을 때, "이거 몇 번 박스에 넣었더라?" 확인 용도로도 쓸 수
-    //   있도록, 기존에 기록된 박스/팔렛 정보도 같이 모아둠(분할된 경우 여러 개).
-    const plLast = pl.getLastRow();
+    // ★ 2026-09-25 수정(속도) — 이 시트 전체를 매번 읽는 대신, getPackScanRowsCached_로
+    //   배치 단위(30초, 쓰기 즉시 무효화) 캐싱된 목록을 씀. 값 자체는 여전히
+    //   "이번 스캔 직전까지의 최신 상태"를 정확히 반영함(직전 쓰기마다 바로
+    //   무효화되므로) — 정확성은 그대로 유지하면서 무거운 전체 시트 읽기만 없앰.
+    //   자세한 이유는 getPackScanRowsCached_ 주석 참고.
     let already = 0;
     const existingBoxGroups = {};
-    if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(data.batchId)) return;
-        if (String(r[6]) !== String(data.invoice)) return;
-        if (r[7] !== 'pass' || r[8] === 'undone') return;
-        if (normBarcode_(r[4]) !== normBc) return;
-        if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
-        already += Number(r[9]) || 0;
-        const rBox = String(r[11] || ''), rPallet = String(r[12] || '');
-        if (rBox || rPallet) {
-          const bk = rBox + '|' + rPallet;
-          if (!existingBoxGroups[bk]) existingBoxGroups[bk] = { box: rBox, pallet: rPallet, qty: 0 };
-          existingBoxGroups[bk].qty += Number(r[9]) || 0;
-        }
-      });
-    }
+    getPackScanRowsCached_(data.batchId).forEach(r => {
+      if (String(r[6]) !== String(data.invoice)) return;
+      if (r[7] !== 'pass' || r[8] === 'undone') return;
+      if (normBarcode_(r[4]) !== normBc) return;
+      if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
+      already += Number(r[9]) || 0;
+      const rBox = String(r[11] || ''), rPallet = String(r[12] || '');
+      if (rBox || rPallet) {
+        const bk = rBox + '|' + rPallet;
+        if (!existingBoxGroups[bk]) existingBoxGroups[bk] = { box: rBox, pallet: rPallet, qty: 0 };
+        existingBoxGroups[bk].qty += Number(r[9]) || 0;
+      }
+    });
     const totalReq = matchLines.reduce((a, l) => a + l.reqQty, 0);
     // 검수 단계에서 이미 EXP/OOS 등으로 이슈 처리된 수량만큼 필요수량에서 제외
     // ★ 2026-09-01 수정(속도) — IssueLog 전체 대신 캐싱된 인보이스 범위 목록에서 계산.
@@ -1798,6 +1846,7 @@ function logPackScan(data) {
         data.batchId, packScanId0, batchNow_(), data.worker || '', barcode, sku,
         data.invoice, 'over', 'active', 0, round, box, pallet,
       ]]);
+      invalidatePackScanCache_(data.batchId); // ★ 2026-09-25 신규 — 기록이 추가됐으므로(이력 화면 반영) 캐시 무효화
       return {
         ok: true, result: 'over', note: note, packScanId: packScanId0, sku: sku, name: name,
         filled: 0, packed: already, required: effectiveReq,
@@ -1832,6 +1881,7 @@ function logPackScan(data) {
       data.batchId, packScanId, nowStr, data.worker || '', barcode, sku,
       data.invoice, 'pass', 'active', fillQty, round, box, pallet,
     ]]);
+    invalidatePackScanCache_(data.batchId); // ★ 2026-09-25 신규 — 새 스캔이 기록됐으므로 캐시 무효화
     bumpVersion_();
     // ★ 세션E 신규 — 구글시트에 실제로 쓴 것과 동일한 내용으로 Firestore 이중쓰기용
     //   문서를 준비. Pack Verify의 "정상 채움(pass)" 케이스만 미러링함 — 위쪽의
@@ -1880,10 +1930,13 @@ function undoPackScan(data) {
     const sh = packscanSheet_();
     const last = sh.getLastRow();
     if (last < 2) return { ok: false, error: 'no pack scans' };
-    const ids = sh.getRange(2, 2, last - 1, 1).getValues();
-    for (let i = 0; i < ids.length; i++) {
-      if (String(ids[i][0]) === String(id)) {
+    // ★ 2026-09-25 수정 — batchId(A열)도 같이 읽어서, 찾은 즉시 그 배치의
+    //   getPackScanRowsCached_ 캐시를 무효화할 수 있게 함(추가 읽기 없이).
+    const idRows = sh.getRange(2, 1, last - 1, 2).getValues();
+    for (let i = 0; i < idRows.length; i++) {
+      if (String(idRows[i][1]) === String(id)) {
         sh.getRange(i + 2, 9).setValue('undone');
+        invalidatePackScanCache_(idRows[i][0]);
         bumpVersion_();
         return { ok: true };
       }
@@ -1958,6 +2011,7 @@ function updatePackScanBoxPallet(data) {
     });
 
     if (updated === 0) return { ok: false, error: '해당 상품의 스캔 기록을 찾지 못했습니다' };
+    invalidatePackScanCache_(data.batchId); // ★ 2026-09-25 신규 — 박스/팔렛 값이 바뀌었으므로 캐시 무효화
     bumpVersion_();
     return { ok: true, updated: updated };
   } catch (e) {
@@ -2041,6 +2095,7 @@ function splitScannedItemBox(data) {
       data.invoice, 'pass', 'active', splitQty, round, toBox, toPallet,
     ]]);
 
+    invalidatePackScanCache_(data.batchId); // ★ 2026-09-25 신규 — 분할로 기록이 바뀌었으므로 캐시 무효화
     bumpVersion_();
     return { ok: true };
   } catch (e) {
@@ -2087,6 +2142,7 @@ function moveBoxOrPallet(data) {
     });
 
     if (updated === 0) return { ok: false, error: (mode === 'pallet' ? '팔렛' : '박스') + ' ' + fromValue + '번에 담긴 상품을 찾지 못했습니다' };
+    invalidatePackScanCache_(data.batchId); // ★ 2026-09-25 신규 — 박스/팔렛 일괄이동으로 기록이 바뀌었으므로 캐시 무효화
     bumpVersion_();
     return { ok: true, updated: updated };
   } catch (e) {
@@ -2126,18 +2182,15 @@ function forceCompletePackScan(data) {
     });
 
     const pl = packscanSheetSafe_();
-    const plLast = pl.getLastRow();
+    // ★ 2026-09-25 수정(속도) — logPackScan과 동일한 이유로 getPackScanRowsCached_ 사용.
     const alreadyByBarcode = {};
-    if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 11).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[6]) !== String(invoice)) return;
-        if (r[7] !== 'pass' || r[8] === 'undone') return;
-        if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
-        const k = normBarcode_(r[4]);
-        alreadyByBarcode[k] = (alreadyByBarcode[k] || 0) + (Number(r[9]) || 0);
-      });
-    }
+    getPackScanRowsCached_(batchId).forEach(r => {
+      if (String(r[6]) !== String(invoice)) return;
+      if (r[7] !== 'pass' || r[8] === 'undone') return;
+      if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리
+      const k = normBarcode_(r[4]);
+      alreadyByBarcode[k] = (alreadyByBarcode[k] || 0) + (Number(r[9]) || 0);
+    });
 
     const now = batchNow_();
     const rows = [];
@@ -2155,6 +2208,7 @@ function forceCompletePackScan(data) {
       ensureSheetRoom_(pl, startRow + rows.length - 1);
       pl.getRange(startRow, 5, rows.length, 2).setNumberFormat('@'); // Barcode, SKU 텍스트 고정
       pl.getRange(startRow, 1, rows.length, 11).setValues(rows);
+      invalidatePackScanCache_(batchId); // ★ 2026-09-25 신규 — 강제확정으로 기록이 추가됐으므로 캐시 무효화
       bumpVersion_();
     }
     return { ok: true, filledLines: rows.length };
@@ -2205,8 +2259,9 @@ function getPackScanState(batchId, invoice, round) {
       issueQtyByBarcode[k] = (issueQtyByBarcode[k] || 0) + iss.qty;
     });
 
-    const pl = packscanSheetSafe_();
-    const plLast = pl.getLastRow();
+    // ★ 2026-09-25 수정(속도, 현장 지적 — "인보이스 선택하면 로딩이 오래
+    //   걸린다") — PackScanLog 전체를 매번 읽는 대신 getPackScanRowsCached_로
+    //   배치 단위 캐싱된 목록을 씀. 자세한 이유는 getPackScanRowsCached_ 주석 참고.
     const packedByBarcode = {};
     const boxPalletByBarcode = {};
     // ★ 2026-09-08 신규(현장 지적) — "같은 SKU는 절대 여러 박스에 안 나뉜다"는
@@ -2218,29 +2273,26 @@ function getPackScanState(batchId, invoice, round) {
     //   박스마다 수량을 따로 집계해서, 여러 박스에 걸쳐 있으면 전부 보여줌.
     const boxBreakdownByBarcode = {};
     const history = [];
-    if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
-        if (String(r[0]) !== String(batchId)) return;
-        if (String(r[6]) !== String(invoice)) return;
-        if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리 — 다른 라운드 기록은 아예 안 보여줌
-        const entry = { packScanId: r[1], time: String(r[2]), worker: r[3], barcode: String(r[4]), sku: String(r[5]), result: r[7], status: r[8], qty: Number(r[9]) || 0, box: String(r[11] || ''), pallet: String(r[12] || '') };
-        history.push(entry);
-        if (r[8] === 'undone') return;
-        if (r[7] !== 'pass') return;
-        const k = normBarcode_(r[4]);
-        packedByBarcode[k] = (packedByBarcode[k] || 0) + entry.qty;
-        // 마지막으로 기록된 박스/팔렛 값 — 분할 없이 한 박스에만 있는 보통의
-        // 경우, 화면 상단의 "Box N" 표시 및 다음 스캔 기본값 등에 그대로 사용.
-        if (entry.box || entry.pallet) boxPalletByBarcode[k] = { box: entry.box, pallet: entry.pallet };
-        // 박스별 수량 집계 — 분할된 경우 여기서 여러 항목으로 쌓임.
-        if (entry.box || entry.pallet) {
-          if (!boxBreakdownByBarcode[k]) boxBreakdownByBarcode[k] = {};
-          const bk = entry.box + '|' + entry.pallet;
-          if (!boxBreakdownByBarcode[k][bk]) boxBreakdownByBarcode[k][bk] = { box: entry.box, pallet: entry.pallet, qty: 0 };
-          boxBreakdownByBarcode[k][bk].qty += entry.qty;
-        }
-      });
-    }
+    getPackScanRowsCached_(batchId).forEach(r => {
+      if (String(r[6]) !== String(invoice)) return;
+      if ((Number(r[10]) || 2) !== round) return; // ★ 2026-09-03: 1차/2차 분리 — 다른 라운드 기록은 아예 안 보여줌
+      const entry = { packScanId: r[1], time: String(r[2]), worker: r[3], barcode: String(r[4]), sku: String(r[5]), result: r[7], status: r[8], qty: Number(r[9]) || 0, box: String(r[11] || ''), pallet: String(r[12] || '') };
+      history.push(entry);
+      if (r[8] === 'undone') return;
+      if (r[7] !== 'pass') return;
+      const k = normBarcode_(r[4]);
+      packedByBarcode[k] = (packedByBarcode[k] || 0) + entry.qty;
+      // 마지막으로 기록된 박스/팔렛 값 — 분할 없이 한 박스에만 있는 보통의
+      // 경우, 화면 상단의 "Box N" 표시 및 다음 스캔 기본값 등에 그대로 사용.
+      if (entry.box || entry.pallet) boxPalletByBarcode[k] = { box: entry.box, pallet: entry.pallet };
+      // 박스별 수량 집계 — 분할된 경우 여기서 여러 항목으로 쌓임.
+      if (entry.box || entry.pallet) {
+        if (!boxBreakdownByBarcode[k]) boxBreakdownByBarcode[k] = {};
+        const bk = entry.box + '|' + entry.pallet;
+        if (!boxBreakdownByBarcode[k][bk]) boxBreakdownByBarcode[k][bk] = { box: entry.box, pallet: entry.pallet, qty: 0 };
+        boxBreakdownByBarcode[k][bk].qty += entry.qty;
+      }
+    });
     history.sort((a, b) => String(b.time).localeCompare(String(a.time)));
 
     const lines = Object.entries(linesByBarcode).map(([k, l]) => {
@@ -5134,61 +5186,100 @@ function saveDimensions(data) {
 }
 
 /* ---------------------------------------------------------------------
- * autoDeleteOldDimensions() — ★ 2026-08-04 신규
- * 목적: 창고에서 디멘션(치수/무게)을 입력한 날로부터 "2일이 지나면" 자동으로
- * 삭제. 영업팀이 디멘션·이슈를 전부 확인해서 최종 인보이스를 발행하기까지
- * 시간이 필요해서(하루면 놓치는 경우가 생김), 검수완료 오더 자체는 메인
- * 대시보드 기준으로 1일 뒤 삭제되지만 디멘션은 2일 뒤로 더 여유를 둠.
+ * autoDeleteOldDimensions() — ★ 2026-08-04 신규, ★ 2026-09-25 전면 재설계
  *
- * 왜 서버(GAS) 트리거 방식인가: 메인 대시보드(index.html)의 자동삭제는
- * 브라우저가 열려있어야만 작동하는 클라이언트 타이머 방식이라, 아무도 그
- * 페이지를 안 열어둔 날엔 삭제가 안 일어날 수 있음. 디멘션은 이보다 더
- * 안정적으로, 브라우저와 무관하게 매일 정확히 실행되는 GAS 자체 시간 기반
- * 트리거로 구현함.
+ * ★★★ 2026-09-25 근본 원인 발견 및 재설계 ★★★
+ * 예전 방식(입력 후 N일 경과 시 무조건 삭제, 최근엔 8일)은 실제로 심각한
+ * 사고로 이어졌음: TK/UPS 오더의 자동 보관 처리(jobArchiveCheck_, Code.gs)는
+ * "디멘션이 아직 남아있어야만" 판정 가능(디멘션 저장일로부터 영업일 3일
+ * 경과했는지 계산해야 하므로). 그런데 이 함수가 그 디멘션을 시간 기준으로
+ * 먼저 지워버리면, 보관 처리가 영영 "디멘션 미입력"으로 조건 불충족 상태에
+ * 빠져서 그 오더는 다시는 자동 보관될 수 없게 됨 — sales.html의 OVERDUE
+ * 카드가 "no dims" 오더로 계속 쌓이기만 하고 절대 줄지 않는 형태로 실제
+ * 발견됨(80건 전부가 1~9일째 "no dims"로 막혀있었음).
  *
- * 기준: EnteredAt(입력 시각)의 날짜 부분이 "오늘 - 2일" 이하인 행은 삭제.
- *   예) 8/4에 입력 → 8/4, 8/5 동안 남아있고 → 8/6 새벽 1시경 삭제됨(2일 보관).
+ * [새 규칙] 시간이 아니라 "그 오더가 이미 보관 처리(archived=true)됐는지,
+ * 또는 Jobs 시트에서 이미 완전히 사라졌는지(30일 후 Archive_Jobs로 이동,
+ * archiveOldJobs 참고)"만 보고 판단한다. 즉 오더 자체의 라이프사이클을
+ * 그대로 따라가며, 그 오더가 보관 처리되어 더 이상 필요 없어진 바로 그
+ * 시점에만 디멘션을 같이 정리한다 — 디멘션이 필요한 동안은 절대 먼저
+ * 지워지지 않음이 구조적으로 보장됨(archived가 되려면 애초에 디멘션이
+ * 있어야만 하므로).
  *
- * ★ Apps Script 트리거 등록 방법 (직접 한번만 설정하면 매일 자동 실행됨):
- *   1) Apps Script 에디터 왼쪽 시계 아이콘(트리거) 클릭
- *   2) 함수 목록에서 setupDimensionsCleanupTrigger 선택 → ▶ 실행
- *      (한 번만 실행하면 그 뒤로 매일 새벽 1시경 자동 실행됨)
+ * 트리거는 그대로 유지(매일 새벽 1시, setupDimensionsCleanupTrigger로 이미
+ * 설치돼 있으면 별도 재설정 없이 이 새 규칙이 그대로 적용됨).
  * ------------------------------------------------------------------- */
 function autoDeleteOldDimensions() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
-    // ★ 2026-08-07 수정 — 예전 2일은 위험했음.
-    //   오더 보관(index.html AutoDelete)은 "디멘션이 저장돼 있을 것"을 조건으로 하는데,
-    //   디멘션이 먼저 지워지면 그 조건이 영원히 충족되지 않아 TK/UPS 오더가 목록에
-    //   계속 쌓이게 됨. 실제로 금요일에 디멘션을 넣으면 일요일에 지워져서
-    //   월요일엔 이미 조건 불충족 상태가 됐음.
-    //   오더 보관 기준이 영업일 3일(주말·연휴 끼면 달력으로 5~6일)이므로,
-    //   디멘션은 그보다 넉넉히 오래 남겨야 함. 8일로 둠.
-    const RETENTION_DAYS = 8;
-    const tz = batchTz_();
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
-    const cutoffStr = Utilities.formatDate(cutoffDate, tz, 'yyyy-MM-dd');
-
     const sh = dimensionsSheet_();
     const last = sh.getLastRow();
     if (last < 2) { Logger.log('Dimensions: 데이터 없음'); return { ok: true, deleted: 0 }; }
+
+    // ★ 2026-09-25 신규 — Jobs 시트에서 "이 인보이스가 이미 보관 처리됐는지"를
+    //   한 번에 조회할 수 있는 맵을 만듦. Jobs 시트에서 아예 찾을 수 없는
+    //   인보이스(archiveOldJobs가 30일 후 Archive_Jobs로 이미 옮긴 경우)도
+    //   "더 이상 필요 없음"으로 간주해 안전하게 정리 대상에 포함시킴.
+    const jobsSh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    const iArch = hdr[norm('archived')];
+    // ★ 2026-09-25 긴급 수정(2차 최종점검에서 발견) — 아래에서 knownInvoiceSet이
+    //   "Jobs 시트에 지금 존재하는 인보이스 전체"를 담는데, isSafeToDelete()는
+    //   "knownInvoiceSet에 없으면 안전하게 지워도 된다"고 판단함. 그런데 Invoice
+    //   컬럼을 못 찾거나(iInv가 falsy — 헤더 이름이 바뀌는 등) Jobs 시트가 일시적
+    //   으로 비어있으면(jLast < 2) knownInvoiceSet이 통째로 빈 채로 남아서, 이
+    //   함수가 "Dimensions에 있는 모든 인보이스가 Jobs엔 없다"고 잘못 판단하고
+    //   Dimensions 시트 전체를 지워버릴 수 있었음(이 함수가 원래 막으려던 사고를
+    //   다른 경로로 다시 만드는 셈). Invoice 컬럼을 못 찾거나 Jobs가 비어있으면
+    //   "판단 불가"로 보고 아무것도 지우지 말고 그냥 중단(abort)하도록 안전장치 추가.
+    const jLast = jobsSh.getLastRow();
+    if (!iInv) {
+      Logger.log('autoDeleteOldDimensions: Jobs 시트에서 Invoice 컬럼을 찾지 못해 중단(안전을 위해 아무것도 지우지 않음)');
+      return { ok: false, error: 'Jobs 시트에서 Invoice 컬럼을 찾지 못함 — 안전을 위해 삭제를 건너뜀' };
+    }
+    if (jLast < 2) {
+      Logger.log('autoDeleteOldDimensions: Jobs 시트에 데이터가 없어 중단(안전을 위해 아무것도 지우지 않음)');
+      return { ok: false, error: 'Jobs 시트가 비어있음 — 안전을 위해 삭제를 건너뜀' };
+    }
+    const archivedSet = {}; // invoice → true (Jobs에 있고 archived=true인 것만)
+    const knownInvoiceSet = {}; // invoice → true (Jobs에 지금 존재하는 것 전부, archived 여부 무관)
+    {
+      const n = jLast - 1;
+      const invVals = jobsSh.getRange(2, iInv, n, 1).getValues();
+      const archVals = iArch ? jobsSh.getRange(2, iArch, n, 1).getValues() : null;
+      for (let i = 0; i < n; i++) {
+        const inv = String(invVals[i][0] || '').trim();
+        if (!inv) continue;
+        knownInvoiceSet[inv] = true;
+        const a = archVals ? String(archVals[i][0] || '').trim().toLowerCase() : '';
+        if (a === 'true' || a === '1' || a === 'y' || a === 'yes') archivedSet[inv] = true;
+      }
+    }
+    // ★ Jobs를 읽었는데도 알아낸 인보이스가 하나도 없다면(예: 전부 빈 셀)
+    //   위와 같은 이유로 판단 불가 상태이므로 역시 중단.
+    if (Object.keys(knownInvoiceSet).length === 0) {
+      Logger.log('autoDeleteOldDimensions: Jobs 시트에서 유효한 인보이스를 하나도 찾지 못해 중단(안전을 위해 아무것도 지우지 않음)');
+      return { ok: false, error: 'Jobs 시트에서 유효한 인보이스를 찾지 못함 — 안전을 위해 삭제를 건너뜀' };
+    }
+    // 정리 대상 판정: (a) Jobs에서 archived=true로 확인됐거나, (b) Jobs 시트에
+    // 아예 없음(이미 더 먼 단계로 넘어간 것) — 그 외(아직 활성/보관 대기 중)는
+    // 절대 건드리지 않음.
+    function isSafeToDelete(invoice) {
+      if (archivedSet[invoice]) return true;
+      if (!knownInvoiceSet[invoice]) return true;
+      return false;
+    }
 
     const lastCol = sh.getLastColumn();
     const rows = sh.getRange(2, 1, last - 1, lastCol).getValues();
     const keepRows = [];
     let deletedCount = 0;
     rows.forEach(r => {
-      const enteredAtRaw = r[7]; // H열: EnteredAt
-      let enteredDateStr = '';
-      if (enteredAtRaw instanceof Date && !isNaN(enteredAtRaw)) {
-        enteredDateStr = Utilities.formatDate(enteredAtRaw, tz, 'yyyy-MM-dd');
-      } else {
-        enteredDateStr = String(enteredAtRaw || '').slice(0, 10);
-      }
-      // 날짜를 못 읽으면(비어있거나 형식이상) 안전하게 보관 쪽으로 처리(삭제 안 함)
-      if (enteredDateStr && enteredDateStr <= cutoffStr) {
+      const invoice = String(r[0] || '').trim();
+      if (invoice && isSafeToDelete(invoice)) {
         deletedCount++;
       } else {
         keepRows.push(r);
@@ -5196,9 +5287,17 @@ function autoDeleteOldDimensions() {
     });
 
     if (deletedCount > 0) {
-      sh.getRange(2, 1, last - 1, lastCol).clearContent();
+      // ★ 2026-09-25 긴급 수정(2차 최종점검에서 발견) — 예전엔 clearContent()로
+      //   기존 내용을 먼저 몽땅 지운 뒤에 남길 행을 다시 써넣었음. 그 사이에
+      //   setValues()가 실패하면(용량 초과, 일시적 오류 등) 이미 지워진 원본은
+      //   복구할 수 없고 새로 쓰지도 못해 시트 전체가 사라짐. 순서를 뒤집어서
+      //   "남길 행을 먼저 써넣고, 그 다음에 남은 빈 자리만 지우는" 방식으로
+      //   바꿔서, 쓰기가 실패해도 원본 데이터가 아직 그대로 남아있게 함.
       if (keepRows.length > 0) sh.getRange(2, 1, keepRows.length, lastCol).setValues(keepRows);
-      Logger.log('autoDeleteOldDimensions: ' + deletedCount + '건 삭제 (기준일 ' + cutoffStr + ' 이하), ' + keepRows.length + '건 유지');
+      const clearFromRow = 2 + keepRows.length;
+      const clearRowCount = last - clearFromRow + 1;
+      if (clearRowCount > 0) sh.getRange(clearFromRow, 1, clearRowCount, lastCol).clearContent();
+      Logger.log('autoDeleteOldDimensions: ' + deletedCount + '건 삭제 (이미 보관 처리됐거나 Jobs에서 사라진 오더만), ' + keepRows.length + '건 유지');
       // ★ 2026-08-06 신규 — 대표 쪽 디멘션이 사라졌는데 연결 정보만 남는 것 정리
       cleanupOrphanDimLinks_();
     } else {
