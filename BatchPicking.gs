@@ -851,7 +851,7 @@ function getActiveWorkersGlobal() {
     // 여러 기기가 Workers 탭을 동시에 열어도 서버 부담이 적도록 10초 캐시
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'activeWorkersGlobal_v1';
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const sh = workerPresenceSheet_();
@@ -871,7 +871,7 @@ function getActiveWorkersGlobal() {
     const _result = { ok: true, active: active };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 10);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 10); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -1228,7 +1228,7 @@ function getBatch(batchId) {
     //   ensureBatchItemsLoaded도 이슈 모달 열 때마다 호출함. 6초 캐시로 완화.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'getBatch_v1_' + (batchId || '_today_');
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const bSh = batchesSheet_();
@@ -1302,7 +1302,7 @@ function getBatch(batchId) {
     const _result = { ok: true, batch: batch, sumItems: sumItems, customers: customers };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 6); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -1345,7 +1345,7 @@ function assignSlots(data) {
     //   안 보이고 예전 값(미배정)으로 되돌아간 것처럼 보일 수 있었음 — 실제로
     //   현장에서 "슬롯 배정했는데 새로고침하니 사라졌다"로 보고된 증상과
     //   정확히 일치하는 경로라 즉시 무효화 추가.
-    try { CacheService.getScriptCache().remove('getBatch_v1_' + batchId); } catch (eCache) { /* 무시 */ }
+    try { CacheService.getScriptCache().remove('getBatch_v1_' + batchId + '_meta'); } catch (eCache) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨(_cacheGetChunked_ 참고)
     return { ok: true, updated: updated };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1568,7 +1568,7 @@ function setPackingMoved(data) {
 function getInvoiceBatchItemsCached_(batchId, invoice) {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'biLines_v1_' + batchId + '_' + invoice;
-  const cached = cache.get(cacheKey);
+  const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
   }
@@ -1584,14 +1584,14 @@ function getInvoiceBatchItemsCached_(batchId, invoice) {
   }
   try {
     const payload = JSON.stringify(lines);
-    if (payload.length < 90000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
+    _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자류 가드 제거(청크 캐시)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return lines;
 }
 function getInvoiceIssueQtyCached_(batchId, invoice) {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'ilIssues_v1_' + batchId + '_' + invoice;
-  const cached = cache.get(cacheKey);
+  const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
   }
@@ -1608,7 +1608,7 @@ function getInvoiceIssueQtyCached_(batchId, invoice) {
   }
   try {
     const payload = JSON.stringify(issues);
-    if (payload.length < 90000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
+    _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자류 가드 제거(청크 캐시)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return issues;
 }
@@ -1618,8 +1618,9 @@ function getInvoiceIssueQtyCached_(batchId, invoice) {
 function clearInvoiceCache_(batchId, invoice) {
   try {
     const cache = CacheService.getScriptCache();
-    cache.remove('biLines_v1_' + batchId + '_' + invoice);
-    cache.remove('ilIssues_v1_' + batchId + '_' + invoice);
+    // ★ 2026-09-25 수정 — 청크 캐시로 바뀌면서 무효화 대상도 메타 키로 변경(_cacheGetChunked_ 참고)
+    cache.remove('biLines_v1_' + batchId + '_' + invoice + '_meta');
+    cache.remove('ilIssues_v1_' + batchId + '_' + invoice + '_meta');
   } catch (e) { /* 무시 */ }
 }
 
@@ -3434,7 +3435,7 @@ function getActivePickers(batchId) {
     //   확인은 좀 더 즉각적이어야 하므로.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'activePickers_v1_' + batchId;
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const sh = picktimeSheetSafe_();
@@ -3469,7 +3470,7 @@ function getActivePickers(batchId) {
     const _result = { ok: true, active: active, lastPageRange: lastPageRange };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 4);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 4); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -3500,7 +3501,7 @@ function getBatchKPI(batchId) {
     //   부르는 무거운 함수(ScanLog/PickTiming/IssueLog 조합 계산)라 6초 캐시로 완화.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'batchKPI_v1_' + batchId;
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     // 이 배치의 pass 스캔 전체를 먼저 한 번에 읽어둔다 (세션별 SKU/PCS 계산과
@@ -3652,7 +3653,7 @@ function getBatchKPI(batchId) {
     };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 6); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -3859,7 +3860,7 @@ function getInvoiceItemStatus(batchId, invoice) {
     //   첫 번째만 실제 계산.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'invItemStatus_v1_' + batchId + '_' + invoice;
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) {
       _diagPush_('getInvoiceItemStatus CACHE HIT(이 인보이스) invoice=' + invoice + ' 총 ' + (Date.now() - _reqT0) + 'ms');
       const _cachedResult = JSON.parse(_cached);
@@ -3896,7 +3897,7 @@ function getInvoiceItemStatus(batchId, invoice) {
     const _result = { ok: true, invoice: invoice, items: items };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 6);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 6); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     _diagPush_('getInvoiceItemStatus 전체(캐시 미스 경로) invoice=' + invoice + ' 총 소요 ' + (Date.now() - _reqT0) + 'ms');
     _result.diag = __DIAG__.slice();
@@ -4139,7 +4140,7 @@ function getUnfulfilledSkuAlerts(batchId) {
     //   주기보다 짧은 15초 캐시라 실시간성 저하는 거의 없음.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'unfulfilledAlerts_v1_' + batchId;
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const bi = bitemsSheet_();
@@ -4212,7 +4213,7 @@ function getUnfulfilledSkuAlerts(batchId) {
     const _result = { ok: true, alerts: alerts, count: alerts.length };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 15);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 15); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -4428,7 +4429,7 @@ function getOpenBatches() {
     //   무거운 함수라, 여러 기기가 동시에 부르면 부담이 큼. 6초 캐시로 완화.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'openBatches_v1';
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const bSh = batchesSheet_();
@@ -4661,7 +4662,7 @@ function getOpenBatches() {
       //   누르는 순간에는 항상 getBatch/getScanState로 100% 최신 데이터를 다시
       //   받아오므로(안전장치 그대로 유지), 목록 자체만 좀 더 오래 캐시해서
       //   반복적으로 여는 속도를 개선함.
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 20);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 20); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -4857,7 +4858,7 @@ function getBatchWorkers() {
     // ★ 2026-08-19 신규(긴급) — 작업자 명단은 자주 안 바뀌므로 30초로 여유있게 캐싱.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'batchWorkers_v1';
-    const _cached = _cache.get(_cacheKey);
+    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
     const sh = bworkersSheet_();
@@ -4870,7 +4871,7 @@ function getBatchWorkers() {
     const _result = { ok: true, workers: workers };
     try {
       const _payload = JSON.stringify(_result);
-      if (_payload.length < 95000) CacheService.getScriptCache().put(_cacheKey, _payload, 30);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 30); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -4892,7 +4893,7 @@ function setBatchWorkers(data) {
     }
     // ★ 2026-08-19 신규 — getBatchWorkers 캐시를 즉시 무효화(작업자 추가/수정이
     //   30초 캐시 때문에 늦게 반영되는 것 방지)
-    try { CacheService.getScriptCache().remove('batchWorkers_v1'); } catch (eCache) {}
+    try { CacheService.getScriptCache().remove('batchWorkers_v1_meta'); } catch (eCache) {} // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -5006,7 +5007,7 @@ function buildDimsExistsMap_() {
 function getAllDimensionsRowsCached_() {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'allDimsRows_v1';
-  const cached = cache.get(cacheKey);
+  const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
   }
@@ -5015,7 +5016,7 @@ function getAllDimensionsRowsCached_() {
   const rows = last >= 2 ? sh.getRange(2, 1, last - 1, 8).getValues() : [];
   try {
     const payload = JSON.stringify(rows);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
+    _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시, 이전: 20초→30초)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return rows;
 }
@@ -5722,7 +5723,7 @@ function dimCustomerKey_(name) {
 function buildDimLinksMap_() {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'dimLinksMap_v1';
-  const cached = cache.get(cacheKey);
+  const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 손상 시 새로 만듦 */ }
   }
@@ -5745,7 +5746,7 @@ function buildDimLinksMap_() {
   const result = { childToPrimary: childToPrimary, primaryToChildren: primaryToChildren };
   try {
     const payload = JSON.stringify(result);
-    if (payload.length < 95000) cache.put(cacheKey, payload, 30); // ★ 2026-09-03 20초→30초(서버 부담 추가 완화)
+    _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시, 이전: 20초→30초)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return result;
 }
@@ -5772,7 +5773,7 @@ function resolveDimPrimary_(invoice, links) {
 function dimJobsSnapshot_() {
   try {
     const cache = CacheService.getScriptCache();
-    const cached = cache.get('dimJobsSnapshot_v2');
+    const cached = _cacheGetChunked_(cache, 'dimJobsSnapshot_v2'); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     if (cached) { try { return JSON.parse(cached); } catch (e) { /* 파싱 실패 시 새로 조회 */ } }
   } catch (e) { /* 캐시 없어도 계속 진행 */ }
 
@@ -5836,10 +5837,12 @@ function dimJobsSnapshot_() {
     }
   } catch (e) { /* best-effort */ }
 
-  // 캐시는 1건당 100KB 제한이 있어서, 넘칠 것 같으면 저장을 시도하지 않음
+  // ★ 2026-09-25 수정 — "캐시가 넘칠 것 같으면 저장을 아예 안 함" 방식이었던 걸
+  //   청크 캐시로 교체(다른 곳과 동일한 근본 수정). 이제 후보 수가 아무리 많아도
+  //   항상 정상적으로 캐시됨.
   try {
     const payload = JSON.stringify(out);
-    if (payload.length < 90000) CacheService.getScriptCache().put('dimJobsSnapshot_v2', payload, 120);
+    _cachePutChunked_(CacheService.getScriptCache(), 'dimJobsSnapshot_v2', payload, 120);
   } catch (e) { /* 무시 */ }
   return out;
 }
@@ -6054,7 +6057,7 @@ function unlinkDimensions(data) {
     //   전혀 안 지워서, 최대 30초간 예전(끊기기 전) 관계가 그대로 보일 수
     //   있는 잠재 버그가 있었음(이번에 groups 갱신 로직을 만들면서 발견).
     //   linkDimensions/setDimPrimary도 동일하게 지금 이 세션에서 같이 고침.
-    try { CacheService.getScriptCache().remove('dimLinksMap_v1'); } catch (e) { /* 무시 */ }
+    try { CacheService.getScriptCache().remove('dimLinksMap_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
     mirrorArgs = [invoice, oldPrimary];
     // ★ 세션D 신규 — 그룹에서 빠진 뒤의 최신 구성원으로 groups 컬렉션 갱신.
@@ -6138,7 +6141,7 @@ function setDimPrimary(data) {
     bumpVersion_();
     // ★ 세션D 버그 수정 — linkDimensions/unlinkDimensions와 동일한 이유로
     //   추가(예전엔 방금 바뀐 DimLinks를 다시 읽을 때 이 캐시를 전혀 안 지웠음).
-    try { CacheService.getScriptCache().remove('dimLinksMap_v1'); } catch (e) { /* 무시 */ }
+    try { CacheService.getScriptCache().remove('dimLinksMap_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨
     try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
     mirrorArgs = members;
     // ★ 세션D 신규 — 대표가 바뀌었으므로 새 대표(invoice) ID로 groups 문서를
