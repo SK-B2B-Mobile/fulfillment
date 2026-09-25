@@ -510,7 +510,53 @@ const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
 // 네트워크 호출 대신 이 캐시를 읽음. FIRESTORE_MIRROR_OK가 true일 때만
 // 캐시를 신뢰하고, 그렇지 않으면 기존 gasQuery 직접 호출로 자동 대체됨.
 let FIRESTORE_MIRROR_OK = false;
-let _mirrorCache = { activeBatch:null, batch:null, openBatches:null, slotProgress:null, unfulfilledAlerts:null };
+let _mirrorCache = { activeBatch:null, batch:null, openBatches:null, slotProgress:null, unfulfilledAlerts:null, slotProgressByBatch:{} };
+
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-09-25 신규(현장 요청 — "다른 배치로 전환할 때 최대한 빨리") —
+ * "조회 모드"(manualBatchOverride, "다른 배치"/"지난 배치"에서 고른 임의의
+ * 배치)는 지금까지 mirror/board_slotProgress(활성 배치 전용)를 못 쓰고 매번
+ * Apps Script에 직접 getSlotProgress를 호출했음 — 배치가 크면 캐시가 없는
+ * 상태에서 시트 전체를 훑어야 해서 수 초~20초 가까이 걸렸던 원인.
+ *
+ * 서버(FirestoreSync.gs)가 이제 열린 배치 상위 8개(최근 생성 순)에 대해
+ * mirror/slotProgress_{batchId} 문서를 1분마다 미리 채워두므로, 조회 모드로
+ * 들어갈 때 그 배치 전용 문서를 구독해서 있으면 즉시(보통 1초 이내) 쓰고,
+ * 3초 안에 안 오면(14일 지난 진짜 오래된 배치이거나 아직 이번 1분 주기가 안
+ * 돈 경우) 기존처럼 직접 호출로 안전하게 대체한다.
+ * ═══════════════════════════════════════════════════════════ */
+let _subscribedSlotProgressBatchIds = new Set();
+let _pendingSlotProgressResolvers = {}; // batchId -> [resolve, ...]
+function _ensureBatchSlotProgressSubscription(batchId){
+  if(!FIRESTORE_MIRROR_OK || !window._subscribeMirror) return;
+  if(_subscribedSlotProgressBatchIds.has(batchId)) return;
+  _subscribedSlotProgressBatchIds.add(batchId);
+  window._subscribeMirror('slotProgress_' + batchId, (p) => {
+    _mirrorCache.slotProgressByBatch[batchId] = p;
+    const resolvers = _pendingSlotProgressResolvers[batchId];
+    if(resolvers && resolvers.length){
+      resolvers.forEach(r => r(p));
+      _pendingSlotProgressResolvers[batchId] = [];
+    }
+    // 지금도 이 배치를 보는 중이면(조회 모드) 방금 도착한 최신 값으로 바로 다시 그림
+    if(manualBatchOverride && manualBatchOverride.batchId === batchId) pollOnce();
+  });
+}
+// 조회 모드에서 슬롯 데이터를 가져오는 전용 함수 — 미러 우선, 없으면(3초 대기 후) 직접 호출로 대체.
+async function getSlotProgressOverrideData_(batchId){
+  if(FIRESTORE_MIRROR_OK && window._subscribeMirror){
+    _ensureBatchSlotProgressSubscription(batchId);
+    const cached = _mirrorCache.slotProgressByBatch[batchId];
+    if(cached) return cached; // 이전 구독에서 이미 받아둔 값이 있으면 그걸 즉시 사용
+    const fromMirror = await new Promise(resolve => {
+      if(!_pendingSlotProgressResolvers[batchId]) _pendingSlotProgressResolvers[batchId] = [];
+      _pendingSlotProgressResolvers[batchId].push(resolve);
+      setTimeout(() => resolve(null), 3000); // 3초 안에 안 오면 포기하고 직접 호출로 대체
+    });
+    if(fromMirror) return fromMirror;
+  }
+  return await gasQuery('getSlotProgress', { batchId: batchId });
+}
 
 // ★ 2026-09-24 신규(Board 실시간 반영 Phase 1) — batch.html이 스캔 직후 곧바로
 // Firestore에 직접 더해놓는 "임시 보정치"(mirror/board_scanFast). 정본 값
@@ -1897,11 +1943,15 @@ async function pollOnce(){
     liveBatchId = currentBatchId;
     }
 
-    // ★ 2026-09 신규 — override 모드(TV에서 임의의 다른 배치를 골라 보는 중)는
-    //   Firestore 미러가 담고 있지 않은 배치일 수 있으므로 항상 직접 조회.
-    //   라이브 모드(평소)는 미러 캐시를 쓰되, 연결 실패 시 자동으로 직접 조회로 대체됨.
+    // ★ 2026-09 신규, ★ 2026-09-25 수정(속도 개선) — override 모드(TV에서 임의의
+    //   다른 배치를 골라 보는 중)도 이제 getSlotProgressOverrideData_를 통해
+    //   배치 전용 미러(mirror/slotProgress_{batchId})를 먼저 시도하고, 3초 안에
+    //   없으면(미러 대상에서 빠진 진짜 오래된 배치 등) 안전하게 직접 조회로
+    //   대체함 — 자세한 이유는 위 getSlotProgressOverrideData_ 주석 참고.
+    //   라이브 모드(평소)는 기존과 동일하게 활성 배치 전용 미러 캐시를 쓰되,
+    //   연결 실패 시 자동으로 직접 조회로 대체됨.
     const res = manualBatchOverride
-      ? await gasQuery('getSlotProgress', { batchId: currentBatchId })
+      ? await getSlotProgressOverrideData_(currentBatchId)
       : await getSlotProgressLiveData_(currentBatchId);
     if(mySeq !== pollSeq) return; // ★ 신규 — 핵심 가드: 이 응답이 도착하기 전에 더 최신 폴링(예: 방금 고른 다른 배치)이
                                   //   이미 시작됐다면, 이 낡은 응답은 절대 화면에 반영하지 않고 버림.
