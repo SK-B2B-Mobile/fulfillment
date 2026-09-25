@@ -1653,6 +1653,24 @@ function invalidateScanStateCache_(batchId) {
   try { CacheService.getScriptCache().remove(scanStateCacheKey_(batchId) + '_meta'); } catch (e) { /* 무시 */ }
 }
 
+// ★ 2026-09-25 신규 — board.html 슬롯 카드의 SKU/PCS 수량 표시가 스캔·이슈
+//   등록/수정/취소 직후에도 최대 30~55초씩 그대로 보이던 문제의 근본 원인 수정.
+//   getSlotProgress()(청크 캐시 'slotProgress_v1_{batchId}', TTL 30초)와
+//   그 내부에서 호출하는 _buildBatchAggregates_()(청크 캐시
+//   'batchAggr_v1_{batchId}', TTL 55초)는 실제 값이 바뀌는 시점(스캔 저장,
+//   이슈 등록/수정/취소)에 지금까지 전혀 무효화되지 않고 있었음 — 오직 TTL
+//   만료를 기다려야만 새 숫자가 반영됐음. invalidateScanStateCache_/
+//   clearInvoiceCache_와 동일한 원칙(청크 캐시는 '_meta' 키만 지우면 다음
+//   조회부터 바로 재계산됨)으로 이 두 캐시도 즉시 비워서, TV 보드가 다음
+//   폴링(12초 주기)부터 바로 최신 수량을 보여주도록 함.
+function invalidateBatchAggregateCaches_(batchId) {
+  try {
+    const cache = CacheService.getScriptCache();
+    cache.remove('batchAggr_v1_' + batchId + '_meta');
+    cache.remove('slotProgress_v1_' + batchId + '_meta');
+  } catch (e) { /* 무시 */ }
+}
+
 function logPackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -2681,6 +2699,7 @@ function logScan(data) {
     ]]);
     result = { ok: true, scanId: scanId };
     invalidateScanStateCache_(data.batchId); // ★ 2026-09-23 신규 — 이 스캔이 다음 폴링부터 바로 보이게 즉시 무효화
+    invalidateBatchAggregateCaches_(data.batchId); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
     // ★ 세션E 신규 — 구글시트에 실제로 쓴 것과 동일한 필드·값으로 Firestore
     //   이중쓰기용 문서를 준비. 락 안에서는 절대 Firestore를 직접 호출하지
     //   않음(스캔은 창고에서 가장 빈번한 동작이라, 락을 붙잡은 채 외부 API를
@@ -2846,6 +2865,7 @@ function logIssue(data) {
     //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
     clearInvoiceCache_(data.batchId, data.invoice);
     invalidateScanStateCache_(data.batchId); // ★ 2026-09-23 신규 — ADJ- 상쇄 기록이 doneMap을 바꾸므로 같이 무효화
+    invalidateBatchAggregateCaches_(data.batchId); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
     needsSync = true; // ★ 2026-09-03 — 락 밖에서 처리(아래 설명)
     // ★ 세션C 신규 — 구글시트에 실제로 쓴 것과 정확히 동일한 필드·값으로
     //   Firestore 이중쓰기용 문서를 준비. 락 안에서는 절대 Firestore를 직접
@@ -2963,6 +2983,7 @@ function undoIssue(data) {
         const rowVals = sh.getRange(i + 2, 1, 1, 13).getValues()[0]; // A~M
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         invalidateScanStateCache_(rowVals[0]); // ★ 2026-09-23 신규 — 이슈 취소로 issueMap이 바뀌므로 같이 무효화
+        invalidateBatchAggregateCaches_(rowVals[0]); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
         syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
         // ★ 세션C 신규 — logIssue()와 완전히 같은 필드 구조로 Firestore
         //   이중쓰기용 문서를 준비(이번엔 status만 'undone'으로 바뀐 전체 문서).
@@ -3140,6 +3161,7 @@ function editIssue(data) {
         const rowVals = sh.getRange(row, 1, 1, 13).getValues()[0]; // A~M (수정된 값 포함)
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         invalidateScanStateCache_(rowVals[0]); // ★ 2026-09-23 신규 — 수량 수정이 issueMap/doneMap(ADJ-)을 바꾸므로 같이 무효화
+        invalidateBatchAggregateCaches_(rowVals[0]); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
         syncArgs = [rowVals[0], rowVals[7], rowVals[3]]; // ★ 2026-09-03 — 락 밖에서 처리
         // ★ 세션C 신규 — logIssue()/undoIssue()와 동일한 패턴으로 Firestore
         //   이중쓰기용 전체 문서 준비(방금 수정된 reason/qty/note 반영됨).
@@ -3195,6 +3217,7 @@ function undoScan(data) {
         //   data엔 scanId만 오고 batchId가 없는 호출부가 있어서, 방금 고친
         //   바로 그 행에서 직접 읽는 게 가장 확실함.
         try { invalidateScanStateCache_(sh.getRange(i + 2, 1).getValue()); } catch (eCache) { /* 무시 */ }
+        try { invalidateBatchAggregateCaches_(sh.getRange(i + 2, 1).getValue()); } catch (eCache2) { /* 무시 — ★ 2026-09-25 신규, board.html 슬롯 SKU/PCS 수량도 즉시 최신화 */ }
         return { ok: true };
       }
     }
@@ -5989,7 +6012,7 @@ function linkDimensions(data) {
       sh.getRange(sh.getLastRow() + 1, 1, newRows.length, 4).setValues(newRows);
     }
     bumpVersion_();
-    try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    try { CacheService.getScriptCache().remove('salesToday_cache_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 재검토 수정 — 청크 캐시는 메타 키만 지우면 됨
     mirrorArgs = [primary].concat(moving);
     // ★ 세션D 신규 — packTogether 그룹을 Firestore groups 컬렉션에 이중쓰기.
     //   groupId=대표 인보이스 번호(DimLinks와 동일한 자연키). best-effort —
@@ -6058,7 +6081,7 @@ function unlinkDimensions(data) {
     //   있는 잠재 버그가 있었음(이번에 groups 갱신 로직을 만들면서 발견).
     //   linkDimensions/setDimPrimary도 동일하게 지금 이 세션에서 같이 고침.
     try { CacheService.getScriptCache().remove('dimLinksMap_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨
-    try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    try { CacheService.getScriptCache().remove('salesToday_cache_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 재검토 수정 — 청크 캐시는 메타 키만 지우면 됨
     mirrorArgs = [invoice, oldPrimary];
     // ★ 세션D 신규 — 그룹에서 빠진 뒤의 최신 구성원으로 groups 컬렉션 갱신.
     //   방금 캐시를 지웠으므로 이 조회는 항상 최신 DimLinks 상태를 반영함.
@@ -6142,7 +6165,7 @@ function setDimPrimary(data) {
     // ★ 세션D 버그 수정 — linkDimensions/unlinkDimensions와 동일한 이유로
     //   추가(예전엔 방금 바뀐 DimLinks를 다시 읽을 때 이 캐시를 전혀 안 지웠음).
     try { CacheService.getScriptCache().remove('dimLinksMap_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨
-    try { CacheService.getScriptCache().remove('salesToday_cache_v1'); } catch (e) { /* 무시 */ }
+    try { CacheService.getScriptCache().remove('salesToday_cache_v1_meta'); } catch (e) { /* 무시 */ } // ★ 2026-09-25 재검토 수정 — 청크 캐시는 메타 키만 지우면 됨
     mirrorArgs = members;
     // ★ 세션D 신규 — 대표가 바뀌었으므로 새 대표(invoice) ID로 groups 문서를
     //   씀. 예전 대표(oldPrimary) ID의 옛 문서는 그대로 남는데(고아 문서),
