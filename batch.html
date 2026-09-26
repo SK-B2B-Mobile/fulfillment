@@ -2808,6 +2808,7 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
     if(topbar) dd.style.top = (topbar.getBoundingClientRect().bottom + 6) + 'px';
   }
 
+  dd._switching = false; // ★ 2026-09-25 신규 — 이번에 새로 여는 것이므로 "전환 중" 잠금 해제
   dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">불러오는 중...</div>`;
   dd.style.display = 'block';
   // ★ 2026-09-22 긴급 수정 — 현장 보고: "다른 배치" 목록이 열리자마자 아주
@@ -2858,9 +2859,40 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
     }
   } catch (eMeasure) { dd.style.maxHeight = 'calc(100vh - 200px)'; /* 측정 실패해도 안전하게 넉넉한 기본 높이로 */ }
 
-  const res = await gasQueryWithRetry('getOpenBatches', {});
-  if(!res.ok){ dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`; return; }
-  const list = (res.batches || []).filter(b => b.batchId !== state.batchId);
+  // ★ 2026-09-25 신규(속도 개선, 사장님 요청) — 이 목록은 이미 위쪽
+  //   _waitForBatchMirrorInit()에서 board_openBatches Firestore 미러를 실시간
+  //   구독하고 있어서(_openBatchesMirrorCache), sales.html/board.html처럼 이미
+  //   최신에 가까운 값을 로컬에 들고 있는 상태임. 그런데 정작 이 드롭다운은 그
+  //   캐시를 전혀 안 쓰고 매번 새로 서버(getOpenBatches)에 물어봐서 응답을
+  //   기다리는 동안 계속 "불러오는 중..."만 보였던 것 — 목록이 느리게 느껴진
+  //   진짜 이유. 캐시가 있으면 그것부터 즉시(0초) 그려주고, 그 다음 항상
+  //   서버에도 한 번 더 확인해서(정확성 보장) 다르면 조용히 다시 그림.
+  if(_openBatchesMirrorCache && _openBatchesMirrorCache.ok){
+    renderSwitchDropdownList_(dd, _openBatchesMirrorCache.batches || []);
+  }
+  try {
+    const res = await gasQueryWithRetry('getOpenBatches', {});
+    // 그 사이 드롭다운이 닫혔거나(사용자가 이미 나감) "전환 중" 상태로
+    // 넘어갔으면(버튼을 이미 눌러서 로딩 표시 중) 화면을 건드리지 않음.
+    if (dd.style.display !== 'block' || dd._switching) return;
+    if (!res.ok) {
+      if (!(_openBatchesMirrorCache && _openBatchesMirrorCache.ok)) {
+        dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`;
+      }
+      return;
+    }
+    renderSwitchDropdownList_(dd, res.batches || []);
+  } catch (eList) {
+    if (!(_openBatchesMirrorCache && _openBatchesMirrorCache.ok)) {
+      dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--red);">불러오기 실패</div>`;
+    }
+  }
+};
+
+// ★ 2026-09-25 신규 — "다른 배치" 드롭다운의 목록 렌더링을 함수로 분리.
+//   미러 캐시로 즉시 한 번, 서버 응답 도착 후 한 번 더(동일 로직 재사용).
+function renderSwitchDropdownList_(dd, batches) {
+  const list = (batches || []).filter(b => b.batchId !== state.batchId);
   // ★ 2026-09-04 신규(현장 지적) — 정렬 기준이 없어 뒤죽박죽으로 보이던 문제.
   //   최근 생성된 배치가 위로 오게 정렬.
   list.sort((a, b) => {
@@ -2874,7 +2906,7 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   }
   const today = new Date().toISOString().slice(0,10);
   dd.innerHTML = list.map(b => `
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
+    <div data-row-batch="${b.batchId}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
       <div>
         <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?(b.pendingTakeOut?'#3EB8F5':'var(--green)'):(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?(b.pendingTakeOut?' · 🟣 2차 검증 대기 '+b.pendingTakeOut+'건':' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전'):''}</div>
         <div style="font-size:10px; color:var(--text-dim);">🕐 ${fmtBatchWhen(b.createdAt) || b.date} 생성 · ${b.totalSku} SKU · 스캔 ${b.scannedPass||0}건</div>
@@ -2888,13 +2920,38 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
   //   이 기기 안에서만 바뀌고 다른 기기에는 절대 영향을 주지 않음(완전 독립).
   //   차이는 표시상 의미뿐: "보기"는 조회전용 배지가 붙고 Scan Log로 이동,
   //   "전환"은 실제로 이어서 작업한다는 뜻으로 Slot Layout(또는 원래 보던 탭)으로 이동.
+  // ★ 2026-09-25 신규(속도 개선 + 클릭 표시, 사장님 요청) — 버튼을 누르면 즉시
+  //   그 버튼/행을 "처리 중" 표시로 바꾸고 잠근 뒤(눌렀는지 안 눌렀는지 헷갈리지
+  //   않도록), continueOpenBatch()가 끝난 뒤에야 드롭다운을 닫는다. board.html의
+  //   "다른 배치" 드롭다운에 적용했던 것과 동일한 패턴. 실제 배치 데이터
+  //   (getBatch/getScanState)는 슬롯 배정처럼 한 치의 오차도 없이 정확해야 하는
+  //   값이라 Firestore 미러(최대 1분 지연 가능)로 대체하지 않고 지금처럼 서버에서
+  //   직접 최신 값을 받아오는 방식을 그대로 유지함 — 그래서 클릭 표시는 여전히
+  //   의미가 있음(순간이동은 아니지만 목록 로딩은 이제 즉시임).
   dd.querySelectorAll('[data-view-only]').forEach(btn => {
-    btn.onclick = () => { dd.style.display = 'none'; continueOpenBatch(btn.dataset.viewOnly, true); };
+    btn.onclick = async () => {
+      _markSwitchBtnClicked_(btn, dd, true);
+      await continueOpenBatch(btn.dataset.viewOnly, true);
+      dd.style.display = 'none';
+    };
   });
   dd.querySelectorAll('[data-switch-to]').forEach(btn => {
-    btn.onclick = () => { dd.style.display = 'none'; continueOpenBatch(btn.dataset.switchTo); };
+    btn.onclick = async () => {
+      _markSwitchBtnClicked_(btn, dd, false);
+      await continueOpenBatch(btn.dataset.switchTo);
+      dd.style.display = 'none';
+    };
   });
-};
+}
+
+function _markSwitchBtnClicked_(btn, dd, isViewOnly) {
+  dd._switching = true; // 위쪽 백그라운드 목록 새로고침이 이 상태를 덮어쓰지 않도록 잠금
+  const row = btn.closest('[data-row-batch]');
+  if (row) { row.style.opacity = '0.55'; row.style.pointerEvents = 'none'; }
+  dd.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  btn.textContent = isViewOnly ? '👁 여는 중...' : '⏳ 전환 중...';
+  btn.style.opacity = '1'; // 눌린 버튼 자체는 흐리게 하지 않아 "표시"가 잘 보이게
+}
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('switchBatchDropdown');
   if(!dd || dd.style.display !== 'block') return;
