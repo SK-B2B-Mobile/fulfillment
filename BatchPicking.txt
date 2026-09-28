@@ -1020,6 +1020,22 @@ function createBatch(data) {
   if (result.ok && batchDocForFirestore) {
     try { queueFirestoreWrite_('batch', batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
+  // ★ 2026-09-28 신규(긴급 버그 수정) — "새로 배치를 만들었는데 board.html
+  //   TV 현황판에 전혀 안 뜬다" 신고로 발견함. 2026-08-25에 batch.html의
+  //   "전환"/"보기" 버튼에서 setActiveBatch 호출을 의도적으로 제거했는데
+  //   (기기 독립 원칙 — 좋은 결정이었음), 그때 실수로 "새 배치를 만들 때"도
+  //   같이 빠져버렸음. 그 결과 이 날짜 이후로 activeBatchId(=TV가 기본으로
+  //   따라가는 배치)를 갱신하는 곳이 시스템 어디에도 없어져서, board.html은
+  //   그 이후로 새 배치가 아무리 생겨도 영원히 옛날 값(또는 완료 처리 때
+  //   clearActiveBatch로 지워진 빈 값)에 멈춰 있었음 — TV가 "진행중인 배치
+  //   없음"만 계속 보여주던 진짜 원인.
+  //   "새 배치 생성"은 "기존 배치 이어서 작업(전환)"과 성격이 달라서(여러 팀이
+  //   각자 다른 배치를 계속 이어서 작업하는 것과, 오늘 작업이 새로 시작되는
+  //   것은 다름) 기기 독립 원칙과 충돌하지 않음 — 그래서 여기서만 복원함.
+  //   best-effort — 실패해도 배치 생성 자체(이미 시트에 저장 완료)엔 영향 없음.
+  if (result.ok && result.batchId) {
+    try { setActiveBatch({ batchId: result.batchId }); } catch (eActive) { /* 무시 */ }
+  }
   return result;
 }
 
