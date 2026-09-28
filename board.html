@@ -458,12 +458,34 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 
     // classic <script>(아래)에서 이 함수를 통해 mirror 문서를 구독함.
     // docPath 예: 'board_activeBatch', 'board_batch', 'board_slotProgress' 등.
+    // ★ 2026-09-28 신규(긴급) — 실제 장애로 확인됨: Apps Script의 하루 UrlFetch
+    // 호출 한도가 초과되면(오늘 실제로 발생), 서버가 Firestore에 아무것도 새로
+    // 못 쓰게 되어 이 미러 문서들이 전부 "마지막으로 성공했던 시점"에 멈춰버림.
+    // 브라우저는 Firestore에 여전히 정상 연결돼 있어서(읽기는 이 한도와 무관)
+    // FIRESTORE_MIRROR_OK는 계속 true로 남고, 결과적으로 "오래된 값을 정상인 것
+    // 처럼" 계속 보여주는 사고가 났음(SKU/PCS 숫자가 실제보다 훨씬 낮게 표시됨).
+    // 이제 문서마다 "실제로 값이 바뀐(=서버 쓰기가 성공한) 마지막 시각"을
+    // 이 브라우저 시계 기준으로 따로 기록해두고(_mirrorFreshness), 이걸로
+    // "이 데이터가 너무 오래됐는지"를 판단할 수 있게 함(아래 window._mirrorAgeMs).
+    // 서버 시각 문자열을 파싱하지 않고 순수히 "이 브라우저가 마지막으로 변화를
+    // 감지한 시각"만 쓰므로 시간대 문제와 무관하게 항상 정확함.
+    window._mirrorFreshness = {}; // docPath -> { lastUpdatedAt: 서버가 적어둔 문자열, seenAtMs: 이 값이 마지막으로 "바뀐" 걸 감지한 브라우저 시각 }
+    window._mirrorAgeMs = function(docPath){
+      const f = window._mirrorFreshness[docPath];
+      return f ? (Date.now() - f.seenAtMs) : Infinity; // 한 번도 못 받았으면 무한대(=항상 오래된 것으로 취급)
+    };
     window._subscribeMirror = function(docPath, onUpdate){
       const ref = doc(db, 'mirror', docPath);
       onSnapshot(ref, (snap) => {
         if(!snap.exists()) return;
         try{
-          const payload = JSON.parse(snap.data().data);
+          const raw = snap.data();
+          const serverUpdatedAt = raw.updatedAt || null;
+          const prev = window._mirrorFreshness[docPath];
+          if(!prev || prev.lastUpdatedAt !== serverUpdatedAt){
+            window._mirrorFreshness[docPath] = { lastUpdatedAt: serverUpdatedAt, seenAtMs: Date.now() };
+          }
+          const payload = JSON.parse(raw.data);
           onUpdate(payload);
         }catch(e){ console.error('[mirror] JSON 파싱 실패 (' + docPath + '):', e); }
       }, (err) => {
@@ -642,12 +664,34 @@ async function getOpenBatchesData_(){
   if(FIRESTORE_MIRROR_OK) return _mirrorCache.openBatches || { ok:false };
   return await gasQuery('getOpenBatches', {});
 }
+// ★ 2026-09-28 신규 — board_slotProgress는 SKU/PCS 숫자가 걸린 가장 중요한
+// 데이터라 특히 엄격하게 신선도를 확인함. Apps Script 쪽 1분 동기화가 정상
+// 이면 이 값은 항상 90초 이내로 갱신돼 있어야 함 — 그보다 오래됐다면(오늘
+// 실제로 있었던 Firestore 쓰기 쿼터 초과처럼) 그 미러는 더 이상 신뢰하지
+// 않고, Apps Script Web App을 브라우저가 직접 호출해서 정확한 값을 새로
+// 받아옴. 이 직접 호출은 Firestore를 거치지 않는 완전히 별개의 경로라
+// (브라우저→Apps Script Web App), 오늘 겪은 것과 같은 UrlFetch 하루 한도
+// 문제와 전혀 무관하게 항상 정확하게 동작함.
+const SLOT_PROGRESS_STALE_MS = 90 * 1000;
 async function getSlotProgressLiveData_(batchId){
   // ★ manualBatchOverride(TV에서 임의의 다른 배치를 고른 상태)는 Firestore
   // 미러 대상이 아닌(미러는 "현재 활성 배치"만 담음) 임의 배치일 수 있으므로
   // 이 경로는 절대 캐시를 쓰지 않고 항상 직접 조회함 — pollOnce() 쪽에서
   // manualBatchOverride일 때는 이 함수를 호출하지 않고 gasQuery를 직접 씀.
-  if(FIRESTORE_MIRROR_OK) return _mirrorCache.slotProgress || { ok:false };
+  if(FIRESTORE_MIRROR_OK){
+    const ageMs = window._mirrorAgeMs ? window._mirrorAgeMs('board_slotProgress') : Infinity;
+    if(_mirrorCache.slotProgress && ageMs < SLOT_PROGRESS_STALE_MS) return _mirrorCache.slotProgress;
+    console.warn('[slotProgress] 미러가 ' + Math.round(ageMs/1000) + '초 동안 안 바뀜 — 직접 조회로 대체(정확성 우선)');
+    try {
+      const fresh = await gasQuery('getSlotProgress', { batchId });
+      // ★ 2026-09-28 신규 — 직접 조회 결과는 이미 "지금 이 순간"의 정확한 값이므로,
+      // 호출부에서 mirror/board_scanFast의 낙관적 "보정치"를 또 더하면(_applyFastScanDelta_)
+      // 이미 반영된 스캔이 중복으로 더해져 실제보다 부풀려질 수 있음. _fresh 플래그로
+      // 표시해서, 호출부가 이 경우엔 보정치를 건너뛰도록 함.
+      if(fresh && fresh.ok) return Object.assign({}, fresh, { _fresh: true });
+    } catch(e){ console.warn('[slotProgress] 직접 조회도 실패 — 오래됐더라도 마지막 미러 값 사용:', e); }
+    return _mirrorCache.slotProgress || { ok:false }; // 직접 조회까지 실패하면 최후 수단으로 오래된 값이라도 반환
+  }
   return await gasQuery('getSlotProgress', { batchId });
 }
 async function getUnfulfilledAlertsData_(batchId){
@@ -1840,7 +1884,9 @@ async function pollOnce(){
           document.getElementById('doneCount').textContent = `${fast.doneCount} / ${fast.totalCount}`;
           document.getElementById('doneBar').style.width =
             (fast.totalCount > 0 ? (fast.doneCount / fast.totalCount * 100) : 0) + '%';
-          renderBoard(_applyFastScanDelta_(fast.slots), true);
+          // ★ 2026-09-28 신규 — 이것도 Apps Script 직접 조회(방금 받은 정확한 값)라
+          // board_scanFast 보정치를 또 얹으면 중복 가산될 수 있어 건너뜀(위 getSlotProgressLiveData_와 동일 원칙).
+          renderBoard(fast.slots, true);
         }
       }catch(e){ /* 실패해도 아래 정상 경로가 이어서 확인 */ }
     }
@@ -1979,7 +2025,9 @@ async function pollOnce(){
     document.getElementById('doneCount').textContent = `${res.doneCount} / ${res.totalCount}`;
     document.getElementById('doneBar').style.width =
       (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
-    renderBoard(_applyFastScanDelta_(res.slots), true);
+    // ★ 2026-09-28 신규 — res._fresh(Apps Script 직접 조회로 방금 받아온 정확한 값)면
+    // mirror/board_scanFast 보정치를 또 더하지 않음(이미 최신 값이라 중복 가산 방지).
+    renderBoard(res._fresh ? res.slots : _applyFastScanDelta_(res.slots), true);
   }catch(e){
     // ★ 2026-07-17 신규: 폴링 중 예상 못한 오류가 나도 콘솔에만 남기고
     //   다음 8초 뒤 폴링은 그대로 이어지게 함(화면이 아예 멈추지 않도록)
