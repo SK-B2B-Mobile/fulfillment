@@ -4975,13 +4975,37 @@ function _clearRangeChunked_(sh, startRow, numRows, numCols, label) {
 }
 
 function archiveOldBatches(daysOld) {
-  daysOld = daysOld || 14; // 기본값: 완료된 지 14일 지난 배치부터 이동
+  daysOld = daysOld || 60; // ★ 2026-09-28 수정(사장님 지시) — 90일 대신 60일로. 완료+검증까지 다 끝난 지 60일 지난 배치만 대상.
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
   try {
     const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
 
-    // 1) 옮길 대상 배치ID 목록 뽑기 — 완료 상태 + CompletedAt이 기준일보다 오래된 것만
+    // ★ 2026-09-28 신규(사장님 요청) — "완료된 지 오래됐다"는 것만으로는 보관
+    //   대상으로 삼지 않음. 2차 검증(PackVerify)이 안 끝난 배치는 절대 여기서
+    //   시트를 옮기지 않고(화면 숨김은 H열 HiddenFromList로 별도 처리),
+    //   "완료 + 오래됨 + 2차 검증까지 완전히 끝난" 배치만 대상으로 삼음.
+    //   _computeOpenBatches_와 동일한 방식으로 BatchCustomers를 미리 집계.
+    const verifiedInfo = {}; // batchId -> { total, verified }
+    try {
+      const bc = bcustSheetSafe_();
+      const bcLast = bc.getLastRow();
+      if (bcLast >= 2) {
+        const bcRows = _readRangeChunked_(bc, 2, bcLast - 1, 13, 'BatchCustomers(검증 집계)');
+        bcRows.forEach(r2 => {
+          const bid = String(r2[0] || '').trim();
+          if (!bid) return;
+          if (!verifiedInfo[bid]) verifiedInfo[bid] = { total: 0, verified: 0 };
+          verifiedInfo[bid].total++;
+          if (r2[12]) verifiedInfo[bid].verified++; // M열: PackVerified
+        });
+      }
+    } catch (eVi) {
+      Logger.log('⚠️ 검증 현황 집계 실패 — 안전하게 이번 실행은 아무 배치도 보관하지 않음: ' + String(eVi && eVi.message || eVi));
+      return { ok: false, error: '검증 현황 집계 실패, 안전하게 중단함: ' + String(eVi && eVi.message || eVi) };
+    }
+
+    // 1) 옮길 대상 배치ID 목록 뽑기 — 완료 상태 + CompletedAt이 기준일보다 오래됨 + 2차 검증 완료
     const bSh = batchesSheet_();
     const bLast = bSh.getLastRow();
     if (bLast < 2) { Logger.log('Batches: 데이터 없음'); return { ok: true, archived: [] }; }
@@ -4993,7 +5017,18 @@ function archiveOldBatches(daysOld) {
       const completedAt = r[6];
       const isDate = Object.prototype.toString.call(completedAt) === '[object Date]' && !isNaN(completedAt);
       if (status === 'completed' && isDate && completedAt.getTime() < cutoffMs) {
-        targetBatchIds.push(String(r[0]));
+        const bid = String(r[0]);
+        const _cMs = completedAt.getTime();
+        const _isPostVerifyLaunch = _cMs >= PACK_VERIFY_LAUNCH_MS;
+        const _vi = verifiedInfo[bid];
+        // 2차 검증 기능 자체가 없던 시절(post-launch 이전)에 완료된 배치, 또는
+        // BatchCustomers 기록이 아예 없는 배치, 또는 전부 검증된 배치만 대상.
+        const _fullyVerified = !_isPostVerifyLaunch || !_vi || _vi.total === 0 || _vi.verified >= _vi.total;
+        if (_fullyVerified) {
+          targetBatchIds.push(bid);
+        } else {
+          keepBatchRows.push(r); // 검증 미완료 — 이번엔 보관하지 않고 시트에 그대로 유지
+        }
       } else {
         keepBatchRows.push(r);
       }
@@ -5108,7 +5143,7 @@ function archiveOldBatches(daysOld) {
 
 // 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
 function archiveOldBatchesDaily() {
-  archiveOldBatches(14);
+  archiveOldBatches(60); // ★ 2026-09-28 수정(사장님 지시) — 14일 대신 60일
 }
 
 function setupArchiveTrigger() {
