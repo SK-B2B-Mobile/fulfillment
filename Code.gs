@@ -1852,6 +1852,53 @@ function fillMissingProcessingMinutes() {
   }
 }
 
+// ★ 2026-09-28 신규(속도 개선, 사장님 신고: "슬롯 처음 클릭하면 30~60초, 그 다음엔
+//   2~3초") — 진단 로그로 원인을 확인함: 실제 계산 시간(_buildBatchAggregates_ 등)은
+//   캐시 히트든 미스든 항상 1초 미만이었는데, "클라이언트 왕복" 시간은 최대 60초까지
+//   나왔음 — 즉 느려진 건 "계산"이 아니라 "시작"이었음.
+//   원인: Apps Script Web App(doGet, board.html/batch.html이 fetch()로 두드리는
+//   그 URL)은 한동안 요청이 없으면 컨테이너가 내려가고, 다음 요청이 올 때 이
+//   프로젝트 전체(Code.gs+BatchPicking.gs 등 합쳐서 수십만 자)를 처음부터 다시
+//   불러오고 파싱하는 "콜드 스타트"가 일어남 — 이게 바로 "처음 한 번만 오래 걸리고
+//   그 다음엔 빨라진다"는 증상과 정확히 일치함.
+//   이미 1분마다 도는 syncToFirestore 트리거가 있지만, 그건 "트리거 실행 경로"만
+//   따뜻하게 유지할 뿐 board.html/batch.html이 실제로 두드리는 "Web App 요청 경로"는
+//   완전히 별개라 계속 식어 있었음. 그래서 이 Web App 자기 자신의 URL을 5분마다
+//   가볍게 한 번씩 두드려서(op=ping — 시트도 안 읽고 계산도 없이 즉시 응답) 그
+//   요청 경로를 계속 따뜻하게 유지하는 전용 트리거를 새로 추가함.
+function pingSelfToStayWarm_() {
+  try {
+    const url = ScriptApp.getService().getUrl();
+    if (!url) return;
+    UrlFetchApp.fetch(url + '?op=ping&_warm=1&_ts=' + Date.now(), { muteHttpExceptions: true });
+  } catch (e) {
+    // 예열 실패는 그냥 다음 5분 주기에 다시 시도하면 되므로 조용히 넘어감(치명적이지 않음)
+    Logger.log('pingSelfToStayWarm_ 실패(무시 가능): ' + String(e && e.message || e));
+  }
+}
+
+// ★ 이 함수를 Apps Script 편집기에서 딱 한 번만 수동으로 실행(▶ 버튼)하면 설치됨.
+//   (setupFillTrigger 등 기존 트리거들과 완전히 동일한 설치 방식)
+function setupKeepWarmTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'pingSelfToStayWarm_') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger('pingSelfToStayWarm_')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  Logger.log('✅ Web App 예열(warm-up) 트리거 설정 완료 — 5분마다 자동으로 깨워둠');
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    '5분마다 Web App을 미리 깨워둬서, 오랜만에 슬롯을 클릭했을 때 첫 로딩이 느린 문제를 줄입니다.',
+    '✅ 예열 트리거 설정 완료',
+    5
+  );
+}
+
 function setupFillTrigger() {
   ScriptApp.getProjectTriggers().forEach(function(t) {
     if (t.getHandlerFunction() === 'fillMissingProcessingMinutes') {
