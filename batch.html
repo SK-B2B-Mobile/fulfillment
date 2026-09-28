@@ -1925,12 +1925,22 @@ select option:disabled{color:var(--text-dim2);}
     // 그 주기가 돌 때마다 이 보정치는 _resetScanFastMirror_로 리셋됨 — 즉
     // 이 값은 "최근 1분 안에 이 배치에서 스캔된 추가분"만 잠깐 보여주는
     // 낙관적 표시용이고, 매 분 자동으로 스스로 지워짐(self-healing).
+    // ★ 2026-09-28 긴급 수정 — 실제 장애 확인: 이 문서(board_scanFast)는 "모든
+    // 배치가 같이 쓰는 문서 하나"인데, slots.<슬롯번호>가 배치 구분 없이 그냥
+    // 더해지고 있었음. 그래서 동시에 다른 배치를 스캔 중인 작업자가 있으면(현장에
+    // 워커가 여러 명이라 흔한 상황), 그 사람이 스캔한 슬롯 번호가 우연히 지금
+    // TV가 보여주는 배치의 같은 슬롯 번호와 겹치면 그 수량이 그대로 얹혀서
+    // "실제로는 안 끝났는데 화면(TV)에서만 완료로 보이는" 사고가 났음(오늘
+    // 실제로 발견됨 — batch.html의 정확한 값과 board.html이 크게 달랐음).
+    // 고침: slots를 배치ID로 한 번 더 감싸서(slots.<batchId>.<슬롯번호>)
+    // 다른 배치의 증분이 물리적으로 같은 필드에 절대 섞이지 않게 함.
     window._pushFastScan = function(batchId, slot, qty){
       if(!batchId || slot === null || slot === undefined || !qty) return;
       try{
+        const bid = String(batchId);
         setDoc(doc(db, 'mirror', 'board_scanFast'), {
-          batchId: String(batchId),
-          slots: { [String(slot)]: increment(Number(qty) || 0) },
+          batchId: bid, // 참고용(마지막 writer) — 실제 격리는 아래 slots.<bid> 중첩 구조가 담당
+          slots: { [bid]: { [String(slot)]: increment(Number(qty) || 0) } },
           updatedAt: serverTimestamp()
         }, { merge: true }).catch(e => console.warn('[fastScan] 전송 실패(무시 — 1분 뒤 정본 값이 어차피 따라잡음):', e));
       }catch(e){ console.warn('[fastScan] 예외(무시):', e); }
