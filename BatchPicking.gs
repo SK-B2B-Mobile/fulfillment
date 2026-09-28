@@ -4856,6 +4856,51 @@ function _sheetOpWithRetry_(fn, label) {
   throw lastErr;
 }
 
+// ★ 2026-09-28 추가 수정 — 재시도만으로는 부족했음: 실제 실행 로그를 보면
+//   BatchCustomers(1406행)는 한 번에 성공했지만, BatchItems/ScanLog/PickTiming/
+//   IssueLog는 3번 재시도까지 전부 실패했다. 이건 "가끔 있는 일시적 지연"이
+//   아니라, 이 시트들 자체가 너무 커서(스캔·이슈 로그는 매 작업마다 쌓이는
+//   구조라 수만 행 이상 누적됐을 가능성이 큼) 한 번의 getRange().getValues()/
+//   setValues() 호출 자체가 구글 스프레드시트 서비스의 내부 처리 한도를 넘는
+//   것으로 보인다. 그래서 이제 큰 시트는 한 번에 통째로 읽고/쓰지 않고,
+//   행 단위로 잘게 나눠서(청크) 여러 번에 걸쳐 처리한다 — 각 청크는 여전히
+//   재시도로 감싸져 있어서, 청크 하나가 일시적으로 실패해도 자동 회복된다.
+const _ARCHIVE_CHUNK_SIZE_ = 2000;
+
+function _readRangeChunked_(sh, startRow, numRows, numCols, label) {
+  const out = [];
+  let row = startRow, remaining = numRows;
+  while (remaining > 0) {
+    const take = Math.min(_ARCHIVE_CHUNK_SIZE_, remaining);
+    const chunk = _sheetOpWithRetry_(() => sh.getRange(row, 1, take, numCols).getValues(), label + ' 읽기(행 ' + row + '~' + (row + take - 1) + ')');
+    for (let i = 0; i < chunk.length; i++) out.push(chunk[i]);
+    row += take;
+    remaining -= take;
+  }
+  return out;
+}
+
+function _writeRowsChunked_(sh, startRow, rows, numCols, label) {
+  let offset = 0;
+  while (offset < rows.length) {
+    const take = Math.min(_ARCHIVE_CHUNK_SIZE_, rows.length - offset);
+    const chunk = rows.slice(offset, offset + take);
+    const atRow = startRow + offset;
+    _sheetOpWithRetry_(() => sh.getRange(atRow, 1, chunk.length, numCols).setValues(chunk), label + ' 쓰기(행 ' + atRow + '~' + (atRow + chunk.length - 1) + ')');
+    offset += take;
+  }
+}
+
+function _clearRangeChunked_(sh, startRow, numRows, numCols, label) {
+  let row = startRow, remaining = numRows;
+  while (remaining > 0) {
+    const take = Math.min(_ARCHIVE_CHUNK_SIZE_, remaining);
+    _sheetOpWithRetry_(() => sh.getRange(row, 1, take, numCols).clearContent(), label + ' 비우기(행 ' + row + '~' + (row + take - 1) + ')');
+    row += take;
+    remaining -= take;
+  }
+}
+
 function archiveOldBatches(daysOld) {
   daysOld = daysOld || 14; // 기본값: 완료된 지 14일 지난 배치부터 이동
   const lock = LockService.getDocumentLock();
@@ -4927,26 +4972,39 @@ function archiveOldBatches(daysOld) {
         const last = sh.getLastRow();
         const lastCol = sh.getLastColumn();
         if (last < 2) { summary.push(name + ': 데이터 없음'); return; }
+        const totalRows = last - 1;
 
-        // Batches 시트 자신은 위에서 이미 targetBatchIds/keepBatchRows로 걸러뒀으므로
-        // 그 기준(activeBatchIdSet)을 그대로 재사용해서 일관성 유지.
-        const allRows = _sheetOpWithRetry_(() => sh.getRange(2, 1, last - 1, lastCol).getValues(), name + ' 읽기');
+        // ★ 2026-09-28 수정 — 실제 실행에서 BatchItems/ScanLog/PickTiming/IssueLog가
+        //   한 번의 통짜 읽기로는 재시도 3번까지도 계속 타임아웃났다(로그로 확인).
+        //   시트가 너무 커서 단일 호출 자체가 무리인 것으로 보고, 이제 청크 단위로
+        //   나눠서 읽는다 — 청크 하나가 실패해도 그 청크만 재시도되므로 훨씬 안전함.
+        const allRows = _readRangeChunked_(sh, 2, totalRows, lastCol, name);
         const toArchive = allRows.filter(r => !activeBatchIdSet[String(r[0])]);
         const toKeep = allRows.filter(r => activeBatchIdSet[String(r[0])]);
 
+        // 보관 시트에 먼저 씀(메인 시트는 아직 전혀 건드리지 않으므로, 여기서
+        // 중간에 실패해도 메인 데이터는 100% 안전함).
         if (toArchive.length > 0) {
           const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + name, headers);
-          _sheetOpWithRetry_(() => {
-            archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
-          }, name + ' 보관 시트에 쓰기');
+          _writeRowsChunked_(archiveSh, archiveSh.getLastRow() + 1, toArchive, lastCol, name + ' 보관 시트');
         }
 
-        // ★ 2026-09-28 수정 — clearContent 후 곧바로 toKeep을 다시 쓰는 두 단계 사이에
-        //   타임아웃이 나면 데이터가 비는 위험한 구간이었음. 이제 이 두 단계도
-        //   각각 재시도로 감싸서, 일시적 오류로 멈추더라도 자동으로 끝까지 복구함.
-        _sheetOpWithRetry_(() => { sh.getRange(2, 1, last - 1, lastCol).clearContent(); }, name + ' 비우기');
+        // ★ 2026-09-28 수정(안전 순서 변경) — 예전엔 "먼저 통째로 비우고 → 유지할
+        //   행을 다시 씀" 순서였는데, 그 사이에 실패하면 유지해야 할 데이터까지
+        //   빈 채로 남는 위험한 구간이 있었음. 이제는 순서를 바꿔서: 유지할 행을
+        //   맨 위(2행부터)에 먼저 겹쳐씀(덮어쓰기 실패해도 원본이 그 자리에 그대로
+        //   있으므로 안전) → 그 다음 남은 꼬리 부분(유지 행 개수를 넘어선 나머지,
+        //   즉 이미 위로 옮겨졌거나 보관된 옛 행들의 잔재)만 비움. 이렇게 하면
+        //   어느 단계에서 실패하더라도 "유지해야 할 데이터가 사라지는" 경우는
+        //   생기지 않고, 최악의 경우에도 잠깐 중복 행이 꼬리에 남는 정도(다음 재실행 시
+        //   자동으로 정리됨)에 그침.
         if (toKeep.length > 0) {
-          _sheetOpWithRetry_(() => { sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep); }, name + ' 유지 행 다시 쓰기');
+          _writeRowsChunked_(sh, 2, toKeep, lastCol, name + ' 유지 행 재기록');
+        }
+        const tailStart = 2 + toKeep.length;
+        const tailCount = totalRows - toKeep.length; // = toArchive.length
+        if (tailCount > 0) {
+          _clearRangeChunked_(sh, tailStart, tailCount, lastCol, name + ' 꼬리');
         }
 
         summary.push(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
