@@ -2892,7 +2892,17 @@ document.getElementById('btnSwitchBatch').onclick = async (e) => {
 // ★ 2026-09-25 신규 — "다른 배치" 드롭다운의 목록 렌더링을 함수로 분리.
 //   미러 캐시로 즉시 한 번, 서버 응답 도착 후 한 번 더(동일 로직 재사용).
 function renderSwitchDropdownList_(dd, batches) {
-  const list = (batches || []).filter(b => b.batchId !== state.batchId);
+  const all = (batches || []).slice();
+  // ★ 2026-09-28 신규(사장님 지적) — 예전엔 "지금 작업 중인 배치"를 이 목록에서
+  //   아예 빼버려서, "다른 배치"를 눌렀을 때 지금 보고 있는 배치가 어디에도
+  //   안 보였음. board.html의 "다른 배치" 드롭다운은 지금 보는 중인 배치도
+  //   목록 맨 위에 "지금 보는 중" 표시로 같이 보여주는데, 그게 훨씬 헷갈리지
+  //   않는다는 지적을 받아 batch.html도 동일하게 맞춤 — 지금 작업 중인 배치를
+  //   목록 맨 위에 "🟢 지금 작업 중" 표시로 같이 보여주고(전환/보기 버튼은
+  //   당연히 없음 — 이미 그 배치를 보고 있으므로), 나머지는 기존과 동일하게
+  //   최근 생성 순으로 그 아래에 나열함.
+  const currentBatch = all.find(b => b.batchId === state.batchId);
+  const list = all.filter(b => b.batchId !== state.batchId);
   // ★ 2026-09-04 신규(현장 지적) — 정렬 기준이 없어 뒤죽박죽으로 보이던 문제.
   //   최근 생성된 배치가 위로 오게 정렬.
   list.sort((a, b) => {
@@ -2900,12 +2910,25 @@ function renderSwitchDropdownList_(dd, batches) {
     const tb = new Date(b.createdAt).getTime() || 0;
     return tb - ta;
   });
-  if(!list.length){
+  if(!currentBatch && !list.length){
     dd.innerHTML = `<div style="padding:8px; font-size:11px; color:var(--text-dim);">전환할 다른 미완료 배치가 없습니다</div>`;
     return;
   }
   const today = new Date().toISOString().slice(0,10);
-  dd.innerHTML = list.map(b => `
+  let html = '';
+  if (currentBatch) {
+    html += `
+    <div data-row-batch="${currentBatch.batchId}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px; background:var(--surface2);">
+      <div>
+        <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:var(--text);">${currentBatch.batchId}</div>
+        <div style="font-size:10px; color:var(--text-dim);">🕐 ${fmtBatchWhen(currentBatch.createdAt) || currentBatch.date} 생성 · ${currentBatch.totalSku} SKU · 스캔 ${currentBatch.scannedPass||0}건</div>
+      </div>
+      <div style="flex-shrink:0;">
+        <span style="font-size:11px; font-weight:800; padding:4px 10px; border-radius:6px; background:rgba(16,185,129,0.15); color:var(--green); white-space:nowrap;">🟢 지금 작업 중</span>
+      </div>
+    </div>`;
+  }
+  html += list.map(b => `
     <div data-row-batch="${b.batchId}" style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px; border-radius:6px;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background='transparent'">
       <div>
         <div style="font-family:var(--mono); font-weight:700; font-size:12px; color:${b.recentlyCompleted?(b.pendingTakeOut?'#3EB8F5':'var(--green)'):(b.date!==today?'var(--amber)':'var(--text)')}">${b.batchId}${b.recentlyCompleted?(b.pendingTakeOut?' · 🟣 2차 검증 대기 '+b.pendingTakeOut+'건':' · ✅ 완료됨 · '+b.completedMinutesAgo+'분 전'):''}</div>
@@ -2916,6 +2939,7 @@ function renderSwitchDropdownList_(dd, batches) {
         <button class="btn btn-primary btn-sm" data-switch-to="${b.batchId}" style="white-space:nowrap;">전환</button>
       </div>
     </div>`).join('');
+  dd.innerHTML = html;
   // ★ 2026-08-07 신규 → 2026-08-25 재확정(매니저 결정) — "보기"/"전환" 둘 다
   //   이 기기 안에서만 바뀌고 다른 기기에는 절대 영향을 주지 않음(완전 독립).
   //   차이는 표시상 의미뿐: "보기"는 조회전용 배지가 붙고 Scan Log로 이동,
