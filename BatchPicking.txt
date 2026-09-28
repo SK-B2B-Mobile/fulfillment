@@ -532,6 +532,20 @@ function ensureBatchSheet_(name, headers) {
 }
 
 function batchesSheet_()  { return ensureBatchSheet_(BATCHES_SHEET,  ['BatchId','Date','Status','TotalSku','TotalQty','CreatedAt','CompletedAt']); }
+// ★ 2026-09-28 신규 — "목록에서 숨기기"를 시트 데이터는 절대 건드리지 않고
+//   영구적으로(모든 기기에서) 적용하기 위한 수동 표시용 컬럼(H: HiddenFromList).
+//   기존 batchesSheet_()처럼 신규 생성 시에만 헤더가 자동으로 안 생기므로,
+//   bcustSheetSafe_()와 동일한 패턴으로 이미 있는 시트에도 한 번만 채워줌.
+//   ★ 2026-09-28 수정 — Records 시트에서 이미 쓰고 있던 "archived / archivedAt"
+//   짝 컬럼 방식과 똑같이 맞춰서, H(HiddenFromList) 옆에 I(HiddenAt, 숨긴 시각)도
+//   같이 둠 — 언제 숨겼는지 나중에 확인 가능하고, 다른 컬럼과 마찬가지로
+//   "표시"만 할 뿐 어떤 데이터도 지우지 않음.
+function batchesSheetSafe_() {
+  const bSh = batchesSheet_();
+  if (!bSh.getRange(1, 8).getValue()) bSh.getRange(1, 8).setValue('HiddenFromList');
+  if (!bSh.getRange(1, 9).getValue()) bSh.getRange(1, 9).setValue('HiddenAt');
+  return bSh;
+}
 function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId','Invoice','Customer','ShipDate','ShipVia','TotalQty','TotalSku','SlotNum','SlotSize','Cleared','MovedToPacking']); }
 // ★ 2026-07-23 신규 — 이미 운영 중이던 시트는 10개 컬럼으로 만들어져 있어서,
 //   위 headers 배열을 바꿔도 기존 시트엔 11번째 컬럼(MovedToPacking)이 자동으로
@@ -4572,13 +4586,50 @@ function getOpenBatches() {
 
 // ★ 2026-09-28 신규 — getOpenBatches()의 실제 계산 로직을 분리(락 안에서만
 //   실행되도록). 계산 내용은 기존과 100% 동일 — "어디서 감싸느냐"만 바뀜.
+// ★ 2026-09-28 신규 — batch.html의 "✕ 목록에서 숨기기"가 부르는 서버 함수.
+//   시트의 BatchId/Date/Status/... 등 어떤 값도 지우거나 옮기지 않고, Batches
+//   시트 H열(HiddenFromList)에 TRUE만 세팅함. 이 배치는 getOpenBatches()가
+//   화면용 목록을 만들 때만 제외되고, 원본 데이터는 시트에 그대로 남아 언제든
+//   확인 가능함. hidden:false로 다시 부르면 원래대로 목록에 복귀함(즉시 되돌릴
+//   수 있음 — 값을 지운 게 아니라 표시만 바꾼 것이므로).
+function setBatchHiddenFlag(data) {
+  try {
+    const batchId = String(data && data.batchId || '').trim();
+    if (!batchId) return { ok: false, error: 'batchId required' };
+    const hidden = !!(data && data.hidden);
+    const bSh = batchesSheetSafe_();
+    const last = bSh.getLastRow();
+    if (last < 2) return { ok: false, error: 'no batches' };
+    const ids = bSh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]).trim() === batchId) {
+        bSh.getRange(i + 2, 8).setValue(hidden);
+        // ★ 2026-09-28 신규 — Records 시트의 archived/archivedAt 짝 컬럼 방식과 동일하게,
+        //   숨길 때는 시각을 남기고 다시 되돌리면(hidden:false) 시각도 같이 비움.
+        bSh.getRange(i + 2, 9).setValue(hidden ? batchNow_() : '');
+        // getOpenBatches()의 청크 캐시를 즉시 무효화해서, 다음 조회부터 바로 반영되게 함
+        // (그냥 두면 최대 60초 뒤에나 반영됨 — meta 키만 지우면 _cacheGetChunked_가
+        //  캐시 미스로 처리해서 다음 호출이 새로 계산함).
+        try { CacheService.getScriptCache().remove('openBatches_v1_meta'); } catch (eCache) { /* 무시 */ }
+        return { ok: true, batchId: batchId, hidden: hidden };
+      }
+    }
+    return { ok: false, error: 'batchId not found: ' + batchId };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
 function _computeOpenBatches_(_cache, _cacheKey) {
   try {
-    const bSh = batchesSheet_();
+    // ★ 2026-09-28 신규 — H열(HiddenFromList)을 같이 읽기 위해 batchesSheetSafe_()로
+    //   바꾸고 범위를 7열→8열로 넓힘. 이 컬럼이 TRUE인 배치는 화면 목록에서만
+    //   제외됨(시트 데이터는 전혀 삭제/이동되지 않음 — 아래 forEach 참고).
+    const bSh = batchesSheetSafe_();
     const last = bSh.getLastRow();
     if (last < 2) return { ok: true, batches: [] };
 
-    const rows = bSh.getRange(2, 1, last - 1, 7).getValues();
+    const rows = bSh.getRange(2, 1, last - 1, 8).getValues();
     const open = [];
     const openIds = {};
 
@@ -4630,6 +4681,12 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     const PENDING_VERIFY_HIDE_AFTER_DAYS = 14;
     const nowMs = Date.now();
     rows.forEach(r => {
+      // ★ 2026-09-28 신규 — H열(HiddenFromList)이 TRUE로 표시된 배치는 상태·기간과
+      //   무관하게 무조건 화면 목록에서 제외. batch.html의 "✕ 목록에서 숨기기"가
+      //   이제 이 값을 TRUE로 세팅함(setBatchHiddenFlag) — 시트의 다른 컬럼이나
+      //   BatchCustomers/ScanLog 등 다른 시트는 전혀 건드리지 않음.
+      const _hiddenFlag = r[7];
+      if (_hiddenFlag === true || String(_hiddenFlag).trim().toUpperCase() === 'TRUE') return;
       const status = String(r[2] || '');
       let recentlyCompleted = false, completedMinutesAgo = null, pendingTakeOut = 0;
       if (status === 'completed') {
