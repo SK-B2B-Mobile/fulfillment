@@ -4625,6 +4625,9 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     //   1시간이 지나야 목록에서 완전히 빠짐 — 완료 트리거 자체(스캔 100%)는
     //   그대로 유지하고, 화면 표시만 1시간 유예를 둠.
     const RECENT_COMPLETE_GRACE_MS = 60 * 60 * 1000; // 1시간
+    // ★ 2026-09-28 신규 — "2차 검수 대기" 화면 목록에서만 오래된 미검증 배치를
+    //   빼는 기준(일). 시트 데이터에는 전혀 영향 없음(위 주석 참고).
+    const PENDING_VERIFY_HIDE_AFTER_DAYS = 14;
     const nowMs = Date.now();
     rows.forEach(r => {
       const status = String(r[2] || '');
@@ -4648,6 +4651,19 @@ function _computeOpenBatches_(_cache, _cacheKey) {
           // ★ 2026-08-24 수정 — "아직 안 가져간 고객사" 대신 "아직 2차 검증 안 된
           //   고객사"가 남아 있으면 시간과 무관하게 계속 보임(파랑까지만 되고
           //   검증 전인 경우도 여기 포함됨 — 정확히 매니저가 지적한 부분).
+          //
+          // ★ 2026-09-28 신규 — 이 규칙 때문에 2차 검증이 끝내 안 된 배치가
+          //   "2차 검수 대기" 목록에 계속 쌓이는 문제가 실제로 발생함(8월 배치
+          //   21건이 계속 남아있었음). 사장님 요청: 구글시트 원본 데이터는
+          //   "절대" 지우거나 옮기면 안 되고, 화면(웹브라우저)에서만 안 보이게
+          //   해야 함. 그래서 Batches/BatchCustomers/... 시트는 전혀 건드리지
+          //   않고, 이 함수가 화면에 "보여줄 목록"을 만들 때만 아래 조건으로
+          //   걸러냄 — 완료된 지 PENDING_VERIFY_HIDE_AFTER_DAYS일이 지나도록
+          //   2차 검증이 안 끝난 배치는(이미 정상 출고됐고 검증만 누락된 것으로
+          //   간주) 이 목록에서만 빠짐. 원본 시트 데이터·PackVerified 값 등은
+          //   전혀 수정되지 않으므로, 필요하면 시트에서 언제든 그대로 확인 가능함.
+          const _completedDaysAgo = (nowMs - _cMs) / (24 * 60 * 60 * 1000);
+          if (_completedDaysAgo > PENDING_VERIFY_HIDE_AFTER_DAYS) return;
           recentlyCompleted = true;
           completedMinutesAgo = null;
           pendingTakeOut = _vi.total - _vi.verified;
