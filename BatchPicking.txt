@@ -4530,12 +4530,50 @@ function getOpenBatches() {
   try {
     // ★ 2026-08-19 신규(긴급) — getSlotProgress와 동일한 이유. "다른 배치"
     //   드롭다운·초기 배치 감지 등에서 자주 불리는데 시트 여러 개를 훑는
-    //   무거운 함수라, 여러 기기가 동시에 부르면 부담이 큼. 6초 캐시로 완화.
+    //   무거운 함수라, 여러 기기가 동시에 부르면 부담이 큼. 캐시로 완화.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'openBatches_v1';
     const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
+    // ★ 2026-09-28 신규(긴급 안정성 강화) — 2026-09-28 실제 장애로 확인됨:
+    //   이 함수는 ScanLog·IssueLog·BatchItems·BatchCustomers를 매번 통째로
+    //   훑는 무거운 함수인데(수만 행 단위), 캐시가 막 만료된 그 순간에 여러
+    //   기기(batch.html "다른 배치" 드롭다운, board.html TV, 1분 동기화 트리거 등)가
+    //   동시에 몰리면 각자 따로 이 무거운 계산을 중복 실행하면서 서버 동시
+    //   실행 한도에 부딪혀 타임아웃(AbortError/jsonp error)이 나는 것을 실제로
+    //   확인했음. 짧은 스크립트 락으로 "동시에는 딱 한 곳만 계산"하도록 보호함 —
+    //   락을 못 얻은 요청은 먼저 계산 중이던 요청이 채워놨을 캐시를 한 번 더
+    //   확인해서 그대로 씀(중복 계산 방지). 락 획득 자체가 실패해도(드묾)
+    //   그냥 기존처럼 직접 계산해서 응답은 항상 보장됨 — 이 안전장치가 실패해도
+    //   기능 자체가 죽지는 않음.
+    const _lock = LockService.getScriptLock();
+    let _gotLock = false;
+    try { _gotLock = _lock.tryLock(8000); } catch (eLock) { _gotLock = false; }
+    if (!_gotLock) {
+      const _cachedAfterWait = _cacheGetChunked_(_cache, _cacheKey);
+      if (_cachedAfterWait) return JSON.parse(_cachedAfterWait);
+      // 락도 못 얻고 캐시도 여전히 비어있으면(드묾) — 안전하게 계속 진행해서
+      // 아래에서 직접 계산함(중복 계산이 생길 수 있어도, 응답을 아예 못 주는
+      // 것보다는 훨씬 나음).
+    }
+    try {
+      // 락을 기다리는 사이 다른 요청이 이미 캐시를 채웠을 수 있으니 한 번 더 확인
+      const _cachedInsideLock = _cacheGetChunked_(_cache, _cacheKey);
+      if (_cachedInsideLock) return JSON.parse(_cachedInsideLock);
+      return _computeOpenBatches_(_cache, _cacheKey);
+    } finally {
+      if (_gotLock) { try { _lock.releaseLock(); } catch (eRelease) { /* 무시 */ } }
+    }
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+// ★ 2026-09-28 신규 — getOpenBatches()의 실제 계산 로직을 분리(락 안에서만
+//   실행되도록). 계산 내용은 기존과 100% 동일 — "어디서 감싸느냐"만 바뀜.
+function _computeOpenBatches_(_cache, _cacheKey) {
+  try {
     const bSh = batchesSheet_();
     const last = bSh.getLastRow();
     if (last < 2) return { ok: true, batches: [] };
@@ -4761,12 +4799,19 @@ function getOpenBatches() {
     const _result = { ok: true, batches: open };
     try {
       const _payload = JSON.stringify(_result);
-      // ★ 2026-08-25 수정(속도 개선) — 6초→20초로 확대. 이 목록은 "훑어보고 고르는"
-      //   용도라 살짝 오래된 숫자가 보여도 안전에 전혀 영향 없음 — 실제로 "전환"을
-      //   누르는 순간에는 항상 getBatch/getScanState로 100% 최신 데이터를 다시
-      //   받아오므로(안전장치 그대로 유지), 목록 자체만 좀 더 오래 캐시해서
-      //   반복적으로 여는 속도를 개선함.
-      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 20); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
+      // ★ 2026-08-25 수정(속도 개선) — 6초→20초로 확대.
+      // ★ 2026-09-28 재수정(안정성 강화) — 20초→60초로 재확대. 2026-09-28 실제
+      //   장애로 확인됨: 이 계산 자체가 무거운 배치에서는 20~30초 넘게 걸릴 수
+      //   있는데, 캐시 TTL(20초)이 계산 시간보다 짧으면 "캐시가 채워지자마자
+      //   곧 다시 만료"되어 사실상 항상 미스가 나는 것과 다름없어짐 — 20초
+      //   TTL로는 이 함수의 계산 비용을 제대로 못 가려줬던 게 실제 원인.
+      //   1분 동기화 트리거 주기와 맞춰 60초로 늘려서, 계산이 아무리 오래
+      //   걸려도 다음 동기화 전까지는 확실히 캐시로 가려지게 함. 이 목록은
+      //   "훑어보고 고르는" 용도라 최대 1분 정도 오래된 숫자가 보여도 안전에
+      //   전혀 영향 없음 — 실제로 "전환"을 누르는 순간에는 항상 getBatch/
+      //   getScanState로 100% 최신 데이터를 다시 받아오므로(안전장치 그대로
+      //   유지) 여기서는 순수하게 "목록 훑어보기" 속도만 좌우함.
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 60); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
