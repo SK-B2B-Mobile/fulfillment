@@ -574,10 +574,15 @@ let _scanFastCache = null;
 //     있었던 사고("수량은 찼는데 특정 SKU가 안 채워졌는데도 완료로 표시")를
 //     그대로 재현할 위험이 있음 — 그래서 waiting → active까지만 밀어올리고,
 //     effectiveTotal을 넘겨서 보여주지도 않음(Math.min으로 캡).
+// ★ 2026-09-28 긴급 수정 — mirror/board_scanFast는 모든 배치가 함께 쓰는 문서라,
+// 예전엔 slots.<슬롯번호>가 배치 구분 없이 그냥 더해져서 다른 배치를 동시에
+// 스캔 중인 작업자의 수량이 지금 보고 있는 배치의 같은 슬롯 번호에 잘못 얹히는
+// 사고가 실제로 발생함(batch.html의 정확한 값과 TV 화면이 크게 어긋났음).
+// 이제 slots가 배치ID로 한 번 더 감싸져 있으므로(slots.<batchId>.<슬롯번호>),
+// 반드시 현재 배치의 하위 맵만 읽어서 다른 배치의 증분이 섞이지 않게 함.
 function _applyFastScanDelta_(slots){
   if(!_scanFastCache || !slots || !slots.length) return slots;
-  if(String(_scanFastCache.batchId || '') !== String(currentBatchId || '')) return slots;
-  const deltas = _scanFastCache.slots || {};
+  const deltas = (_scanFastCache.slots && _scanFastCache.slots[String(currentBatchId || '')]) || {};
   slots.forEach(s => {
     const d = Number(deltas[String(s.slotNum)]) || 0;
     if(d <= 0) return;
