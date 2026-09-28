@@ -4832,6 +4832,30 @@ function _computeOpenBatches_(_cache, _cacheKey) {
  *          → ▶ 실행 (한 번만 하면 그 뒤로 매일 새벽 자동으로 정리됨)
  *          끄고 싶으면 removeArchiveTrigger 실행
  * ===================================================================== */
+// ★ 2026-09-28 신규 — archiveOldBatches()가 "Service Spreadsheets timed out"
+//   같은 일시적 오류(대용량 시트 read/write 중 구글 인프라 쪽에서 가끔 발생)로
+//   중간에 멈춰버리는 사고가 실제로 발생함(Batches 시트는 42행 보관 이동까지
+//   끝냈는데 바로 다음 BatchCustomers 시트 처리 중 타임아웃으로 전체 함수가
+//   예외를 던지며 중단됨). 이런 일시적 오류는 대부분 몇 초 후 재시도하면
+//   성공하므로, 재시도 로직으로 감싸서 어지간한 타임아웃은 자동으로 극복하게 함.
+function _sheetOpWithRetry_(fn, label) {
+  const maxTries = 3;
+  let lastErr;
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      return fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e && e.message || e);
+      // 타임아웃류가 아닌 오류(예: 잘못된 인자)는 재시도해도 의미 없으므로 바로 던짐
+      if (!/timed out|timeout|internal error|시간이 초과|일시적/i.test(msg)) throw e;
+      Logger.log('⚠️ ' + (label || '시트 작업') + ' 일시적 오류(재시도 ' + (i + 1) + '/' + maxTries + '): ' + msg);
+      if (i < maxTries - 1) Utilities.sleep(2000 * (i + 1)); // 2초, 4초 대기 후 재시도
+    }
+  }
+  throw lastErr;
+}
+
 function archiveOldBatches(daysOld) {
   daysOld = daysOld || 14; // 기본값: 완료된 지 14일 지난 배치부터 이동
   const lock = LockService.getDocumentLock();
@@ -4843,21 +4867,38 @@ function archiveOldBatches(daysOld) {
     const bSh = batchesSheet_();
     const bLast = bSh.getLastRow();
     if (bLast < 2) { Logger.log('Batches: 데이터 없음'); return { ok: true, archived: [] }; }
-    const bRows = bSh.getRange(2, 1, bLast - 1, 7).getValues();
+    const bRows = _sheetOpWithRetry_(() => bSh.getRange(2, 1, bLast - 1, 7).getValues(), 'Batches 읽기');
     const targetBatchIds = [];
+    const keepBatchRows = [];
     bRows.forEach(r => {
       const status = String(r[2] || '');
       const completedAt = r[6];
       const isDate = Object.prototype.toString.call(completedAt) === '[object Date]' && !isNaN(completedAt);
       if (status === 'completed' && isDate && completedAt.getTime() < cutoffMs) {
         targetBatchIds.push(String(r[0]));
+      } else {
+        keepBatchRows.push(r);
       }
     });
 
+    // ★ 2026-09-28 수정 — 예전에는 여기서 targetBatchIds가 0건이면 바로 종료했는데,
+    //   그러면 "Batches 시트에서는 이미 지워졌지만 BatchCustomers 등 하위 시트에는
+    //   아직 안 지워진 고아 데이터"(예: 이번에 실제로 발생한 타임아웃 중단 상황)가
+    //   있어도 재실행 시 영원히 정리가 안 되는 문제가 있었음. 이제는 Batches에 새
+    //   대상이 없어도, 하위 시트 정리(자가치유)는 항상 시도함 — 단, Batches 시트
+    //   자체를 다시 읽고 쓰는 불필요한 재작업은 생략해서 헛수고를 줄임.
     if (targetBatchIds.length === 0) {
-      Logger.log('보관 대상 없음 (완료된 지 ' + daysOld + '일 넘은 배치 없음)');
-      return { ok: true, archived: [] };
+      Logger.log('Batches 시트 기준 신규 보관 대상은 없음 — 하위 시트 고아 데이터 정리만 진행');
     }
+
+    // ★ 2026-09-28 수정 — Batches 시트를 기준으로 "현재도 살아있는 배치ID" 집합을
+    //   먼저 확정해두고, 하위 시트(BatchCustomers 등)에서는 이 집합에 "없는"
+    //   행을 전부 정리 대상으로 잡음. 이렇게 하면 예전에 타임아웃으로 도중에
+    //   멈춘 적이 있어서 Batches 시트에서는 이미 지워졌는데 하위 시트에는 그대로
+    //   남아있던 "고아 행(orphan)"까지 이번 실행에서 같이 자동으로 정리되고,
+    //   재실행해도 항상 같은 결과로 수렴하는(자가치유) 안전한 방식이 됨.
+    const activeBatchIdSet = {};
+    keepBatchRows.forEach(r => { activeBatchIdSet[String(r[0])] = true; });
 
     // 2) 시트 6개 각각에 대해: 대상 배치 행은 Archive_ 시트로 복사 후 메인에서 제거
     const sheetsToArchive = [
@@ -4870,32 +4911,62 @@ function archiveOldBatches(daysOld) {
     ];
 
     const summary = [];
+    const failedSheets = [];
     sheetsToArchive.forEach(({ name, get, headers }) => {
-      const sh = get();
-      const last = sh.getLastRow();
-      const lastCol = sh.getLastColumn();
-      if (last < 2) { summary.push(name + ': 데이터 없음'); return; }
+      try {
+        // ★ 2026-09-28 신규 — Batches 시트는 위에서 이미 새 대상이 없다고 확인됐다면
+        //   (targetBatchIds 0건) activeBatchIdSet과 내용이 100% 동일하므로, 굳이
+        //   다시 읽고/지우고/쓰는 불필요한 재작업(및 그로 인한 타임아웃 위험)을
+        //   피하기 위해 건너뜀. 하위 시트들(BatchCustomers 등)은 고아 데이터가
+        //   있을 수 있으므로 targetBatchIds가 0건이어도 항상 검사함.
+        if (name === BATCHES_SHEET && targetBatchIds.length === 0) {
+          summary.push(name + ': 변경 없음(이미 정리됨)');
+          return;
+        }
+        const sh = get();
+        const last = sh.getLastRow();
+        const lastCol = sh.getLastColumn();
+        if (last < 2) { summary.push(name + ': 데이터 없음'); return; }
 
-      const allRows = sh.getRange(2, 1, last - 1, lastCol).getValues();
-      const toArchive = allRows.filter(r => targetBatchIds.indexOf(String(r[0])) !== -1);
-      const toKeep = allRows.filter(r => targetBatchIds.indexOf(String(r[0])) === -1);
+        // Batches 시트 자신은 위에서 이미 targetBatchIds/keepBatchRows로 걸러뒀으므로
+        // 그 기준(activeBatchIdSet)을 그대로 재사용해서 일관성 유지.
+        const allRows = _sheetOpWithRetry_(() => sh.getRange(2, 1, last - 1, lastCol).getValues(), name + ' 읽기');
+        const toArchive = allRows.filter(r => !activeBatchIdSet[String(r[0])]);
+        const toKeep = allRows.filter(r => activeBatchIdSet[String(r[0])]);
 
-      if (toArchive.length > 0) {
-        const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + name, headers);
-        archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
+        if (toArchive.length > 0) {
+          const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + name, headers);
+          _sheetOpWithRetry_(() => {
+            archiveSh.getRange(archiveSh.getLastRow() + 1, 1, toArchive.length, lastCol).setValues(toArchive);
+          }, name + ' 보관 시트에 쓰기');
+        }
+
+        // ★ 2026-09-28 수정 — clearContent 후 곧바로 toKeep을 다시 쓰는 두 단계 사이에
+        //   타임아웃이 나면 데이터가 비는 위험한 구간이었음. 이제 이 두 단계도
+        //   각각 재시도로 감싸서, 일시적 오류로 멈추더라도 자동으로 끝까지 복구함.
+        _sheetOpWithRetry_(() => { sh.getRange(2, 1, last - 1, lastCol).clearContent(); }, name + ' 비우기');
+        if (toKeep.length > 0) {
+          _sheetOpWithRetry_(() => { sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep); }, name + ' 유지 행 다시 쓰기');
+        }
+
+        summary.push(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
+        Logger.log(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
+      } catch (eSheet) {
+        // ★ 2026-09-28 신규 — 시트 하나가 재시도까지 다 실패해도 전체를 중단하지
+        //   않고 다음 시트는 계속 진행함(예전엔 여기서 예외가 통째로 함수를 빠져나가
+        //   나머지 시트들이 아예 손도 못 대는 문제가 있었음). 실패한 시트는
+        //   failedSheets에 기록해서 결과에 남기고, 다음 archiveOldBatches 재실행 때
+        //   activeBatchIdSet 기준으로 자동으로 다시 정리됨.
+        const msg = name + ': 실패 — ' + String(eSheet && eSheet.message || eSheet);
+        summary.push(msg);
+        failedSheets.push(name);
+        Logger.log('❌ ' + msg);
       }
-
-      sh.getRange(2, 1, last - 1, lastCol).clearContent();
-      if (toKeep.length > 0) {
-        sh.getRange(2, 1, toKeep.length, lastCol).setValues(toKeep);
-      }
-
-      summary.push(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
-      Logger.log(name + ': ' + toArchive.length + '행 보관 이동, ' + toKeep.length + '행 유지');
     });
 
-    Logger.log('✅ 보관 완료 — 배치 ' + targetBatchIds.length + '개 (' + targetBatchIds.join(', ') + ')');
-    return { ok: true, archived: targetBatchIds, summary: summary };
+    Logger.log('✅ 보관 완료 — 배치 ' + targetBatchIds.length + '개 (' + targetBatchIds.join(', ') + ')' +
+      (failedSheets.length ? (' / ⚠️ 실패한 시트: ' + failedSheets.join(', ') + ' — 잠시 후 archiveOldBatches를 한 번 더 실행하면 자동으로 이어서 정리됨') : ''));
+    return { ok: failedSheets.length === 0, archived: targetBatchIds, summary: summary, failedSheets: failedSheets };
   } catch (e) {
     Logger.log('❌ archiveOldBatches 오류: ' + String(e && e.message || e));
     return { ok: false, error: String(e && e.message || e) };
