@@ -45,14 +45,18 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 /* ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 버튼/드롭다운
    (batch.html의 활성 배치 전환과 별개 · 여기서 배치를 골라도
    다른 기기/작업자 폰에는 전혀 영향 없음, TV 혼자만 조회) */
-/* ★ 2026-09-30 수정(현장 지적 — "지난 배치를 보는 중입니다" 배너와 버튼이
-   너무 붙어 있고 버튼이 잘 안 보임) — 예전엔 .tb-left가 align-items:center라서
-   배너가 표시되며 제목 영역이 길어지면 버튼이 그 세로 중앙(=배너 줄 근처)으로
-   같이 내려와 배너와 거의 붙어 보였음. align-self:flex-start로 버튼을 항상
-   맨 위(제목 줄 높이)에 고정해서, 배너가 몇 줄이 되든 버튼과 항상 분리되게 함.
-   왼쪽 여백도 넓히고, 버튼 자체도 테두리/글자를 더 밝게 해서 잘 보이도록 함. */
-.tb-switch-wrap{position:relative; margin-left:28px; align-self:flex-start; margin-top:2px;}
-.tb-switch-btn{font-family:var(--sans); font-size:13px; font-weight:700; color:var(--text); background:var(--surface2); border:1.5px solid var(--border2); border-radius:8px; padding:8px 16px; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,0.3);}
+/* ★ 2026-09-30 1차 수정(현장 지적 — 배너와 버튼이 너무 붙어 있고 버튼이 잘 안
+   보임) — align-self:flex-start로 버튼을 배너 포함 전체 영역의 맨 위에 고정. */
+/* ★ 2026-09-30 2차 수정(현장 재지적 — 버튼이 너무 위쪽으로 쏠려서 전체적으로
+   균형이 안 맞아 보이고, 테두리도 여전히 잘 안 보이며, 크기도 좀 더 커야 함) —
+   버튼을 .tb-titlerow(제목+배치정보+Built by 3줄 블록)에만 같이 묶어서, 배너가
+   뜨든 안 뜨든(배너는 이제 이 줄 아래로 완전히 분리됨) 항상 그 3줄 블록 높이
+   기준으로만 세로 중앙정렬 되게 함 — flex-start 트릭이 더는 필요 없음.
+   버튼 크기도 한 단계 키우고(패딩/글자 확대), 테두리를 더 밝은 톤으로 바꿔서
+   어두운 배경에서 경계가 또렷이 보이도록 함. */
+.tb-titlerow{display:flex; align-items:center; gap:20px;}
+.tb-switch-wrap{position:relative;}
+.tb-switch-btn{font-family:var(--sans); font-size:14.5px; font-weight:700; color:#F5F8FF; background:var(--surface2); border:1.5px solid #46527A; border-radius:10px; padding:11px 22px; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.03);}
 .tb-switch-btn:hover{background:var(--border2); color:var(--text); border-color:var(--amber);}
 .tb-switch-dd{display:none; position:absolute; top:calc(100% + 8px); left:0; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px; min-width:340px; box-shadow:0 10px 30px rgba(0,0,0,0.5); max-height:calc(100vh - 160px); overflow-y:auto;}
 .tb-switch-dd.open{display:block;}
@@ -327,9 +331,28 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">총량피킹 현황판</div>
-      <div class="tb-sub" id="batchLabel"><span class="status-dot off" id="liveDot"></span>연결 대기중...</div>
-      <div style="font-size:10px; color:var(--text-dim2); margin-top:1px;">Built by David Kim · 2026</div>
+      <!-- ★ 2026-09-30 재구성(사장님 지시 — 버튼 위치가 위로 쏠려 불균형해 보임) —
+           예전엔 "다른 배치"/"지난 배치" 버튼이 배너까지 포함한 전체 제목 영역
+           기준으로 맨 위에 고정돼서, 배너가 뜨면 버튼만 붕 떠 보이는 문제가
+           있었음. 이제 버튼을 "제목+배치정보+Built by" 3줄 블록만 감싸는
+           tb-titlerow 안에 같이 묶어서 그 블록 높이 기준으로만 세로 중앙정렬
+           되게 함 — 배너/미배분경보는 이 줄 아래 별도로 내려가므로 배너가
+           뜨든 안 뜨든 버튼 위치가 항상 제목 옆에서 균형 있게 유지됨. -->
+      <div class="tb-titlerow">
+        <div>
+          <div class="tb-title">총량피킹 현황판</div>
+          <div class="tb-sub" id="batchLabel"><span class="status-dot off" id="liveDot"></span>연결 대기중...</div>
+          <div style="font-size:10px; color:var(--text-dim2); margin-top:1px;">Built by David Kim · 2026</div>
+        </div>
+        <div class="tb-switch-wrap">
+          <button class="tb-switch-btn" id="btnSwitchBatchTV">⇄ 다른 배치</button>
+          <div class="tb-switch-dd" id="switchBatchDropdownTV"></div>
+        </div>
+        <div class="tb-switch-wrap">
+          <button class="tb-switch-btn" id="btnBatchHistoryTV">📅 지난 배치 (최근 14일)</button>
+          <div class="tb-switch-dd" id="batchHistoryDropdownTV"></div>
+        </div>
+      </div>
       <div class="manual-banner" id="manualBanner">
         <span style="white-space:nowrap;">🔍 <b>지난 배치를 보는 중입니다</b> — 창고 진행과 별개로 고정돼 있습니다</span>
         <span id="backToLiveCountdown" style="font-family:var(--mono); font-weight:800; white-space:nowrap;"></span>
@@ -341,14 +364,6 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
       <div class="unfulfilled-banner" id="unfulfilledBanner">
         ⚠️ <span id="unfulfilledBannerText">미배분 제품 확인 필요</span>
       </div>
-    </div>
-    <div class="tb-switch-wrap">
-      <button class="tb-switch-btn" id="btnSwitchBatchTV">⇄ 다른 배치</button>
-      <div class="tb-switch-dd" id="switchBatchDropdownTV"></div>
-    </div>
-    <div class="tb-switch-wrap">
-      <button class="tb-switch-btn" id="btnBatchHistoryTV">📅 지난 배치 (최근 14일)</button>
-      <div class="tb-switch-dd" id="batchHistoryDropdownTV"></div>
     </div>
   </div>
   <div class="tb-right">
