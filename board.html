@@ -977,8 +977,18 @@ let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상
 //   서로 다르게 말하는 불일치 발생). 이제 { stage, ts } 형태로 설정 시각을 같이
 //   기록하고, PENDING_MAX_MS(30초)가 지나도록 서버가 못 따라오면 더는 우기지
 //   않고 서버의 실제 값을 그대로 인정한다(+콘솔에 경고 남김, 진단용).
-let _pendingPackMoves = {}; // invoice -> { stage:'moved'|'taken', ts:Number }
-const PENDING_PACK_MAX_MS = 50000; // ★ 2026-09-03 재수정 — POLL_MS를 30초로 늘리면서 여유가 없어져(30초=30초) 함께 50초로 늘림(1.5배 이상 여유 유지). 이 시간 넘도록 서버가 확인 안 해주면 서버 값을 신뢰
+let _pendingPackMoves = {}; // invoice -> { stage:'moved'|'taken', ts:Number, lastVerifyTs?:Number }
+// ★ 2026-09-30 긴급 수정(현장 사고 — "블루로 바뀌었다가 다시 핑크로 돌아간다") —
+// 진짜 원인을 찾음: 이 50초 값은 2026-09-03에 "클라이언트가 Apps Script를 직접
+// 30초마다 폴링한다"는 전제로 정해진 여유(1.5배)였다. 그런데 지금은 Firestore
+// 미러 구조라, 폴링이 대부분 "서버가 1분(=60초)마다 한 번씩 새로 써주는 캐시
+// 문서"를 읽을 뿐이다. 즉 실제 서버 반영 확인 주기는 최대 60초 이상 걸릴 수
+// 있는데, 50초 만에 포기하고 "아직 못 따라온" 미러 값을 진짜인 것처럼 믿어버려서
+// (저장 자체는 이미 성공했는데도) 화면만 핑크로 되돌아가는 사고가 난 것.
+// 해결 2단계: ①시간을 넉넉히(정상 미러 주기 1회를 확실히 넘기도록) 늘리고,
+// ②그래도 못 따라오면 아래 _verifyPendingPackMoveDirectly_()로 미러를 거치지
+// 않고 서버에 직접 한 번 더 물어봐서, 실제로 저장 안 된 "진짜 실패"만 되돌린다.
+const PENDING_PACK_MAX_MS = 75000;
 
 // ★ 2026-08-14 신규 — 패킹존 이동 상태가 서버와 30초 넘게 안 맞을 때 눈에 보이게 알림.
 //   콘솔 경고만으로는 창고 TV 앞에서 아무도 못 봄.
@@ -995,6 +1005,41 @@ function showSyncFailToast(customerName){
   el.style.display = 'block';
   clearTimeout(el._hideTimer);
   el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 8000);
+}
+
+// ★ 2026-09-30 신규(위 PENDING_PACK_MAX_MS 수정과 짝) — 낙관적으로 표시해둔
+// 패킹존 이동 값이 미러에서 오래도록(75초) 확인이 안 되면, 곧바로 "실패"로
+// 단정해서 되돌리는 대신 Firestore 미러를 건너뛰고 Apps Script에 직접
+// getSlotProgress를 한 번 더 물어본다(togglePackingMoved의 실패 처리에서
+// 이미 쓰던 것과 완전히 동일한 "직접 확인" 패턴). 서버에 실제로는 잘
+// 저장돼 있는데 미러만 아직 못 따라온 것이라면(가장 흔한 경우 — 1분 동기화
+// 주기가 밀렸을 때) pending을 계속 유지해서 화면이 절대 틀리게 되돌아가지
+// 않게 하고, 직접 확인해도 진짜 반영이 안 돼 있을 때만(정말 드문 진짜 실패)
+// 그때 되돌린다. invoice별로 동시에 여러 번 확인을 안 보내도록 가드함.
+let _pendingPackMoveVerifying = new Set();
+async function _verifyPendingPackMoveDirectly_(invoice, pendingEntry, batchIdAtCheck){
+  if(_pendingPackMoveVerifying.has(invoice)) return;
+  _pendingPackMoveVerifying.add(invoice);
+  try{
+    const check = await gasQuery('getSlotProgress', { batchId: batchIdAtCheck });
+    const checkSlot = check && check.ok && (check.slots || []).find(s => s.invoice === invoice);
+    const checkStage = checkSlot ? (checkSlot.takenOut ? 'taken' : checkSlot.movedToPacking ? 'moved' : 'none') : null;
+    if(checkStage === pendingEntry.stage){
+      // 미러만 아직 못 따라왔을 뿐, 서버엔 이미 정확히 저장돼 있음 — 절대 되돌리지 않음.
+      // 타이머를 다시 미뤄서, 다음 미러 갱신이 따라잡을 때까지 재확인을 과도하게 반복 안 함.
+      pendingEntry.ts = Date.now();
+      console.log('✅ [패킹존 이동] 미러 지연 확인 — 서버엔 이미 정상 저장되어 있어 화면 유지:', invoice, pendingEntry.stage);
+    } else {
+      console.warn('⚠ [패킹존 이동] 서버 직접 확인 결과도 반영 안 돼 있음 — 진짜 실패로 판단, 되돌림:', invoice, '기대값:', pendingEntry.stage, '실제값:', checkStage);
+      delete _pendingPackMoves[invoice];
+      showSyncFailToast((_slotsByInvoice[invoice] && _slotsByInvoice[invoice].customer) || invoice);
+      pollOnce(); // 실제 서버 값으로 화면을 정확히 맞춤
+    }
+  }catch(e){
+    console.warn('[패킹존 이동] 직접 확인 자체 실패 — 다음 재확인 때 다시 시도:', invoice, e);
+  }finally{
+    _pendingPackMoveVerifying.delete(invoice);
+  }
 }
 
 // ★ 2026-08-04 신규 — 슬롯의 현재 패킹 단계: none(초록) / moved(핑크) / taken(파랑)
@@ -1898,17 +1943,20 @@ function renderBoard(slots, fromPoll){
       const pending = pendingEntry.stage;
       const age = Date.now() - pendingEntry.ts;
       if(serverStage === pending){
-        delete _pendingPackMoves[s.invoice]; // 서버가 따라옴 — 정상 종료
-      } else if(age > PENDING_PACK_MAX_MS){
-        // ★ 2026-08-14 신규 — 30초가 지나도록 서버가 이 값을 확인해주지 않음.
-        //   저장이 실패했거나 나중에 다른 이유로 지워진 것 — 더는 우기지 않고
-        //   서버의 실제 값을 그대로 인정한다(s.movedToPacking/s.takenOut을 안 건드림).
-        console.warn('⚠ 패킹존 이동 상태 동기화 실패 — 서버 값으로 되돌림:', s.invoice, '기대값:', pending, '실제값:', serverStage);
-        showSyncFailToast(s.customer || s.invoice);
-        delete _pendingPackMoves[s.invoice];
+        delete _pendingPackMoves[s.invoice]; // 미러가 따라옴 — 정상 종료
       } else {
+        // ★ 2026-09-30 수정(현장 사고 — "블루가 다시 핑크로 돌아간다") — 미러가
+        //   아직 못 따라왔다고 해서 절대 섣불리 되돌리지 않는다. 화면은 계속
+        //   낙관적 값(방금 누른 값)을 유지하고, PENDING_PACK_MAX_MS를 넘겼을
+        //   때만(그것도 15초 간격으로만) 미러를 거치지 않는 직접 확인을 한 번
+        //   보내서 진짜 실패인지 아닌지 가려낸다 — 실제로 되돌리는 건 그 직접
+        //   확인이 "진짜 실패"라고 답했을 때뿐(_verifyPendingPackMoveDirectly_).
         s.movedToPacking = (pending !== 'none');
         s.takenOut = (pending === 'taken');
+        if(age > PENDING_PACK_MAX_MS && (Date.now() - (pendingEntry.lastVerifyTs || 0)) > 15000){
+          pendingEntry.lastVerifyTs = Date.now();
+          _verifyPendingPackMoveDirectly_(s.invoice, pendingEntry, currentBatchId);
+        }
       }
     }
     _slotsByInvoice[s.invoice] = s;
