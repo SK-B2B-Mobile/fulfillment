@@ -45,9 +45,15 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 /* ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 버튼/드롭다운
    (batch.html의 활성 배치 전환과 별개 · 여기서 배치를 골라도
    다른 기기/작업자 폰에는 전혀 영향 없음, TV 혼자만 조회) */
-.tb-switch-wrap{position:relative; margin-left:14px;}
-.tb-switch-btn{font-family:var(--sans); font-size:13px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:7px 14px; cursor:pointer;}
-.tb-switch-btn:hover{background:var(--border); color:var(--text);}
+/* ★ 2026-09-30 수정(현장 지적 — "지난 배치를 보는 중입니다" 배너와 버튼이
+   너무 붙어 있고 버튼이 잘 안 보임) — 예전엔 .tb-left가 align-items:center라서
+   배너가 표시되며 제목 영역이 길어지면 버튼이 그 세로 중앙(=배너 줄 근처)으로
+   같이 내려와 배너와 거의 붙어 보였음. align-self:flex-start로 버튼을 항상
+   맨 위(제목 줄 높이)에 고정해서, 배너가 몇 줄이 되든 버튼과 항상 분리되게 함.
+   왼쪽 여백도 넓히고, 버튼 자체도 테두리/글자를 더 밝게 해서 잘 보이도록 함. */
+.tb-switch-wrap{position:relative; margin-left:28px; align-self:flex-start; margin-top:2px;}
+.tb-switch-btn{font-family:var(--sans); font-size:13px; font-weight:700; color:var(--text); background:var(--surface2); border:1.5px solid var(--border2); border-radius:8px; padding:8px 16px; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,0.3);}
+.tb-switch-btn:hover{background:var(--border2); color:var(--text); border-color:var(--amber);}
 .tb-switch-dd{display:none; position:absolute; top:calc(100% + 8px); left:0; z-index:200; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px; min-width:340px; box-shadow:0 10px 30px rgba(0,0,0,0.5); max-height:calc(100vh - 160px); overflow-y:auto;}
 .tb-switch-dd.open{display:block;}
 .tb-switch-row{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 8px; border-radius:8px; cursor:pointer;}
@@ -820,6 +826,24 @@ let prevStatus = {}; // slotNum -> 'waiting'|'active'|'done' (완료 순간 감�
 // 무조건 "지난 배치를 보는 중입니다"로 잘못 들어가는 버그가 있었음(실제 현장
 // 사진으로 확인됨 — 오늘 만든 배치를 보고 있는데 "지난 배치" 배너가 뜸).
 let liveBatchId = null;
+
+// ★ 2026-09-30 신규(사장님 지시 — 기기 독립성) — 이 기기가 "어느 배치를
+// 기본으로 보여줄지"를 이미 정했는지 여부. false인 동안(페이지를 막 열었을 때,
+// 또는 backToLiveNow()로 복귀한 직후)에만 pollOnce()가 "완료 안 된 배치 중
+// 가장 최근 것"을 새로 고른다. true가 된 뒤로는 새 배치가 생기거나 다른
+// 기기 상태가 바뀌어도 이 값을 다시 안 고름 — 오직 ①현재 보는 배치가 전부
+// 블루(패킹존 이동 완료)로 넘어갈 때, ②사람이 새로고침할 때만 다시 false로 돌아감.
+let _defaultBatchLocked = false;
+
+// ★ 2026-09-30 신규(사장님 지시 — 정정) — 지금 보고 있는 배치가 이미
+// 전부 블루(패킹존 이동 완료)로 끝났는데, 그 순간엔 넘어갈 "다음 배치"가
+// 하나도 없어서 이 배치에 그대로 머물러 있는 상태인지 여부. true인 동안은
+// 매 폴링마다 "혹시 그 사이에 새 배치가 생겼는지"를 가볍게 확인해서, 생겼다면
+// 그 즉시 그 새 배치로 자동 전환한다(= "완료된 배치에 멈춰 있다가 다음 배치가
+// 생기면 바로 넘어간다"는 예외 케이스 전용 플래그). 배치가 아직 진행 중일 때
+// 새 배치가 생기는 것은 이 플래그와 무관하며, 그 경우엔 기존 원칙대로 절대
+// 자동 전환되지 않는다.
+let _waitingForNextBatchAfterCompletion = false;
 
 // ★ 2026-07-23 신규 — TV 자체 "다른 배치 조회" 모드.
 // null이면 평소대로 getActiveBatch(매니저가 batch.html에서 정한 활성 배치)를 실시간으로 따라감.
@@ -1843,6 +1867,47 @@ function renderBoard(slots, fromPoll){
 // "그사이 더 최신 요청이 이미 시작됐으면" 그 낡은 응답은 화면에 반영하지
 // 않고 조용히 버리도록 함.
 let pollSeq = 0;
+
+// ★ 2026-09-30 신규(사장님 지시, 같은 날 블루 기준으로 정정) — "지금 보고
+// 있는 배치의 모든 슬롯이 블루(패킹존 이동 "완료", takenOut===true)로 다
+// 넘어갔는지" 확인해서, 그렇다면 이 기기를 자동으로 "다음 최신 배치"로
+// 넘긴다. (핑크/movedToPacking은 "패킹존 이동이 필요하다"는 표시일 뿐 실제
+// 완료 신호가 아니므로 기준에서 제외 — 실제 완료는 블루/takenOut.)
+// 이 화면이 자동으로 바뀌는 트리거는 다음 세 가지뿐 — 그 외엔 절대 자동으로
+// 안 바뀐다: ①새로고침, ②지금 보는 배치가 전부 블루로 완료되는 순간(여기),
+// ③②의 순간에 넘어갈 다음 배치가 아직 없어서 대기 중이다가, 그 뒤 새 배치가
+// 생기는 순간(pollOnce의 _waitingForNextBatchAfterCompletion 처리 참고).
+// manualBatchOverride(수동으로 지난 배치 고정) 중에는 호출부에서 아예 안
+// 부르므로 여기선 다시 확인 안 함. 넘어갈 다음 배치가 없으면 그대로 유지하되,
+// "새 배치가 생기면 바로 넘어가야 하는 대기 상태"로 표시해둔다.
+async function checkAutoAdvanceOnFullyTaken_(slots){
+  const filled = (slots || []).filter(s => s && !s.empty);
+  if(!filled.length) return; // 빈 슬롯뿐이면 판단 불가 — 그대로 둠
+  const allTaken = filled.every(s => s.status === 'done' && s.takenOut === true);
+  if(!allTaken) return;
+  if(_waitingForNextBatchAfterCompletion) return; // 이미 대기 상태로 표시돼 있음 — pollOnce 쪽에서 새 배치 등장을 계속 확인 중이므로 중복 처리 방지
+  try{
+    const openRes = await getOpenBatchesData_();
+    const trulyOpen = (openRes.batches || []).filter(b => !b.recentlyCompleted && String(b.batchId) !== String(currentBatchId));
+    if(!openRes.ok || !trulyOpen.length){
+      // 넘어갈 다음 배치가 지금은 없음 — 이 배치에 그대로 머무르되, 앞으로
+      // 새 배치가 생기는 즉시 자동 전환되도록 "대기 상태"로 표시해둔다.
+      _waitingForNextBatchAfterCompletion = true;
+      console.log('ℹ️ 배치 ' + currentBatchId + ' 전체 슬롯이 블루(패킹존 이동 완료)로 전환됨 — 넘어갈 다음 배치 없음, 새 배치 생성 대기 상태로 전환');
+      return;
+    }
+    const next = trulyOpen.slice().sort((a, b) => {
+      let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+      let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+      return tb - ta;
+    })[0];
+    console.log('✅ 배치 ' + currentBatchId + ' 전체 슬롯이 블루(패킹존 이동 완료)로 전환됨 — 다음 최신 배치 ' + next.batchId + '로 자동 전환');
+    currentBatchId = next.batchId;
+    rememberBatch(currentBatchId);
+    pollOnce(); // 새 배치 기준으로 즉시 다시 갱신
+  }catch(e){ console.warn('전체 블루 전환 후 자동전환 확인 실패(다음 폴링에서 재시도):', e); }
+}
+
 async function pollOnce(){
   const mySeq = ++pollSeq;
   try{
@@ -1858,26 +1923,43 @@ async function pollOnce(){
       document.getElementById('batchLabel').innerHTML =
         `<span class="status-dot manual"></span>배치 ${currentBatchId} · ${manualBatchOverride.date}`;
     } else {
-    // ★ 2026-07-23 신규: "오늘 배치"만 찾던 것을, 매니저가 서버에 기록해둔
-    //   "활성 배치"를 우선 확인하도록 변경 — batch.html에서 매니저가 배치를
-    //   새로 시작하거나 "이어서 작업하기"를 누르면 서버에 기록되는데, TV
-    //   현황판도 그 기록을 그대로 따라감 (어제 배치든 오늘 배치든 무관).
-    //   TV는 하루 종일 안 끄고 켜두는 경우가 많아서, 이미 배치를 하나 물고
-    //   있어도 매 폴링(8초)마다 계속 재확인함 — 매니저가 중간에 다른 배치로
-    //   전환하면 TV도 곧바로 자동으로 따라가게 하기 위함.
-    // ★ 2026-08-11 속도 개선(매니저 지적) — 새로고침할 때마다 "연결 대기중..."이
-    //   한참 이어지던 문제. 원인은 서버 왕복을 순서대로 기다렸기 때문:
-    //     getActiveBatch → (없으면 getBatch → getOpenBatches) → getSlotProgress
-    //   각 호출이 1~3초라 화면이 뜨기까지 최대 10초 가까이 걸렸음.
-    //   → 마지막으로 본 배치 번호를 이 TV에 기억해두고, 새로고침 직후에는
-    //     그 번호로 슬롯을 곧바로 불러와 화면을 먼저 채움. 활성 배치 확인은
-    //     그다음에 이어서 하고, 배치가 바뀌었으면 그때 갱신함.
+    // ★ 2026-09-30 재설계(사장님 지시 — TV/컴퓨터 독립성, 기존 버그 수정) —
+    //   예전엔 이 블록이 매 폴링(30초)마다 서버의 "활성 배치"(매니저가
+    //   batch.html에서 지정)를 다시 따라갔다. 그래서 다른 기기의 조작이나 새
+    //   배치 생성이 이 화면에 그대로 전파돼서 여러 대의 TV/컴퓨터가 서로
+    //   영향을 주는 문제가 있었고, 열린 배치가 2개 이상이면 아예 아무것도 못
+    //   골라서(옛 로직: trulyOpen.length===1 조건) 제목줄엔 최근 배치가 보이는데
+    //   본문은 "오늘의 배치를 기다리는 중..."만 뜨는 불일치 버그(2026-09-30
+    //   실제 현장에서 발견됨)로도 이어졌다.
+    //
+    //   이제 이 화면이 "어느 배치를 보여줄지"는 완전히 이 기기 혼자 결정하고,
+    //   아래 세 경우에만 다시 정한다 — 그 사이엔 새 배치가 생기든, 매니저가
+    //   활성 배치를 새로 지정하든, 다른 TV/컴퓨터가 뭘 보고 있든 이 화면은
+    //   절대 안 바뀐다:
+    //     ① 이 페이지를 처음 열었을 때, 또는 새로고침 직후(_defaultBatchLocked
+    //        === false) → "완료되지 않은 배치 중 가장 최근에 생성된 것"을
+    //        자동으로 선택
+    //     ② 지금 보고 있는 배치의 모든 슬롯이 블루(패킹존 이동 완료,
+    //        takenOut===true)로 다 넘어가서 아래 checkAutoAdvanceOnFullyTaken_()가
+    //        스스로 다음 배치로 넘길 때
+    //     ③ ②의 순간에 넘어갈 다음 배치가 아직 없어서 이 배치에 머물러
+    //        있다가(_waitingForNextBatchAfterCompletion===true), 그 뒤 새
+    //        배치가 생기는 순간 — 이 배치가 이미 완료 상태일 때만 적용되는
+    //        예외이며, 아직 진행 중인 배치를 보고 있을 땐 새 배치가 생겨도
+    //        절대 자동 전환되지 않는다(기존 원칙 그대로 유지)
+    //   (작업자가 "다른 배치"/"지난 배치"에서 직접 고르는 경우는 이 블록과
+    //   무관하게 manualBatchOverride 모드로 따로 들어가므로 여기 영향 없음)
+    // ★ 2026-08-11 속도 개선(매니저 지적, 그대로 유지) — 새로고침할 때마다
+    //   "연결 대기중..."이 한참 이어지던 문제. 마지막으로 본 배치 번호를 이
+    //   기기에 기억해두고, 새로고침 직후엔 그 번호로 슬롯을 곧바로 불러와
+    //   화면을 먼저 채운다. 진짜 "최신 배치" 판정은 그다음에 이어서 하고,
+    //   달랐으면 그때 정정한다.
     if (BOOT_FAST && LAST_BATCH_ID){
       BOOT_FAST = false;
       currentBatchId = LAST_BATCH_ID;
       document.getElementById('batchLabel').innerHTML =
         `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · 확인 중…`;
-      // 슬롯을 먼저 그리고, 활성 배치 확인은 아래 폴링에서 이어감
+      // 슬롯을 먼저 그리고, 진짜 최신 배치 판정은 아래에서 이어감
       try{
         const fast = await gasQuery('getSlotProgress', { batchId: currentBatchId });
         if(mySeq === pollSeq && fast && fast.ok){
@@ -1890,107 +1972,82 @@ async function pollOnce(){
         }
       }catch(e){ /* 실패해도 아래 정상 경로가 이어서 확인 */ }
     }
-    const activeRes = await getActiveBatchData_();
-    if(mySeq !== pollSeq) return; // ★ 신규: await 도중 더 최신 폴링이 시작됐으면 여기서 중단
-    // ★ 2026-09-23 수정(버그) — 예전엔 batchId가 "바뀔 때만" 라벨을 갱신해서,
-    //   BOOT_FAST로 미리 띄워둔 "확인 중…" placeholder가 활성 배치가 그대로
-    //   확인된(=흔한) 경우엔 영영 안 지워지던 문제. batchId 변경 여부와
-    //   무관하게 활성 배치 확인이 성공할 때마다 항상 실제 날짜로 라벨을 갱신함.
-    if(activeRes.ok && activeRes.batch){
-      currentBatchId = activeRes.batch.batchId;
-      rememberBatch(currentBatchId); // ★ 2026-08-11 — 다음 새로고침 때 즉시 띄우기 위해 기억
-      document.getElementById('batchLabel').innerHTML =
-        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${activeRes.batch.date}`;
-    } else if(!currentBatchId){
-      // 활성 배치 기록이 아직 없으면(아무도 안 정했으면) 예전처럼 오늘자 배치라도 확인
-      const b = await getBatchData_();
-      if(mySeq !== pollSeq) return; // ★ 신규
-      if(!b.ok || !b.batch){
-        // ★ 2026-08-04 신규 — batch.html에서 어제 적용한 것과 동일한 안전장치.
-        //   활성 배치 기록도 없고 "오늘 생성된" 배치도 없으면(=날짜가 바뀐
-        //   다음날 아침 등), 완료 안 된 배치가 정확히 1개뿐일 때만 자동으로
-        //   그 배치를 TV에 띄움. 2개 이상이면 헷갈릴 수 있으니 절대 임의로
-        //   고르지 않고 "진행중인 배치 없음"으로 두어 매니저가 다른 배치 버튼으로
-        //   직접 고르게 함.
-        let resolved = null;
-        try{
-          // ★ 2026-08-19 재수정(긴급) — 여기 재시도(gasQueryWithRetry)를 썼던 게
-          //   오히려 서버 혼잡을 키운 원인으로 확인됨. 이 코드는 pollOnce() 안,
-          //   즉 12초마다 자동으로 다시 실행되는 반복 폴링 경로라서, 그 안에서
-          //   또 재시도(최대 3번)를 하면 혼잡한 순간에 요청이 3배로 늘어나며
-          //   혼잡을 더 키우고 더 오래 끌게 만듦. 반복 폴링 경로는 "실패하면
-          //   다음 폴링(12초 후)에 알아서 다시 시도된다"는 게 이미 보장돼
-          //   있으므로, 여기서 자체 재시도는 불필요하고 오히려 해로움 — 일반
-          //   호출로 되돌림. (사람이 직접 누르는 "다른 배치" 버튼 등은 반복
-          //   폴링이 아니라서 재시도를 그대로 둠)
-          const openRes = await getOpenBatchesData_();
-          if(mySeq !== pollSeq) return;
-          // ★ 2026-08-05 신규 — getOpenBatches가 "완료된 지 1시간 안 된 배치"도
-          //   같이 내려주므로, 이 자동표시 판단에서는 반드시 제외해야 함.
-          const trulyOpen = (openRes.batches || []).filter(b => !b.recentlyCompleted);
-          if(openRes.ok && trulyOpen.length === 1){
-            resolved = trulyOpen[0];
-          }
-        }catch(e){ console.warn('미완료 배치 자동 확인 실패:', e); }
-        if(!resolved){
-          // ★ 2026-09-25 긴급 수정(현장 발견 — "지난 배치에서 특정 배치를
-          //   눌러도 아무것도 안 뜬다") — 여기서 그냥 return하면 liveBatchId가
-          //   "마지막으로 실제 라이브였던 배치 번호"에 계속 고정된 채로 절대
-          //   안 지워졌음(liveBatchId 갱신 줄은 이 return보다 한참 아래에
-          //   있어서 여기서 절대 도달 못 함). 그 상태에서 "지난 배치" 목록에서
-          //   하필 그 옛날 라이브 배치와 같은 번호를 다시 누르면,
-          //   tvHistoryWireRows_의 "row.dataset.batch === liveBatchId" 검사가
-          //   (실제로는 이미 라이브가 아닌데도) true로 잘못 판정되어 override
-          //   모드로 안 들어가고 그냥 backToLiveNow()만 다시 호출됨 — 그런데
-          //   지금 실제 서버 상태가 정확히 "진행중인 배치 없음"이므로
-          //   backToLiveNow()가 또 똑같이 아무것도 없는 화면만 보여주고 끝남.
-          //   즉 그 특정 배치만 영원히 "선택해도 반응 없음"처럼 보이던 원인.
-          //   이제 "진행중인 배치가 없다"고 확정되는 바로 이 시점에 liveBatchId도
-          //   같이 지워서, 더 이상 그 옛 배치 번호와 잘못 매칭될 일이 없게 함.
-          liveBatchId = null;
-          const dot0 = document.getElementById('liveDot');
-          if(dot0) dot0.className = 'status-dot off';
-          document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
-          return;
+
+    if(!_defaultBatchLocked){
+      // ① 이 기기가 아직 "어느 배치를 볼지" 정하기 전 — 완료 안 된 배치 중
+      //   가장 최근에 생성된 것을 고른다. 2개 이상 열려있어도(예전 버그
+      //   원인) 문제없이 항상 하나를 고름.
+      let resolved = null;
+      try{
+        const openRes = await getOpenBatchesData_();
+        if(mySeq !== pollSeq) return;
+        // getOpenBatches가 "완료된 지 1시간 안 된 배치"도 같이 내려주므로,
+        // 이 자동표시 판단에서는 반드시 제외해야 함.
+        const trulyOpen = (openRes.batches || []).filter(b => !b.recentlyCompleted);
+        if(openRes.ok && trulyOpen.length){
+          resolved = trulyOpen.slice().sort((a, b) => {
+            let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+            let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+            return tb - ta; // 가장 최근 생성된 배치가 맨 앞
+          })[0];
         }
-        currentBatchId = resolved.batchId;
-        document.getElementById('batchLabel').innerHTML =
-          `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${resolved.date}`;
-      } else {
-      currentBatchId = b.batch.batchId;
-      rememberBatch(currentBatchId); // ★ 2026-08-11
-      document.getElementById('batchLabel').innerHTML =
-        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b.batch.date}`;
+      }catch(e){ console.warn('열린 배치 목록 확인 실패(다음 폴링에서 재시도):', e); }
+
+      if(!resolved){
+        // ★ 진행중인 배치가 정말 하나도 없는 경우에만 대기 화면 표시
+        liveBatchId = null;
+        const dot0 = document.getElementById('liveDot');
+        if(dot0) dot0.className = 'status-dot off';
+        document.getElementById('batchLabel').innerHTML = '<span class="status-dot off"></span>진행중인 배치 없음';
+        return;
       }
+      currentBatchId = resolved.batchId;
+      rememberBatch(currentBatchId); // 다음 새로고침 때 즉시 띄우기 위해 기억
+      document.getElementById('batchLabel').innerHTML =
+        `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${resolved.date}`;
+      _defaultBatchLocked = true; // ★ 이 페이지가 살아있는 동안 다시는 이 판정으로 안 돌아옴
+      _waitingForNextBatchAfterCompletion = false; // 새로 고른 배치 기준으로 대기 상태 초기화
     } else {
-      // ★ 2026-09-23 신규(추가 버그 수정) — "명시적으로 지정된 활성 배치"가
-      //   없는 상태(activeRes.ok=true, activeRes.batch=null — 흔히 있는 정상
-      //   상태)에서 BOOT_FAST가 이미 화면에 배치를 하나 띄워둔 경우, 위
-      //   두 분기 모두 해당이 안 돼서 "확인 중…" placeholder가 영영 안 바뀌던
-      //   문제. 이미 화면에 띄운 currentBatchId의 실제 날짜를 열린 배치
-      //   목록(미러 캐시라 즉시 응답)에서 찾아서 채워줌.
+      // 이미 "이 기기가 볼 배치"가 정해진 상태 — 라벨(날짜)만 가볍게 갱신하고
+      // currentBatchId는 절대 다시 고르지 않음(새 배치가 생겨도 여기서 안 바뀜).
+      // ★ 유일한 예외: 지금 보고 있는 배치가 이미 전부 블루로 완료돼서
+      //   _waitingForNextBatchAfterCompletion === true인 상태라면, 그 사이에
+      //   새 배치가 생겼는지 확인해서 생겼으면 그 배치로 자동 전환한다.
       try{
         const openRes2 = await getOpenBatchesData_();
         if(mySeq !== pollSeq) return;
-        const found2 = (openRes2.batches || []).find(bb => String(bb.batchId) === String(currentBatchId));
-        if(found2){
-          document.getElementById('batchLabel').innerHTML =
-            `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${found2.date}`;
-        } else {
-          const b2 = await getBatchData_();
-          if(mySeq !== pollSeq) return;
-          if(b2.ok && b2.batch && String(b2.batch.batchId) === String(currentBatchId)){
+        let switched = false;
+        if(_waitingForNextBatchAfterCompletion){
+          const trulyOpen2 = (openRes2.batches || []).filter(b => !b.recentlyCompleted && String(b.batchId) !== String(currentBatchId));
+          if(openRes2.ok && trulyOpen2.length){
+            const next2 = trulyOpen2.slice().sort((a, b) => {
+              let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
+              let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
+              return tb - ta;
+            })[0];
+            console.log('✅ 완료된 배치 ' + currentBatchId + ' 에서 대기 중 새 배치 ' + next2.batchId + ' 발견 — 자동 전환');
+            currentBatchId = next2.batchId;
+            rememberBatch(currentBatchId);
+            _waitingForNextBatchAfterCompletion = false;
             document.getElementById('batchLabel').innerHTML =
-              `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${b2.batch.date}`;
+              `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${next2.date}`;
+            switched = true;
+          }
+        }
+        if(!switched){
+          const found2 = (openRes2.batches || []).find(bb => String(bb.batchId) === String(currentBatchId));
+          if(found2){
+            document.getElementById('batchLabel').innerHTML =
+              `<span class="status-dot live" id="liveDot"></span>배치 ${currentBatchId} · ${found2.date}`;
           }
         }
       }catch(e){ /* 실패해도 다음 폴링에서 다시 시도됨 */ }
     }
-    // ★ 2026-08-25 신규(버그 수정) — 위 else 블록(비-override 상태) 안에서
-    //   확정된 currentBatchId를 "진짜 실제 활성 배치"로 항상 같이 기억해둠.
-    //   override 모드로 들어가도 이 값은 안 바뀌므로, "다른 배치"/"지난 배치"
-    //   목록에서 이 값과 같은 배치를 다시 클릭했을 때 "그건 이미 지금 보고
-    //   있는 실제 배치니까 override 모드로 들어갈 필요 없다"를 판단할 수 있음.
+    // ★ 확정된 currentBatchId를 "진짜 실제로 보고 있는 배치"로 항상 같이
+    //   기억해둠. override 모드로 들어가도 이 값은 안 바뀌므로, "다른 배치"/
+    //   "지난 배치" 목록에서 이 값과 같은 배치를 다시 클릭했을 때 "그건 이미
+    //   지금 보고 있는 실제 배치니까 override 모드로 들어갈 필요 없다"를
+    //   판단할 수 있음.
     liveBatchId = currentBatchId;
     }
 
@@ -2027,7 +2084,13 @@ async function pollOnce(){
       (res.totalCount > 0 ? (res.doneCount / res.totalCount * 100) : 0) + '%';
     // ★ 2026-09-28 신규 — res._fresh(Apps Script 직접 조회로 방금 받아온 정확한 값)면
     // mirror/board_scanFast 보정치를 또 더하지 않음(이미 최신 값이라 중복 가산 방지).
-    renderBoard(res._fresh ? res.slots : _applyFastScanDelta_(res.slots), true);
+    const slotsForRender = res._fresh ? res.slots : _applyFastScanDelta_(res.slots);
+    renderBoard(slotsForRender, true);
+    // ★ 2026-09-30 신규 — ②번 자동전환 트리거(모든 슬롯 초록→핑크 전환 완료).
+    //   manualBatchOverride(수동으로 지난 배치 고정 중)일 땐 절대 호출 안 함 —
+    //   작업자의 수동 선택이 항상 우선. fire-and-forget으로 호출(다음 폴링을
+    //   막지 않음) — 전환이 필요하면 내부에서 알아서 pollOnce()를 다시 부름.
+    if(!manualBatchOverride) checkAutoAdvanceOnFullyTaken_(slotsForRender);
   }catch(e){
     // ★ 2026-07-17 신규: 폴링 중 예상 못한 오류가 나도 콘솔에만 남기고
     //   다음 8초 뒤 폴링은 그대로 이어지게 함(화면이 아예 멈추지 않도록)
@@ -2415,6 +2478,8 @@ let viewOnlyPinned = false; // ★ 2026-08-24 신규 — true면 자동복귀 �
 function backToLiveNow(){
   manualBatchOverride = null;
   currentBatchId = null; // ★ 강제 초기화해야 다음 폴링이 배치가 바뀐 걸로 인식해서 라벨을 다시 그림
+  _defaultBatchLocked = false; // ★ 2026-09-30 신규 — 복귀 시 "완료 안 된 배치 중 최신"을 다시 한번 새로 고름
+  _waitingForNextBatchAfterCompletion = false; // ★ 복귀 시 대기 상태도 함께 초기화
   document.getElementById('manualBanner').classList.remove('show');
   stopViewOnlyTimer();
   viewOnlyPinned = false; // 복귀했으니 고정 상태도 초기화(다음에 다른 배치 볼 때 기본값부터 시작)
