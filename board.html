@@ -553,7 +553,11 @@ const GAS_READY = CONFIG.GAS_URL.startsWith('https://script.google.com/');
 // 네트워크 호출 대신 이 캐시를 읽음. FIRESTORE_MIRROR_OK가 true일 때만
 // 캐시를 신뢰하고, 그렇지 않으면 기존 gasQuery 직접 호출로 자동 대체됨.
 let FIRESTORE_MIRROR_OK = false;
-let _mirrorCache = { activeBatch:null, batch:null, openBatches:null, slotProgress:null, unfulfilledAlerts:null, slotProgressByBatch:{} };
+// ★ 2026-09-30 수정 — slotProgress/unfulfilledAlerts(둘 다 전역 단일 배치용)
+// 필드는 더 이상 안 씀(이유: 위 getSlotProgressForBatch_, 아래
+// getUnfulfilledAlertsForBatch_ 함수 주석 참고). 배치별 데이터는 전부
+// *ByBatch에 배치ID로 구분해서 저장.
+let _mirrorCache = { activeBatch:null, batch:null, openBatches:null, slotProgressByBatch:{}, unfulfilledAlertsByBatch:{} };
 
 /* ═══════════════════════════════════════════════════════════
  * ★ 2026-09-25 신규(현장 요청 — "다른 배치로 전환할 때 최대한 빨리") —
@@ -567,6 +571,23 @@ let _mirrorCache = { activeBatch:null, batch:null, openBatches:null, slotProgres
  * 들어갈 때 그 배치 전용 문서를 구독해서 있으면 즉시(보통 1초 이내) 쓰고,
  * 3초 안에 안 오면(14일 지난 진짜 오래된 배치이거나 아직 이번 1분 주기가 안
  * 돈 경우) 기존처럼 직접 호출로 안전하게 대체한다.
+ *
+ * ★ 2026-09-30 긴급 수정(현장 버그 — "보고 있던 배치가 갑자기 죽었다가
+ * 다시 살아난다") — 원인을 찾음: 평소(실시간) 모드는 이 배치 전용 미러가
+ * 아니라 mirror/board_slotProgress라는 "서버가 정한 단 하나의 활성 배치"용
+ * 전역 문서만 읽고 있었다. 그런데 이 전역 문서는 서버(FirestoreSync.gs)가
+ * ①매니저가 지정한 활성 배치, ②없으면 오늘 배치, ③그것도 없고 열린 배치가
+ * 정확히 1개일 때만 그 배치를 쓰고, 그 외(열린 배치가 2개 이상인데 활성
+ * 배치도 없는 — 바로 지금 이 창고의 실제 상황!)에는 슬롯을 통째로 빈
+ * 배열로 써버린다. 그러니 1분 동기화 주기마다 "이 기기가 실제로 보고 있는
+ * 배치"와 무관하게 화면이 통째로 비었다 채워졌다를 반복한 것 — 오늘 우리가
+ * board.html에 만든 "기기별 독립 배치 선택" 기능과 애초에 안 맞는 낡은
+ * 전역 문서였다.
+ * 해결: 실시간 모드도 조회 모드와 완전히 동일하게, 이미 서버가 열린 배치
+ * 전체에 대해 1분마다 채워주는 배치 전용 문서(mirror/slotProgress_{batchId})
+ * 만 쓰도록 통일한다. 전역 board_slotProgress는 더 이상 읽지 않음 — 그래서
+ * "몇 개의 배치가 열려있는지", "서버가 어느 배치를 활성으로 보는지"와 완전히
+ * 무관하게, 이 기기가 지금 보기로 정한 배치의 데이터만 항상 정확하게 표시됨.
  * ═══════════════════════════════════════════════════════════ */
 let _subscribedSlotProgressBatchIds = new Set();
 let _pendingSlotProgressResolvers = {}; // batchId -> [resolve, ...]
@@ -581,22 +602,55 @@ function _ensureBatchSlotProgressSubscription(batchId){
       resolvers.forEach(r => r(p));
       _pendingSlotProgressResolvers[batchId] = [];
     }
-    // 지금도 이 배치를 보는 중이면(조회 모드) 방금 도착한 최신 값으로 바로 다시 그림
-    if(manualBatchOverride && manualBatchOverride.batchId === batchId) pollOnce();
+    // ★ 2026-09-30 수정 — 예전엔 조회 모드(manualBatchOverride)일 때만 바로
+    //   다시 그렸음. 이제 실시간 모드도 이 배치 전용 문서를 쓰므로, "지금 이
+    //   기기가 실제로 보고 있는 배치"(조회 모드든 평소 모드든) 값이 막
+    //   도착했으면 두 경우 모두 즉시 다시 그림 — 다음 30초 폴링까지 안 기다림.
+    const viewingBatchId = manualBatchOverride ? manualBatchOverride.batchId : currentBatchId;
+    if(String(viewingBatchId) === String(batchId)) pollOnce();
   });
 }
-// 조회 모드에서 슬롯 데이터를 가져오는 전용 함수 — 미러 우선, 없으면(3초 대기 후) 직접 호출로 대체.
-async function getSlotProgressOverrideData_(batchId){
+// ★ 2026-09-30 통합 — 예전엔 "실시간 모드"(getSlotProgressLiveData_, 전역
+// board_slotProgress 사용)와 "조회 모드"(getSlotProgressOverrideData_, 배치
+// 전용 미러 사용)가 서로 다른 소스를 썼다. 위에서 설명한 버그의 근본 원인이
+// 바로 그 불일치였으므로, 이제 두 모드 모두 이 함수 하나로 통일 — 항상
+// "그 배치 전용" 미러(mirror/slotProgress_{batchId})를 먼저 쓰고, 없거나
+// (신선도 검사 결과) 너무 오래됐으면 Apps Script 직접 호출로 안전하게 대체.
+// ★ 2026-09-28 원래 board_slotProgress에 쓰던 신선도 기준을 그대로 이전 —
+// Apps Script 쪽 1분 동기화가 정상이면 이 값은 항상 90초 이내로 갱신돼 있어야
+// 함. 그보다 오래됐다면(예: Firestore 쓰기 쿼터 초과) 더 이상 신뢰하지 않고
+// Apps Script Web App을 브라우저가 직접 호출해서 정확한 값을 새로 받아옴.
+const SLOT_PROGRESS_STALE_MS = 90 * 1000;
+async function getSlotProgressForBatch_(batchId){
   if(FIRESTORE_MIRROR_OK && window._subscribeMirror){
     _ensureBatchSlotProgressSubscription(batchId);
     const cached = _mirrorCache.slotProgressByBatch[batchId];
-    if(cached) return cached; // 이전 구독에서 이미 받아둔 값이 있으면 그걸 즉시 사용
-    const fromMirror = await new Promise(resolve => {
-      if(!_pendingSlotProgressResolvers[batchId]) _pendingSlotProgressResolvers[batchId] = [];
-      _pendingSlotProgressResolvers[batchId].push(resolve);
-      setTimeout(() => resolve(null), 3000); // 3초 안에 안 오면 포기하고 직접 호출로 대체
-    });
-    if(fromMirror) return fromMirror;
+    if(cached){
+      // ★ 2026-09-28 신규(board_slotProgress에 쓰던 신선도 검사를 여기로 이전) —
+      //   Apps Script 쪽 1분 동기화가 정상이면 이 값은 항상 90초 이내로 갱신돼
+      //   있어야 함. 그보다 오래됐다면(예: Firestore 쓰기 쿼터 초과) 이 배치의
+      //   미러는 더 이상 신뢰하지 않고 직접 조회로 대체.
+      const ageMs = window._mirrorAgeMs ? window._mirrorAgeMs('slotProgress_' + batchId) : Infinity;
+      if(ageMs < SLOT_PROGRESS_STALE_MS) return cached;
+      console.warn('[slotProgress] ' + batchId + ' 미러가 ' + Math.round(ageMs/1000) + '초 동안 안 바뀜 — 직접 조회로 대체(정확성 우선)');
+    } else {
+      // 이 배치를 이 기기에서 처음 구독하는 순간 — 최대 3초까지 첫 값 도착을 기다림
+      const fromMirror = await new Promise(resolve => {
+        if(!_pendingSlotProgressResolvers[batchId]) _pendingSlotProgressResolvers[batchId] = [];
+        _pendingSlotProgressResolvers[batchId].push(resolve);
+        setTimeout(() => resolve(null), 3000); // 3초 안에 안 오면 포기하고 직접 호출로 대체
+      });
+      if(fromMirror) return fromMirror;
+    }
+    try {
+      const fresh = await gasQuery('getSlotProgress', { batchId });
+      // ★ 직접 조회 결과는 이미 "지금 이 순간"의 정확한 값이므로, 호출부에서
+      // mirror/board_scanFast의 낙관적 "보정치"를 또 더하면(_applyFastScanDelta_)
+      // 이미 반영된 스캔이 중복으로 더해져 실제보다 부풀려질 수 있음. _fresh
+      // 플래그로 표시해서, 호출부가 이 경우엔 보정치를 건너뛰도록 함.
+      if(fresh && fresh.ok) return Object.assign({}, fresh, { _fresh: true });
+    } catch(e){ console.warn('[slotProgress] ' + batchId + ' 직접 조회도 실패 — 오래됐더라도 마지막 미러 값 사용:', e); }
+    return _mirrorCache.slotProgressByBatch[batchId] || { ok:false }; // 직접 조회까지 실패하면 최후 수단으로 오래된 값이라도 반환
   }
   return await gasQuery('getSlotProgress', { batchId: batchId });
 }
@@ -646,13 +700,21 @@ function _waitForMirrorInit(tries){
     window._subscribeMirror('board_activeBatch', (p) => { _mirrorCache.activeBatch = p; if(!manualBatchOverride) pollOnce(); });
     window._subscribeMirror('board_batch',        (p) => { _mirrorCache.batch = p; });
     window._subscribeMirror('board_openBatches',  (p) => { _mirrorCache.openBatches = p; });
-    window._subscribeMirror('board_slotProgress', (p) => { _mirrorCache.slotProgress = p; if(!manualBatchOverride) pollOnce(); });
-    window._subscribeMirror('board_unfulfilledAlerts', (p) => { _mirrorCache.unfulfilledAlerts = p; if(!manualBatchOverride && typeof pollUnfulfilledAlerts === 'function') pollUnfulfilledAlerts(); });
+    // ★ 2026-09-30 제거 — mirror/board_slotProgress(서버가 정한 "단 하나의
+    // 활성 배치"용 전역 문서) 구독을 완전히 뺐다. 이게 "보던 배치가 갑자기
+    // 죽었다 살아나는" 버그의 원인이었음(자세한 설명은 위 getSlotProgressForBatch_
+    // 함수 주석 참고) — 이제 각 배치는 오직 배치 전용 문서(slotProgress_{batchId},
+    // _ensureBatchSlotProgressSubscription)로만 구독되고, 그 구독 콜백이 이미
+    // 필요할 때마다 알아서 pollOnce()를 불러준다.
+    // ★ 2026-09-30 제거 — mirror/board_unfulfilledAlerts(전역 단일 배치용)도
+    // 동일한 이유로 뺐다. "미배분 제품" 배너도 이제 배치 전용 문서
+    // (unfulfilledAlerts_{batchId}, _ensureBatchUnfulfilledAlertsSubscription)로만
+    // 구독되고, 그 구독 콜백이 필요할 때마다 알아서 pollUnfulfilledAlerts()를 불러준다.
     if(window._subscribeScanFastNative){
-      // ★ 2026-09-24 신규 — 이게 이번 기능의 핵심. board_slotProgress(1분 주기)와
+      // ★ 2026-09-24 신규 — 이게 이번 기능의 핵심. 배치 전용 슬롯 진행 미러와
       // 똑같이, 이 값이 바뀔 때마다 즉시 pollOnce()를 한 번 더 불러서 화면을
       // 바로 다시 그린다. FIRESTORE_MIRROR_OK 상태에서는 pollOnce() 안의
-      // getSlotProgressLiveData_가 네트워크 호출 없이 로컬 캐시(_mirrorCache)만
+      // getSlotProgressForBatch_가 네트워크 호출 없이 로컬 캐시(_mirrorCache)만
       // 읽으므로(=Apps Script/Sheets에 추가 부담 0), 스캔마다 이게 자주 불려도
       // 안전함 — 순수하게 이 브라우저 안에서 DOM만 다시 그리는 비용뿐.
       window._subscribeScanFastNative((p) => { _scanFastCache = p; if(!manualBatchOverride) pollOnce(); });
@@ -685,39 +747,62 @@ async function getOpenBatchesData_(){
   if(FIRESTORE_MIRROR_OK) return _mirrorCache.openBatches || { ok:false };
   return await gasQuery('getOpenBatches', {});
 }
-// ★ 2026-09-28 신규 — board_slotProgress는 SKU/PCS 숫자가 걸린 가장 중요한
-// 데이터라 특히 엄격하게 신선도를 확인함. Apps Script 쪽 1분 동기화가 정상
-// 이면 이 값은 항상 90초 이내로 갱신돼 있어야 함 — 그보다 오래됐다면(오늘
-// 실제로 있었던 Firestore 쓰기 쿼터 초과처럼) 그 미러는 더 이상 신뢰하지
-// 않고, Apps Script Web App을 브라우저가 직접 호출해서 정확한 값을 새로
-// 받아옴. 이 직접 호출은 Firestore를 거치지 않는 완전히 별개의 경로라
-// (브라우저→Apps Script Web App), 오늘 겪은 것과 같은 UrlFetch 하루 한도
-// 문제와 전혀 무관하게 항상 정확하게 동작함.
-const SLOT_PROGRESS_STALE_MS = 90 * 1000;
-async function getSlotProgressLiveData_(batchId){
-  // ★ manualBatchOverride(TV에서 임의의 다른 배치를 고른 상태)는 Firestore
-  // 미러 대상이 아닌(미러는 "현재 활성 배치"만 담음) 임의 배치일 수 있으므로
-  // 이 경로는 절대 캐시를 쓰지 않고 항상 직접 조회함 — pollOnce() 쪽에서
-  // manualBatchOverride일 때는 이 함수를 호출하지 않고 gasQuery를 직접 씀.
-  if(FIRESTORE_MIRROR_OK){
-    const ageMs = window._mirrorAgeMs ? window._mirrorAgeMs('board_slotProgress') : Infinity;
-    if(_mirrorCache.slotProgress && ageMs < SLOT_PROGRESS_STALE_MS) return _mirrorCache.slotProgress;
-    console.warn('[slotProgress] 미러가 ' + Math.round(ageMs/1000) + '초 동안 안 바뀜 — 직접 조회로 대체(정확성 우선)');
-    try {
-      const fresh = await gasQuery('getSlotProgress', { batchId });
-      // ★ 2026-09-28 신규 — 직접 조회 결과는 이미 "지금 이 순간"의 정확한 값이므로,
-      // 호출부에서 mirror/board_scanFast의 낙관적 "보정치"를 또 더하면(_applyFastScanDelta_)
-      // 이미 반영된 스캔이 중복으로 더해져 실제보다 부풀려질 수 있음. _fresh 플래그로
-      // 표시해서, 호출부가 이 경우엔 보정치를 건너뛰도록 함.
-      if(fresh && fresh.ok) return Object.assign({}, fresh, { _fresh: true });
-    } catch(e){ console.warn('[slotProgress] 직접 조회도 실패 — 오래됐더라도 마지막 미러 값 사용:', e); }
-    return _mirrorCache.slotProgress || { ok:false }; // 직접 조회까지 실패하면 최후 수단으로 오래된 값이라도 반환
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-09-30 신규(board.html "미배분 제품" 배너 버그 수정) — 위
+ * getSlotProgressForBatch_와 완전히 같은 문제가 이 배너에도 있었다: 지금까지
+ * mirror/board_unfulfilledAlerts(서버가 정한 "단 하나의 활성 배치" 전용)
+ * 하나만 읽었는데, 열린 배치가 2개 이상이고 활성 배치도 안 정해져 있으면
+ * 서버가 그 문서를 빈 배열로 써버린다 — 기기별로 독립된 배치를 보는 지금
+ * 구조와 안 맞음. 서버(FirestoreSync.gs)가 이제 열린 배치마다
+ * mirror/unfulfilledAlerts_{batchId} 문서를 따로 채워두므로, 여기서도
+ * getSlotProgressForBatch_와 똑같은 패턴(배치 전용 미러 우선, 없거나 오래되면
+ * 직접 호출로 대체)으로 통일한다.
+ * ═══════════════════════════════════════════════════════════ */
+let _subscribedUnfulfilledAlertsBatchIds = new Set();
+let _pendingUnfulfilledAlertsResolvers = {}; // batchId -> [resolve, ...]
+const UNFULFILLED_ALERTS_STALE_MS = 150 * 1000; // 90초 폴링 주기보다 넉넉하게 여유를 둠
+function _ensureBatchUnfulfilledAlertsSubscription(batchId){
+  if(!FIRESTORE_MIRROR_OK || !window._subscribeMirror) return;
+  if(_subscribedUnfulfilledAlertsBatchIds.has(batchId)) return;
+  _subscribedUnfulfilledAlertsBatchIds.add(batchId);
+  window._subscribeMirror('unfulfilledAlerts_' + batchId, (p) => {
+    _mirrorCache.unfulfilledAlertsByBatch[batchId] = p;
+    const resolvers = _pendingUnfulfilledAlertsResolvers[batchId];
+    if(resolvers && resolvers.length){
+      resolvers.forEach(r => r(p));
+      _pendingUnfulfilledAlertsResolvers[batchId] = [];
+    }
+    // 지금 이 기기가 실제로 보고 있는 배치(조회 모드든 평소 모드든) 값이 막
+    // 도착했으면 바로 다시 그림 — 다음 90초 폴링까지 안 기다림.
+    const viewingBatchId = manualBatchOverride ? manualBatchOverride.batchId : currentBatchId;
+    if(String(viewingBatchId) === String(batchId) && typeof pollUnfulfilledAlerts === 'function') pollUnfulfilledAlerts();
+  });
+}
+async function getUnfulfilledAlertsForBatch_(batchId){
+  if(FIRESTORE_MIRROR_OK && window._subscribeMirror){
+    _ensureBatchUnfulfilledAlertsSubscription(batchId);
+    const cached = _mirrorCache.unfulfilledAlertsByBatch[batchId];
+    if(cached){
+      const ageMs = window._mirrorAgeMs ? window._mirrorAgeMs('unfulfilledAlerts_' + batchId) : Infinity;
+      if(ageMs < UNFULFILLED_ALERTS_STALE_MS) return cached;
+    } else {
+      const fromMirror = await new Promise(resolve => {
+        if(!_pendingUnfulfilledAlertsResolvers[batchId]) _pendingUnfulfilledAlertsResolvers[batchId] = [];
+        _pendingUnfulfilledAlertsResolvers[batchId].push(resolve);
+        setTimeout(() => resolve(null), 3000); // 3초 안에 안 오면 포기하고 직접 호출로 대체
+      });
+      if(fromMirror) return fromMirror;
+    }
+    try{
+      const fresh = await gasQuery('getUnfulfilledSkuAlerts', { batchId });
+      if(fresh && fresh.ok) return fresh;
+    }catch(e){ console.warn('[미배분] ' + batchId + ' 직접 조회 실패 — 오래됐더라도 마지막 미러 값 사용:', e); }
+    return _mirrorCache.unfulfilledAlertsByBatch[batchId] || { ok:false };
   }
-  return await gasQuery('getSlotProgress', { batchId });
+  return await gasQuery('getUnfulfilledSkuAlerts', { batchId });
 }
 async function getUnfulfilledAlertsData_(batchId){
-  if(FIRESTORE_MIRROR_OK && !manualBatchOverride) return _mirrorCache.unfulfilledAlerts || { ok:false };
-  return await gasQuery('getUnfulfilledSkuAlerts', { batchId });
+  return await getUnfulfilledAlertsForBatch_(batchId);
 }
 // ★ 2026-08-19 수정(현장 확인) — 서버(Apps Script)에 여러 기기의 요청이
 //   몰려 간헐적으로 응답 실패하는 게 확인돼서, 8초→12초로 완화. TV는 실시간성이
@@ -1982,7 +2067,7 @@ async function pollOnce(){
           document.getElementById('doneBar').style.width =
             (fast.totalCount > 0 ? (fast.doneCount / fast.totalCount * 100) : 0) + '%';
           // ★ 2026-09-28 신규 — 이것도 Apps Script 직접 조회(방금 받은 정확한 값)라
-          // board_scanFast 보정치를 또 얹으면 중복 가산될 수 있어 건너뜀(위 getSlotProgressLiveData_와 동일 원칙).
+          // board_scanFast 보정치를 또 얹으면 중복 가산될 수 있어 건너뜀(위 getSlotProgressForBatch_와 동일 원칙).
           renderBoard(fast.slots, true);
         }
       }catch(e){ /* 실패해도 아래 정상 경로가 이어서 확인 */ }
@@ -2066,16 +2151,16 @@ async function pollOnce(){
     liveBatchId = currentBatchId;
     }
 
-    // ★ 2026-09 신규, ★ 2026-09-25 수정(속도 개선) — override 모드(TV에서 임의의
-    //   다른 배치를 골라 보는 중)도 이제 getSlotProgressOverrideData_를 통해
-    //   배치 전용 미러(mirror/slotProgress_{batchId})를 먼저 시도하고, 3초 안에
-    //   없으면(미러 대상에서 빠진 진짜 오래된 배치 등) 안전하게 직접 조회로
-    //   대체함 — 자세한 이유는 위 getSlotProgressOverrideData_ 주석 참고.
-    //   라이브 모드(평소)는 기존과 동일하게 활성 배치 전용 미러 캐시를 쓰되,
-    //   연결 실패 시 자동으로 직접 조회로 대체됨.
-    const res = manualBatchOverride
-      ? await getSlotProgressOverrideData_(currentBatchId)
-      : await getSlotProgressLiveData_(currentBatchId);
+    // ★ 2026-09-30 통합(버그 수정) — override 모드(TV에서 임의의 다른 배치를
+    //   골라 보는 중)와 라이브 모드(평소) 모두 이제 getSlotProgressForBatch_
+    //   하나로 통일 — 항상 "이 배치 전용" 미러(mirror/slotProgress_{batchId})를
+    //   먼저 시도하고, 3초 안에 없거나 너무 오래됐으면 안전하게 직접 조회로
+    //   대체함. 예전엔 라이브 모드만 서버가 정한 "단 하나의 활성 배치"용 전역
+    //   문서(board_slotProgress)를 썼는데, 그 문서는 열린 배치가 2개 이상이고
+    //   활성 배치도 안 정해져 있으면 빈 슬롯을 써버려서 "보던 화면이 갑자기
+    //   죽었다 살아나는" 버그의 원인이었음 — 자세한 이유는 위
+    //   getSlotProgressForBatch_ 함수 주석 참고.
+    const res = await getSlotProgressForBatch_(currentBatchId);
     if(mySeq !== pollSeq) return; // ★ 신규 — 핵심 가드: 이 응답이 도착하기 전에 더 최신 폴링(예: 방금 고른 다른 배치)이
                                   //   이미 시작됐다면, 이 낡은 응답은 절대 화면에 반영하지 않고 버림.
     if(!res.ok){
@@ -2355,27 +2440,97 @@ function tvHistoryWireRows_(container){
   });
 }
 
-async function loadBatchHistoryList(days){
-  const dd = document.getElementById('batchHistoryDropdownTV');
-  dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
-  dd.classList.add('open');
+// ★ 2026-09-30 신규(현장 지적 — "'다른 배치'는 바로 뜨는데 '지난 배치'는
+// '불러오는 중...'이 한 번 보이고서야 뜬다") — 원인: "다른 배치"는 이미
+// 실시간으로 계속 최신 상태를 받아두는 Firestore 미러(getOpenBatchesData_)를
+// 읽어서 사실상 0초에 뜨는 반면, "지난 배치"(최근 14일)는 누를 때마다 매번
+// Apps Script Web App에 새로 왕복 호출을 해서 1~3초 정도 걸렸던 것.
+// 서버에 이 목록 전용 미러가 따로 없어서(추가하려면 FirestoreSync.gs를 새로
+// 배포해야 함) 완전히 동일하게 만들 순 없지만, 클라이언트에서 마지막으로
+// 받아온 결과를 잠깐 기억해뒀다가 재사용하는 방식으로 체감 속도를 맞춘다:
+//   · 캐시가 있으면 "불러오는 중" 없이 그 자리에서 즉시 목록을 보여줌
+//     ("다른 배치"와 동일한 체감).
+//   · 캐시가 45초 넘게 지났으면, 보여주는 화면은 그대로 둔 채 뒤에서 조용히
+//     새로 받아와서 캐시와 (열려 있다면) 화면을 갱신함.
+//   · 캐시가 아예 없는 경우(이 기기에서 이번 세션 중 처음 여는 경우)에만
+//     예전처럼 "불러오는 중..."이 잠깐 보임 — 페이지 로드 후 조용히 한 번
+//     미리 받아두므로(아래 _prefetchTvHistory14_), 실제로는 거의 항상 이미
+//     캐시가 있는 상태로 시작함.
+let _tvHistory14Cache = null; // { list, fetchedAtMs }
+let _tvHistoryDisplayMode = null; // '14' | 'calendar' | null(닫힘) — 배경 갱신이 화면을 다시 그려도 되는지 판단용
+const TV_HISTORY_CACHE_TTL_MS = 45000;
 
-  const res = await gasQueryWithRetry('getBatchHistoryList', { days });
-  if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
-  const list = res.batches || [];
+function renderTvHistory14List_(list){
+  const dd = document.getElementById('batchHistoryDropdownTV');
+  _tvHistoryDisplayMode = '14';
+  const moreBtn = `<div class="tb-switch-more" id="tbHistoryMoreBtn">🔍 더 예전 배치 찾기 (달력에서 날짜로 찾기)</div>`;
+  if(!list.length){
+    dd.innerHTML = `<div class="tb-switch-empty">최근 14일 안에 배치 기록이 없습니다</div>${moreBtn}`;
+  } else {
+    dd.innerHTML = list.map(b => tvHistoryRowHtml_(b)).join('') + moreBtn;
+  }
+  tvHistoryWireRows_(dd);
+  const moreEl = document.getElementById('tbHistoryMoreBtn');
+  if(moreEl) moreEl.onclick = (ev) => { ev.stopPropagation(); loadBatchHistoryList(365); };
+}
+
+function _sortBatchListNewestFirst_(list){
   // ★ 2026-09-04 신규 — 서버가 이미 최신순 정렬해서 주지만(재배포 전 기기 대비)
   //   클라이언트에서도 한 번 더 실제 시각값으로 방어적 재정렬.
-  list.sort((a, b) => {
+  return list.slice().sort((a, b) => {
     let ta = new Date(a.createdAt).getTime(); if (isNaN(ta)) ta = new Date(a.date).getTime() || 0;
     let tb = new Date(b.createdAt).getTime(); if (isNaN(tb)) tb = new Date(b.date).getTime() || 0;
     return tb - ta;
   });
+}
+
+// 백그라운드로 14일 목록을 새로 받아와서 캐시를 갱신 — 화면에 로딩 표시를
+// 전혀 띄우지 않고, 지금 14일 목록이 열려 있는 경우에만 조용히 다시 그림.
+async function _refreshTvHistory14Cache_(){
+  try{
+    const res = await gasQueryWithRetry('getBatchHistoryList', { days: 14 });
+    if(!res || !res.ok) return;
+    const list = _sortBatchListNewestFirst_(res.batches || []);
+    _tvHistory14Cache = { list, fetchedAtMs: Date.now() };
+    const dd = document.getElementById('batchHistoryDropdownTV');
+    if(dd && dd.classList.contains('open') && _tvHistoryDisplayMode === '14'){
+      renderTvHistory14List_(list);
+    }
+  }catch(e){ console.warn('[지난 배치] 배경 갱신 실패(다음 클릭 때 다시 시도):', e); }
+}
+// ★ 페이지를 연 직후 한 번 조용히 미리 받아둠 — 그러면 작업자가 실제로
+// "지난 배치" 버튼을 처음 누르는 순간에는 이미 캐시가 준비돼 있어서
+// "불러오는 중..."이 거의 보이지 않음. 초기 슬롯 데이터 로딩과 겹치지
+// 않도록 약간 늦춰서 시작.
+setTimeout(_refreshTvHistory14Cache_, 3000);
+
+async function loadBatchHistoryList(days){
+  const dd = document.getElementById('batchHistoryDropdownTV');
+
+  if(days === 14 && _tvHistory14Cache){
+    // 캐시가 있으면 "불러오는 중" 없이 즉시 렌더 — "다른 배치"와 동일한 체감 속도.
+    dd.classList.add('open');
+    renderTvHistory14List_(_tvHistory14Cache.list);
+    if(Date.now() - _tvHistory14Cache.fetchedAtMs > TV_HISTORY_CACHE_TTL_MS){
+      _refreshTvHistory14Cache_(); // 화면은 그대로 둔 채 뒤에서 조용히 새로고침
+    }
+    return;
+  }
+
+  dd.innerHTML = `<div class="tb-switch-empty">불러오는 중...</div>`;
+  dd.classList.add('open');
+  _tvHistoryDisplayMode = null;
+
+  const res = await gasQueryWithRetry('getBatchHistoryList', { days });
+  if(!res.ok){ dd.innerHTML = `<div class="tb-switch-empty" style="color:#FF4D6D">불러오기 실패</div>`; return; }
+  const list = _sortBatchListNewestFirst_(res.batches || []);
 
   if(days >= 365){
     // ★ 2026-09-04 신규(현장 요청) — 1년치를 끝없이 스크롤하는 목록 대신 달력으로
     //   보여줌. 서버 호출은 지금(days=365)과 완전히 동일하게 딱 한 번만 하고,
     //   그 결과를 화면에서 날짜별로 묶어서 달력으로 그리는 것뿐이라 속도엔
     //   전혀 영향 없음.
+    _tvHistoryDisplayMode = 'calendar';
     _tvHistoryFullList = list;
     const mostRecentKey = list.length ? tvHistoryDateKey_(list[0]) : tvTodayKey_();
     _tvCalendarMonth = new Date(mostRecentKey + 'T00:00:00');
@@ -2384,18 +2539,12 @@ async function loadBatchHistoryList(days){
     return;
   }
 
+  // days === 14 (캐시가 없던 이번 세션 첫 조회) — 결과를 캐시에 저장해두고 렌더.
   // ★ 2026-08-25 신규(매니저 요청) — 계속 쌓이면 지저분하니 기본은 최근 14일치만.
   //   그래도 더 예전 것이 필요한 드문 경우를 위해 맨 아래에 "더 예전 배치 찾기"를
   //   달아둠(누르면 달력으로 전환).
-  const moreBtn = `<div class="tb-switch-more" id="tbHistoryMoreBtn">🔍 더 예전 배치 찾기 (달력에서 날짜로 찾기)</div>`;
-  if(!list.length){
-    dd.innerHTML = `<div class="tb-switch-empty">최근 ${days}일 안에 배치 기록이 없습니다</div>${moreBtn}`;
-  } else {
-    dd.innerHTML = list.map(b => tvHistoryRowHtml_(b)).join('') + moreBtn;
-  }
-  tvHistoryWireRows_(dd);
-  const moreEl = document.getElementById('tbHistoryMoreBtn');
-  if(moreEl) moreEl.onclick = (ev) => { ev.stopPropagation(); loadBatchHistoryList(365); };
+  _tvHistory14Cache = { list, fetchedAtMs: Date.now() };
+  renderTvHistory14List_(list);
 }
 
 function renderTvHistoryCalendar(){
