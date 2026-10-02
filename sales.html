@@ -1740,9 +1740,14 @@ function renderShipping(){
     const statusHtml = j.shipped
       ? `<span class="ship2-status shipped">✓ SHIPPED</span>`
       : `<span class="ship2-status pending">PENDING</span>`;
+    // ★ 2026-10-02 수정(질문 답변) — 이 숫자는 Order Detail Lookup의 Dims
+    //   편집기에서 실제로 저장된 팔렛 치수 행 개수(dimsCount, buildDimsExistsMap_
+    //   기준) — 검수(Inspection/Issues)와는 무관한 실제 입력 데이터. 이 탭은
+    //   TK 전용이라 단위를 "pc" 대신 "Pallet(s)"로 표기.
+    const dCount = j.dimsCount || 0;
     const dimsHtml = isLinked
       ? `<span class="ship2-linked">🔗 ${j.dimsLinkedTo}</span>`
-      : `<span>${j.dimsCount||0} pc</span>`;
+      : `<span>${dCount} Pallet${dCount===1?'':'s'}</span>`;
     let actionHtml;
     if (isLinked){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
