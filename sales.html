@@ -257,6 +257,32 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .today-sep{color:var(--border2); font-size:12px; display:none;}
 .today-time{font-family:var(--mono); font-size:11.5px; color:#B9C2DC;}
 .today-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
+
+/* ★ 2026-10-02 신규 — Shipping Status 탭 전용 스타일 (ship2-* 로 분리해서
+   기존 .ship-row/.ship-card와 절대 겹치지 않도록 함) */
+.ship2-summary{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px;}
+.ship2-tile{background:var(--surface); border:1.5px solid var(--border2); border-radius:10px; padding:12px 16px; display:flex; flex-direction:column; gap:4px;}
+.ship2-tile .num{font-family:var(--mono); font-size:22px; font-weight:800;}
+.ship2-tile .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
+.ship2-tile.pending .num{color:var(--amber);}
+.ship2-tile.shipped .num{color:var(--green);}
+.ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+.ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.8fr) minmax(100px,1fr) minmax(130px,1.3fr) minmax(70px,0.7fr) minmax(110px,1fr) minmax(130px,1fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1000px;}
+.ship2-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
+.ship2-row{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.8fr) minmax(100px,1fr) minmax(130px,1.3fr) minmax(70px,0.7fr) minmax(110px,1fr) minmax(130px,1fr); gap:14px; align-items:center; padding:13px 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1000px;}
+.ship2-row > *{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.ship2-row:last-child{border-bottom:none;}
+.ship2-row.shipped{background:rgba(16,217,126,0.05);}
+.ship2-inv{font-family:var(--mono); font-weight:800; font-size:12.5px;}
+.ship2-linked{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
+.ship2-status{font-family:var(--mono); font-size:10.5px; font-weight:800; padding:3px 8px; border-radius:6px; white-space:nowrap; display:inline-block;}
+.ship2-status.pending{background:var(--amber-bg); color:var(--amber);}
+.ship2-status.shipped{background:var(--green-bg); color:var(--green);}
+.ship2-btn{font-family:var(--sans); font-size:11.5px; font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; border:1px solid var(--border2); background:var(--surface2); color:var(--text);}
+.ship2-btn.go{background:var(--green); border-color:var(--green); color:#07241a;}
+.ship2-btn.undo{background:transparent; color:var(--text-dim);}
+.ship2-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
+@media (max-width:900px){ .ship2-summary{grid-template-columns:repeat(2,1fr);} }
 /* ★ Completed Today 목록 전용 — 뱃지(박스) 대신 색상만 있는 순수 텍스트
    ★ 2026-08-05 수정 — pending/moved-no/method 값들이 --text-dim(연회색)이라
    너무 흐릿해서 잘 안 보인다는 피드백 반영 — 더 밝은 톤(#B9C2DC)으로 교체.
@@ -520,6 +546,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   <div class="tabs">
     <button class="tab-btn active" onclick="showScreen('sheet')">① Sales Sheet Preview</button>
     <button class="tab-btn" onclick="showScreen('lookup')">② Order Detail Lookup</button>
+    <button class="tab-btn" onclick="showScreen('shipping')">③ Shipping Status</button>
   </div>
   <div style="display:flex; align-items:center; gap:18px;">
     <div class="tb-clock"><div class="time" id="clockTime">--:--:-- --</div><div class="date" id="clockDate">----- -- --</div></div>
@@ -641,6 +668,28 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
       </div>
     </div>
 
+  </div>
+
+  <!-- ★ 2026-10-02 신규 — Shipping Status 탭: TK 팔렛 출고 확인.
+       웨어하우스가 Dims를 올리면 영업팀이 트럭킹 배차를 넣는데, 그 팔렛이
+       실제로 픽업/출고됐는지 매일 확인할 길이 없다는 불만을 해결. 트럭킹
+       배차 담당자가 여기서 체크하면 영업팀/출고팀 모두 바로 확인 가능.
+       LINKED(병합) 오더는 PRIMARY 한 곳에서만 체크하면 전부 같이 반영됨
+       (서버가 그룹 전체를 한번에 계산해서 내려줌 — 클라이언트는 그대로 표시만). -->
+  <div class="screen" id="screen-shipping">
+    <div class="ship2-summary" id="ship2-summary"></div>
+    <div class="ship2-table">
+      <div class="ship2-header">
+        <span>Invoice</span>
+        <span>Customer</span>
+        <span>Ship Out</span>
+        <span>Dims</span>
+        <span>Age</span>
+        <span>Status</span>
+        <span class="col-right">Action</span>
+      </div>
+      <div id="ship2-list"></div>
+    </div>
   </div>
 
 </div>
@@ -1433,6 +1482,7 @@ function applyTodayResult(res){
         const ageMin = Math.round((Date.now() - cached.savedAt) / 60000);
         document.getElementById('today-count').textContent = TODAY_JOBS.length + `건 (⚠ ${ageMin}분 전 데이터)`;
         renderToday();
+        renderShipping();
         setSync('err', `⚠ 서버 연결 실패 — ${ageMin}분 전 데이터 표시 중`);
         return;
       }
@@ -1457,6 +1507,7 @@ function applyTodayResult(res){
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
   document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
   renderToday();
+  renderShipping();
 }
 // ★ 2026-08-19 신규 — today list 로컬 캐시 저장/조회
 function saveCachedTodayList_(jobs){
@@ -1531,6 +1582,99 @@ function renderToday(){
     `${start+1}–${Math.min(start+TODAY_PAGE_SIZE, jobs.length)} of ${jobs.length}`;
   document.getElementById('today-pager').style.display = totalPages > 1 ? 'flex' : 'none';
   renderTodayPager(totalPages);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ★ 2026-10-02 신규 — Shipping Status 탭.
+   TK(트럭킹) 오더 중 Dims가 입력된 것만 대상으로, 실제 픽업/출고 여부를
+   트럭킹 배차 담당자가 체크. LINKED(병합) 오더는 자기 행은 그대로 보여주되
+   읽기 전용으로 "🔗 PRIMARY#"만 표시하고, 상태는 서버가 이미 PRIMARY 값으로
+   계산해서 내려준 j.shipped/j.shippedAt/j.shippedBy를 그대로 쓰면 됨 —
+   클라이언트에서 그룹을 다시 계산할 필요 없음(resolveShipInfo 패턴, Code.gs 참고). */
+function shippableJobs_(){
+  return TODAY_JOBS.filter(j => (j.method==='TK' || j.method==='TRUCKING') && (j.dimsCount > 0 || j.dimsLinkedTo));
+}
+
+function renderShipping(){
+  const jobs = shippableJobs_();
+  const summaryEl = document.getElementById('ship2-summary');
+  const listEl = document.getElementById('ship2-list');
+  if (!summaryEl || !listEl) return; // 탭이 아직 DOM에 없을 때(초기 로드 순서) 방어
+
+  // ★ 요약 집계는 PRIMARY(또는 그룹 없는 단독 오더) 기준 1건당 1팔렛으로 셈 —
+  //   LINKED 행까지 같이 세면 "팔렛 개수"가 아니라 "인보이스 개수"가 되어버림.
+  const primaries = jobs.filter(j => !j.dimsLinkedTo);
+  const shippedCount = primaries.filter(j => j.shipped).length;
+  const pendingCount = primaries.length - shippedCount;
+  summaryEl.innerHTML = `
+    <div class="ship2-tile"><div class="num">${primaries.length}</div><div class="lbl">TK Pallets</div></div>
+    <div class="ship2-tile pending"><div class="num">${pendingCount}</div><div class="lbl">Not Shipped</div></div>
+    <div class="ship2-tile shipped"><div class="num">${shippedCount}</div><div class="lbl">Shipped</div></div>
+    <div class="ship2-tile"><div class="num">${jobs.length}</div><div class="lbl">Total Invoices</div></div>
+  `;
+
+  if (!jobs.length){
+    listEl.innerHTML = '<div class="ship2-empty">No TK pallets with dimensions yet.</div>';
+    return;
+  }
+
+  // 같은 팔렛(그룹)을 테이블에서 서로 붙어 보이도록 PRIMARY 기준으로 정렬
+  const sorted = jobs.slice().sort((a,b) => {
+    const ka = a.dimsLinkedTo || a.invoice, kb = b.dimsLinkedTo || b.invoice;
+    if (ka !== kb) return ka.localeCompare(kb);
+    return (a.dimsLinkedTo ? 1 : 0) - (b.dimsLinkedTo ? 1 : 0); // PRIMARY 먼저
+  });
+
+  listEl.innerHTML = sorted.map(j => {
+    const isLinked = !!j.dimsLinkedTo;
+    const ageDays = ageDaysFromShipDate_(j.shipDate);
+    const ageTxt = (ageDays === null) ? '-' : (ageDays + 'd');
+    const statusHtml = j.shipped
+      ? `<span class="ship2-status shipped">✓ SHIPPED</span>`
+      : `<span class="ship2-status pending">PENDING</span>`;
+    const dimsHtml = isLinked
+      ? `<span class="ship2-linked">🔗 ${j.dimsLinkedTo}</span>`
+      : `<span>${j.dimsCount||0} pc</span>`;
+    let actionHtml;
+    if (isLinked){
+      actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
+    } else if (j.shipped){
+      actionHtml = `<button class="ship2-btn undo" onclick="toggleShipped('${j.invoice}', false)">Undo</button>`;
+    } else {
+      actionHtml = `<button class="ship2-btn go" onclick="toggleShipped('${j.invoice}', true)">Mark Shipped</button>`;
+    }
+    return `<div class="ship2-row ${j.shipped?'shipped':''}">
+      <span class="ship2-inv">${j.invoice||''}</span>
+      <span title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
+      <span>${j.shipDate||'-'}</span>
+      ${dimsHtml}
+      <span>${ageTxt}</span>
+      ${statusHtml}
+      <span class="col-right">${actionHtml}</span>
+    </div>`;
+  }).join('');
+}
+
+function ageDaysFromShipDate_(shipDate){
+  const sd = String(shipDate||'').slice(0,10);
+  if (!sd) return null;
+  const d = new Date(sd + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
+  return diff >= 0 ? diff : 0;
+}
+
+async function toggleShipped(invoice, nextShipped){
+  const msg = nextShipped
+    ? `Mark ${invoice} as SHIPPED?`
+    : `Undo — mark ${invoice} as NOT shipped?`;
+  if (!confirm(msg)) return;
+  const res = await gasPostWithRetry('setShippedStatus', { invoice: invoice, shipped: nextShipped, by: 'Dispatch (tablet)' });
+  if (res && res.ok){
+    await loadToday();
+  } else {
+    alert((res && res.error) ? res.error : 'Could not update shipping status. Check your connection and try again.');
+  }
 }
 
 function renderTodayPager(totalPages){
@@ -2517,8 +2661,10 @@ function showScreen(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.tab-btn').forEach((b,i)=>{
-    b.classList.toggle('active', (name==='sheet'&&i===0)||(name==='lookup'&&i===1));
+    b.classList.toggle('active', (name==='sheet'&&i===0)||(name==='lookup'&&i===1)||(name==='shipping'&&i===2));
   });
+  // ★ 2026-10-02 신규 — Shipping Status 탭을 열 때마다 최신 상태로 다시 그림
+  if (name === 'shipping') renderShipping();
 }
 
 /* ★ 2026-08-06 신규(매니저 지적) — 자동 동기화.
