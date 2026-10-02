@@ -44,10 +44,12 @@ a{color:inherit;}
 .sync-dot.busy{background:var(--amber); box-shadow:0 0 8px var(--amber); animation:blink 1s infinite;}
 @keyframes blink{0%,100%{opacity:1} 50%{opacity:0.3}}
 
-.tabs{display:flex; gap:8px;}
-.tab-btn{font-family:var(--sans); font-size:13.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:9px 16px; cursor:pointer; transition:all 0.15s;}
-.tab-btn:hover{color:var(--text); border-color:var(--border2);}
-.tab-btn.active{background:var(--blue-bg); border-color:var(--blue); color:#93C1FF;}
+/* ★ 2026-10-02 수정(피드백 반영) — 번호(①②③) 제거하고, 낱개 버튼 대신
+   하나의 알약(pill) 그룹 안에 묶어서 더 깔끔하게. 활성 탭만 파란색으로 채움. */
+.tabs{display:flex; gap:4px; background:var(--surface2); border:1px solid var(--border); border-radius:11px; padding:4px;}
+.tab-btn{font-family:var(--sans); font-size:13px; font-weight:700; color:var(--text-dim); background:transparent; border:none; border-radius:8px; padding:8px 18px; cursor:pointer; transition:all 0.15s;}
+.tab-btn:hover{color:var(--text);}
+.tab-btn.active{background:var(--blue); color:#fff;}
 
 /* ★ 2026-08-11 개선(매니저 지적) — 창고 TV에서 이 화면만 작게 보이던 문제. 메인 대시보드는 폭 제한 없이 화면 비율(vw)로 여백과 글자가 같이 커지는데, 이 화면은 1560px에서 멈췄고 글자도 고정이라 4K TV에서 가운데 작게 모였음. → 메인과 동일하게 화면 전체를 쓰고 글자도 비례해서 커지도록 바꿈. */.wrap{padding:clamp(10px,0.9vw,22px) clamp(14px,1.6vw,40px); width:100%; margin:0 auto;}
 .screen{display:none;}
@@ -140,9 +142,11 @@ table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed
    커졌다 작아졌다 하던 clamp() 가변 크기를 없애고, Order Detail Lookup/
    Shipping Status 탭과 동일한 고정 크기(헤더 10px, 자간 0.04em, text-dim)로
    맞춤. 좁은 화면에서는 .table-scroll의 가로 스크롤이 그대로 받아줌. */
-thead th{background:var(--surface2); text-align:left; padding:9px clamp(10px,0.8vw,18px); font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+thead th{background:var(--surface2); text-align:left; padding:9px clamp(10px,0.8vw,18px); font-family:var(--mono); font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-10 개선(매니저 지적) — 뒤쪽 4개 컬럼에 깔려 있던 초록 배경을 없앨. AMOUNT와 STATUS 사이가 벽처럼 보여 표가 둘로 나뉘어 보였음. 원래 'WMS 시트에 새로 추가된 컬럼'을 표시하려던 것인데, 이제는 그냥 표의 일부임. 헤더는 조용히 물러나고 본문 배지가 주인공이 되도록 함. */thead th.new-col{color:var(--text-dim);}
-tbody td{padding:12px clamp(10px,0.8vw,18px); font-size:12.5px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* ★ 2026-10-02 수정(피드백 반영) — 행 높이를 3탭 전부 54px로 통일. 세로
+   패딩 대신 고정 height + vertical-align:middle로 내용을 가운데 정렬. */
+tbody td{height:54px; padding:0 clamp(10px,0.8vw,18px); font-size:12.5px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-05 신규 — "✓ Complete" 뱃지가 Waiting/Active보다 길어서 열 폭에
    딱 걸려 말줄임표(...) 일부가 점처럼 삐져나오던 문제. 이 칸만 말줄임을 꺼서
    뱃지 전체가 항상 온전히 보이게 함. */
@@ -242,7 +246,9 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .today-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 /* ★ 고객명 길이에 따라 Ship 날짜 위치가 들쭉날쭉하던 것을 고쳐서, 모든 컬럼이
    표처럼 항상 같은 x 위치에서 시작하도록 grid로 전면 개편 */
-.today-row{display:grid; grid-template-columns:minmax(100px,1.3fr) minmax(120px,2.1fr) minmax(105px,1.4fr) minmax(110px,1.5fr) minmax(120px,1.6fr) minmax(90px,1.2fr) minmax(120px,1.55fr) minmax(140px,0.5fr); gap:14px; align-items:center; padding:13px 24px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; white-space:nowrap; min-width:1120px;}
+/* ★ 2026-10-02 수정(피드백 반영) — 행 높이 3탭 통일(54px). 세로 패딩 대신
+   min-height + align-items:center로 가운데 정렬. */
+.today-row{display:grid; grid-template-columns:minmax(100px,1.3fr) minmax(120px,2.1fr) minmax(105px,1.4fr) minmax(110px,1.5fr) minmax(120px,1.6fr) minmax(90px,1.2fr) minmax(120px,1.55fr) minmax(140px,0.5fr); gap:14px; align-items:center; min-height:54px; padding:0 24px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s; white-space:nowrap; min-width:1120px;}
 /* ★ 2026-08-06 수정(매니저 지적) — DIMS 칸의 '🔗 IN00462789'가 옆 칸(Inspected At)을
    침범해서 글자가 겹쳐 보이던 문제. 원인 두 가지를 같이 고침:
    (1) DIMS 칸 폭이 85px로 고정이라 내용보다 좁았음 → 폭을 넓히고 fr(비율)로 바꿔서
@@ -262,7 +268,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
    글꼴/색/스타일을 쓰되, 아래 행들과 정확히 같은 grid-template-columns을 써서
    각 항목이 컬럼별로 줄이 맞게 함. */
 .today-header{display:grid; grid-template-columns:minmax(100px,1.3fr) minmax(120px,2.1fr) minmax(105px,1.4fr) minmax(110px,1.5fr) minmax(120px,1.6fr) minmax(90px,1.2fr) minmax(120px,1.55fr) minmax(140px,0.5fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1120px;}
-.today-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.today-header span{font-family:var(--mono); font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-inv{font-family:var(--mono); font-weight:800; font-size:12px;} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-inv와 동일 크기) */
 .today-cust{font-size:12.5px; color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-sep{color:var(--border2); font-size:12px; display:none;}
@@ -279,11 +285,15 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-tile.late .num{color:var(--red);}
 .ship2-tile.shipped .num{color:var(--green);}
 .ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
-.ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.7fr) minmax(100px,1fr) minmax(110px,1.1fr) minmax(60px,0.6fr) minmax(170px,1.7fr) minmax(110px,1fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1080px;}
-.ship2-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
-.ship2-row{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.7fr) minmax(100px,1fr) minmax(110px,1.1fr) minmax(60px,0.6fr) minmax(170px,1.7fr) minmax(110px,1fr); gap:14px; align-items:center; padding:12px 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1080px;}
+.ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.6fr) minmax(100px,0.9fr) minmax(100px,0.9fr) minmax(50px,0.5fr) minmax(150px,1.1fr) minmax(100px,0.7fr); gap:10px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1020px;}
+.ship2-header span{font-family:var(--mono); font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
+/* ★ 2026-10-02 수정(피드백 반영) — Status&BOL# 칸 폭을 줄이고 간격(gap)도
+   좁혀서 Action 버튼이 뚝 떨어져 보이지 않게 함. 행 높이는 54px로 통일(세로
+   패딩 대신 min-height + align-items:center). */
+.ship2-row{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.6fr) minmax(100px,0.9fr) minmax(100px,0.9fr) minmax(50px,0.5fr) minmax(150px,1.1fr) minmax(100px,0.7fr); gap:10px; align-items:center; min-height:54px; padding:0 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1020px;}
 .ship2-row > *{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .ship2-row > .ship2-status-cell{overflow:visible;}
+.ship2-action-cell{overflow:visible;}
 .ship2-row:last-child{border-bottom:none;}
 .ship2-row.shipped{background:rgba(16,217,126,0.05);}
 .ship2-inv{font-family:var(--mono); font-weight:800; font-size:12px;} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-inv와 동일) */
@@ -573,9 +583,9 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
     </div>
   </div>
   <div class="tabs">
-    <button class="tab-btn active" onclick="showScreen('sheet')">① Sales Sheet Preview</button>
-    <button class="tab-btn" onclick="showScreen('lookup')">② Order Detail Lookup</button>
-    <button class="tab-btn" onclick="showScreen('shipping')">③ Shipping Status</button>
+    <button class="tab-btn active" onclick="showScreen('sheet')">Sales Sheet Preview</button>
+    <button class="tab-btn" onclick="showScreen('lookup')">Order Detail Lookup</button>
+    <button class="tab-btn" onclick="showScreen('shipping')">Shipping Status</button>
   </div>
   <div style="display:flex; align-items:center; gap:18px;">
     <div class="tb-clock"><div class="time" id="clockTime">--:--:-- --</div><div class="date" id="clockDate">----- -- --</div></div>
@@ -733,7 +743,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         <span>Dims</span>
         <span>Age</span>
         <span>Status &amp; BOL#</span>
-        <span class="col-right">Action</span>
+        <span>Action</span>
       </div>
       <div id="ship2-list"></div>
     </div>
@@ -1807,7 +1817,7 @@ function renderShipping(){
       ${dimsHtml}
       <span class="ship2-age${overdue?' overdue':''}">${ageTxt}</span>
       <div class="ship2-status-cell">${statusHtml}${bolHtml}</div>
-      <span class="col-right">${actionHtml}</span>
+      <span class="ship2-action-cell">${actionHtml}</span>
     </div>`;
   }).join('');
 
