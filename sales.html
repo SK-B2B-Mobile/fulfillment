@@ -265,6 +265,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-tile .num{font-family:var(--mono); font-size:22px; font-weight:800;}
 .ship2-tile .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
 .ship2-tile.pending .num{color:var(--amber);}
+.ship2-tile.late .num{color:var(--red);}
 .ship2-tile.shipped .num{color:var(--green);}
 .ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
 .ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.8fr) minmax(100px,1fr) minmax(130px,1.3fr) minmax(70px,0.7fr) minmax(110px,1fr) minmax(130px,1fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1000px;}
@@ -1664,11 +1665,18 @@ function renderShipping(){
   const primaries = jobs.filter(j => !j.dimsLinkedTo);
   const shippedCount = primaries.filter(j => j.shipped).length;
   const pendingCount = primaries.length - shippedCount;
+  // ★ 2026-10-02 수정(피드백 반영) — "지연" 개념을 행(Age 칸)뿐 아니라 맨 위
+  //   요약 칸에도 노출. 2일 이상 밀린 미출고 팔렛 수를 한눈에 보여줌.
+  const lateCount = primaries.filter(j => {
+    if (j.shipped) return false;
+    const d = ageDaysFromShipDate_(j.shipDate);
+    return d !== null && d >= 2;
+  }).length;
   summaryEl.innerHTML = `
     <div class="ship2-tile"><div class="num">${primaries.length}</div><div class="lbl">TK Pallets</div></div>
     <div class="ship2-tile pending"><div class="num">${pendingCount}</div><div class="lbl">Not Shipped</div></div>
+    <div class="ship2-tile late"><div class="num">${lateCount}</div><div class="lbl">2+ Days Late</div></div>
     <div class="ship2-tile shipped"><div class="num">${shippedCount}</div><div class="lbl">Shipped</div></div>
-    <div class="ship2-tile"><div class="num">${jobs.length}</div><div class="lbl">Total Invoices</div></div>
   `;
 
   // ★ 2026-10-02 신규 — 검색 필터 (invoice / customer)
@@ -1690,12 +1698,33 @@ function renderShipping(){
     return;
   }
 
-  // 같은 팔렛(그룹)을 테이블에서 서로 붙어 보이도록 PRIMARY 기준으로 정렬
-  const sorted = matched.slice().sort((a,b) => {
-    const ka = a.dimsLinkedTo || a.invoice, kb = b.dimsLinkedTo || b.invoice;
-    if (ka !== kb) return ka.localeCompare(kb);
-    return (a.dimsLinkedTo ? 1 : 0) - (b.dimsLinkedTo ? 1 : 0); // PRIMARY 먼저
+  // ★ 2026-10-02 수정(피드백 반영) — 정렬 기준 변경:
+  //   1) 같은 팔렛(그룹)은 여전히 서로 붙어서 보이도록(PRIMARY 행이 맨 앞)
+  //   2) 그룹 단위로: 미출고 그룹이 전부 먼저, 출고완료 그룹은 뒤로
+  //   3) 같은 상태(미출고 vs 출고완료) 안에서는 최신순(날짜 내림차순) —
+  //      미출고는 Ship Out 날짜가 최신인 것부터, 출고완료는 출고 확인 시각이
+  //      최신인 것부터
+  const groupMap = {};
+  matched.forEach(j => {
+    const key = j.dimsLinkedTo || j.invoice;
+    if (!groupMap[key]) groupMap[key] = { key: key, rows: [] };
+    groupMap[key].rows.push(j);
   });
+  const groups = Object.keys(groupMap).map(key => {
+    const g = groupMap[key];
+    const primary = g.rows.find(r => !r.dimsLinkedTo) || g.rows[0];
+    g.rows.sort((a,b) => (a.dimsLinkedTo?1:0) - (b.dimsLinkedTo?1:0)); // PRIMARY 먼저
+    g.shipped = !!primary.shipped;
+    g.sortDate = primary.shipped ? (primary.shippedAt || '') : (primary.shipDate || '');
+    return g;
+  });
+  groups.sort((a,b) => {
+    if (a.shipped !== b.shipped) return a.shipped ? 1 : -1; // 미출고 그룹 먼저, 출고완료 그룹은 뒤로
+    if (a.sortDate === b.sortDate) return 0;
+    return a.sortDate < b.sortDate ? 1 : -1; // 최신순(내림차순)
+  });
+  const sorted = [];
+  groups.forEach(g => sorted.push.apply(sorted, g.rows));
 
   // ★ 2026-10-02 신규 — 페이지네이션 (82건 전체가 한 화면에 쏟아지던 문제 해결)
   const totalPages = Math.max(1, Math.ceil(sorted.length / SHIP_PAGE_SIZE));
