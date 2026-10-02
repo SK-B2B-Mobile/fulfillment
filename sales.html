@@ -136,9 +136,13 @@ a{color:inherit;}
 .table-wrap{background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden;}
 .table-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch;}
 table{width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed;}
-/* ★ 2026-08-10 — 헤더가 너무 흐려서 잘 안 보인다는 지적 반영. 밝기를 올리고 자간을 조금 넓혀 가독성 확보. 모든 컬럼 같은 색으로 통일. */thead th{background:var(--surface2); text-align:left; padding:clamp(9px,0.7vw,16px) clamp(10px,0.8vw,18px); font-family:var(--mono); font-size:clamp(10px,0.62vw,15px); color:#C3CBDE; text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* ★ 2026-10-02 수정(피드백 반영) — 3개 탭 글자 크기 통일. 뷰포트 너비에 따라
+   커졌다 작아졌다 하던 clamp() 가변 크기를 없애고, Order Detail Lookup/
+   Shipping Status 탭과 동일한 고정 크기(헤더 10px, 자간 0.04em, text-dim)로
+   맞춤. 좁은 화면에서는 .table-scroll의 가로 스크롤이 그대로 받아줌. */
+thead th{background:var(--surface2); text-align:left; padding:9px clamp(10px,0.8vw,18px); font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-10 개선(매니저 지적) — 뒤쪽 4개 컬럼에 깔려 있던 초록 배경을 없앨. AMOUNT와 STATUS 사이가 벽처럼 보여 표가 둘로 나뉘어 보였음. 원래 'WMS 시트에 새로 추가된 컬럼'을 표시하려던 것인데, 이제는 그냥 표의 일부임. 헤더는 조용히 물러나고 본문 배지가 주인공이 되도록 함. */thead th.new-col{color:var(--text-dim);}
-tbody td{padding:clamp(10px,0.75vw,18px) clamp(10px,0.8vw,18px); font-size:clamp(12px,0.78vw,18px); border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+tbody td{padding:12px clamp(10px,0.8vw,18px); font-size:12.5px; border-bottom:1px solid var(--border); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* ★ 2026-08-05 신규 — "✓ Complete" 뱃지가 Waiting/Active보다 길어서 열 폭에
    딱 걸려 말줄임표(...) 일부가 점처럼 삐져나오던 문제. 이 칸만 말줄임을 꺼서
    뱃지 전체가 항상 온전히 보이게 함. */
@@ -148,6 +152,13 @@ tbody tr:hover{background:rgba(255,255,255,0.02);}
 td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .mono{font-family:var(--mono);}
 .dim{color:var(--text-dim);}
+/* ★ 2026-10-02 신규(피드백 반영) — Sales Sheet Preview / Order Detail Lookup /
+   Shipping Status 세 탭의 글자 크기·칸 크기를 하나의 기준으로 통일하기 위한
+   공유 클래스. 인보이스#는 어디서나 mono 12px/800, 날짜·수량 같은 보조값은
+   mono 12px/text-dim, 본문(고객명 등)은 12.5px — 세 탭 전부 동일 적용. */
+.cell-inv{font-family:var(--mono); font-weight:800; font-size:12px;}
+.cell-mono-dim{font-family:var(--mono); font-size:12px; color:var(--text-dim);}
+.cell-body{font-size:12.5px;}
 .cust-name{cursor:pointer; border-bottom:1px dotted var(--border2);}
 .cust-name:hover{color:var(--text); border-bottom-color:var(--text-dim);}
 
@@ -252,10 +263,10 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
    각 항목이 컬럼별로 줄이 맞게 함. */
 .today-header{display:grid; grid-template-columns:minmax(100px,1.3fr) minmax(120px,2.1fr) minmax(105px,1.4fr) minmax(110px,1.5fr) minmax(120px,1.6fr) minmax(90px,1.2fr) minmax(120px,1.55fr) minmax(140px,0.5fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1120px;}
 .today-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.today-inv{font-family:var(--mono); font-weight:800; font-size:13.5px;}
+.today-inv{font-family:var(--mono); font-weight:800; font-size:12px;} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-inv와 동일 크기) */
 .today-cust{font-size:12.5px; color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .today-sep{color:var(--border2); font-size:12px; display:none;}
-.today-time{font-family:var(--mono); font-size:11.5px; color:#B9C2DC;}
+.today-time{font-family:var(--mono); font-size:12px; color:var(--text-dim);} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-mono-dim과 동일) */
 .today-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
 
 /* ★ 2026-10-02 신규 — Shipping Status 탭 전용 스타일 (ship2-* 로 분리해서
@@ -268,13 +279,14 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-tile.late .num{color:var(--red);}
 .ship2-tile.shipped .num{color:var(--green);}
 .ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
-.ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.8fr) minmax(100px,1fr) minmax(130px,1.3fr) minmax(70px,0.7fr) minmax(110px,1fr) minmax(130px,1fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1000px;}
+.ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.7fr) minmax(100px,1fr) minmax(110px,1.1fr) minmax(60px,0.6fr) minmax(170px,1.7fr) minmax(110px,1fr); gap:14px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1080px;}
 .ship2-header span{font-family:var(--mono); font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
-.ship2-row{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.8fr) minmax(100px,1fr) minmax(130px,1.3fr) minmax(70px,0.7fr) minmax(110px,1fr) minmax(130px,1fr); gap:14px; align-items:center; padding:13px 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1000px;}
+.ship2-row{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.7fr) minmax(100px,1fr) minmax(110px,1.1fr) minmax(60px,0.6fr) minmax(170px,1.7fr) minmax(110px,1fr); gap:14px; align-items:center; padding:12px 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1080px;}
 .ship2-row > *{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.ship2-row > .ship2-status-cell{overflow:visible;}
 .ship2-row:last-child{border-bottom:none;}
 .ship2-row.shipped{background:rgba(16,217,126,0.05);}
-.ship2-inv{font-family:var(--mono); font-weight:800; font-size:12.5px;}
+.ship2-inv{font-family:var(--mono); font-weight:800; font-size:12px;} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-inv와 동일) */
 .ship2-linked{font-family:var(--mono); font-size:11px; color:#C4B0FF; font-weight:700;}
 .ship2-status{font-family:var(--mono); font-size:10.5px; font-weight:800; padding:3px 8px; border-radius:6px; white-space:nowrap; display:inline-block;}
 .ship2-status.pending{background:var(--amber-bg); color:var(--amber);}
@@ -283,12 +295,23 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-btn.go{background:var(--green); border-color:var(--green); color:#07241a;}
 .ship2-btn.undo{background:transparent; color:var(--text-dim);}
 .ship2-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
-.ship2-age{font-family:var(--mono); font-size:11.5px; color:var(--text-dim);}
+.ship2-age{font-family:var(--mono); font-size:12px; color:var(--text-dim);} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-mono-dim과 동일) */
 .ship2-age.overdue{color:var(--red); font-weight:800;}
 .ship2-toolbar{display:flex; gap:12px; margin-bottom:10px; align-items:center; justify-content:space-between; flex-wrap:wrap;}
 .ship2-top{display:flex; gap:12px; flex:1; min-width:240px;}
 .ship2-count{font-size:12px; color:var(--text-dim); white-space:nowrap;}
 @media (max-width:900px){ .ship2-summary{grid-template-columns:repeat(2,1fr);} }
+/* ★ 2026-10-02 신규 — BOL# 입력(시뮬레이션에서 확정된 디자인). Status 칸
+   바로 아래에 붙여서, 배차 담당자가 출고 체크와 별개로 아무 때나 적을 수
+   있게 함. */
+.ship2-status-cell{display:flex; flex-direction:column; gap:5px; align-items:flex-start; white-space:normal;}
+.ship2-bol-link{font-size:11px; font-weight:700; color:var(--blue); text-decoration:none; border-bottom:1px dashed var(--blue); cursor:pointer; background:none; border-top:none; border-left:none; border-right:none; padding:0; font-family:var(--sans);}
+.ship2-bol-chip{font-family:var(--mono); font-size:10.5px; font-weight:700; color:#C4B0FF; background:var(--purple-bg); border:1px solid rgba(139,92,246,0.4); border-radius:6px; padding:2px 7px; white-space:nowrap;}
+.ship2-bol-edit{background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:11px; padding:0 0 0 2px;}
+.ship2-bol-row{display:flex; gap:6px; align-items:center;}
+.ship2-bol-input{width:104px; font-family:var(--mono); font-size:11px; background:var(--bg); border:1px solid var(--border2); border-radius:6px; padding:4px 6px; color:var(--text);}
+.ship2-bol-save{background:var(--green); border:none; border-radius:6px; width:22px; height:22px; color:#07241a; font-weight:800; cursor:pointer; font-size:11px; line-height:1;}
+.ship2-bol-cancel{background:transparent; border:1px solid var(--border2); border-radius:6px; width:22px; height:22px; color:var(--text-dim); cursor:pointer; font-size:11px; line-height:1;}
 /* ★ Completed Today 목록 전용 — 뱃지(박스) 대신 색상만 있는 순수 텍스트
    ★ 2026-08-05 수정 — pending/moved-no/method 값들이 --text-dim(연회색)이라
    너무 흐릿해서 잘 안 보인다는 피드백 반영 — 더 밝은 톤(#B9C2DC)으로 교체.
@@ -709,7 +732,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         <span>Ship Out</span>
         <span>Dims</span>
         <span>Age</span>
-        <span>Status</span>
+        <span>Status &amp; BOL#</span>
         <span class="col-right">Action</span>
       </div>
       <div id="ship2-list"></div>
@@ -1436,12 +1459,12 @@ function renderSheet(){
       const movedBadge = packStageBadgeHtml(o, 'badge');
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
       return `<tr>
-        <td class="mono" style="font-weight:800">${o.invoice}</td>
-        <td><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
-        <td class="mono dim">${o.shipDate||'-'}</td>
+        <td class="cell-inv">${o.invoice}</td>
+        <td class="cell-body"><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
+        <td class="cell-mono-dim">${o.shipDate||'-'}</td>
         <td class="badge-cell">${pickingBadge(o)}</td>
         <td><span class="badge method ${methodClass(o.method)}">${o.method||'-'}</span></td>
-        <td class="mono">${fmtMoney(o.amount)}</td>
+        <td class="cell-mono-dim">${fmtMoney(o.amount)}</td>
         <td class="new-col">${badge}</td>
         <td class="new-col">${movedBadge}</td>
         <td class="new-col">${dimsBadge(o)}</td>
@@ -1747,7 +1770,7 @@ function renderShipping(){
     const dCount = j.dimsCount || 0;
     const dimsHtml = isLinked
       ? `<span class="ship2-linked">🔗 ${j.dimsLinkedTo}</span>`
-      : `<span>${dCount} Pallet${dCount===1?'':'s'}</span>`;
+      : `<span class="cell-mono-dim">${dCount} Pallet${dCount===1?'':'s'}</span>`;
     let actionHtml;
     if (isLinked){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
@@ -1756,16 +1779,43 @@ function renderShipping(){
     } else {
       actionHtml = `<button class="ship2-btn go" onclick="toggleShipped('${j.invoice}', true)">Mark Shipped</button>`;
     }
+
+    // ★ 2026-10-02 신규(시뮬레이션에서 확정) — BOL# 입력. Shipped 체크와는
+    //   완전히 독립적으로 아무 때나 입력/수정. LINKED 행은 PRIMARY의 BOL을
+    //   서버가 이미 계산해서 내려준 값을 그대로 읽기 전용으로만 보여줌
+    //   (Shipped 상태와 동일한 "대표에서만 진짜 값" 원칙).
+    let bolHtml;
+    if (isLinked){
+      bolHtml = j.bol ? `<span class="ship2-bol-chip">BOL# ${j.bol}</span>` : '';
+    } else if (BOL_EDIT.hasOwnProperty(j.invoice)){
+      const draft = (BOL_EDIT[j.invoice] || '').replace(/"/g,'&quot;');
+      bolHtml = `<div class="ship2-bol-row">
+        <input class="ship2-bol-input" id="bol-input-${j.invoice}" value="${draft}" placeholder="BOL number" oninput="onBolDraftInput('${j.invoice}', this.value)" onkeydown="if(event.key==='Enter')saveBol('${j.invoice}'); if(event.key==='Escape')cancelBolEdit('${j.invoice}');">
+        <button class="ship2-bol-save" title="Save" onclick="saveBol('${j.invoice}')">✓</button>
+        <button class="ship2-bol-cancel" title="Cancel" onclick="cancelBolEdit('${j.invoice}')">✕</button>
+      </div>`;
+    } else if (j.bol){
+      bolHtml = `<div class="ship2-bol-row"><span class="ship2-bol-chip">BOL# ${j.bol}</span><button class="ship2-bol-edit" title="Edit BOL#" onclick="startBolEdit('${j.invoice}', '${j.bol.replace(/'/g,"&#39;")}')">✎</button></div>`;
+    } else {
+      bolHtml = `<a class="ship2-bol-link" onclick="startBolEdit('${j.invoice}', '')">+ Add BOL#</a>`;
+    }
+
     return `<div class="ship2-row ${j.shipped?'shipped':''}">
       <span class="ship2-inv">${j.invoice||''}</span>
-      <span title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
-      <span>${j.shipDate||'-'}</span>
+      <span class="cell-body" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
+      <span class="cell-mono-dim">${j.shipDate||'-'}</span>
       ${dimsHtml}
       <span class="ship2-age${overdue?' overdue':''}">${ageTxt}</span>
-      ${statusHtml}
+      <div class="ship2-status-cell">${statusHtml}${bolHtml}</div>
       <span class="col-right">${actionHtml}</span>
     </div>`;
   }).join('');
+
+  // 방금 그린 BOL 입력창에 자동 포커스 — 링크를 클릭한 직후 바로 타이핑 가능하게
+  Object.keys(BOL_EDIT).forEach(inv => {
+    const el = document.getElementById('bol-input-' + inv);
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  });
 
   document.getElementById('ship2-pager-summary').textContent =
     `${start+1}–${Math.min(start+SHIP_PAGE_SIZE, sorted.length)} of ${sorted.length}`;
@@ -1814,6 +1864,39 @@ async function toggleShipped(invoice, nextShipped){
     await loadToday();
   } else {
     alert((res && res.error) ? res.error : 'Could not update shipping status. Check your connection and try again.');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ★ 2026-10-02 신규(시뮬레이션에서 확정) — BOL# 입력. Shipping Status의
+   Status 칸에서 트럭킹 BOL 번호를 바로 입력. Shipped 체크와는 완전히
+   독립적인 별도 op(setBolNumber)로 서버에 저장되며, 언제든 수정 가능.
+   BOL_EDIT는 "지금 이 인보이스가 입력창이 열려 있는지 + 임시로 타이핑 중인
+   값"만 들고 있는 클라이언트 전용 상태 — 저장 성공 시 지워지고 서버값(j.bol)이
+   그 자리를 대신한다. */
+let BOL_EDIT = {};
+
+function startBolEdit(invoice, current){
+  BOL_EDIT[invoice] = current || '';
+  renderShipping();
+}
+function cancelBolEdit(invoice){
+  delete BOL_EDIT[invoice];
+  renderShipping();
+}
+function onBolDraftInput(invoice, value){
+  // 매 타이핑마다 다시 그리면 입력창 포커스/커서 위치를 잃으므로, 여기서는
+  // 값만 저장하고 화면은 다시 그리지 않음 — 저장(Enter/✓) 시에만 반영.
+  BOL_EDIT[invoice] = value;
+}
+async function saveBol(invoice){
+  const bol = (BOL_EDIT[invoice] || '').trim();
+  const res = await gasPostWithRetry('setBolNumber', { invoice: invoice, bol: bol, by: 'Dispatch (tablet)' });
+  if (res && res.ok){
+    delete BOL_EDIT[invoice];
+    await loadToday();
+  } else {
+    alert((res && res.error) ? res.error : 'Could not save BOL#. Check your connection and try again.');
   }
 }
 
