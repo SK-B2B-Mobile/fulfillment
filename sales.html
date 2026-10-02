@@ -244,8 +244,14 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
    3탭(Sales Sheet Preview/Order Detail Lookup/Shipping Status) 공통으로 씀. */
 .badge-link-clickable{cursor:pointer;}
 .badge-link-clickable:hover{text-decoration:underline;}
-.linked-group-popover{position:fixed; z-index:500; background:var(--surface); border:1px solid var(--border2); border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,0.5); width:320px; overflow:hidden;}
-.linked-pop-head{font-size:12px; font-weight:800; color:#C4B0FF; background:var(--surface2); padding:10px 14px; border-bottom:1px solid var(--border);}
+/* ★ 2026-10-02 수정(현장 지적) — position:fixed였어서 페이지를 스크롤하면
+   팝업이 그 자리에 고정된 채로 안 따라와서 엉뚱한 위치에 떠 보이는 문제가
+   있었음. position:absolute(문서 기준 좌표)로 바꿔서 스크롤해도 원래
+   클릭했던 자리에 항상 같이 붙어 있도록 수정. */
+.linked-group-popover{position:absolute; z-index:500; background:var(--surface); border:1px solid var(--border2); border-radius:10px; box-shadow:0 12px 32px rgba(0,0,0,0.5); width:320px; overflow:hidden;}
+.linked-pop-head{display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; font-weight:800; color:#C4B0FF; background:var(--surface2); padding:10px 14px; border-bottom:1px solid var(--border);}
+.linked-pop-close{background:none; border:none; color:var(--text-dim); font-size:15px; cursor:pointer; line-height:1; padding:2px 4px; flex-shrink:0;}
+.linked-pop-close:hover{color:var(--text);}
 .linked-pop-body{max-height:260px; overflow-y:auto;}
 .linked-pop-row{display:flex; align-items:center; gap:8px; padding:9px 14px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.12s;}
 .linked-pop-row:last-child{border-bottom:none;}
@@ -1142,7 +1148,10 @@ function showLinkedGroupPopover(evt, primaryInvoice, primaryCustomer, group){
   const pop = document.createElement('div');
   pop.className = 'linked-group-popover';
   pop.innerHTML = `
-    <div class="linked-pop-head">🔗 이 팔렛에 묶인 오더 (${members.length}건)</div>
+    <div class="linked-pop-head">
+      <span>🔗 이 팔렛에 묶인 오더 (${members.length}건)</span>
+      <button type="button" class="linked-pop-close" title="닫기" onclick="event.stopPropagation(); document.querySelectorAll('.linked-group-popover').forEach(el=>el.remove());">✕</button>
+    </div>
     <div class="linked-pop-body">${members.map(m => `
         <div class="linked-pop-row" onclick="event.stopPropagation(); document.querySelectorAll('.linked-group-popover').forEach(el=>el.remove()); jumpToInvoice('${m.invoice}')">
           <span class="linked-pop-badge ${m.isPrimary ? 'primary' : 'child'}">${m.isPrimary ? 'PRIMARY' : 'LINKED'}</span>
@@ -1151,9 +1160,16 @@ function showLinkedGroupPopover(evt, primaryInvoice, primaryCustomer, group){
         </div>`).join('')}</div>
     <div class="linked-pop-foot">클릭하면 해당 오더 상세로 이동합니다.</div>`;
   document.body.appendChild(pop);
+  // ★ 2026-10-02 수정(현장 지적) — position:fixed(뷰포트 기준)였어서 스크롤하면
+  //   팝업이 안 따라오고 그 자리에 고정돼 있던 문제. getBoundingClientRect()는
+  //   뷰포트 기준 좌표라서, 여기에 현재 스크롤량(window.scrollX/scrollY)을
+  //   더해 "문서 기준" 좌표로 바꿔줌 — CSS도 position:absolute로 맞춰놨으므로
+  //   이제 스크롤해도 클릭했던 칩 바로 아래에 항상 붙어서 같이 움직임.
   const rect = evt.target.getBoundingClientRect();
-  pop.style.left = Math.min(rect.left, window.innerWidth - 336) + 'px';
-  pop.style.top = (rect.bottom + 6) + 'px';
+  const docLeft = rect.left + window.scrollX;
+  const docTop = rect.bottom + window.scrollY;
+  pop.style.left = Math.min(docLeft, window.scrollX + window.innerWidth - 336) + 'px';
+  pop.style.top = (docTop + 6) + 'px';
   setTimeout(()=>{
     document.addEventListener('click', function closeIt(){ pop.remove(); document.removeEventListener('click', closeIt); });
   }, 0);
