@@ -172,10 +172,13 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .badge.gap{background:var(--blue-bg); color:#8FBBFF;}
 .badge.pending{background:var(--gray-bg); color:var(--text-dim);}
 .badge.na{background:var(--gray-bg); color:var(--text-dim2); opacity:0.7;}
-/* ★ 2026-10-02 신규(현장 피드백) — PRIMARY(대표) 오더 옆에 "자식 N건 묶여있음"을
-   알려주는 작은 칩. LINKED 쪽 🔗 표시와 같은 보라색 계열로 통일(ship2-linked,
-   ship2-bol-chip과 동일 톤) — 3탭 어디서나 같은 색/모양으로 "묶인 오더"를 인식. */
-.linked-count-chip{display:inline-flex; align-items:center; font-family:var(--mono); font-size:10.5px; font-weight:800; color:#C4B0FF; background:var(--purple-bg); border:1px solid rgba(139,92,246,0.4); border-radius:6px; padding:2px 6px; white-space:nowrap; vertical-align:middle;}
+/* ★ 2026-10-02 수정(현장 버그 리포트) — PRIMARY(대표) 오더 옆에 "자식 N건
+   묶여있음"을 별도 뱃지(.linked-count-chip)로 따로 띄웠더니, 좁은 칸에서
+   기존 뱃지("✓ Dims" 등)와 둘 사이에서 줄바꿈이 일어나 행이 2단으로 밀리는
+   버그 발생(실측 확인). 수정: 별도 뱃지를 만들지 않고, 기존 뱃지 "안"에
+   같은 텍스트로 이어붙임(.badge-link-part) — 뱃지 자체가 하나의 요소라
+   중간에 줄바꿈될 자리가 없음. 색은 기존 LINKED 보라색 톤 그대로 유지. */
+.badge-link-part{color:#C4B0FF; font-weight:800;}
 .plain-tag.na{color:#8A93AC; opacity:1;}
 .badge.moved-no{background:var(--gray-bg); color:var(--text-dim);}
 .badge.method{background:var(--surface2); color:var(--text-dim); border:1px solid var(--border2);}
@@ -1410,13 +1413,17 @@ function dimsBadge(o){
   if (o.dimsLinkedTo) return '<span class="badge pass">🔗 '+o.dimsLinkedTo+'</span>';
   // ★ 2026-10-02 신규(현장 피드백) — 이 오더가 PRIMARY(대표)이고 다른 오더가 여기로
   //   묶여 있으면, 묶인 자식 쪽에만 🔗가 보이고 대표 쪽엔 아무 표시가 없어서 "이 오더도
-  //   묶여 있는 그룹이구나"를 리스트만 보고는 알 수 없었음. 대표 쪽도 작은 링크
-  //   칩으로 일관되게 표시(상세 팝업의 "N LINKED"와 같은 정보).
+  //   묶여 있는 그룹이구나"를 리스트만 보고는 알 수 없었음. 대표 쪽도 링크 정보를
+  //   일관되게 표시(상세 팝업의 "N LINKED"와 같은 정보).
+  // ★ 2026-10-02 긴급 수정(현장 버그 리포트) — 처음엔 별도 뱃지(🔗 +N)를 옆에
+  //   따로 띄웠는데, 칸이 좁으면 두 뱃지 사이에서 줄바꿈이 일어나 행이 밀리는
+  //   버그가 실제로 확인됨. "뱃지 하나로 합치기"로 수정 — 기존 뱃지 텍스트
+  //   안에 이어붙여서(badge-link-part) 줄바꿈 지점 자체를 없앰.
   const linkedN = o.dimsLinkedCount || 0;
-  const linkSuffix = linkedN>0 ? ' <span class="linked-count-chip" title="'+linkedN+' order(s) linked to this one">🔗 +'+linkedN+'</span>' : '';
-  return (n>0
-    ? '<span class="badge pass">✓ Saved ('+n+')</span>'
-    : '<span class="badge pending">Not Entered</span>') + linkSuffix;
+  const linkedInner = linkedN>0 ? ' <span class="badge-link-part">· 🔗 +'+linkedN+'</span>' : '';
+  return n>0
+    ? '<span class="badge pass">✓ Saved ('+n+')'+linkedInner+'</span>'
+    : '<span class="badge pending">Not Entered'+linkedInner+'</span>';
 }
 
 function renderSheet(){
@@ -1637,10 +1644,12 @@ function renderToday(){
     }
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     // ★ 2026-10-02 신규(현장 피드백) — PRIMARY(대표) 오더도 자식이 묶여 있으면
-    //   dimsBadge()와 동일하게 작은 링크 칩을 같이 보여줌(리스트 통일성).
+    //   dimsBadge()와 동일한 방식으로 링크 정보를 보여줌(리스트 통일성).
+    // ★ 2026-10-02 긴급 수정(현장 버그 리포트) — 별도 뱃지로 띄웠더니 좁은 칸에서
+    //   줄바꿈되어 행이 밀리는 버그 발생 → dimsBadge()와 동일하게 뱃지 하나로 합침.
     const linkedNJ = j.dimsLinkedCount || 0;
-    const linkSuffixJ = linkedNJ>0 ? ' <span class="linked-count-chip" title="'+linkedNJ+' order(s) linked to this one">🔗 +'+linkedNJ+'</span>' : '';
-    const dimsBadgeJ = needsDimsJ ? ((j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>')) + linkSuffixJ) : '<span class="plain-tag na">N/A</span>';
+    const linkedInnerJ = linkedNJ>0 ? ' <span class="badge-link-part">· 🔗 +'+linkedNJ+'</span>' : '';
+    const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims'+linkedInnerJ+'</span>' : '<span class="plain-tag pending">Not Entered'+linkedInnerJ+'</span>')) : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" data-invoice="${j.invoice}" onclick="jumpToInvoice('${j.invoice}')" title="${(insp.indexOf('ISSUES')>=0 || insp.indexOf('🔗')>=0) ? 'Click for issue details' : ''}">
       <span class="today-inv">${j.invoice||''}</span>
       <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
@@ -1795,11 +1804,14 @@ function renderShipping(){
     // ★ 2026-10-02 신규(현장 피드백) — 이 탭은 LINKED 행이 PRIMARY 바로 옆에
     //   그룹으로 묶여 보이긴 하지만, PRIMARY 쪽에도 "자식이 있다"는 표시를
     //   같이 줘서 Sales Sheet Preview / Order Detail Lookup과 통일시킴.
+    // ★ 2026-10-02 긴급 수정(현장 버그 리포트) — 별도 뱃지로 띄웠더니 좁은 칸에서
+    //   줄바꿈되어 행이 밀리는 버그 발생 → 다른 두 탭과 동일하게 뱃지(span) 하나
+    //   안에 이어붙여서 줄바꿈 지점 자체를 없앰.
     const linkedNShip = j.dimsLinkedCount || 0;
-    const linkSuffixShip = linkedNShip>0 ? ` <span class="linked-count-chip" title="${linkedNShip} order(s) linked to this one">🔗 +${linkedNShip}</span>` : '';
+    const linkedInnerShip = linkedNShip>0 ? ` <span class="badge-link-part">· 🔗 +${linkedNShip}</span>` : '';
     const dimsHtml = isLinked
       ? `<span class="ship2-linked">🔗 ${j.dimsLinkedTo}</span>`
-      : `<span class="cell-mono-dim">${dCount} Pallet${dCount===1?'':'s'}</span>${linkSuffixShip}`;
+      : `<span class="cell-mono-dim">${dCount} Pallet${dCount===1?'':'s'}${linkedInnerShip}</span>`;
     let actionHtml;
     if (isLinked){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
