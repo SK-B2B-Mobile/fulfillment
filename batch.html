@@ -1064,10 +1064,14 @@ const AUTH_NAME_KEY = 'sk_auth_name';
 const AUTH_DEPT_KEY = 'sk_auth_dept';
 const AUTH_EXPIRES_KEY = 'sk_auth_expires';
 const AUTH_MUST_CHANGE_KEY = 'sk_auth_must_change';
+// ★ 2026-10-02 신규 — 계정 1개 = 작업자 1명(기기 1대) 통합. 이 계정에 연결된 피킹
+// 작업자 이름을 기기에도 캐시해둬서, 새로고침 시 서버 재확인 전에도 즉시 적용 가능.
+const AUTH_WORKER_KEY = 'sk_auth_worker_name';
 
 function authGetToken(){ return localStorage.getItem(AUTH_TOKEN_KEY) || ''; }
 function authGetName(){ return localStorage.getItem(AUTH_NAME_KEY) || ''; }
 function authGetDept(){ return localStorage.getItem(AUTH_DEPT_KEY) || ''; }
+function authGetWorkerName(){ return localStorage.getItem(AUTH_WORKER_KEY) || ''; }
 function authIsLoggedIn(){
   const tok = authGetToken();
   const exp = Number(localStorage.getItem(AUTH_EXPIRES_KEY) || 0);
@@ -1079,6 +1083,28 @@ function authClear(){
   localStorage.removeItem(AUTH_DEPT_KEY);
   localStorage.removeItem(AUTH_EXPIRES_KEY);
   localStorage.removeItem(AUTH_MUST_CHANGE_KEY);
+  localStorage.removeItem(AUTH_WORKER_KEY);
+}
+
+// ★ 2026-10-02 신규 — 계정에 연결된 작업자 이름을 조용히(확인창 없이) 적용.
+// 기존 doLogin(name)과 달리 중복로그인 확인·서버 저장 호출이 없음(이미 서버에
+// 저장된 연결을 단순히 이 기기에 반영하는 것뿐이므로).
+function autoApplyLinkedWorker_(name){
+  if (!name) return;
+  try{
+    if (typeof setLoginWorker === 'function') setLoginWorker(name);
+    if (typeof hideLoginOverlay === 'function') hideLoginOverlay();
+    if (typeof state !== 'undefined' && state) state.currentWorker = null;
+    if (typeof populateWorkerSelect === 'function') populateWorkerSelect();
+    if (typeof populateSsWorkerSelect === 'function') populateSsWorkerSelect();
+    if (typeof populatePvWorkerSelect === 'function') populatePvWorkerSelect();
+    if (typeof populatePsvWorkerSelect === 'function') populatePsvWorkerSelect();
+    if (typeof pingWorkerPresenceNow === 'function') pingWorkerPresenceNow();
+    if (typeof applyWorkerSelectLocks_ === 'function') applyWorkerSelectLocks_();
+  }catch(e){ /* best-effort — 메인 스크립트가 아직 준비 안 됐어도 조용히 무시 */ }
+  // 계정에 이미 연결된 작업자가 있으면 "Switch Worker"는 더 이상 필요 없음
+  const wrap = document.getElementById('loginBadgeWrap');
+  if (wrap) wrap.style.display = 'none';
 }
 function authShowGate(){
   const g = document.getElementById('authGate');
@@ -1088,7 +1114,7 @@ function authHideGate(){
   const g = document.getElementById('authGate');
   if (g) g.classList.add('hidden');
   const b = document.getElementById('authUserBadge');
-  if (b) b.textContent = '🔐 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
+  if (b) b.textContent = '👤 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
 }
 async function authPost(op, data){
   // ★ CONFIG(아래쪽에서 선언됨)는 이 함수가 실제로 호출되는 시점(로그인 버튼 클릭 등,
@@ -1120,10 +1146,15 @@ async function authDoLogin(){
     localStorage.setItem(AUTH_DEPT_KEY, res.dept || '');
     localStorage.setItem(AUTH_EXPIRES_KEY, String(Date.now() + ((res.ttlSec || 21600) * 1000)));
     localStorage.setItem(AUTH_MUST_CHANGE_KEY, res.mustChangePassword ? '1' : '');
+    localStorage.setItem(AUTH_WORKER_KEY, res.workerName || '');
     errEl.style.display = 'none';
     pwEl.value = '';
     authHideGate();
-    if (res.mustChangePassword) pwmOpen(true);
+    if (res.mustChangePassword){
+      pwmOpen(true);
+    } else if (res.workerName){
+      autoApplyLinkedWorker_(res.workerName);
+    }
   } else {
     errEl.textContent = authTranslateError_(res && res.error);
     errEl.style.display = 'block';
@@ -1150,6 +1181,13 @@ function authLogout(){
   if (btn){ btn.disabled = true; btn.innerHTML = '<span class="auth-logout-spin"></span>Logging out...'; }
   const tok = authGetToken();
   if (tok){ try { authPost('logout', { token: tok }); } catch(e){} }
+  // ★ 2026-10-02 신규 — 이 계정에 작업자가 연결돼있던 경우(Switch Worker 없이 자동
+  //   적용된 경우), 계정 로그아웃이 곧 그 작업자 로그아웃이기도 하므로 함께 정리함.
+  const linkedWorker = authGetWorkerName();
+  if (linkedWorker){
+    try{ if (typeof pingWorkerLogoutClear_ === 'function') pingWorkerLogoutClear_(); }catch(e){}
+    try{ if (typeof clearLoginWorker === 'function') clearLoginWorker(); }catch(e){}
+  }
   setTimeout(function(){
     authClear();
     location.reload();
@@ -1211,9 +1249,14 @@ async function pwmSubmit(){
   const res = await authPost('changePassword', { token: authGetToken(), currentPassword: cur, newPassword: nw });
   btn.disabled = false; btn.textContent = 'Save';
   if (res && res.ok){
+    const wasForced = pwmForced;
     pwmForced = false;
     localStorage.setItem(AUTH_MUST_CHANGE_KEY, '');
     document.getElementById('pwChangeModal').classList.add('hidden');
+    if (wasForced){
+      const wn = authGetWorkerName();
+      if (wn) autoApplyLinkedWorker_(wn);
+    }
   } else {
     errEl.textContent = authTranslateError_(res && res.error) || 'Could not change password.';
     errEl.style.display = 'block';
@@ -1241,7 +1284,7 @@ async function deptSubmit(){
   if (res && res.ok){
     localStorage.setItem(AUTH_DEPT_KEY, val);
     const b = document.getElementById('authUserBadge');
-    if (b) b.textContent = '🔐 ' + authGetName() + (val ? ' · ' + val : '');
+    if (b) b.textContent = '👤 ' + authGetName() + (val ? ' · ' + val : '');
     document.getElementById('deptModal').classList.add('hidden');
   } else {
     errEl.textContent = authTranslateError_(res && res.error) || 'Could not save department.';
@@ -1257,7 +1300,13 @@ authInit();
 document.addEventListener('DOMContentLoaded', function(){
   if (authIsLoggedIn()){
     const b = document.getElementById('authUserBadge');
-    if (b) b.textContent = '🔐 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
+    if (b) b.textContent = '👤 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
+    // ★ 2026-10-02 신규 — 강제 비밀번호 변경 중이 아니고, 이 계정에 연결된 작업자가
+    //   있으면 새로고침 때도 "이름 선택" 화면 없이 자동으로 그 이름을 적용함.
+    if (localStorage.getItem(AUTH_MUST_CHANGE_KEY) !== '1'){
+      const wn = authGetWorkerName();
+      if (wn) autoApplyLinkedWorker_(wn);
+    }
   }
 });
 </script>
@@ -2729,6 +2778,23 @@ function clearLoginWorker(){
 }
 
 function refreshLoginUI(){
+  // ★ 2026-10-02 신규 — 계정(ID+PW)에 이미 연결된 작업자가 있으면, "SELECT YOUR NAME"
+  //   화면이 한 프레임이라도 깜빡 보이는 일이 없도록 여기서 먼저(동기적으로) 적용한다.
+  //   DOMContentLoaded 리스너에서도 autoApplyLinkedWorker_를 한 번 더 호출하지만(안전망,
+  //   예: 이 함수가 더 일찍 호출되는 다른 경로가 생기더라도 대비), 실제 깜빡임 방지는
+  //   이 메인 스크립트 맨 아래(DOMContentLoaded보다 항상 먼저 실행됨)에서 처리되는
+  //   이 부분이 담당한다. authGetWorkerName/authIsLoggedIn은 위쪽 인증 스크립트에서
+  //   이미 정의돼 있어 안전하게 호출 가능(함수 선언 순서상 이 스크립트가 더 늦게 실행됨).
+  if(!getLoginWorker()){
+    try{
+      const loggedIn = (typeof authIsLoggedIn !== 'function') || authIsLoggedIn();
+      const mustChange = localStorage.getItem('sk_auth_must_change') === '1';
+      const linked = (typeof authGetWorkerName === 'function') ? authGetWorkerName() : '';
+      if (loggedIn && !mustChange && linked){
+        setLoginWorker(linked);
+      }
+    }catch(e){ /* best-effort — 실패해도 기존처럼 이름 선택 화면으로 진행 */ }
+  }
   if(getLoginWorker()){
     hideLoginOverlay();
     updateLoginBadge();
@@ -2871,6 +2937,22 @@ async function doLogin(name){
   try{ populatePsvWorkerSelect(); }catch(e){}
   try{ pingWorkerPresenceNow(); }catch(e){}
   applyWorkerSelectLocks_(); // ★ 2026-09-25 신규 — 로그인 이름으로 고정, 다른 이름으로 실수로 안 바뀌게 잠금
+
+  // ★ 2026-10-02 신규 — 이 기기에 관리자 계정(ID+비번)이 로그인돼 있으면, 지금 고른
+  //   이름을 그 계정에 영구 연결해둠. 다음부터 이 계정으로 로그인하면 이 화면(이름
+  //   선택)을 아예 건너뛰고 바로 이 이름이 적용됨(best-effort — 실패해도 지금 선택은
+  //   정상 적용된 상태라 작업에 지장 없음).
+  try{
+    if (typeof authGetToken === 'function' && authGetToken() && typeof authPost === 'function'){
+      authPost('linkWorkerName', { token: authGetToken(), workerName: name }).then(function(res){
+        if (res && res.ok){
+          try{ localStorage.setItem(AUTH_WORKER_KEY, name); }catch(e){}
+          const wrap = document.getElementById('loginBadgeWrap');
+          if (wrap) wrap.style.display = 'none';
+        }
+      }).catch(function(){});
+    }
+  }catch(e){}
 }
 
 // ★ 2026-09-25 신규(현장 재발견 버그 수정) — 로그아웃해도 로그인 화면의 "Active" 점이
