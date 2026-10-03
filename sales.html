@@ -351,6 +351,13 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .confirm-with-undo{display:flex; align-items:center; gap:8px;}
 .confirm-locked-note{font-family:var(--sans); font-size:10px; color:var(--text-dim); font-style:italic; white-space:nowrap;}
 .confirm-check-btn.saving{background:var(--surface3,var(--surface)); color:var(--text-dim); cursor:default; font-style:italic;}
+/* ★ 2026-10-02 신규(사용자 요청) — 이름/날짜가 길게 늘어진 텍스트 대신 짧은
+   배지 + 호버 툴팁으로 "옆에 깔끔하게" 유지. 과거에 Undo된 적이 있으면
+   ↺ 표시를 배지에 함께 보여줌(재컨펌 후에도 영구 유지). */
+.confirm-badge-compact{font-family:var(--sans); font-size:10.5px; font-weight:700; color:var(--green); background:rgba(34,197,94,0.12); border:1px solid rgba(34,197,94,0.35); border-radius:6px; padding:4px 9px; white-space:nowrap; cursor:default;}
+/* ★ 2026-10-02 신규(사용자 요청) — Undo 이력이 있지만 현재는 미확인 상태일 때,
+   다른 작업자들이 "컴펌되었다가 취소된 건"임을 한눈에 구분할 수 있도록 경고색 적용. */
+.confirm-check-btn.undone{background:rgba(217,119,6,0.14); color:#d97706; border-color:rgba(217,119,6,0.4);}
 /* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — Sales Confirm이 BOL# "밑"이 아니라
    "옆"에 와야 한다고 명확히 요청받았는데 처음 구현에선 flex-column 안에 각자
    한 줄씩 떨어져서 나왔던 버그. BOL#과 Confirm을 이 한 줄(행)로 묶음. */
@@ -1731,6 +1738,13 @@ let TODAY_PAGE_SIZE = 10;
 // 받아온 목록 데이터보다 "방금 확인된 값"을 우선하도록 함 — 버그가 아니라
 // 서버 혼잡 상황에서의 방어적 안전장치.
 let _recentPaymentOverrides = {}; // { invoice: { paid: bool, until: timestamp } }
+// ★ 2026-10-02 신규 — Sales Confirm(Shipping Status)에서도 위와 동일한 현상
+// ("Undo 눌렀더니 Saving…후 다시 예전 값으로 돌아왔다가 왔다갔다 함") 확인됨.
+// 원인은 위 결제상태(PU/UPS)와 완전히 동일 — autoSync()의 45초 주기 백그라운드
+// 재조회가 저장 직후의 지연된(옛 값) 응답을 받아와 방금 반영한 화면을 덮어씀.
+// 동일한 방어 패턴 적용: 저장이 서버에서 확인된 직후 60초간은 해당 인보이스의
+// Sales Confirm 관련 값만큼은 새로 받아온 목록 데이터보다 우선함.
+let _recentSalesConfirmOverrides = {}; // { invoice: { confirmed, confirmedAt, confirmedBy, wasUndone, undoneAt, undoneBy, until } }
 
 async function loadToday(){
   const res = await getSalesTodayListData_();
@@ -1771,6 +1785,20 @@ function applyTodayResult(res){
     if (ov.until < now) { delete _recentPaymentOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
     if (job) job.paymentPaid = ov.paid;
+  });
+  // ★ 2026-10-02 신규 — 방금 확인된 Sales Confirm 상태 우선 적용(위 설명 참고)
+  Object.keys(_recentSalesConfirmOverrides).forEach(inv => {
+    const ov = _recentSalesConfirmOverrides[inv];
+    if (ov.until < now) { delete _recentSalesConfirmOverrides[inv]; return; }
+    const job = TODAY_JOBS.find(j => j.invoice === inv);
+    if (job){
+      job.salesConfirmed = ov.confirmed;
+      job.salesConfirmedAt = ov.confirmedAt;
+      job.salesConfirmedBy = ov.confirmedBy;
+      job.salesConfirmWasUndone = ov.wasUndone;
+      job.salesConfirmUndoneAt = ov.undoneAt;
+      job.salesConfirmUndoneBy = ov.undoneBy;
+    }
   });
   saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
@@ -2018,16 +2046,23 @@ function renderShipping(){
     const dimsHtml = isLinked
       ? `<span class="ship2-linked">🔗 ${j.dimsLinkedTo}</span>`
       : `<span class="cell-mono-dim">${dCount} Pallet${dCount===1?'':'s'}${linkedInnerShip}</span>`;
+    const hasBol = !!(j.bol && String(j.bol).trim());
     let actionHtml;
     if (isLinked){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
     } else if (j.shipped){
       actionHtml = `<button class="ship2-btn undo" onclick="toggleShipped('${j.invoice}', false)">Undo</button>`;
-    } else if (!j.salesConfirmed){
+    } else if (!j.salesConfirmed || !hasBol){
       // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 영업 컨펌 전에는
       //   Mark Shipped 자체를 비활성화(서버도 setShippedStatus에서 동일하게
       //   막음 — 화면·서버 이중 방어).
-      actionHtml = `<button class="ship2-btn go" disabled title="Sales must confirm before this order can be marked shipped">Mark Shipped</button>`;
+      // ★ 2026-10-02 추가(사용자 요청, 시뮬레이션 승인) — BOL# 없이는 출고
+      //   확정 불가. 무엇이 빠졌는지에 따라 안내 문구를 다르게 보여줌.
+      const missTitle = (!j.salesConfirmed && !hasBol)
+        ? 'Sales Confirm and BOL# are both required before marking shipped'
+        : (!j.salesConfirmed ? 'Sales must confirm before this order can be marked shipped'
+        : 'Enter a BOL# before marking shipped');
+      actionHtml = `<button class="ship2-btn go" disabled title="${missTitle}">Mark Shipped</button>`;
     } else {
       actionHtml = `<button class="ship2-btn go" onclick="toggleShipped('${j.invoice}', true)">Mark Shipped</button>`;
     }
@@ -2036,6 +2071,13 @@ function renderShipping(){
     //   Status 탭). BOL#과 완전히 독립적으로 Status 옆에 나란히 배치. 출고
     //   완료(shipped) 후에는 컨펌 기록을 지울 수 없도록 Undo를 숨김(서버도
     //   setSalesConfirm에서 동일하게 막음).
+    // ★ 2026-10-02 재설계(현장 버그 리포트 + 요청) — "Confirmed by 이름 · 날짜"를
+    //   길게 풀어 쓰면 BOL#과 한 줄에 안 들어가서 줄바꿈이 생기던 문제를, 짧은
+    //   "✓ CONFIRMED" 배지 + 마우스 호버 시 누가/언제인지 보여주는 title
+    //   툴팁으로 교체(항상 한 줄 유지). 또한 Undo한 이력이 있으면(영구 보존)
+    //   "⚠ Sales Confirm"(주황) 경고색으로 표시해서 "취소된 적 있는 오더"임을
+    //   다른 직원도 바로 알 수 있게 하고, 재컨펌 후에도 배지에 "↺" 표시 +
+    //   툴팁으로 그 이력을 계속 남김.
     let confirmHtml;
     if (isLinked){
       confirmHtml = '';
@@ -2045,12 +2087,17 @@ function renderShipping(){
       //   "클릭이 눌렸다"는 게 바로 보임(toggleSalesConfirm/undoSalesConfirm 참고).
       confirmHtml = `<span class="confirm-check-btn saving">Saving…</span>`;
     } else if (j.salesConfirmed){
-      const whoWhen = j.salesConfirmedBy ? `${j.salesConfirmedBy}${j.salesConfirmedAt ? ' · ' + j.salesConfirmedAt : ''}` : (j.salesConfirmedAt || '');
+      const tip = `Confirmed by ${j.salesConfirmedBy || '-'}${j.salesConfirmedAt ? ' · ' + j.salesConfirmedAt : ''}`
+        + (j.salesConfirmWasUndone ? ` — previously undone by ${j.salesConfirmUndoneBy || '-'}${j.salesConfirmUndoneAt ? ' · ' + j.salesConfirmUndoneAt : ''}` : '');
+      const badgeText = '✓ CONFIRMED' + (j.salesConfirmWasUndone ? ' ↺' : '');
       if (j.shipped){
-        confirmHtml = `<span class="confirm-chip">✓ Confirmed${whoWhen ? ' by ' + whoWhen : ''}</span><span class="confirm-locked-note">(shipped — locked)</span>`;
+        confirmHtml = `<span class="confirm-badge-compact" title="${tip.replace(/"/g,'&quot;')}">${badgeText}</span><span class="confirm-locked-note">(shipped — locked)</span>`;
       } else {
-        confirmHtml = `<span class="confirm-with-undo"><span class="confirm-chip">✓ Confirmed${whoWhen ? ' by ' + whoWhen : ''}</span><button class="confirm-undo-btn" onclick="undoSalesConfirm('${j.invoice}')">Undo</button></span>`;
+        confirmHtml = `<span class="confirm-with-undo"><span class="confirm-badge-compact" title="${tip.replace(/"/g,'&quot;')}">${badgeText}</span><button class="confirm-undo-btn" onclick="undoSalesConfirm('${j.invoice}')">Undo</button></span>`;
       }
+    } else if (j.salesConfirmWasUndone){
+      const tip = `Previously confirmed by ${j.salesConfirmedBy || '-'} — undone by ${j.salesConfirmUndoneBy || '-'}${j.salesConfirmUndoneAt ? ' · ' + j.salesConfirmUndoneAt : ''}`;
+      confirmHtml = `<button class="confirm-check-btn undone" onclick="toggleSalesConfirm('${j.invoice}', true)" title="${tip.replace(/"/g,'&quot;')}">⚠ Sales Confirm</button>`;
     } else {
       confirmHtml = `<button class="confirm-check-btn" onclick="toggleSalesConfirm('${j.invoice}', true)">☐ Sales Confirm</button>`;
     }
@@ -2168,7 +2215,17 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
       job.salesConfirmed = res.confirmed;
       job.salesConfirmedAt = res.confirmedAt;
       job.salesConfirmedBy = res.confirmedBy;
+      job.salesConfirmWasUndone = res.wasUndone;
+      job.salesConfirmUndoneAt = res.undoneAt;
+      job.salesConfirmUndoneBy = res.undoneBy;
     }
+    // ★ 2026-10-02 신규 — 방금 서버에서 확인된 값을 60초간 우선 적용(오래된
+    // 백그라운드 재조회 응답이 덮어쓰지 못하도록). 위 _recentSalesConfirmOverrides 설명 참고.
+    _recentSalesConfirmOverrides[invoice] = {
+      confirmed: res.confirmed, confirmedAt: res.confirmedAt, confirmedBy: res.confirmedBy,
+      wasUndone: res.wasUndone, undoneAt: res.undoneAt, undoneBy: res.undoneBy,
+      until: Date.now() + 60000
+    };
     renderShipping();
   } else {
     renderShipping(); // Saving… 표시만 원래대로 되돌림
