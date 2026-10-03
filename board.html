@@ -961,7 +961,9 @@ function fmtClock(){
 }
 setInterval(fmtClock, 1000); fmtClock();
 
-function shipLabel(v){ return v || '-'; }
+// ★ 2026-10-02 신규(사용자 요청) — 저장되는 실제 값("PU & TK")은 안 건드리고
+//   화면에 "보여줄 때"만 공백 없이 "PU&TK"로 표시 통일(sales.html/batch.html과 동일).
+function shipLabel(v){ return String(v||'-').replace(' & ', '&'); }
 // ★ 2026-07-13: UPS/PU/TK가 아닌 값이 들어와도 스타일이 깨지지 않도록 안전하게 클래스 결정
 // ★ 2026-10-02 수정 — 'PU & TK' 신규 Method 추가 반영(전용 핑크색). 이 함수는
 //   이미 "알려진 값만 전용 클래스, 나머진 ship-other" 방식이라 안전했지만,
