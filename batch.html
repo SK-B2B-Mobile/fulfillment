@@ -988,11 +988,11 @@ select option:disabled{color:var(--text-dim2);}
 .auth-btn{width:100%; font-weight:700; font-size:13.5px; padding:11px; border:none; border-radius:8px; background:var(--blue); color:#fff; cursor:pointer; font-family:inherit;}
 .auth-btn:disabled{opacity:0.6; cursor:not-allowed;}
 .auth-err{font-size:11.5px; color:var(--red); margin-bottom:8px; display:none;}
-.auth-userbadge{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); font-family:var(--mono); margin-right:6px;}
-.auth-logout-btn{font-size:10px; font-weight:700; color:var(--text-dim); background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit; margin-right:8px;}
+.auth-userbadge{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--text); font-family:var(--mono); background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:5px 11px; margin-right:6px;}
+.auth-logout-btn{font-size:10.5px; font-weight:700; color:#fff; background:var(--red); border:1px solid var(--red); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit; margin-right:8px;}
 /* ★ 2026-10-02 신규 — Account 메뉴(비밀번호 변경) */
 .account-wrap{position:relative; margin-right:8px;}
-.account-btn{font-size:10px; font-weight:700; color:var(--text-dim); background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit;}
+.account-btn{font-size:10.5px; font-weight:700; color:var(--text); background:var(--surface3); border:1px solid var(--blue); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit;}
 .account-dropdown{position:absolute; top:calc(100% + 6px); right:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.35); padding:6px; min-width:160px; z-index:1000000; display:none;}
 .account-dropdown.open{display:block;}
 .account-dropdown button{width:100%; text-align:left; font-size:12.5px; font-weight:600; color:var(--text); background:none; border:none; border-radius:7px; padding:9px 10px; cursor:pointer; font-family:inherit;}
@@ -1032,6 +1032,20 @@ select option:disabled{color:var(--text-dim2);}
     <div class="pwm-actions">
       <button class="pwm-cancel-btn" id="pwmCancelBtn" onclick="pwmClose()">Cancel</button>
       <button class="auth-btn" id="pwmSaveBtn" onclick="pwmSubmit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-10-02 신규 — 소속(Department) 변경. 필수 아님(빈 값 허용) -->
+<div class="pwm-overlay hidden" id="deptModal">
+  <div class="pwm-box">
+    <h3>Edit Department</h3>
+    <p class="pwm-sub">Optional — shown next to your name after login.</p>
+    <div class="auth-err" id="deptErr"></div>
+    <input class="auth-input" id="deptInput" placeholder="Department (optional)" maxlength="40" onkeydown="if(event.key==='Enter')deptSubmit();">
+    <div class="pwm-actions">
+      <button class="pwm-cancel-btn" onclick="deptClose()">Cancel</button>
+      <button class="auth-btn" id="deptSaveBtn" onclick="deptSubmit()">Save</button>
     </div>
   </div>
 </div>
@@ -1198,7 +1212,46 @@ async function pwmSubmit(){
   }
 }
 
+// ★ 2026-10-02 신규 — 소속(Department) 변경. 필수 아님(빈 값 허용).
+function deptOpenMenu(){
+  const dd = document.getElementById('accountDropdown');
+  if (dd) dd.classList.remove('open');
+  document.getElementById('deptInput').value = authGetDept();
+  document.getElementById('deptErr').style.display = 'none';
+  document.getElementById('deptModal').classList.remove('hidden');
+}
+function deptClose(){
+  document.getElementById('deptModal').classList.add('hidden');
+}
+async function deptSubmit(){
+  const errEl = document.getElementById('deptErr');
+  const val = (document.getElementById('deptInput').value || '').trim();
+  const btn = document.getElementById('deptSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  const res = await authPost('updateDepartment', { token: authGetToken(), department: val });
+  btn.disabled = false; btn.textContent = 'Save';
+  if (res && res.ok){
+    localStorage.setItem(AUTH_DEPT_KEY, val);
+    const b = document.getElementById('authUserBadge');
+    if (b) b.textContent = '🔐 ' + authGetName() + (val ? ' · ' + val : '');
+    document.getElementById('deptModal').classList.add('hidden');
+  } else {
+    errEl.textContent = authTranslateError_(res && res.error) || 'Could not save department.';
+    errEl.style.display = 'block';
+  }
+}
+
 authInit();
+// ★ 2026-10-02 수정(버그) — 이 <script>가 #authUserBadge보다 먼저(body 바로 아래)
+//   위치해 있어서, 위 authInit()이 실행되는 시점엔 아직 그 span이 DOM에 없어
+//   이름 배지가 비어보이는 문제가 있었음. DOM 로드가 끝난 뒤 한 번 더 배지를
+//   채워서, 이미 로그인된 상태로 새로고침했을 때도 이름이 확실히 보이게 함.
+document.addEventListener('DOMContentLoaded', function(){
+  if (authIsLoggedIn()){
+    const b = document.getElementById('authUserBadge');
+    if (b) b.textContent = '🔐 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
+  }
+});
 </script>
 
 <div class="sim-bar" id="simBar">
@@ -1248,13 +1301,16 @@ authInit();
         <button class="account-btn" onclick="toggleAccountMenu()">⚙ Account</button>
         <div class="account-dropdown" id="accountDropdown">
           <button onclick="pwmOpenVoluntary()">Change Password</button>
+          <button onclick="deptOpenMenu()">Edit Department</button>
         </div>
       </div>
       <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
-      <!-- ★ 2026-09-25 신규 — 로그인한 작업자 배지 + 전환(로그아웃) 버튼. 로그인 전에는 숨김(updateLoginBadge). -->
+      <!-- ★ 2026-09-25 신규 — 로그인한 작업자 배지 + 전환(로그아웃) 버튼. 로그인 전에는 숨김(updateLoginBadge).
+           ★ 2026-10-02 수정 — 위 계정 로그아웃("Log Out")과 혼동되지 않도록 라벨만
+           "Switch Worker"로 변경(동작은 기존 doLogout() 그대로, 전혀 안 건드림). -->
       <div id="loginBadgeWrap">
         <div class="login-badge-pill" title="이 기기에 로그인된 작업자"><span class="login-badge-dot"></span><span id="loginBadgeName">—</span></div>
-        <button class="btn btn-ghost btn-sm" id="btnSwitchWorker" title="Logout" onclick="doLogout()">🔄 Logout</button>
+        <button class="btn btn-ghost btn-sm" id="btnSwitchWorker" title="Switch Worker" onclick="doLogout()">🔄 Switch Worker</button>
       </div>
       <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-17:55</span>
       <span style="font-size:10px; color:var(--text-dim2); margin-right:8px;">Built by David Kim · 2026</span>
