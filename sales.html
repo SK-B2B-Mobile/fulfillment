@@ -2239,6 +2239,29 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
       wasUndone: res.wasUndone, undoneAt: res.undoneAt, undoneBy: res.undoneBy,
       until: Date.now() + 60000
     };
+    // ★ 2026-10-02 신규(현장 피드백) — 이 invoice가 PRIMARY이고 여기에 묶인
+    // (LINKED) 오더가 있으면, 서버 데이터는 이미 그 묶인 오더들도 같은 컨펌
+    // 상태로 계산해주고 있지만(읽을 때 dimsLinkedTo로 PRIMARY 값을 가져옴),
+    // 화면(TODAY_JOBS)에 그 반영이 "다음 번 전체 목록 새로고침"(최대 1분,
+    // Firestore 미러 동기화 주기) 때까지 늦게 나타나는 문제가 있었음. 이제
+    // PRIMARY를 컨펌/취소하는 즉시, 같은 그룹에 묶인 오더들도 TODAY_JOBS에서
+    // 바로 찾아 함께 갱신 + override 캐시에도 같이 등록해서, 묶인 오더들까지
+    // 지연 없이 즉시 반영되도록 함.
+    TODAY_JOBS.forEach(j => {
+      if (j.dimsLinkedTo === invoice){
+        j.salesConfirmed = res.confirmed;
+        j.salesConfirmedAt = res.confirmedAt;
+        j.salesConfirmedBy = res.confirmedBy;
+        j.salesConfirmWasUndone = res.wasUndone;
+        j.salesConfirmUndoneAt = res.undoneAt;
+        j.salesConfirmUndoneBy = res.undoneBy;
+        _recentSalesConfirmOverrides[j.invoice] = {
+          confirmed: res.confirmed, confirmedAt: res.confirmedAt, confirmedBy: res.confirmedBy,
+          wasUndone: res.wasUndone, undoneAt: res.undoneAt, undoneBy: res.undoneBy,
+          until: Date.now() + 60000
+        };
+      }
+    });
     renderShipping();
   } else {
     renderShipping(); // Saving… 표시만 원래대로 되돌림
