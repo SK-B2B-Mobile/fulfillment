@@ -974,9 +974,121 @@ select option:disabled{color:var(--text-dim2);}
   .login-title{font-size:24px;}
   .login-worker-grid{grid-template-columns:repeat(auto-fill, minmax(120px,1fr));}
 }
+
+/* ★ 2026-10-02 신규 — 접속 제한(로그인) 1단계: 화면 진입 시 로그인 게이트.
+   기존 작업자 이름 선택 오버레이(#loginOverlay, z-index:99999)보다 위에 뜨도록
+   z-index를 더 높게 둬서, 이 로그인을 먼저 통과해야 그 아래 기존 화면(작업자
+   선택 포함)이 보임 — 기존 작업자 로그인 로직은 전혀 건드리지 않음. */
+.auth-gate{position:fixed; inset:0; z-index:999999; background:var(--bg); display:flex; align-items:center; justify-content:center;}
+.auth-gate.hidden{display:none;}
+.auth-box{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:36px 34px; width:340px; box-sizing:border-box;}
+.auth-box h2{margin:0 0 18px; font-size:16px; font-weight:800; color:var(--text); text-align:center;}
+.auth-input{width:100%; box-sizing:border-box; font-size:13.5px; padding:11px 13px; background:var(--bg); border:1px solid var(--border2); border-radius:8px; color:var(--text); margin-bottom:10px; font-family:inherit;}
+.auth-input::placeholder{color:var(--text-dim);}
+.auth-btn{width:100%; font-weight:700; font-size:13.5px; padding:11px; border:none; border-radius:8px; background:var(--blue); color:#fff; cursor:pointer; font-family:inherit;}
+.auth-btn:disabled{opacity:0.6; cursor:not-allowed;}
+.auth-err{font-size:11.5px; color:var(--red); margin-bottom:8px; display:none;}
+.auth-userbadge{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); font-family:var(--mono); margin-right:6px;}
+.auth-logout-btn{font-size:10px; font-weight:700; color:var(--text-dim); background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit; margin-right:8px;}
 </style>
 </head>
 <body>
+
+<!-- ★ 2026-10-02 신규 — 로그인 전엔 이 화면만 보이고(기존 작업자 선택 포함 전부 가려짐) -->
+<div class="auth-gate hidden" id="authGate">
+  <div class="auth-box">
+    <h2>SK Fulfillment 로그인</h2>
+    <div class="auth-err" id="authErrMsg"></div>
+    <input class="auth-input" id="authIdInput" placeholder="아이디" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('authPwInput').focus();">
+    <input class="auth-input" id="authPwInput" type="password" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')authDoLogin();">
+    <button class="auth-btn" id="authLoginBtn" onclick="authDoLogin()">로그인</button>
+  </div>
+</div>
+<script>
+/* ============== ★ 2026-10-02 신규 — 접속 제한(로그인) ==============
+   1단계: 화면 진입 시 로그인 게이트만 적용(서버 API 자체 차단은 2단계에서).
+   토큰은 6시간 유지(서버 CacheService 최대 유효시간), 만료되면 다시 로그인 화면.
+   ※ 기존 "작업자 이름 선택" 로그인(#loginOverlay)과는 별개 — 이건 "누가 이 화면에
+   접속할 수 있는지"를 막는 계정 로그인이고, 그건 "지금 어떤 작업자가 쓰고 있는지"를
+   기록하는 용도라 그대로 둠. 이 게이트를 통과해야 그 화면이 보이는 구조. */
+const AUTH_TOKEN_KEY = 'sk_auth_token';
+const AUTH_NAME_KEY = 'sk_auth_name';
+const AUTH_DEPT_KEY = 'sk_auth_dept';
+const AUTH_EXPIRES_KEY = 'sk_auth_expires';
+
+function authGetToken(){ return localStorage.getItem(AUTH_TOKEN_KEY) || ''; }
+function authGetName(){ return localStorage.getItem(AUTH_NAME_KEY) || ''; }
+function authGetDept(){ return localStorage.getItem(AUTH_DEPT_KEY) || ''; }
+function authIsLoggedIn(){
+  const tok = authGetToken();
+  const exp = Number(localStorage.getItem(AUTH_EXPIRES_KEY) || 0);
+  return !!tok && Date.now() < exp;
+}
+function authClear(){
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_NAME_KEY);
+  localStorage.removeItem(AUTH_DEPT_KEY);
+  localStorage.removeItem(AUTH_EXPIRES_KEY);
+}
+function authShowGate(){
+  const g = document.getElementById('authGate');
+  if (g) g.classList.remove('hidden');
+}
+function authHideGate(){
+  const g = document.getElementById('authGate');
+  if (g) g.classList.add('hidden');
+  const b = document.getElementById('authUserBadge');
+  if (b) b.textContent = '🔐 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
+}
+async function authPost(op, data){
+  // ★ CONFIG(아래쪽에서 선언됨)는 이 함수가 실제로 호출되는 시점(로그인 버튼 클릭 등,
+  //   페이지 전체 로드 후)엔 이미 준비돼 있으므로 직접 참조해도 안전함 — URL을 여기
+  //   따로 하드코딩해두면 나중에 CONFIG.GAS_URL만 바꾸고 여긴 깜빡해 어긋날 위험이 있음.
+  try{
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({ op, data: JSON.stringify(data) }) });
+    return await res.json();
+  }catch(e){ return { ok:false, error:String(e && e.message || e) }; }
+}
+async function authDoLogin(){
+  const idEl = document.getElementById('authIdInput');
+  const pwEl = document.getElementById('authPwInput');
+  const errEl = document.getElementById('authErrMsg');
+  const btn = document.getElementById('authLoginBtn');
+  const id = (idEl.value || '').trim();
+  const pw = pwEl.value || '';
+  if (!id || !pw){
+    errEl.textContent = '아이디와 비밀번호를 입력하세요.';
+    errEl.style.display = 'block';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '로그인 중...';
+  const res = await authPost('login', { id, password: pw });
+  btn.disabled = false; btn.textContent = '로그인';
+  if (res && res.ok){
+    localStorage.setItem(AUTH_TOKEN_KEY, res.token);
+    localStorage.setItem(AUTH_NAME_KEY, res.name || id);
+    localStorage.setItem(AUTH_DEPT_KEY, res.dept || '');
+    localStorage.setItem(AUTH_EXPIRES_KEY, String(Date.now() + ((res.ttlSec || 21600) * 1000)));
+    errEl.style.display = 'none';
+    pwEl.value = '';
+    authHideGate();
+  } else {
+    errEl.textContent = (res && res.error) || '로그인에 실패했습니다.';
+    errEl.style.display = 'block';
+  }
+}
+function authLogout(){
+  const tok = authGetToken();
+  authClear();
+  if (tok){ try { authPost('logout', { token: tok }); } catch(e){} }
+  location.reload();
+}
+function authInit(){
+  if (authIsLoggedIn()){ authHideGate(); }
+  else { authClear(); authShowGate(); }
+}
+authInit();
+</script>
 
 <div class="sim-bar" id="simBar">
   <span id="simBarText">🧪 <b>SIMULATION</b> · v4.0 · 완결형 시연 · 데이터는 브라우저 세션에만 저장됩니다</span>
@@ -1019,6 +1131,9 @@ select option:disabled{color:var(--text-dim2);}
       </div>
     </div>
     <div class="topbar-right">
+      <!-- ★ 2026-10-02 신규 — 접속 제한(로그인) 계정 배지 + 로그아웃. 작업자 이름 배지와는 별개. -->
+      <span class="auth-userbadge" id="authUserBadge"></span>
+      <button class="auth-logout-btn" onclick="authLogout()">계정 로그아웃</button>
       <!-- ★ 2026-09-25 신규 — 로그인한 작업자 배지 + 전환(로그아웃) 버튼. 로그인 전에는 숨김(updateLoginBadge). -->
       <div id="loginBadgeWrap">
         <div class="login-badge-pill" title="이 기기에 로그인된 작업자"><span class="login-badge-dot"></span><span id="loginBadgeName">—</span></div>
