@@ -715,7 +715,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   </div>
 </div>
 
-<div class="topbar">
+<div class="topbar" id="topbar" style="display:none;">
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
@@ -744,7 +744,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   </div>
 </div>
 
-<div class="wrap">
+<div class="wrap" id="mainWrap" style="display:none;">
 
   <!-- ===================== Screen 1 ===================== -->
   <div class="screen active" id="screen-sheet">
@@ -3510,12 +3510,25 @@ function authClear(){
 function authShowGate(){
   const gate = document.getElementById('authGate');
   if (gate) gate.classList.remove('hidden');
+  // ★ 2026-10-02 수정 — 로그인 전에는 뒤의 topbar/본문(wrap)을 완전히 display:none
+  //   처리. 전에는 auth-gate가 position:fixed 오버레이라 화면엔 로그인 카드만
+  //   보여도, 뒤에 깔린 전체 대시보드(topbar+wrap)가 그대로 문서 흐름에 남아
+  //   실제 문서 높이를 차지해서 로그인 화면에만 불필요한 세로 스크롤바가
+  //   생기던 문제. (다른 페이지엔 이런 로그인 게이트가 없어서 발생하지 않음)
+  const tb = document.getElementById('topbar');
+  const mw = document.getElementById('mainWrap');
+  if (tb) tb.style.display = 'none';
+  if (mw) mw.style.display = 'none';
 }
 function authHideGate(){
   const gate = document.getElementById('authGate');
   if (gate) gate.classList.add('hidden');
   const badge = document.getElementById('authUserBadge');
   if (badge) badge.textContent = '👤 ' + authGetName() + (authGetDept() ? ' · ' + authGetDept() : '');
+  const tb = document.getElementById('topbar');
+  const mw = document.getElementById('mainWrap');
+  if (tb) tb.style.display = '';
+  if (mw) mw.style.display = '';
 }
 async function authDoLogin(){
   const idEl = document.getElementById('authIdInput');
