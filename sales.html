@@ -2078,23 +2078,36 @@ function renderShipping(){
     //   "⚠ Sales Confirm"(주황) 경고색으로 표시해서 "취소된 적 있는 오더"임을
     //   다른 직원도 바로 알 수 있게 하고, 재컨펌 후에도 배지에 "↺" 표시 +
     //   툴팁으로 그 이력을 계속 남김.
+    // ★ 2026-10-02 신규(사용자 요청) — "묶인(LINKED) 오더들은 Confirm도 함께
+    //   되어야 한다"는 요청에 대한 반영. 서버 데이터는 이미 이렇게 동작하고
+    //   있었음(buildSalesConfirmMap_/목록 생성 시 dimsLinkedTo_로 PRIMARY의 값을
+    //   그대로 읽어와 j.salesConfirmed 등에 넣어줌) — 그런데 화면에서 LINKED 행은
+    //   이 값을 무조건 빈 칸으로 가려버려서, 실제로는 함께 컨펌되고 있었는데도
+    //   눈에는 전혀 안 보였던 것. 이제 LINKED 행도 PRIMARY와 동일한 컨펌 상태를
+    //   읽기 전용 배지로 보여줌(버튼/Undo는 여전히 PRIMARY 행에서만 가능).
     let confirmHtml;
-    if (isLinked){
-      confirmHtml = '';
-    } else if (j._confirmSaving){
+    if (j._confirmSaving){
       // ★ 2026-10-02 신규(현장 버그 리포트) — "눌렀는데 반응이 없다"는 피드백
       //   대응. 클릭 즉시(서버 응답 기다리지 않고) 이 상태로 바로 바뀌어서
       //   "클릭이 눌렸다"는 게 바로 보임(toggleSalesConfirm/undoSalesConfirm 참고).
       confirmHtml = `<span class="confirm-check-btn saving">Saving…</span>`;
     } else if (j.salesConfirmed){
       const tip = `Confirmed by ${j.salesConfirmedBy || '-'}${j.salesConfirmedAt ? ' · ' + j.salesConfirmedAt : ''}`
-        + (j.salesConfirmWasUndone ? ` — previously undone by ${j.salesConfirmUndoneBy || '-'}${j.salesConfirmUndoneAt ? ' · ' + j.salesConfirmUndoneAt : ''}` : '');
+        + (j.salesConfirmWasUndone ? ` — previously undone by ${j.salesConfirmUndoneBy || '-'}${j.salesConfirmUndoneAt ? ' · ' + j.salesConfirmUndoneAt : ''}` : '')
+        + (isLinked ? ` (confirmed via primary ${j.dimsLinkedTo})` : '');
       const badgeText = '✓ CONFIRMED' + (j.salesConfirmWasUndone ? ' ↺' : '');
-      if (j.shipped){
-        confirmHtml = `<span class="confirm-badge-compact" title="${tip.replace(/"/g,'&quot;')}">${badgeText}</span><span class="confirm-locked-note">(shipped — locked)</span>`;
+      if (j.shipped || isLinked){
+        // 묶인(LINKED) 행은 Undo 버튼을 보여주지 않음 — 취소는 반드시 PRIMARY에서만.
+        const note = j.shipped ? `<span class="confirm-locked-note">(shipped — locked)</span>` : '';
+        confirmHtml = `<span class="confirm-badge-compact" title="${tip.replace(/"/g,'&quot;')}">${badgeText}</span>${note}`;
       } else {
         confirmHtml = `<span class="confirm-with-undo"><span class="confirm-badge-compact" title="${tip.replace(/"/g,'&quot;')}">${badgeText}</span><button class="confirm-undo-btn" onclick="undoSalesConfirm('${j.invoice}')">Undo</button></span>`;
       }
+    } else if (isLinked){
+      // 묶인(LINKED) 오더는 PRIMARY가 아직 컨펌 전이면 버튼 없이 안내만 표시
+      // (컨펌은 반드시 PRIMARY 행에서). 인보이스 번호는 같은 행의 DIMS 칸에
+      // 이미 "🔗 {primary}"로 보이므로 여기선 짧게만 표시(줄바꿈 방지).
+      confirmHtml = `<span class="confirm-locked-note" title="Confirm on primary invoice ${j.dimsLinkedTo}">Pending on primary</span>`;
     } else if (j.salesConfirmWasUndone){
       const tip = `Previously confirmed by ${j.salesConfirmedBy || '-'} — undone by ${j.salesConfirmUndoneBy || '-'}${j.salesConfirmUndoneAt ? ' · ' + j.salesConfirmUndoneAt : ''}`;
       confirmHtml = `<button class="confirm-check-btn undone" onclick="toggleSalesConfirm('${j.invoice}', true)" title="${tip.replace(/"/g,'&quot;')}">⚠ Sales Confirm</button>`;
