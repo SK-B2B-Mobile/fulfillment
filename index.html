@@ -316,7 +316,10 @@
     .auth-btn:disabled{opacity:0.6;cursor:not-allowed;}
     .auth-err{font-size:11.5px;color:var(--accent-danger);margin-bottom:8px;display:none;}
     .auth-userbadge{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text-primary);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-full);padding:5px 11px;}
-    .auth-logout-btn{font-size:11px;font-weight:700;color:#fff;background:var(--accent-danger);border:1px solid var(--accent-danger);border-radius:var(--r-full);padding:5px 10px;cursor:pointer;font-family:inherit;}
+    .auth-logout-btn{font-size:11px;font-weight:700;color:#fff;background:#64748B;border:1px solid #64748B;border-radius:var(--r-full);padding:5px 10px;cursor:pointer;font-family:inherit;min-width:76px;text-align:center;}
+    .auth-logout-btn:disabled{opacity:0.8;cursor:default;}
+    .auth-logout-spin{display:inline-block;width:9px;height:9px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:authLogoutSpin 0.6s linear infinite;margin-right:5px;vertical-align:-1px;}
+    @keyframes authLogoutSpin{to{transform:rotate(360deg)}}
     /* ★ 2026-10-02 신규 — Account 메뉴(비밀번호 변경) */
     .account-wrap{position:relative;}
     .account-btn{font-size:11px;font-weight:700;color:var(--text-primary);background:var(--bg-card);border:1px solid var(--accent-primary);border-radius:var(--r-full);padding:5px 10px;cursor:pointer;font-family:inherit;}
@@ -438,7 +441,7 @@
           <button onclick="deptOpenMenu()">Edit Department</button>
         </div>
       </div>
-      <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
+      <button class="auth-logout-btn" id="authLogoutBtn" onclick="authLogout()">Log Out</button>
     </div>
   </header>
 
@@ -1152,7 +1155,14 @@
       if(m.indexOf('session expired')>=0) return 'Your session has expired. Please log in again.';
       return 'Login failed. Please check your username and password.';
     }
-    function authLogout(){const tok=authGetToken();authClear();if(tok){try{authPost('logout',{token:tok});}catch(e){}}location.reload();}
+    function authLogout(){
+      // ★ 2026-10-02 수정 — 누르자마자 바로 새로고침돼서 눌렸는지 티가 안 나던 문제 수정.
+      const btn=document.getElementById('authLogoutBtn');
+      if(btn){btn.disabled=true;btn.innerHTML='<span class="auth-logout-spin"></span>Logging out...';}
+      const tok=authGetToken();
+      if(tok){try{authPost('logout',{token:tok});}catch(e){}}
+      setTimeout(function(){authClear();location.reload();},500);
+    }
     function authInit(){if(authIsLoggedIn()){authHideGate();if(localStorage.getItem(AUTH_MUST_CHANGE_KEY)==='1'){pwmOpen(true);}else{App.init();}}else{authClear();authShowGate();}}
 
     // ★ 2026-10-02 신규 — ⚙ Account 메뉴 + 비밀번호 변경(강제/자율 공용)
