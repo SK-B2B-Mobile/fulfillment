@@ -612,11 +612,11 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .auth-btn{width:100%; font-weight:700; font-size:13.5px; padding:11px; border:none; border-radius:8px; background:var(--blue); color:#fff; cursor:pointer; font-family:inherit;}
 .auth-btn:disabled{opacity:0.6; cursor:not-allowed;}
 .auth-err{font-size:11.5px; color:#FF6B6B; margin-bottom:8px; display:none;}
-.auth-userbadge{display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--text-dim); font-family:var(--mono);}
-.auth-logout-btn{font-size:10.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border2); border-radius:7px; padding:5px 10px; cursor:pointer; font-family:inherit;}
+.auth-userbadge{display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; color:var(--text); font-family:var(--mono); background:var(--surface2); border:1px solid var(--border2); border-radius:7px; padding:5px 11px;}
+.auth-logout-btn{font-size:11px; font-weight:700; color:#fff; background:var(--red); border:1px solid var(--red); border-radius:7px; padding:5px 10px; cursor:pointer; font-family:inherit;}
 /* ★ 2026-10-02 신규 — Account 메뉴(비밀번호 변경) */
 .account-wrap{position:relative;}
-.account-btn{font-size:10.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border2); border-radius:7px; padding:5px 10px; cursor:pointer; font-family:inherit;}
+.account-btn{font-size:11px; font-weight:700; color:var(--text); background:var(--surface2); border:1px solid var(--blue); border-radius:7px; padding:5px 10px; cursor:pointer; font-family:inherit;}
 .account-dropdown{position:absolute; top:calc(100% + 6px); right:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.35); padding:6px; min-width:160px; z-index:100000; display:none;}
 .account-dropdown.open{display:block;}
 .account-dropdown button{width:100%; text-align:left; font-size:12.5px; font-weight:600; color:var(--text); background:none; border:none; border-radius:7px; padding:9px 10px; cursor:pointer; font-family:inherit;}
@@ -651,11 +651,25 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
     <p class="pwm-sub" id="pwmSub">Enter your current password and choose a new one.</p>
     <div class="auth-err" id="pwmErr"></div>
     <input class="auth-input" id="pwmCurrent" type="password" placeholder="Current Password" autocomplete="current-password">
-    <input class="auth-input" id="pwmNew" type="password" placeholder="New Password" autocomplete="new-password">
-    <input class="auth-input" id="pwmConfirm" type="password" placeholder="Confirm New Password" autocomplete="new-password" onkeydown="if(event.key==='Enter')pwmSubmit();">
+    <input class="auth-input" id="pwmNew" type="password" placeholder="New Password (4-6 letters/numbers)" autocomplete="new-password" maxlength="6">
+    <input class="auth-input" id="pwmConfirm" type="password" placeholder="Confirm New Password" autocomplete="new-password" maxlength="6" onkeydown="if(event.key==='Enter')pwmSubmit();">
     <div class="pwm-actions">
       <button class="pwm-cancel-btn" id="pwmCancelBtn" onclick="pwmClose()">Cancel</button>
       <button class="auth-btn" id="pwmSaveBtn" onclick="pwmSubmit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-10-02 신규 — 소속(Department) 변경. 필수 아님(빈 값 허용) -->
+<div class="pwm-overlay hidden" id="deptModal">
+  <div class="pwm-box">
+    <h3>Edit Department</h3>
+    <p class="pwm-sub">Optional — shown next to your name after login.</p>
+    <div class="auth-err" id="deptErr"></div>
+    <input class="auth-input" id="deptInput" placeholder="Department (optional)" maxlength="40" onkeydown="if(event.key==='Enter')deptSubmit();">
+    <div class="pwm-actions">
+      <button class="pwm-cancel-btn" onclick="deptClose()">Cancel</button>
+      <button class="auth-btn" id="deptSaveBtn" onclick="deptSubmit()">Save</button>
     </div>
   </div>
 </div>
@@ -682,6 +696,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
       <button class="account-btn" onclick="toggleAccountMenu()">⚙ Account</button>
       <div class="account-dropdown" id="accountDropdown">
         <button onclick="pwmOpenVoluntary()">Change Password</button>
+        <button onclick="deptOpenMenu()">Edit Department</button>
       </div>
     </div>
     <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
@@ -3316,6 +3331,37 @@ async function pwmSubmit(){
     if (wasForced) appInit();
   } else {
     errEl.textContent = authTranslateError_(res && res.error) || 'Could not change password.';
+    errEl.style.display = 'block';
+  }
+}
+
+// ★ 2026-10-02 신규 — 소속(Department) 변경. 필수 아님(빈 값 허용).
+function deptOpenMenu(){
+  const dd = document.getElementById('accountDropdown');
+  if (dd) dd.classList.remove('open');
+  document.getElementById('deptInput').value = authGetDept();
+  document.getElementById('deptErr').style.display = 'none';
+  document.getElementById('deptModal').classList.remove('hidden');
+}
+function deptClose(){
+  document.getElementById('deptModal').classList.add('hidden');
+}
+async function deptSubmit(){
+  const errEl = document.getElementById('deptErr');
+  const val = (document.getElementById('deptInput').value || '').trim();
+  const btn = document.getElementById('deptSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  let res;
+  try { res = await gasPost('updateDepartment', { token: authGetToken(), department: val }); }
+  catch(e){ res = { ok:false, error:String(e && e.message || e) }; }
+  btn.disabled = false; btn.textContent = 'Save';
+  if (res && res.ok){
+    localStorage.setItem(AUTH_DEPT_KEY, val);
+    const b = document.getElementById('authUserBadge');
+    if (b) b.textContent = '👤 ' + authGetName() + (val ? ' · ' + val : '');
+    document.getElementById('deptModal').classList.add('hidden');
+  } else {
+    errEl.textContent = authTranslateError_(res && res.error) || 'Could not save department.';
     errEl.style.display = 'block';
   }
 }
