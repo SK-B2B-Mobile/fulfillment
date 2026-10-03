@@ -1154,6 +1154,16 @@ async function authDoLogin(){
       pwmOpen(true);
     } else if (res.workerName){
       autoApplyLinkedWorker_(res.workerName);
+    } else {
+      // ★ 2026-10-02 버그 수정 — 이 계정이 아직 어떤 작업자와도 연결된 적이 없는 경우,
+      //   이 기기(브라우저)에 "예전에 다른 계정/다른 사람이 쓰던 이름"이 localStorage에
+      //   그대로 남아있을 수 있다(예: 이전에 Helper 2로 선택해둔 적이 있는 기기). 그 값을
+      //   그대로 두면 지금 로그인한 계정과 무관한 이름이 화면에 떠버리고 "SELECT YOUR NAME"
+      //   화면도 건너뛰게 되는 문제가 있었음. 그래서 신규(미연결) 계정 로그인 시에는 이 기기의
+      //   기존 작업자 선택값을 지우고 이름 선택 화면을 다시 띄워서, 반드시 본인 이름을
+      //   고르고 그 계정에 연결되도록 한다.
+      try{ if (typeof clearLoginWorker === 'function') clearLoginWorker(); }catch(e){}
+      try{ if (typeof refreshLoginUI === 'function') refreshLoginUI(); }catch(e){}
     }
   } else {
     errEl.textContent = authTranslateError_(res && res.error);
@@ -1255,7 +1265,14 @@ async function pwmSubmit(){
     document.getElementById('pwChangeModal').classList.add('hidden');
     if (wasForced){
       const wn = authGetWorkerName();
-      if (wn) autoApplyLinkedWorker_(wn);
+      if (wn){
+        autoApplyLinkedWorker_(wn);
+      } else {
+        // ★ 2026-10-02 버그 수정 — authDoLogin과 동일한 이유: 아직 연결 안 된 계정이면
+        //   이 기기에 남아있을 수 있는 예전 작업자 선택값을 지우고 이름 선택 화면을 새로 띄움.
+        try{ if (typeof clearLoginWorker === 'function') clearLoginWorker(); }catch(e){}
+        try{ if (typeof refreshLoginUI === 'function') refreshLoginUI(); }catch(e){}
+      }
     }
   } else {
     errEl.textContent = authTranslateError_(res && res.error) || 'Could not change password.';
