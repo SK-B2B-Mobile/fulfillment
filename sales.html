@@ -1195,6 +1195,10 @@ function methodClass(m){
   if (v==='PU' || v==='PICK UP' || v==='PICKUP') return 'method-pu';
   return '';
 }
+// ★ 2026-10-02 신규(사용자 요청) — 저장되는 실제 값("PU & TK", 서버 비교/검증에
+//   그대로 쓰임)은 안 건드리고, 화면에 "보여줄 때"만 공백 없이 "PU&TK"로 표시
+//   통일(모든 화면에서 동일하게). batch.html/board.html에도 동일한 함수를 둠.
+function fmtMethodLabel(m){ return String(m||'-').replace(' & ', '&'); }
 
 // ★ 2026-08-24 신규(오출고 방지) — 4단계 뱃지: No(회색) / Moved to Packing(초록,
 // 기존 그대로 — 파랑=물리적 이동완료의 원래 의미) / 2nd Verification Complete
@@ -1689,7 +1693,7 @@ function renderSheet(){
         <td class="cell-body"><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
         <td class="cell-mono-dim">${o.shipDate||'-'}</td>
         <td class="badge-cell">${pickingBadge(o)}</td>
-        <td><span class="badge method ${methodClass(o.method)}">${o.method||'-'}</span></td>
+        <td><span class="badge method ${methodClass(o.method)}">${fmtMethodLabel(o.method)}</span></td>
         <td class="new-col">${badge}</td>
         <td class="new-col">${movedBadge}</td>
         <td class="new-col">${dimsBadge(o)}</td>
@@ -1745,6 +1749,12 @@ let _recentPaymentOverrides = {}; // { invoice: { paid: bool, until: timestamp }
 // 동일한 방어 패턴 적용: 저장이 서버에서 확인된 직후 60초간은 해당 인보이스의
 // Sales Confirm 관련 값만큼은 새로 받아온 목록 데이터보다 우선함.
 let _recentSalesConfirmOverrides = {}; // { invoice: { confirmed, confirmedAt, confirmedBy, wasUndone, undoneAt, undoneBy, until } }
+// ★ 2026-10-02 신규 — Shipping Method 변경(saveMethodChange)도 위와 동일한
+// 이유("저장했는데 바깥 목록엔 반영이 안 된다")로 확인됨. 이 목록은 Firestore의
+// "sales_todayList" 미러 캐시를 우선 쓰는데, 그 미러는 1분 주기 정기 동기화
+// 에서만 다시 만들어지고 updateOrderMethod는 그 목록 미러를 직접 안 건드리기
+// 때문에 최대 1분간 옛 Method 값이 계속 보였음. 동일한 방어 패턴 적용.
+let _recentMethodOverrides = {}; // { invoice: { method, until } }
 
 async function loadToday(){
   const res = await getSalesTodayListData_();
@@ -1799,6 +1809,13 @@ function applyTodayResult(res){
       job.salesConfirmUndoneAt = ov.undoneAt;
       job.salesConfirmUndoneBy = ov.undoneBy;
     }
+  });
+  // ★ 2026-10-02 신규 — 방금 확인된 Shipping Method 우선 적용(위 설명 참고)
+  Object.keys(_recentMethodOverrides).forEach(inv => {
+    const ov = _recentMethodOverrides[inv];
+    if (ov.until < now) { delete _recentMethodOverrides[inv]; return; }
+    const job = TODAY_JOBS.find(j => j.invoice === inv);
+    if (job) job.method = ov.method;
   });
   saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
@@ -1859,7 +1876,7 @@ function renderToday(){
     // ★ 2026-10-03 수정(사용자 요청) — "Payment Status"를 "Sales Confirm"으로
     //   재활용하며 PU 전용 → PU/UPS/PU & TK로 확장. 칸 폭을 유지하기 위해
     //   PAID/UNPAID와 글자 수가 같은 CONF/UNCONF로 축약 표기.
-    let methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
+    let methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+fmtMethodLabel(j.method)+'</span>';
     if (['PU','UPS','PU & TK'].indexOf(String(j.method||'').trim().toUpperCase()) >= 0) {
       const payMini = j.paymentPaid ? '<span class="pay-mini paid" data-pay-badge="1">CONF</span>' : '<span class="pay-mini unpaid" data-pay-badge="1">UNCONF</span>';
       methodBadge = `<span class="method-cell-wrap">${methodBadge}${payMini}</span>`;
@@ -3165,7 +3182,7 @@ function renderDetail(res){
           <div class="meta-item">
             <div class="k">Shipping Method</div>
             <div class="v">
-              ${res.method||'-'}
+              ${fmtMethodLabel(res.method)}
               ${status!=='pending' ? `<button class="method-edit-btn" onclick="toggleMethodEdit()" title="Change shipping method">✎ Edit</button>` : ''}
             </div>
             ${status!=='pending' ? `
@@ -3174,7 +3191,7 @@ function renderDetail(res){
                 <option value="TK" ${res.method==='TK'?'selected':''}>TK</option>
                 <option value="UPS" ${res.method==='UPS'?'selected':''}>UPS</option>
                 <option value="PU" ${res.method==='PU'?'selected':''}>PU</option>
-                <option value="PU & TK" ${res.method==='PU & TK'?'selected':''}>PU & TK</option>
+                <option value="PU & TK" ${res.method==='PU & TK'?'selected':''}>PU&TK</option>
               </select>
               <button class="method-save-btn" onclick="saveMethodChange('${res.invoice}')">Save</button>
               <button class="method-cancel-btn" onclick="toggleMethodEdit()">Cancel</button>
@@ -3261,11 +3278,13 @@ async function saveMethodChange(invoice){
   // ★ 2026-10-03 신규(시뮬레이션 승인) — 'PU & TK'는 전체 Dims 대신 전체 박스
   //   수량만 필요하므로 별도 안내 문구.
   const needsBoxQtyNow = (newMethod === 'PU & TK');
+  const oldLabel = fmtMethodLabel(oldMethod);
+  const newLabel = fmtMethodLabel(newMethod);
   const warn = needsDimsNow
-    ? `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} requires shipping dimensions — make sure they get entered.`
+    ? `Change shipping method from "${oldLabel}" to "${newLabel}"?\n\n${newLabel} requires shipping dimensions — make sure they get entered.`
     : needsBoxQtyNow
-    ? `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} needs a total box quantity instead of full dimensions.`
-    : `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} orders don't need shipping dimensions.`;
+    ? `Change shipping method from "${oldLabel}" to "${newLabel}"?\n\n${newLabel} needs a total box quantity instead of full dimensions.`
+    : `Change shipping method from "${oldLabel}" to "${newLabel}"?\n\n${newLabel} orders don't need shipping dimensions.`;
   if (!confirm(warn)) return;
 
   const res = await gasPostWithRetry('updateOrderMethod', { invoice: invoice, method: newMethod, by: (authGetName() || 'Packing (Sales page)') });
@@ -3273,8 +3292,21 @@ async function saveMethodChange(invoice){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  await openInvoice(invoice); // 최신 상태로 다시 불러와서 화면 갱신
-  loadToday();
+  // ★ 2026-10-02 긴급 수정(현장 버그 리포트 — "Shipping Method를 바꾸고 저장해도
+  //   바깥 목록(Sales Sheet Preview/Recently Completed)은 계속 예전 값(PU)으로
+  //   남아있다") — 원인은 이 화면의 목록(TODAY_JOBS)이 Firestore 미러의
+  //   "sales_todayList" 캐시를 우선 쓰는데, 그 캐시는 1분마다 도는 정기
+  //   동기화에서만 다시 만들어짐. updateOrderMethod는 개별 인보이스 상세
+  //   미러(salesInvDetail_{invoice})만 갱신하고 이 목록 미러는 안 건드리므로,
+  //   최대 1분간 화면이 옛 값을 계속 보여주고 있었음 — Sales Confirm/결제상태에
+  //   이미 적용했던 것과 똑같은 "방금 확인된 값 우선 적용" 패턴을 Method에도
+  //   적용해서 즉시 반영되도록 함.
+  const job = TODAY_JOBS.find(j => j.invoice === invoice);
+  if (job) job.method = newMethod;
+  _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 60000 };
+  renderToday();
+  if (typeof renderShipping === 'function') renderShipping();
+  await openInvoice(invoice); // 상세 팝업도 최신 상태로 다시 불러와서 갱신
 }
 
 // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인 저장. Order Detail Lookup에서만
