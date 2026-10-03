@@ -621,11 +621,11 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 <!-- ★ 2026-10-02 신규 — 로그인 전엔 이 화면만 보이고, 뒤 데이터는 로드되지 않음 -->
 <div class="auth-gate hidden" id="authGate">
   <div class="auth-box">
-    <h2>SK Fulfillment 로그인</h2>
+    <h2>SK Fulfillment Login</h2>
     <div class="auth-err" id="authErrMsg"></div>
-    <input class="auth-input" id="authIdInput" placeholder="아이디" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('authPwInput').focus();">
-    <input class="auth-input" id="authPwInput" type="password" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')authDoLogin();">
-    <button class="auth-btn" id="authLoginBtn" onclick="authDoLogin()">로그인</button>
+    <input class="auth-input" id="authIdInput" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('authPwInput').focus();">
+    <input class="auth-input" id="authPwInput" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')authDoLogin();">
+    <button class="auth-btn" id="authLoginBtn" onclick="authDoLogin()">Log In</button>
   </div>
 </div>
 
@@ -647,7 +647,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
     <div class="tb-clock"><div class="time" id="clockTime">--:--:-- --</div><div class="date" id="clockDate">----- -- --</div></div>
     <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting...</span></div>
     <div class="auth-userbadge" id="authUserBadge"></div>
-    <button class="auth-logout-btn" onclick="authLogout()">로그아웃</button>
+    <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
   </div>
 </div>
 
@@ -3157,15 +3157,15 @@ async function authDoLogin(){
   const id = (idEl.value || '').trim();
   const pw = pwEl.value || '';
   if (!id || !pw){
-    errEl.textContent = '아이디와 비밀번호를 입력하세요.';
+    errEl.textContent = 'Please enter your username and password.';
     errEl.style.display = 'block';
     return;
   }
-  btn.disabled = true; btn.textContent = '로그인 중...';
+  btn.disabled = true; btn.textContent = 'Logging in...';
   let res;
   try { res = await gasPost('login', { id: id, password: pw }); }
   catch(e){ res = { ok:false, error:String(e && e.message || e) }; }
-  btn.disabled = false; btn.textContent = '로그인';
+  btn.disabled = false; btn.textContent = 'Log In';
   if (res && res.ok){
     localStorage.setItem(AUTH_TOKEN_KEY, res.token);
     localStorage.setItem(AUTH_NAME_KEY, res.name || id);
@@ -3176,9 +3176,19 @@ async function authDoLogin(){
     authHideGate();
     appInit();
   } else {
-    errEl.textContent = (res && res.error) || '로그인에 실패했습니다.';
+    errEl.textContent = authTranslateError_(res && res.error);
     errEl.style.display = 'block';
   }
+}
+// ★ 서버(Code.gs)는 batch.html/index.html과 공용이라 한국어 메시지를 내려줌 —
+//   이 페이지(sales.html)는 영어 UI이므로 알려진 메시지만 영어로 바꿔 보여줌.
+function authTranslateError_(msg){
+  const m = String(msg || '');
+  if (m.indexOf('아이디와 비밀번호') >= 0) return 'Please enter your username and password.';
+  if (m.indexOf('등록된 사용자가 없습니다') >= 0) return 'No accounts have been set up yet. Please contact your administrator.';
+  if (m.indexOf('비활성화된 계정') >= 0) return 'This account has been disabled. Please contact your administrator.';
+  if (m.indexOf('아이디 또는 비밀번호가 올바르지') >= 0) return 'Incorrect username or password.';
+  return 'Login failed. Please check your username and password.';
 }
 function authLogout(){
   const tok = authGetToken();
