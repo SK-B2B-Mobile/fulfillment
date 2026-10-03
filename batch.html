@@ -997,11 +997,11 @@ select option:disabled{color:var(--text-dim2);}
 <!-- ★ 2026-10-02 신규 — 로그인 전엔 이 화면만 보이고(기존 작업자 선택 포함 전부 가려짐) -->
 <div class="auth-gate hidden" id="authGate">
   <div class="auth-box">
-    <h2>SK Fulfillment 로그인</h2>
+    <h2>SK Fulfillment Login</h2>
     <div class="auth-err" id="authErrMsg"></div>
-    <input class="auth-input" id="authIdInput" placeholder="아이디" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('authPwInput').focus();">
-    <input class="auth-input" id="authPwInput" type="password" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')authDoLogin();">
-    <button class="auth-btn" id="authLoginBtn" onclick="authDoLogin()">로그인</button>
+    <input class="auth-input" id="authIdInput" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('authPwInput').focus();">
+    <input class="auth-input" id="authPwInput" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')authDoLogin();">
+    <button class="auth-btn" id="authLoginBtn" onclick="authDoLogin()">Log In</button>
   </div>
 </div>
 <script>
@@ -1057,13 +1057,13 @@ async function authDoLogin(){
   const id = (idEl.value || '').trim();
   const pw = pwEl.value || '';
   if (!id || !pw){
-    errEl.textContent = '아이디와 비밀번호를 입력하세요.';
+    errEl.textContent = 'Please enter your username and password.';
     errEl.style.display = 'block';
     return;
   }
-  btn.disabled = true; btn.textContent = '로그인 중...';
+  btn.disabled = true; btn.textContent = 'Logging in...';
   const res = await authPost('login', { id, password: pw });
-  btn.disabled = false; btn.textContent = '로그인';
+  btn.disabled = false; btn.textContent = 'Log In';
   if (res && res.ok){
     localStorage.setItem(AUTH_TOKEN_KEY, res.token);
     localStorage.setItem(AUTH_NAME_KEY, res.name || id);
@@ -1073,9 +1073,19 @@ async function authDoLogin(){
     pwEl.value = '';
     authHideGate();
   } else {
-    errEl.textContent = (res && res.error) || '로그인에 실패했습니다.';
+    errEl.textContent = authTranslateError_(res && res.error);
     errEl.style.display = 'block';
   }
+}
+// ★ 서버(Code.gs)는 sales.html/index.html과 공용이라 한국어 메시지를 내려줌 —
+//   이 로그인 게이트는 영어 UI이므로 알려진 메시지만 영어로 바꿔 보여줌.
+function authTranslateError_(msg){
+  const m = String(msg || '');
+  if (m.indexOf('아이디와 비밀번호') >= 0) return 'Please enter your username and password.';
+  if (m.indexOf('등록된 사용자가 없습니다') >= 0) return 'No accounts have been set up yet. Please contact your administrator.';
+  if (m.indexOf('비활성화된 계정') >= 0) return 'This account has been disabled. Please contact your administrator.';
+  if (m.indexOf('아이디 또는 비밀번호가 올바르지') >= 0) return 'Incorrect username or password.';
+  return 'Login failed. Please check your username and password.';
 }
 function authLogout(){
   const tok = authGetToken();
@@ -1133,7 +1143,7 @@ authInit();
     <div class="topbar-right">
       <!-- ★ 2026-10-02 신규 — 접속 제한(로그인) 계정 배지 + 로그아웃. 작업자 이름 배지와는 별개. -->
       <span class="auth-userbadge" id="authUserBadge"></span>
-      <button class="auth-logout-btn" onclick="authLogout()">계정 로그아웃</button>
+      <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
       <!-- ★ 2026-09-25 신규 — 로그인한 작업자 배지 + 전환(로그아웃) 버튼. 로그인 전에는 숨김(updateLoginBadge). -->
       <div id="loginBadgeWrap">
         <div class="login-badge-pill" title="이 기기에 로그인된 작업자"><span class="login-badge-dot"></span><span id="loginBadgeName">—</span></div>
