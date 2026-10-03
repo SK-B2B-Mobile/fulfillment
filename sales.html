@@ -614,6 +614,21 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .auth-err{font-size:11.5px; color:#FF6B6B; margin-bottom:8px; display:none;}
 .auth-userbadge{display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--text-dim); font-family:var(--mono);}
 .auth-logout-btn{font-size:10.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border2); border-radius:7px; padding:5px 10px; cursor:pointer; font-family:inherit;}
+/* ★ 2026-10-02 신규 — Account 메뉴(비밀번호 변경) */
+.account-wrap{position:relative;}
+.account-btn{font-size:10.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border2); border-radius:7px; padding:5px 10px; cursor:pointer; font-family:inherit;}
+.account-dropdown{position:absolute; top:calc(100% + 6px); right:0; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,0.35); padding:6px; min-width:160px; z-index:100000; display:none;}
+.account-dropdown.open{display:block;}
+.account-dropdown button{width:100%; text-align:left; font-size:12.5px; font-weight:600; color:var(--text); background:none; border:none; border-radius:7px; padding:9px 10px; cursor:pointer; font-family:inherit;}
+.account-dropdown button:hover{background:var(--bg);}
+.pwm-overlay{position:fixed; inset:0; z-index:200000; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center;}
+.pwm-overlay.hidden{display:none;}
+.pwm-box{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:30px 28px; width:320px; box-sizing:border-box;}
+.pwm-box h3{margin:0 0 6px; font-size:15px; font-weight:800; color:var(--text);}
+.pwm-box p.pwm-sub{margin:0 0 16px; font-size:11.5px; color:var(--text-dim); line-height:1.5;}
+.pwm-actions{display:flex; gap:8px; margin-top:4px;}
+.pwm-actions .auth-btn{flex:1;}
+.pwm-cancel-btn{flex:1; font-weight:700; font-size:13.5px; padding:11px; border:1px solid var(--border2); border-radius:8px; background:var(--surface2); color:var(--text); cursor:pointer; font-family:inherit;}
 </style>
 </head>
 <body>
@@ -626,6 +641,22 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
     <input class="auth-input" id="authIdInput" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('authPwInput').focus();">
     <input class="auth-input" id="authPwInput" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')authDoLogin();">
     <button class="auth-btn" id="authLoginBtn" onclick="authDoLogin()">Log In</button>
+  </div>
+</div>
+
+<!-- ★ 2026-10-02 신규 — 비밀번호 변경(강제/자율 공용) -->
+<div class="pwm-overlay hidden" id="pwChangeModal">
+  <div class="pwm-box">
+    <h3 id="pwmTitle">Change Password</h3>
+    <p class="pwm-sub" id="pwmSub">Enter your current password and choose a new one.</p>
+    <div class="auth-err" id="pwmErr"></div>
+    <input class="auth-input" id="pwmCurrent" type="password" placeholder="Current Password" autocomplete="current-password">
+    <input class="auth-input" id="pwmNew" type="password" placeholder="New Password" autocomplete="new-password">
+    <input class="auth-input" id="pwmConfirm" type="password" placeholder="Confirm New Password" autocomplete="new-password" onkeydown="if(event.key==='Enter')pwmSubmit();">
+    <div class="pwm-actions">
+      <button class="pwm-cancel-btn" id="pwmCancelBtn" onclick="pwmClose()">Cancel</button>
+      <button class="auth-btn" id="pwmSaveBtn" onclick="pwmSubmit()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -647,6 +678,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
     <div class="tb-clock"><div class="time" id="clockTime">--:--:-- --</div><div class="date" id="clockDate">----- -- --</div></div>
     <div class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncText">Connecting...</span></div>
     <div class="auth-userbadge" id="authUserBadge"></div>
+    <div class="account-wrap">
+      <button class="account-btn" onclick="toggleAccountMenu()">⚙ Account</button>
+      <div class="account-dropdown" id="accountDropdown">
+        <button onclick="pwmOpenVoluntary()">Change Password</button>
+      </div>
+    </div>
     <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
   </div>
 </div>
@@ -2007,7 +2044,7 @@ async function toggleShipped(invoice, nextShipped){
     ? `Mark ${invoice} as SHIPPED?`
     : `Undo — mark ${invoice} as NOT shipped?`;
   if (!confirm(msg)) return;
-  const res = await gasPostWithRetry('setShippedStatus', { invoice: invoice, shipped: nextShipped, by: 'Dispatch (tablet)' });
+  const res = await gasPostWithRetry('setShippedStatus', { invoice: invoice, shipped: nextShipped, by: (authGetName() || 'Dispatch (tablet)') });
   if (res && res.ok){
     await loadToday();
   } else {
@@ -2039,7 +2076,7 @@ function onBolDraftInput(invoice, value){
 }
 async function saveBol(invoice){
   const bol = (BOL_EDIT[invoice] || '').trim();
-  const res = await gasPostWithRetry('setBolNumber', { invoice: invoice, bol: bol, by: 'Dispatch (tablet)' });
+  const res = await gasPostWithRetry('setBolNumber', { invoice: invoice, bol: bol, by: (authGetName() || 'Dispatch (tablet)') });
   if (res && res.ok){
     delete BOL_EDIT[invoice];
     await loadToday();
@@ -2401,17 +2438,17 @@ async function dimGroupCall(op, payload, confirmMsg){
 }
 
 function joinDimGroup(invoice, target){
-  dimGroupCall('linkDimensions', { invoice: invoice, target: target, by: 'Packing (tablet)' },
+  dimGroupCall('linkDimensions', { invoice: invoice, target: target, by: (authGetName() || 'Packing (tablet)') },
     `Merge dimensions of ${invoice} and ${target}.\n\nAre these really shipping on the same pallet / box?`);
 }
 
 function unlinkDim(invoice, isSelf){
-  dimGroupCall('unlinkDimensions', { invoice: invoice, by: 'Packing (tablet)' },
+  dimGroupCall('unlinkDimensions', { invoice: invoice, by: (authGetName() || 'Packing (tablet)') },
     `Unlink ${invoice} and ship it separately.\n\nIts dimensions will go back to "not entered". Continue?`);
 }
 
 function makeDimPrimary(invoice){
-  dimGroupCall('setDimPrimary', { invoice: invoice, by: 'Packing (tablet)' },
+  dimGroupCall('setDimPrimary', { invoice: invoice, by: (authGetName() || 'Packing (tablet)') },
     `Make ${invoice} the primary invoice for this group.\n\nSaved dimensions move here and the other orders will be linked to it. Continue?`);
 }
 
@@ -2918,7 +2955,7 @@ async function markManualMoved(invoice, moved){
     : `"${invoice}" Undo the packing-zone move for this order?\n\nUse this only if it was clicked by mistake.`;
   if (!confirm(msg)) return;
 
-  const res = await gasPostWithRetry('setManualPackingMoved', { invoice: invoice, moved: moved, by: 'Packing (Sales page)' });
+  const res = await gasPostWithRetry('setManualPackingMoved', { invoice: invoice, moved: moved, by: (authGetName() || 'Packing (Sales page)') });
   if (!res || !res.ok){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
@@ -2949,7 +2986,7 @@ async function saveMethodChange(invoice){
     : `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} orders don't need shipping dimensions.`;
   if (!confirm(warn)) return;
 
-  const res = await gasPostWithRetry('updateOrderMethod', { invoice: invoice, method: newMethod, by: 'Packing (Sales page)' });
+  const res = await gasPostWithRetry('updateOrderMethod', { invoice: invoice, method: newMethod, by: (authGetName() || 'Packing (Sales page)') });
   if (!res || !res.ok){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
@@ -2985,7 +3022,7 @@ async function savePaymentStatus(invoice){
   const warn = `Change payment status to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
   if (!confirm(warn)) return;
 
-  const res = await gasPostWithRetry('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: 'Sales (Order Detail Lookup)' });
+  const res = await gasPostWithRetry('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: (authGetName() || 'Sales (Order Detail Lookup)') });
   if (!res || !res.ok){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
@@ -3124,6 +3161,7 @@ const AUTH_TOKEN_KEY = 'sk_auth_token';
 const AUTH_NAME_KEY = 'sk_auth_name';
 const AUTH_DEPT_KEY = 'sk_auth_dept';
 const AUTH_EXPIRES_KEY = 'sk_auth_expires';
+const AUTH_MUST_CHANGE_KEY = 'sk_auth_must_change';
 
 function authGetToken(){ return localStorage.getItem(AUTH_TOKEN_KEY) || ''; }
 function authGetName(){ return localStorage.getItem(AUTH_NAME_KEY) || ''; }
@@ -3138,6 +3176,7 @@ function authClear(){
   localStorage.removeItem(AUTH_NAME_KEY);
   localStorage.removeItem(AUTH_DEPT_KEY);
   localStorage.removeItem(AUTH_EXPIRES_KEY);
+  localStorage.removeItem(AUTH_MUST_CHANGE_KEY);
 }
 function authShowGate(){
   const gate = document.getElementById('authGate');
@@ -3171,10 +3210,15 @@ async function authDoLogin(){
     localStorage.setItem(AUTH_NAME_KEY, res.name || id);
     localStorage.setItem(AUTH_DEPT_KEY, res.dept || '');
     localStorage.setItem(AUTH_EXPIRES_KEY, String(Date.now() + ((res.ttlSec || 21600) * 1000)));
+    localStorage.setItem(AUTH_MUST_CHANGE_KEY, res.mustChangePassword ? '1' : '');
     errEl.style.display = 'none';
     pwEl.value = '';
     authHideGate();
-    appInit();
+    if (res.mustChangePassword){
+      pwmOpen(true);
+    } else {
+      appInit();
+    }
   } else {
     errEl.textContent = authTranslateError_(res && res.error);
     errEl.style.display = 'block';
@@ -3188,6 +3232,11 @@ function authTranslateError_(msg){
   if (m.indexOf('등록된 사용자가 없습니다') >= 0) return 'No accounts have been set up yet. Please contact your administrator.';
   if (m.indexOf('비활성화된 계정') >= 0) return 'This account has been disabled. Please contact your administrator.';
   if (m.indexOf('아이디 또는 비밀번호가 올바르지') >= 0) return 'Incorrect username or password.';
+  if (m.indexOf('현재 비밀번호가 올바르지') >= 0) return 'Your current password is incorrect.';
+  if (m.indexOf('새 비밀번호는 4~6자') >= 0) return 'New password must be 4-6 characters.';
+  if (m.indexOf('영문과 숫자만') >= 0) return 'New password can only contain letters and numbers.';
+  if (m.indexOf('계정을 찾을 수 없습니다') >= 0) return 'Account not found. Please log in again.';
+  if (m.indexOf('session expired') >= 0) return 'Your session has expired. Please log in again.';
   return 'Login failed. Please check your username and password.';
 }
 function authLogout(){
@@ -3199,12 +3248,78 @@ function authLogout(){
 function authInit(){
   if (authIsLoggedIn()){
     authHideGate();
-    appInit();
+    if (localStorage.getItem(AUTH_MUST_CHANGE_KEY) === '1'){
+      pwmOpen(true);
+    } else {
+      appInit();
+    }
   } else {
     authClear();
     authShowGate();
   }
 }
+
+// ★ 2026-10-02 신규 — ⚙ Account 메뉴 + 비밀번호 변경(강제/자율 공용)
+function toggleAccountMenu(){
+  const dd = document.getElementById('accountDropdown');
+  if (dd) dd.classList.toggle('open');
+}
+document.addEventListener('click', function(e){
+  const wrap = document.querySelector('.account-wrap');
+  if (wrap && !wrap.contains(e.target)){
+    const dd = document.getElementById('accountDropdown');
+    if (dd) dd.classList.remove('open');
+  }
+});
+let pwmForced = false;
+function pwmOpen(forced){
+  pwmForced = !!forced;
+  document.getElementById('pwmTitle').textContent = forced ? 'Set a New Password' : 'Change Password';
+  document.getElementById('pwmSub').textContent = forced ? 'Your account requires a new password before you can continue.' : 'Enter your current password and choose a new one.';
+  document.getElementById('pwmCancelBtn').style.display = forced ? 'none' : 'block';
+  document.getElementById('pwmCurrent').value = '';
+  document.getElementById('pwmNew').value = '';
+  document.getElementById('pwmConfirm').value = '';
+  document.getElementById('pwmErr').style.display = 'none';
+  document.getElementById('pwChangeModal').classList.remove('hidden');
+}
+function pwmOpenVoluntary(){
+  const dd = document.getElementById('accountDropdown');
+  if (dd) dd.classList.remove('open');
+  pwmOpen(false);
+}
+function pwmClose(){
+  if (pwmForced) return; // 강제 변경 중엔 취소 불가
+  document.getElementById('pwChangeModal').classList.add('hidden');
+}
+async function pwmSubmit(){
+  const errEl = document.getElementById('pwmErr');
+  const cur = document.getElementById('pwmCurrent').value;
+  const nw = document.getElementById('pwmNew').value;
+  const cf = document.getElementById('pwmConfirm').value;
+  errEl.style.display = 'none';
+  if (!cur || !nw || !cf){ errEl.textContent = 'Please fill in all fields.'; errEl.style.display='block'; return; }
+  if (nw.length < 4 || nw.length > 6){ errEl.textContent = 'New password must be 4-6 characters.'; errEl.style.display='block'; return; }
+  if (!/^[A-Za-z0-9]+$/.test(nw)){ errEl.textContent = 'New password can only contain letters and numbers.'; errEl.style.display='block'; return; }
+  if (nw !== cf){ errEl.textContent = 'New passwords do not match.'; errEl.style.display='block'; return; }
+  const btn = document.getElementById('pwmSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  let res;
+  try { res = await gasPost('changePassword', { token: authGetToken(), currentPassword: cur, newPassword: nw }); }
+  catch(e){ res = { ok:false, error:String(e && e.message || e) }; }
+  btn.disabled = false; btn.textContent = 'Save';
+  if (res && res.ok){
+    const wasForced = pwmForced;
+    pwmForced = false;
+    localStorage.setItem(AUTH_MUST_CHANGE_KEY, '');
+    document.getElementById('pwChangeModal').classList.add('hidden');
+    if (wasForced) appInit();
+  } else {
+    errEl.textContent = authTranslateError_(res && res.error) || 'Could not change password.';
+    errEl.style.display = 'block';
+  }
+}
+
 authInit();
 </script>
 
