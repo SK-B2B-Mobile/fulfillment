@@ -310,7 +310,10 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 
 /* ★ 2026-10-02 신규 — Shipping Status 탭 전용 스타일 (ship2-* 로 분리해서
    기존 .ship-row/.ship-card와 절대 겹치지 않도록 함) */
-.ship2-summary{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px;}
+/* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — 타일을 4개→5개(Awaiting
+   Confirm/Confirmed 분리)로 늘렸는데 이 grid-template-columns를 같이 안
+   고쳐서 5번째(Shipped) 타일이 다음 줄로 혼자 떨어져 나가는 버그. 5칸으로 수정. */
+.ship2-summary{display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px;}
 .ship2-tile{background:var(--surface); border:1.5px solid var(--border2); border-radius:10px; padding:12px 16px; display:flex; flex-direction:column; gap:4px;}
 .ship2-tile .num{font-family:var(--mono); font-size:22px; font-weight:800;}
 .ship2-tile .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
@@ -347,6 +350,11 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .confirm-undo-btn{font-family:var(--sans); font-size:10.5px; font-weight:700; color:var(--text-dim); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; white-space:nowrap;}
 .confirm-with-undo{display:flex; align-items:center; gap:8px;}
 .confirm-locked-note{font-family:var(--sans); font-size:10px; color:var(--text-dim); font-style:italic; white-space:nowrap;}
+.confirm-check-btn.saving{background:var(--surface3,var(--surface)); color:var(--text-dim); cursor:default; font-style:italic;}
+/* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — Sales Confirm이 BOL# "밑"이 아니라
+   "옆"에 와야 한다고 명확히 요청받았는데 처음 구현에선 flex-column 안에 각자
+   한 줄씩 떨어져서 나왔던 버그. BOL#과 Confirm을 이 한 줄(행)로 묶음. */
+.ship2-bol-confirm-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
 .ship2-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
 .ship2-age{font-family:var(--mono); font-size:14px; color:var(--text-dim);} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-mono-dim과 동일) */
 .ship2-age.overdue{color:var(--red); font-weight:800;}
@@ -437,13 +445,19 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .method-cancel-btn{background:var(--surface2); border:1px solid var(--border2); color:var(--text-dim);}
 /* ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용). Recently Completed
    목록은 절대 안 건드림(METHOD 컬럼 폭 제약) — 매니저 확인 사항. */
-.pay-badge{cursor:pointer; border:none; font-family:var(--mono); font-size:12px; font-weight:800; padding:4px 9px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;}
+/* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — 주변 값(Amount/Inspector 등,
+   13.5px)에 비해 Sales Confirm 배지 글씨가 눈에 띄게 작다는 지적 → 통일. */
+.pay-badge{cursor:pointer; border:none; font-family:var(--mono); font-size:13.5px; font-weight:800; padding:5px 10px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;}
 .pay-badge.unpaid{background:var(--red-bg); color:#FF7A7A; border:1px solid rgba(239,68,68,0.4);}
 .pay-badge.paid{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.4);}
 .pay-locked{font-family:var(--mono); font-size:11px; color:var(--text-dim); background:var(--gray-bg); border:1px solid var(--border2); padding:5px 9px; border-radius:6px; display:inline-block;}
 /* ★ 2026-09-02 신규 — Recently Completed 목록의 Method 칸 안에서 PU일 때만
    같이 보여주는 결제상태 미니 배지(읽기 전용 — 여기서는 클릭 안 됨). */
 .method-cell-wrap{display:flex; align-items:center; gap:6px;}
+/* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — PU(2글자)와 UPS(3글자)의 너비가
+   달라서 그 옆의 CONF/UNCONF 배지 시작 위치가 행마다 들쭉날쭉해 보이던 문제.
+   Method 글자 부분의 너비를 고정해서 배지 위치를 항상 통일되게 맞춤. */
+.method-cell-wrap .plain-tag.method{display:inline-block; min-width:28px;}
 .pay-mini{font-family:var(--mono); font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:5px; white-space:nowrap;}
 .pay-mini.unpaid{background:var(--red-bg); color:#FF7A7A;}
 .pay-mini.paid{background:var(--green-bg); color:var(--green);}
@@ -2025,6 +2039,11 @@ function renderShipping(){
     let confirmHtml;
     if (isLinked){
       confirmHtml = '';
+    } else if (j._confirmSaving){
+      // ★ 2026-10-02 신규(현장 버그 리포트) — "눌렀는데 반응이 없다"는 피드백
+      //   대응. 클릭 즉시(서버 응답 기다리지 않고) 이 상태로 바로 바뀌어서
+      //   "클릭이 눌렸다"는 게 바로 보임(toggleSalesConfirm/undoSalesConfirm 참고).
+      confirmHtml = `<span class="confirm-check-btn saving">Saving…</span>`;
     } else if (j.salesConfirmed){
       const whoWhen = j.salesConfirmedBy ? `${j.salesConfirmedBy}${j.salesConfirmedAt ? ' · ' + j.salesConfirmedAt : ''}` : (j.salesConfirmedAt || '');
       if (j.shipped){
@@ -2062,7 +2081,10 @@ function renderShipping(){
       <span class="cell-mono-dim">${j.shipDate||'-'}</span>
       ${dimsHtml}
       <span class="ship2-age${overdue?' overdue':''}">${ageTxt}</span>
-      <div class="ship2-status-cell">${statusHtml}${bolHtml}${confirmHtml}</div>
+      <div class="ship2-status-cell">
+        ${statusHtml}
+        <div class="ship2-bol-confirm-row">${bolHtml}${confirmHtml}</div>
+      </div>
       <span class="ship2-action-cell">${actionHtml}</span>
     </div>`;
   }).join('');
@@ -2128,11 +2150,28 @@ async function toggleShipped(invoice, nextShipped){
    로그인 계정 이름이 "누가 컨펌했는지"로 같이 기록됨. 출고(shipped) 이후에는
    서버가 되돌리기를 거부하므로(setSalesConfirm 가드) Undo 버튼 자체를 그 전에
    화면에서 숨김(renderShipping 참고). */
+// ★ 2026-10-02 긴급 수정(현장 버그 리포트) — "눌렀는데 작동 안 하는 것 같다 /
+// 느리다"는 피드백. 원인: 예전엔 저장 후 loadToday()로 전체 목록(90여 건)을
+// 서버에서 통째로 다시 불러와 다시 그렸음 — 느리기도 하고, 그 몇 초 동안은
+// 버튼이 눌렸는지조차 화면에 아무 표시가 없었음. 이제 (1) 누르자마자 그
+// 자리에서 즉시 "Saving…"으로 바뀌어 클릭이 눌렸다는 게 바로 보이고,
+// (2) 저장 성공/실패도 전체 재조회 없이 이미 메모리에 있는 TODAY_JOBS를 그
+// 자리에서 직접 갱신 + 이 탭만 다시 그림 — 서버 왕복 1번으로 끝나서 체감
+// 속도도 훨씬 빠름(PU 결제확인 저장과 동일한 원칙).
 async function toggleSalesConfirm(invoice, nextConfirmed){
+  const job = TODAY_JOBS.find(j => j.invoice === invoice);
+  if (job) { job._confirmSaving = true; renderShipping(); }
   const res = await gasPostWithRetry('setSalesConfirm', { invoice: invoice, confirmed: nextConfirmed, by: (authGetName() || 'Sales') });
+  if (job) job._confirmSaving = false;
   if (res && res.ok){
-    await loadToday();
+    if (job){
+      job.salesConfirmed = res.confirmed;
+      job.salesConfirmedAt = res.confirmedAt;
+      job.salesConfirmedBy = res.confirmedBy;
+    }
+    renderShipping();
   } else {
+    renderShipping(); // Saving… 표시만 원래대로 되돌림
     alert((res && res.error) ? res.error : 'Could not save Sales Confirm. Check your connection and try again.');
   }
 }
@@ -3172,8 +3211,23 @@ async function savePaymentStatus(invoice){
   const warn = `Change Sales Confirm to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
   if (!confirm(warn)) return;
 
+  // ★ 2026-10-02 긴급 수정(현장 버그 리포트) — "저장이 느리다"는 지적의 실제
+  //   원인은 네트워크 왕복 시간 자체(이미 서버 1회 왕복으로 최적화돼 있음)지만,
+  //   그동안 Save 버튼이 눌린 건지 아닌지 화면에 아무 표시가 없어서 "작동을
+  //   안 하는 것 같다"는 체감으로 이어짐. 누르자마자 바로 "Saving…"으로 바꿔서
+  //   클릭이 확실히 반영됐다는 걸 즉시 보여줌.
+  const saveBtn = document.querySelector('#paymentEditRow .method-save-btn');
+  const cancelBtn = document.querySelector('#paymentEditRow .method-cancel-btn');
+  const saveBtnOrigText = saveBtn ? saveBtn.textContent : '';
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (sel) sel.disabled = true;
+
   const res = await gasPostWithRetry('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: (authGetName() || 'Sales (Order Detail Lookup)') });
   if (!res || !res.ok){
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = saveBtnOrigText; }
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (sel) sel.disabled = false;
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
