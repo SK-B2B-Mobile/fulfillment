@@ -989,7 +989,10 @@ select option:disabled{color:var(--text-dim2);}
 .auth-btn:disabled{opacity:0.6; cursor:not-allowed;}
 .auth-err{font-size:11.5px; color:var(--red); margin-bottom:8px; display:none;}
 .auth-userbadge{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--text); font-family:var(--mono); background:var(--surface3); border:1px solid var(--border2); border-radius:999px; padding:5px 11px; margin-right:6px;}
-.auth-logout-btn{font-size:10.5px; font-weight:700; color:#fff; background:var(--red); border:1px solid var(--red); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit; margin-right:8px;}
+.auth-logout-btn{font-size:10.5px; font-weight:700; color:#fff; background:#64748B; border:1px solid #64748B; border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit; margin-right:8px; min-width:76px; text-align:center;}
+.auth-logout-btn:disabled{opacity:0.8; cursor:default;}
+.auth-logout-spin{display:inline-block; width:9px; height:9px; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation:authLogoutSpin 0.6s linear infinite; margin-right:5px; vertical-align:-1px;}
+@keyframes authLogoutSpin{to{transform:rotate(360deg)}}
 /* ★ 2026-10-02 신규 — Account 메뉴(비밀번호 변경) */
 .account-wrap{position:relative; margin-right:8px;}
 .account-btn{font-size:10.5px; font-weight:700; color:var(--text); background:var(--surface3); border:1px solid var(--blue); border-radius:999px; padding:5px 10px; cursor:pointer; font-family:inherit;}
@@ -1142,10 +1145,15 @@ function authTranslateError_(msg){
   return 'Login failed. Please check your username and password.';
 }
 function authLogout(){
+  // ★ 2026-10-02 수정 — 누르자마자 바로 새로고침돼서 눌렸는지 티가 안 나던 문제 수정.
+  const btn = document.getElementById('authLogoutBtn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="auth-logout-spin"></span>Logging out...'; }
   const tok = authGetToken();
-  authClear();
   if (tok){ try { authPost('logout', { token: tok }); } catch(e){} }
-  location.reload();
+  setTimeout(function(){
+    authClear();
+    location.reload();
+  }, 500);
 }
 function authInit(){
   if (authIsLoggedIn()){
@@ -1304,7 +1312,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <button onclick="deptOpenMenu()">Edit Department</button>
         </div>
       </div>
-      <button class="auth-logout-btn" onclick="authLogout()">Log Out</button>
+      <button class="auth-logout-btn" id="authLogoutBtn" onclick="authLogout()">Log Out</button>
       <!-- ★ 2026-09-25 신규 — 로그인한 작업자 배지 + 전환(로그아웃) 버튼. 로그인 전에는 숨김(updateLoginBadge).
            ★ 2026-10-02 수정 — 위 계정 로그아웃("Log Out")과 혼동되지 않도록 라벨만
            "Switch Worker"로 변경(동작은 기존 doLogout() 그대로, 전혀 안 건드림). -->
