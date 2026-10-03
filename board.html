@@ -149,6 +149,9 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .card-ship.ship-UPS{background:rgba(139,92,246,0.18); color:#B39CFF;}
 .card-ship.ship-PU{background:rgba(34,211,238,0.18); color:#67E4F5;}
 .card-ship.ship-TK{background:rgba(245,158,11,0.18); color:#FBBF4E;}
+/* ★ 2026-10-02 신규 — 'PU & TK'도 sales.html/batch.html과 동일한 핑크색으로
+   구분. 이전엔 ship-other(회색)로 PU/TK/UPS와 구분 없이 뭉뚱그려 보였음. */
+.card-ship.ship-PUTK{background:rgba(244,114,182,0.18); color:#F6A8D1;}
 .card-ship.ship-other{background:rgba(58,69,96,0.35); color:var(--text-dim);}
 .card.done .card-ship{background:rgba(4,20,13,0.18); color:#04140D;}
 .card-cust{font-size:30px; font-weight:700; margin-top:10px; line-height:1.2; flex:1; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
@@ -960,8 +963,13 @@ setInterval(fmtClock, 1000); fmtClock();
 
 function shipLabel(v){ return v || '-'; }
 // ★ 2026-07-13: UPS/PU/TK가 아닌 값이 들어와도 스타일이 깨지지 않도록 안전하게 클래스 결정
+// ★ 2026-10-02 수정 — 'PU & TK' 신규 Method 추가 반영(전용 핑크색). 이 함수는
+//   이미 "알려진 값만 전용 클래스, 나머진 ship-other" 방식이라 안전했지만,
+//   'PU & TK'도 ship-other(회색)가 아니라 전용 색으로 구분되도록 케이스 추가.
 function shipClass(v){
-  return (v === 'UPS' || v === 'PU' || v === 'TK') ? 'ship-' + v : 'ship-other';
+  if (v === 'UPS' || v === 'PU' || v === 'TK') return 'ship-' + v;
+  if (v === 'PU & TK') return 'ship-PUTK';
+  return 'ship-other';
 }
 
 let _slotsByInvoice = {}; // ★ 2026-07-16 신규: 이슈 뱃지 클릭 시 상세 조회용
