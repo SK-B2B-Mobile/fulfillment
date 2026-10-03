@@ -186,6 +186,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .badge.method.method-tk{background:rgba(245,158,11,0.12); color:var(--amber); border-color:rgba(245,158,11,0.4);}
 .badge.method.method-ups{background:rgba(139,92,246,0.12); color:#C4B0FF; border-color:rgba(139,92,246,0.4);}
 .badge.method.method-pu{background:rgba(45,212,191,0.14); color:#5EEAD4; border-color:rgba(45,212,191,0.45);}
+.badge.method.method-putk{background:rgba(244,114,182,0.14); color:#F472B6; border-color:rgba(244,114,182,0.45);}
 
 /* ★ 패킹존 이동 완료 — 초록색(Dimensions Saved와 동일 톤)으로 통일 + 반짝이는 애니메이션 */
 .badge.moved-yes{
@@ -314,6 +315,8 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-tile .num{font-family:var(--mono); font-size:22px; font-weight:800;}
 .ship2-tile .lbl{font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
 .ship2-tile.pending .num{color:var(--amber);}
+.ship2-tile.awaiting .num{color:var(--amber);}
+.ship2-tile.confirmed .num{color:var(--blue);}
 .ship2-tile.late .num{color:var(--red);}
 .ship2-tile.shipped .num{color:var(--green);}
 .ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
@@ -335,7 +338,15 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-status.shipped{background:var(--green-bg); color:var(--green);}
 .ship2-btn{font-family:var(--sans); font-size:11.5px; font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; border:1px solid var(--border2); background:var(--surface2); color:var(--text);}
 .ship2-btn.go{background:var(--green); border-color:var(--green); color:#07241a;}
+.ship2-btn.go:disabled{background:var(--surface2); border-color:var(--border2); color:var(--text-dim); cursor:not-allowed;}
 .ship2-btn.undo{background:transparent; color:var(--text-dim);}
+/* ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭). BOL#과 동일한
+   .ship2-status-cell 안에 나란히 배치. */
+.confirm-chip{font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--green); white-space:nowrap;}
+.confirm-check-btn{font-family:var(--sans); font-size:10.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border2); border-radius:6px; padding:4px 9px; cursor:pointer; white-space:nowrap;}
+.confirm-undo-btn{font-family:var(--sans); font-size:10.5px; font-weight:700; color:var(--text-dim); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; white-space:nowrap;}
+.confirm-with-undo{display:flex; align-items:center; gap:8px;}
+.confirm-locked-note{font-family:var(--sans); font-size:10px; color:var(--text-dim); font-style:italic; white-space:nowrap;}
 .ship2-empty{padding:26px 20px; text-align:center; color:var(--text-dim); font-size:12.5px;}
 .ship2-age{font-family:var(--mono); font-size:14px; color:var(--text-dim);} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-mono-dim과 동일) */
 .ship2-age.overdue{color:var(--red); font-weight:800;}
@@ -374,6 +385,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .plain-tag.method-tk{color:var(--amber); font-weight:700;}
 .plain-tag.method-ups{color:#C4B0FF; font-weight:700;}
 .plain-tag.method-pu{color:#5EEAD4; font-weight:700;}
+.plain-tag.method-putk{color:#F472B6; font-weight:700;}
 /* ★ 피킹 진행 상태 — 시작됐으면 초록 깜빡임, 대기중이면 기존 회색 톤 */
 .badge.picking-active{background:var(--green-bg); color:var(--green); border:1px solid rgba(16,217,126,0.5);}
 .badge.picking-active .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; animation:blink 1s infinite; flex-shrink:0;}
@@ -494,6 +506,11 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .dims-head-row{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
 .dims-unit-label{font-family:var(--mono); font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em;}
 .dims-meta{font-family:var(--mono); font-size:10.5px; color:var(--text-dim);}
+/* ★ 2026-10-03 신규 — 'PU & TK' 전용 박스 수량 스테퍼 */
+.boxqty-btn{font-family:var(--mono); font-weight:800; font-size:18px; width:36px; height:36px; border-radius:8px; border:1.5px solid var(--border); background:var(--surface3,var(--surface)); color:var(--text); cursor:pointer; line-height:1;}
+.boxqty-btn:disabled{opacity:0.4; cursor:not-allowed;}
+.boxqty-val{font-family:var(--mono); font-weight:800; font-size:22px; min-width:44px; text-align:center;}
+.boxqty-meta{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); margin-top:10px;}
 
 .dim-row{display:grid; grid-template-columns:36px 1fr 1fr 1fr 90px 32px; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--border);}
 .dim-row.box-only{grid-template-columns:36px 160px 32px;}
@@ -855,7 +872,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         <span>Ship Out</span>
         <span>Dims</span>
         <span>Age</span>
-        <span>Status &amp; BOL#</span>
+        <span>Status &amp; BOL# &amp; Confirm</span>
         <span>Action</span>
       </div>
       <div id="ship2-list"></div>
@@ -1143,6 +1160,9 @@ async function gasPostWithRetry(op, data, retries){
 function needsDims(order){ return order.method==='TRUCKING' || order.method==='TK' || order.method==='UPS'; }
 function dimUnitLabel(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallet' : 'Box'; }
 function dimUnitLabelPlural(order){ return (order.method==='TRUCKING'||order.method==='TK') ? 'Pallets' : 'Boxes'; }
+// ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK'는 TK/UPS식 전체
+//   Dims(박스별 가로·세로·높이) 대신 "전체 박스 수량" 숫자 하나만 입력.
+function needsBoxQty(order){ return order.method==='PU & TK'; }
 function fmtMoney(n){ n = Number(n)||0; return n ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'; }
 
 // ★ 배송방법(TK/UPS/PU)별 색상 클래스 — 다른 값(FedEx 등)이 들어와도 안전하게 기본톤 사용
@@ -1150,6 +1170,7 @@ function methodClass(m){
   const v = String(m||'').toUpperCase();
   if (v==='TK' || v==='TRUCKING') return 'method-tk';
   if (v==='UPS') return 'method-ups';
+  if (v==='PU & TK') return 'method-putk';
   if (v==='PU' || v==='PICK UP' || v==='PICKUP') return 'method-pu';
   return '';
 }
@@ -1793,9 +1814,12 @@ function renderToday(){
     // ★ 2026-09-02 신규(매니저 요청) — PU 오더에만 Method 옆에 결제상태를 같이
     //   표시. 새 컬럼을 만들지 않고 Method 칸 안에서 같이 보여줘서(폭을
     //   넓혀뒀으므로 잘리지 않음) 표 전체 구조는 그대로 유지.
+    // ★ 2026-10-03 수정(사용자 요청) — "Payment Status"를 "Sales Confirm"으로
+    //   재활용하며 PU 전용 → PU/UPS/PU & TK로 확장. 칸 폭을 유지하기 위해
+    //   PAID/UNPAID와 글자 수가 같은 CONF/UNCONF로 축약 표기.
     let methodBadge = '<span class="plain-tag method '+methodClass(j.method)+'">'+(j.method || '-')+'</span>';
-    if (String(j.method||'').trim().toUpperCase() === 'PU') {
-      const payMini = j.paymentPaid ? '<span class="pay-mini paid" data-pay-badge="1">PAID</span>' : '<span class="pay-mini unpaid" data-pay-badge="1">UNPAID</span>';
+    if (['PU','UPS','PU & TK'].indexOf(String(j.method||'').trim().toUpperCase()) >= 0) {
+      const payMini = j.paymentPaid ? '<span class="pay-mini paid" data-pay-badge="1">CONF</span>' : '<span class="pay-mini unpaid" data-pay-badge="1">UNCONF</span>';
       methodBadge = `<span class="method-cell-wrap">${methodBadge}${payMini}</span>`;
     }
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
@@ -1881,6 +1905,11 @@ function renderShipping(){
   const primaries = jobs.filter(j => !j.dimsLinkedTo);
   const shippedCount = primaries.filter(j => j.shipped).length;
   const pendingCount = primaries.length - shippedCount;
+  // ★ 2026-10-03 신규(사용자 요청) — Sales Confirm 반영. 출고 완료되면 Awaiting/
+  //   Confirmed 양쪽에서 모두 빠지고 Shipped 칸으로만 집계(작업자·영업팀 모두
+  //   "지금 해야 할 일"만 한눈에 보도록).
+  const awaitingConfirmCount = primaries.filter(j => !j.shipped && !j.salesConfirmed).length;
+  const confirmedCount = primaries.filter(j => !j.shipped && j.salesConfirmed).length;
   // ★ 2026-10-02 수정(피드백 반영) — "지연" 개념을 행(Age 칸)뿐 아니라 맨 위
   //   요약 칸에도 노출. 2일 이상 밀린 미출고 팔렛 수를 한눈에 보여줌.
   const lateCount = primaries.filter(j => {
@@ -1890,7 +1919,8 @@ function renderShipping(){
   }).length;
   summaryEl.innerHTML = `
     <div class="ship2-tile"><div class="num">${primaries.length}</div><div class="lbl">TK Pallets</div></div>
-    <div class="ship2-tile pending"><div class="num">${pendingCount}</div><div class="lbl">Not Shipped</div></div>
+    <div class="ship2-tile awaiting"><div class="num">${awaitingConfirmCount}</div><div class="lbl">Awaiting Confirm</div></div>
+    <div class="ship2-tile confirmed"><div class="num">${confirmedCount}</div><div class="lbl">Confirmed</div></div>
     <div class="ship2-tile late"><div class="num">${lateCount}</div><div class="lbl">2+ Days Late</div></div>
     <div class="ship2-tile shipped"><div class="num">${shippedCount}</div><div class="lbl">Shipped</div></div>
   `;
@@ -1979,8 +2009,31 @@ function renderShipping(){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
     } else if (j.shipped){
       actionHtml = `<button class="ship2-btn undo" onclick="toggleShipped('${j.invoice}', false)">Undo</button>`;
+    } else if (!j.salesConfirmed){
+      // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 영업 컨펌 전에는
+      //   Mark Shipped 자체를 비활성화(서버도 setShippedStatus에서 동일하게
+      //   막음 — 화면·서버 이중 방어).
+      actionHtml = `<button class="ship2-btn go" disabled title="Sales must confirm before this order can be marked shipped">Mark Shipped</button>`;
     } else {
       actionHtml = `<button class="ship2-btn go" onclick="toggleShipped('${j.invoice}', true)">Mark Shipped</button>`;
+    }
+
+    // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — Sales Confirm(Shipping
+    //   Status 탭). BOL#과 완전히 독립적으로 Status 옆에 나란히 배치. 출고
+    //   완료(shipped) 후에는 컨펌 기록을 지울 수 없도록 Undo를 숨김(서버도
+    //   setSalesConfirm에서 동일하게 막음).
+    let confirmHtml;
+    if (isLinked){
+      confirmHtml = '';
+    } else if (j.salesConfirmed){
+      const whoWhen = j.salesConfirmedBy ? `${j.salesConfirmedBy}${j.salesConfirmedAt ? ' · ' + j.salesConfirmedAt : ''}` : (j.salesConfirmedAt || '');
+      if (j.shipped){
+        confirmHtml = `<span class="confirm-chip">✓ Confirmed${whoWhen ? ' by ' + whoWhen : ''}</span><span class="confirm-locked-note">(shipped — locked)</span>`;
+      } else {
+        confirmHtml = `<span class="confirm-with-undo"><span class="confirm-chip">✓ Confirmed${whoWhen ? ' by ' + whoWhen : ''}</span><button class="confirm-undo-btn" onclick="undoSalesConfirm('${j.invoice}')">Undo</button></span>`;
+      }
+    } else {
+      confirmHtml = `<button class="confirm-check-btn" onclick="toggleSalesConfirm('${j.invoice}', true)">☐ Sales Confirm</button>`;
     }
 
     // ★ 2026-10-02 신규(시뮬레이션에서 확정) — BOL# 입력. Shipped 체크와는
@@ -2009,7 +2062,7 @@ function renderShipping(){
       <span class="cell-mono-dim">${j.shipDate||'-'}</span>
       ${dimsHtml}
       <span class="ship2-age${overdue?' overdue':''}">${ageTxt}</span>
-      <div class="ship2-status-cell">${statusHtml}${bolHtml}</div>
+      <div class="ship2-status-cell">${statusHtml}${bolHtml}${confirmHtml}</div>
       <span class="ship2-action-cell">${actionHtml}</span>
     </div>`;
   }).join('');
@@ -2068,6 +2121,24 @@ async function toggleShipped(invoice, nextShipped){
   } else {
     alert((res && res.error) ? res.error : 'Could not update shipping status. Check your connection and try again.');
   }
+}
+
+/* ★ 2026-10-03 신규(시뮬레이션에서 확정) — Sales Confirm(Shipping Status 탭).
+   BOL#과 완전히 독립적인 별도 op(setSalesConfirm)로 서버에 저장. 체크 시
+   로그인 계정 이름이 "누가 컨펌했는지"로 같이 기록됨. 출고(shipped) 이후에는
+   서버가 되돌리기를 거부하므로(setSalesConfirm 가드) Undo 버튼 자체를 그 전에
+   화면에서 숨김(renderShipping 참고). */
+async function toggleSalesConfirm(invoice, nextConfirmed){
+  const res = await gasPostWithRetry('setSalesConfirm', { invoice: invoice, confirmed: nextConfirmed, by: (authGetName() || 'Sales') });
+  if (res && res.ok){
+    await loadToday();
+  } else {
+    alert((res && res.error) ? res.error : 'Could not save Sales Confirm. Check your connection and try again.');
+  }
+}
+async function undoSalesConfirm(invoice){
+  if (!confirm(`Undo Sales Confirm for ${invoice}?`)) return;
+  await toggleSalesConfirm(invoice, false);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2213,6 +2284,11 @@ document.addEventListener('keydown', function(e){
 });
 
 function renderDimsSection(order){
+  // ★ 2026-10-03 신규(시뮬레이션 승인) — 'PU & TK'는 전체 Dims 대신 박스
+  //   수량만 입력하는 간편 UI를 보여줌(완전히 별도 섹션).
+  if (needsBoxQty(order)){
+    return renderBoxQtySection(order);
+  }
   if (!needsDims(order)){
     return `<div class="section-title-row"><span class="section-title">Shipping Dimensions</span></div>
       <div class="no-dims-note">Pick Up (PU) order — no shipping dimensions needed. Customer picks up in person.</div>`;
@@ -2221,6 +2297,52 @@ function renderDimsSection(order){
       <span class="section-title">Shipping Dimensions</span>
     </div>
     <div id="dims-panel-container">${renderDimsPanel(order, false)}</div>`;
+}
+
+// ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 전용 간편 입력.
+// 전체 박스 수량만 +/- 스테퍼로 입력·저장(setPuTkBoxQty, Code.gs). TK/UPS의
+// 묶음(linked)·후보 추천 등 복잡한 Dims 기능과는 완전히 분리된 가벼운 UI.
+function renderBoxQtySection(order){
+  const qty = Number(order.puTkBoxQty || 0);
+  const meta = order.puTkBoxQtyBy
+    ? `Entered by ${order.puTkBoxQtyBy}${order.puTkBoxQtyAt ? ' · ' + order.puTkBoxQtyAt : ''}`
+    : '';
+  return `<div class="section-title-row"><span class="section-title">Shipping Dimensions</span></div>
+    <div class="dims-panel" id="boxqty-panel">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <button class="boxqty-btn" onclick="adjustPuTkBoxQty('${order.invoice}', -1)" ${qty<=0?'disabled':''}>−</button>
+        <span class="boxqty-val" id="boxqty-val">${qty}</span>
+        <button class="boxqty-btn" onclick="adjustPuTkBoxQty('${order.invoice}', 1)">+</button>
+        <span style="font-size:13px; color:var(--text-dim,#888);">Box(es)</span>
+      </div>
+      ${meta ? `<div class="boxqty-meta">${meta}</div>` : ''}
+    </div>`;
+}
+
+// 서버에 바로 반영(선택→Save 방식이 아니라 +/- 누를 때마다 즉시 저장 — 숫자
+// 하나짜리라 복잡한 편집모드 없이도 실수 위험이 낮음. 실패 시 화면을 되돌림).
+async function adjustPuTkBoxQty(invoice, delta){
+  const cur = Number((CURRENT_ORDER && CURRENT_ORDER.puTkBoxQty) || 0);
+  const next = Math.max(0, cur + delta);
+  if (next === cur) return;
+  if (CURRENT_ORDER) CURRENT_ORDER.puTkBoxQty = next; // 낙관적 업데이트
+  const panel = document.getElementById('boxqty-panel');
+  if (panel) panel.outerHTML = renderBoxQtySection(CURRENT_ORDER);
+  const res = await gasPostWithRetry('setPuTkBoxQty', { invoice: invoice, qty: next, by: (authGetName() || 'Sales (Order Detail Lookup)') });
+  if (!res || !res.ok){
+    if (CURRENT_ORDER) CURRENT_ORDER.puTkBoxQty = cur; // 실패 시 롤백
+    const panel2 = document.getElementById('boxqty-panel');
+    if (panel2) panel2.outerHTML = renderBoxQtySection(CURRENT_ORDER);
+    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
+    return;
+  }
+  if (CURRENT_ORDER){
+    CURRENT_ORDER.puTkBoxQty = res.qty;
+    CURRENT_ORDER.puTkBoxQtyAt = res.qtyAt;
+    CURRENT_ORDER.puTkBoxQtyBy = res.qtyBy;
+  }
+  const panel3 = document.getElementById('boxqty-panel');
+  if (panel3) panel3.outerHTML = renderBoxQtySection(CURRENT_ORDER);
 }
 
 /* ★ 2026-08-06 신규 — 디멘션 합산
@@ -2863,8 +2985,12 @@ function renderDetail(res){
   //   안 보여주고(기존 Shipping Method 편집과 같은 원칙), 검수는 됐지만 아직
   //   패킹존 이동 전이면 편집 불가 안내만 보여줌 — 너무 이른 시점에 실수로
   //   입력되는 걸 서버뿐 아니라 화면에서도 막음.
+  // ★ 2026-10-03 수정(사용자 요청) — 기존 "Payment Status"(PAID/UNPAID)를
+  //   "Sales Confirm"(CONFIRMED/NOT CONFIRMED)으로 재활용. 데이터/로직은 그대로
+  //   (PaymentStatus 컬럼·updatePaymentStatus 그대로 재사용), 라벨만 변경하고
+  //   노출 범위를 PU 전용 → PU/UPS/PU & TK 3개로 확장.
   let paymentMetaHtml = '';
-  if (res.method === 'PU' && status !== 'pending') {
+  if ((res.method === 'PU' || res.method === 'UPS' || res.method === 'PU & TK') && status !== 'pending') {
     if (res.movedToPacking) {
       const isPaid = !!res.paymentPaid;
       // ★ 2026-09-02 재설계(매니저 요청) — 클릭 즉시 토글 방식이 반영 확인이
@@ -2873,15 +2999,15 @@ function renderDetail(res){
       //   쉽고, 이미 안정적으로 동작 검증된 패턴을 그대로 재사용.
       paymentMetaHtml = `
         <div class="meta-item">
-          <div class="k">Payment Status</div>
+          <div class="k">Sales Confirm</div>
           <div class="v">
-            <span class="pay-badge ${isPaid?'paid':'unpaid'}" id="paymentBadge">${isPaid?'✓ PAID':'⚠ UNPAID'}</span>
-            <button class="method-edit-btn" onclick="togglePaymentEdit()" title="Change payment status">✎ Edit</button>
+            <span class="pay-badge ${isPaid?'paid':'unpaid'}" id="paymentBadge">${isPaid?'✓ CONFIRMED':'⚠ NOT CONFIRMED'}</span>
+            <button class="method-edit-btn" onclick="togglePaymentEdit()" title="Change sales confirm status">✎ Edit</button>
           </div>
           <div class="method-edit-row" id="paymentEditRow" style="display:none;">
             <select id="paymentSelect">
-              <option value="paid" ${isPaid?'selected':''}>PAID</option>
-              <option value="unpaid" ${!isPaid?'selected':''}>UNPAID</option>
+              <option value="paid" ${isPaid?'selected':''}>CONFIRMED</option>
+              <option value="unpaid" ${!isPaid?'selected':''}>NOT CONFIRMED</option>
             </select>
             <button class="method-save-btn" onclick="savePaymentStatus('${res.invoice}')">Save</button>
             <button class="method-cancel-btn" onclick="togglePaymentEdit()">Cancel</button>
@@ -2890,7 +3016,7 @@ function renderDetail(res){
     } else {
       paymentMetaHtml = `
         <div class="meta-item">
-          <div class="k">Payment Status</div>
+          <div class="k">Sales Confirm</div>
           <div class="v"><span class="pay-locked">🔒 Available after Moved to Packing</span></div>
         </div>`;
     }
@@ -2916,6 +3042,7 @@ function renderDetail(res){
                 <option value="TK" ${res.method==='TK'?'selected':''}>TK</option>
                 <option value="UPS" ${res.method==='UPS'?'selected':''}>UPS</option>
                 <option value="PU" ${res.method==='PU'?'selected':''}>PU</option>
+                <option value="PU & TK" ${res.method==='PU & TK'?'selected':''}>PU & TK</option>
               </select>
               <button class="method-save-btn" onclick="saveMethodChange('${res.invoice}')">Save</button>
               <button class="method-cancel-btn" onclick="toggleMethodEdit()">Cancel</button>
@@ -2999,8 +3126,13 @@ async function saveMethodChange(invoice){
   if (newMethod === oldMethod){ toggleMethodEdit(); return; }
 
   const needsDimsNow = (newMethod === 'TK' || newMethod === 'UPS');
+  // ★ 2026-10-03 신규(시뮬레이션 승인) — 'PU & TK'는 전체 Dims 대신 전체 박스
+  //   수량만 필요하므로 별도 안내 문구.
+  const needsBoxQtyNow = (newMethod === 'PU & TK');
   const warn = needsDimsNow
     ? `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} requires shipping dimensions — make sure they get entered.`
+    : needsBoxQtyNow
+    ? `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} needs a total box quantity instead of full dimensions.`
     : `Change shipping method from "${oldMethod || '-'}" to "${newMethod}"?\n\n${newMethod} orders don't need shipping dimensions.`;
   if (!confirm(warn)) return;
 
@@ -3036,8 +3168,8 @@ async function savePaymentStatus(invoice){
   //   보냄 — 어차피 서버가 실제로 값이 같으면 그냥 같은 값을 다시 쓸 뿐이라
   //   안전함.
 
-  const nextLabel = willBePaid ? 'PAID' : 'UNPAID';
-  const warn = `Change payment status to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
+  const nextLabel = willBePaid ? 'CONFIRMED' : 'NOT CONFIRMED';
+  const warn = `Change Sales Confirm to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
   if (!confirm(warn)) return;
 
   const res = await gasPostWithRetry('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: (authGetName() || 'Sales (Order Detail Lookup)') });
@@ -3061,7 +3193,7 @@ async function savePaymentStatus(invoice){
   const badge = document.getElementById('paymentBadge');
   if (badge){
     badge.className = 'pay-badge ' + (confirmedPaid ? 'paid' : 'unpaid');
-    badge.textContent = confirmedPaid ? '✓ PAID' : '⚠ UNPAID';
+    badge.textContent = confirmedPaid ? '✓ CONFIRMED' : '⚠ NOT CONFIRMED';
   }
   // ★ 2026-09-03 신규(매니저 요청) — 팝업에서 바뀐 걸 "Recently Completed"
   //   목록에도 즉시 반영. 예전엔 목록 쪽은 별도로 다시 불러와야만(느린 전체
@@ -3073,7 +3205,7 @@ async function savePaymentStatus(invoice){
     const listBadge = listRow.querySelector('[data-pay-badge]');
     if (listBadge){
       listBadge.className = 'pay-mini ' + (confirmedPaid ? 'paid' : 'unpaid');
-      listBadge.textContent = confirmedPaid ? 'PAID' : 'UNPAID';
+      listBadge.textContent = confirmedPaid ? 'CONF' : 'UNCONF';
     }
   }
   // ★ 신규 — 드롭다운 자체도 최신 확인값으로 맞춰둠(다시 Edit을 눌렀을 때
