@@ -5483,6 +5483,9 @@ function gotoView(vid){
 //   맞게 나와도 색상은 일반 PU와 구분이 안 돼서 패커가 헷갈릴 수 있었음.
 //   board.html의 shipClass()와 동일한 안전한 방식(알려진 값만 전용 클래스,
 //   나머지는 ship-other)으로 교체.
+// ★ 2026-10-02 신규(사용자 요청) — 저장되는 실제 값("PU & TK")은 안 건드리고
+//   화면에 "보여줄 때"만 공백 없이 "PU&TK"로 표시 통일(sales.html/board.html과 동일).
+function fmtMethodLabel_(v){ return String(v||'-').replace(' & ', '&'); }
 function shipViaBadgeClass_(v){
   const s = String(v || '').trim().toUpperCase();
   if (s === 'UPS') return 'ship-UPS';
@@ -5560,7 +5563,7 @@ function renderSlots(){
         <span class="slot-num">${numLabel}</span>
         <div class="slot-badges">
           ${slot.otherBatchWarning ? `<span class="slot-badge" style="background:rgba(255,77,109,0.18); color:#FF4D6D; border:1px solid rgba(255,77,109,0.5);" title="${slot.otherBatchWarning.batchId}(${slot.otherBatchWarning.batchDate}) 배치의 &quot;${slot.otherBatchWarning.customer}&quot;도 이 번호를 쓰고 있습니다 — 실제 자리가 겹치는지 현장에서 확인하세요">⚠ 다른 배치와 번호 겹침</span>` : ''}
-          <span class="slot-badge ${shipViaBadgeClass_(cf.meta.ship_via)}">${cf.meta.ship_via}</span>
+          <span class="slot-badge ${shipViaBadgeClass_(cf.meta.ship_via)}">${fmtMethodLabel_(cf.meta.ship_via)}</span>
           ${(() => {
             // ★ 2026-07-24 신규 — 이 버튼은 항상 떠 있는 "이슈 등록 팝업 열기" 버튼이라,
             //   TV의 "⚠ N"(실제 이슈 있을 때만 뜨는 배지)과 겉보기엔 똑같아 보여서
@@ -5708,7 +5711,7 @@ function renderQueue(){
     <div class="cust-card" draggable="true" data-invoice="${cf.meta.invoice_no}">
       <div class="cust-card-head">
         <div class="co">${cf.meta.customer}</div>
-        <span class="rank">${cf.meta.ship_via}</span>
+        <span class="rank">${fmtMethodLabel_(cf.meta.ship_via)}</span>
       </div>
       <div class="meta">
         <span>SKU ${cf.totalSkus}</span>
@@ -6431,7 +6434,7 @@ function renderAllTargets(sku, pending, code){
         <div class="target-slot"><span class="ts-label">SLOT</span><span class="ts-num">${String(r.slot).padStart(2,'0')}</span></div>
         <div class="target-info">
           <div class="target-co">${r.customer}</div>
-          <div class="target-meta">${r.ship_via} · Ship ${(r.ship_date||'').slice(5)} · ${r.invoice}</div>
+          <div class="target-meta">${fmtMethodLabel_(r.ship_via)} · Ship ${(r.ship_date||'').slice(5)} · ${r.invoice}</div>
         </div>
         <div class="target-qty" id="targetQty-${idx}">${r.qty}<small>pcs</small><span class="tq-label">넣기</span></div>
       </div>
@@ -8905,7 +8908,7 @@ async function populatePsvInvoiceSelect(){
   const psvRows = candidates.map(o => ({
     value: o.invoice,
     invHtml: o.invoice,
-    subHtml: `${o.shipVia ? `<b style="color:#3EB8F5;">[${o.shipVia}]</b> ` : ''}${(o.customer||'').replace(/</g,'&lt;')}`,
+    subHtml: `${o.shipVia ? `<b style="color:#3EB8F5;">[${fmtMethodLabel_(o.shipVia)}]</b> ` : ''}${(o.customer||'').replace(/</g,'&lt;')}`,
     badgeHtml: o.packVerified ? '<span class="badge">🟣 Verified</span>' : '',
   }));
   renderTriggerOptList('psvInvoiceSelect', psvRows, '— Select an order —');
@@ -9288,7 +9291,7 @@ function populatePvInvoiceSelect(){
   const pvRows = candidates.map(c => ({
     value: c.invoice,
     invHtml: c.invoice,
-    subHtml: `SLOT ${c.slotNum} · ${c.shipVia ? `<b style="color:#3EB8F5;">[${c.shipVia}]</b> ` : ''}${(c.customer||'').replace(/</g,'&lt;')}`,
+    subHtml: `SLOT ${c.slotNum} · ${c.shipVia ? `<b style="color:#3EB8F5;">[${fmtMethodLabel_(c.shipVia)}]</b> ` : ''}${(c.customer||'').replace(/</g,'&lt;')}`,
     badgeHtml: c.verified ? '<span class="badge">🟣 Verified</span>' : '',
   }));
   renderTriggerOptList('pvInvoiceSelect', pvRows, '— Select an order —');
