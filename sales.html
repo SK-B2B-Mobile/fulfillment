@@ -1755,6 +1755,11 @@ let _recentSalesConfirmOverrides = {}; // { invoice: { confirmed, confirmedAt, c
 // 에서만 다시 만들어지고 updateOrderMethod는 그 목록 미러를 직접 안 건드리기
 // 때문에 최대 1분간 옛 Method 값이 계속 보였음. 동일한 방어 패턴 적용.
 let _recentMethodOverrides = {}; // { invoice: { method, until } }
+// ★ 2026-10-04 신규 — Mark Shipped / BOL# 저장도 위와 똑같은 이유("저장 직후 1분 묵은 Firestore 목록
+// 미러가 다시 도착해 방금 바꾼 값을 되돌려 보여줌")로 같은 방어가 필요해서 추가. 묶인(LINKED) 오더는
+// 대표(PRIMARY)의 값을 그대로 보여주므로 같은 값이 묶인 오더 항목에도 함께 등록됨.
+let _recentShippedOverrides = {}; // { invoice: { shipped, shippedAt, shippedBy, until } }
+let _recentBolOverrides = {};     // { invoice: { bol, until } }
 
 async function loadToday(){
   const res = await getSalesTodayListData_();
@@ -1816,6 +1821,19 @@ function applyTodayResult(res){
     if (ov.until < now) { delete _recentMethodOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
     if (job) job.method = ov.method;
+  });
+  // ★ 2026-10-04 신규 — 방금 확인된 Mark Shipped / BOL# 우선 적용(위 설명 참고)
+  Object.keys(_recentShippedOverrides).forEach(inv => {
+    const ov = _recentShippedOverrides[inv];
+    if (ov.until < now) { delete _recentShippedOverrides[inv]; return; }
+    const job = TODAY_JOBS.find(j => j.invoice === inv);
+    if (job){ job.shipped = ov.shipped; job.shippedAt = ov.shippedAt; job.shippedBy = ov.shippedBy; }
+  });
+  Object.keys(_recentBolOverrides).forEach(inv => {
+    const ov = _recentBolOverrides[inv];
+    if (ov.until < now) { delete _recentBolOverrides[inv]; return; }
+    const job = TODAY_JOBS.find(j => j.invoice === inv);
+    if (job) job.bol = ov.bol;
   });
   saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
@@ -2209,15 +2227,57 @@ function ageDaysFromShipDate_(shipDate){
   return diff >= 0 ? diff : 0;
 }
 
+// ★ 2026-10-04 개편(현장 보고 — 저장이 느림) — Sales Confirm과 같은 방식: 확인(OK)을 누르는 즉시
+//   화면이 바뀌고(묶인 오더 포함), 저장은 뒤에서 진행. 실패하면 원래 상태로 정확히 되돌리고 이유 안내.
+//   예전엔 저장 후 loadToday()로 1분 묵은 Firestore 미러를 다시 읽어, 방금 바꾼 값이 되돌아 보일 수
+//   있었음 → override를 "요청 전에" 먼저 등록해서 어떤 낡은 갱신이 와도 못 덮어쓰게 함.
+const _shipInflight = {};
 async function toggleShipped(invoice, nextShipped){
   const msg = nextShipped
     ? `Mark ${invoice} as SHIPPED?`
     : `Undo — mark ${invoice} as NOT shipped?`;
   if (!confirm(msg)) return;
-  const res = await gasPostWithRetry('setShippedStatus', { invoice: invoice, shipped: nextShipped, by: (authGetName() || 'Dispatch (tablet)') });
+  if (_shipInflight[invoice]) return;
+  const job = TODAY_JOBS.find(j => j.invoice === invoice);
+  if (!job) return;
+  _shipInflight[invoice] = true;
+  const by = authGetName() || 'Dispatch (tablet)';
+  const nowIso = _fmtIsoNow_();
+  const targets = [job].concat(TODAY_JOBS.filter(j => j.dimsLinkedTo === invoice));
+  const snaps = targets.map(j => ({ inv: j.invoice, shipped: j.shipped, shippedAt: j.shippedAt, shippedBy: j.shippedBy, ov: _recentShippedOverrides[j.invoice] }));
+  targets.forEach(j => {
+    j.shipped = nextShipped;
+    j.shippedAt = nextShipped ? nowIso : '';
+    j.shippedBy = nextShipped ? by : '';
+    _recentShippedOverrides[j.invoice] = { shipped: nextShipped, shippedAt: j.shippedAt, shippedBy: j.shippedBy, until: Date.now() + 120000 };
+  });
+  renderToday(); renderShipping();
+
+  let res;
+  try {
+    const t0 = performance.now();
+    res = await _serial_(invoice, () => gasPostSmart_('setShippedStatus', { invoice: invoice, shipped: nextShipped, by: by }));
+    if (res && res.timing) console.log('%c[setShippedStatus] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
+  } catch (e) {
+    res = { ok:false, error: String(e && e.message || e) };
+  }
+  delete _shipInflight[invoice];
+
   if (res && res.ok){
-    await loadToday();
+    TODAY_JOBS.forEach(j => {
+      if (j.invoice === invoice || j.dimsLinkedTo === invoice){
+        j.shipped = res.shipped; j.shippedAt = res.shippedAt; j.shippedBy = res.shippedBy;
+        _recentShippedOverrides[j.invoice] = { shipped: res.shipped, shippedAt: res.shippedAt, shippedBy: res.shippedBy, until: Date.now() + 60000 };
+      }
+    });
+    renderToday(); renderShipping();
   } else {
+    snaps.forEach(sn => {
+      const j = TODAY_JOBS.find(x => x.invoice === sn.inv);
+      if (j){ j.shipped = sn.shipped; j.shippedAt = sn.shippedAt; j.shippedBy = sn.shippedBy; }
+      if (sn.ov) _recentShippedOverrides[sn.inv] = sn.ov; else delete _recentShippedOverrides[sn.inv];
+    });
+    renderToday(); renderShipping();
     alert((res && res.error) ? res.error : 'Could not update shipping status. Check your connection and try again.');
   }
 }
@@ -2277,6 +2337,40 @@ async function gasPostSmart_(op, data){
   await new Promise(r => setTimeout(r, 800 + Math.floor(Math.random() * 600)));
   return await gasPost(op, data);
 }
+// ★ 2026-10-04 신규 — 같은 오더에 대한 저장 요청은 "누른 순서대로 하나씩" 서버에 보냄. 화면은 즉시
+// 바뀌지만 서버 요청은 동시에 여러 개가 나가면 도착 순서가 뒤바뀔 수 있음(예: BOL# 저장 직후 바로 Mark
+// Shipped를 누르면 서버가 BOL 저장 전에 출고 요청을 먼저 처리해 "BOL# 필요" 오류가 나는 경우).
+const _serialQueue = {};
+function _serial_(key, fn){
+  const prev = _serialQueue[key] || Promise.resolve();
+  const p = prev.then(fn, fn);          // 앞선 요청이 실패했어도 이어서 실행
+  const tail = p.catch(() => {});       // 뒤따르는 요청이 이 요청의 실패에 영향받지 않게
+  _serialQueue[key] = tail;
+  tail.then(() => { if (_serialQueue[key] === tail) delete _serialQueue[key]; });
+  return p;
+}
+// 서버가 응답 전에 "낡은 상세 미러"를 무효화해두므로, 이어서 최신 상세를 계산해 미러를 다시 채우도록
+// 요청(기다리지 않음 — 다른 직원 화면은 몇 초 안에 새 값을 받음). 실패하면 한 번 더 시도.
+function _syncInvoiceMirror_(invoice){
+  gasPost('syncInvoiceMirror', { invoice: invoice }).then(r => {
+    if (!r || !r.ok) return gasPost('syncInvoiceMirror', { invoice: invoice });
+  }).catch(() => {});
+}
+// 상세 팝업이 실시간 구독(Firestore) 없이 열려 있는 경우(폴백 모드)에만, 저장 후 조용히 최신 상세로 갱신
+async function _refreshDetailSilently_(invoice){
+  try {
+    const res = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice: invoice });
+    const ov = document.getElementById('detail-overlay');
+    if (res && res.ok && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice && ov && ov.classList.contains('show')){
+      CURRENT_ORDER = res;
+      renderDetail(res);
+    }
+  } catch(e){ /* 조용히 무시 — 화면은 이미 낙관적으로 최신 */ }
+}
+function _fmtIsoNow_(){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
 async function toggleSalesConfirm(invoice, nextConfirmed){
   if (_confirmInflight[invoice]) return;
   const job = TODAY_JOBS.find(j => j.invoice === invoice);
@@ -2303,7 +2397,7 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
   let res;
   try {
     const t0 = performance.now();
-    res = await gasPostSmart_('setSalesConfirm', { invoice: invoice, confirmed: nextConfirmed, by: by });
+    res = await _serial_(invoice, () => gasPostSmart_('setSalesConfirm', { invoice: invoice, confirmed: nextConfirmed, by: by }));
     if (res && res.timing) console.log('%c[setSalesConfirm] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
   } catch (e) {
     res = { ok:false, error: String(e && e.message || e) };
@@ -2361,13 +2455,51 @@ function onBolDraftInput(invoice, value){
   // 값만 저장하고 화면은 다시 그리지 않음 — 저장(Enter/✓) 시에만 반영.
   BOL_EDIT[invoice] = value;
 }
+// ★ 2026-10-04 개편 — Enter/✓를 누르는 즉시 BOL# 칩으로 바뀜(묶인 오더 포함). 저장은 뒤에서 진행되고,
+//   실패하면 방금 입력한 글자를 입력창에 그대로 되돌려놓고(다시 입력할 필요 없음) 이유를 알려줌.
+const _bolInflight = {};
 async function saveBol(invoice){
-  const bol = (BOL_EDIT[invoice] || '').trim();
-  const res = await gasPostWithRetry('setBolNumber', { invoice: invoice, bol: bol, by: (authGetName() || 'Dispatch (tablet)') });
+  if (_bolInflight[invoice]) return;
+  const job = TODAY_JOBS.find(j => j.invoice === invoice);
+  if (!job) return;
+  const draft = BOL_EDIT[invoice] || '';
+  const bol = draft.trim();
+  _bolInflight[invoice] = true;
+  const targets = [job].concat(TODAY_JOBS.filter(j => j.dimsLinkedTo === invoice));
+  const snaps = targets.map(j => ({ inv: j.invoice, bol: j.bol, ov: _recentBolOverrides[j.invoice] }));
+  delete BOL_EDIT[invoice];
+  targets.forEach(j => {
+    j.bol = bol;
+    _recentBolOverrides[j.invoice] = { bol: bol, until: Date.now() + 120000 };
+  });
+  renderShipping();
+
+  let res;
+  try {
+    const t0 = performance.now();
+    res = await _serial_(invoice, () => gasPostSmart_('setBolNumber', { invoice: invoice, bol: bol, by: (authGetName() || 'Dispatch (tablet)') }));
+    if (res && res.timing) console.log('%c[setBolNumber] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
+  } catch (e) {
+    res = { ok:false, error: String(e && e.message || e) };
+  }
+  delete _bolInflight[invoice];
+
   if (res && res.ok){
-    delete BOL_EDIT[invoice];
-    await loadToday();
+    TODAY_JOBS.forEach(j => {
+      if (j.invoice === invoice || j.dimsLinkedTo === invoice){
+        j.bol = res.bol;
+        _recentBolOverrides[j.invoice] = { bol: res.bol, until: Date.now() + 60000 };
+      }
+    });
+    renderShipping();
   } else {
+    snaps.forEach(sn => {
+      const j = TODAY_JOBS.find(x => x.invoice === sn.inv);
+      if (j) j.bol = sn.bol;
+      if (sn.ov) _recentBolOverrides[sn.inv] = sn.ov; else delete _recentBolOverrides[sn.inv];
+    });
+    BOL_EDIT[invoice] = draft; // 입력했던 글자 그대로 복구(다시 입력 불필요)
+    renderShipping();
     alert((res && res.error) ? res.error : 'Could not save BOL#. Check your connection and try again.');
   }
 }
@@ -2519,28 +2651,51 @@ function renderBoxQtySection(order){
 
 // 서버에 바로 반영(선택→Save 방식이 아니라 +/- 누를 때마다 즉시 저장 — 숫자
 // 하나짜리라 복잡한 편집모드 없이도 실수 위험이 낮음. 실패 시 화면을 되돌림).
+// ★ 2026-10-04 개편 — 빠르게 여러 번 누르는 경우(+ + +)를 안전하게: 화면은 누를 때마다 즉시 바뀌고, 서버 요청은
+//   누른 순서대로 하나씩 보냄(도착 순서가 뒤바뀌어 마지막 값이 틀어지는 사고 방지). 서버 응답으로 화면을
+//   되돌리는 건 "더 기다리는 요청이 없을 때"만 — 아니면 연속 클릭 중에 숫자가 깜빡이며 뒤로 갔다 앞으로 감.
+const _qtyState = {}; // { invoice: { pending, confirmed } }
 async function adjustPuTkBoxQty(invoice, delta){
-  const cur = Number((CURRENT_ORDER && CURRENT_ORDER.puTkBoxQty) || 0);
+  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return;
+  const cur = Number(CURRENT_ORDER.puTkBoxQty || 0);
   const next = Math.max(0, cur + delta);
   if (next === cur) return;
-  if (CURRENT_ORDER) CURRENT_ORDER.puTkBoxQty = next; // 낙관적 업데이트
-  const panel = document.getElementById('boxqty-panel');
-  if (panel) panel.outerHTML = renderBoxQtySection(CURRENT_ORDER);
-  const res = await gasPostWithRetry('setPuTkBoxQty', { invoice: invoice, qty: next, by: (authGetName() || 'Sales (Order Detail Lookup)') });
+  let st = _qtyState[invoice];
+  if (!st) st = _qtyState[invoice] = { pending: 0, confirmed: cur };
+  st.pending++;
+  const repaint = () => {
+    if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){
+      const panel = document.getElementById('boxqty-panel');
+      if (panel) panel.outerHTML = renderBoxQtySection(CURRENT_ORDER);
+    }
+  };
+  CURRENT_ORDER.puTkBoxQty = next; // 낙관적 업데이트
+  repaint();
+
+  let res;
+  try {
+    res = await _serial_(invoice, () => gasPostSmart_('setPuTkBoxQty', { invoice: invoice, qty: next, by: (authGetName() || 'Sales (Order Detail Lookup)') }));
+  } catch (e) {
+    res = { ok:false, error: String(e && e.message || e) };
+  }
+  st.pending--;
+  const last = (st.pending === 0);
   if (!res || !res.ok){
-    if (CURRENT_ORDER) CURRENT_ORDER.puTkBoxQty = cur; // 실패 시 롤백
-    const panel2 = document.getElementById('boxqty-panel');
-    if (panel2) panel2.outerHTML = renderBoxQtySection(CURRENT_ORDER);
+    // 마지막으로 서버가 확인한 값으로 복구
+    if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) CURRENT_ORDER.puTkBoxQty = st.confirmed;
+    repaint();
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
-    return;
+  } else {
+    st.confirmed = res.qty;
+    if (last && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){
+      CURRENT_ORDER.puTkBoxQty = res.qty;
+      CURRENT_ORDER.puTkBoxQtyAt = res.qtyAt;
+      CURRENT_ORDER.puTkBoxQtyBy = res.qtyBy;
+      repaint();
+    }
+    if (last) _syncInvoiceMirror_(invoice);
   }
-  if (CURRENT_ORDER){
-    CURRENT_ORDER.puTkBoxQty = res.qty;
-    CURRENT_ORDER.puTkBoxQtyAt = res.qtyAt;
-    CURRENT_ORDER.puTkBoxQtyBy = res.qtyBy;
-  }
-  const panel3 = document.getElementById('boxqty-panel');
-  if (panel3) panel3.outerHTML = renderBoxQtySection(CURRENT_ORDER);
+  if (last) delete _qtyState[invoice];
 }
 
 /* ★ 2026-08-06 신규 — 디멘션 합산
@@ -3336,26 +3491,43 @@ async function saveMethodChange(invoice){
     : `Change shipping method from "${oldLabel}" to "${newLabel}"?\n\n${newLabel} orders don't need shipping dimensions.`;
   if (!confirm(warn)) return;
 
-  const res = await gasPostWithRetry('updateOrderMethod', { invoice: invoice, method: newMethod, by: (authGetName() || 'Packing (Sales page)') });
+  // ★ 2026-10-04 개편(현장 보고 — 저장이 느림) — OK를 누르는 즉시 화면(목록 + 열려 있는 상세 팝업)을
+  //   새 배송방법으로 바꾸고, 저장은 뒤에서 진행. 실패하면 원래 값으로 정확히 되돌리고 이유 안내.
+  //   override는 요청 전에 먼저 등록(어떤 낡은 목록 갱신이 와도 방금 바꾼 값을 못 덮어씀 — 위
+  //   "저장해도 바깥 목록은 그대로" 사고와 같은 원리). 예전엔 저장 후 상세를 통째로 다시 열어(느림)
+  //   로딩 화면이 길게 보였음 — 이제는 팝업을 그 자리에서 바로 갱신하고, 서버가 계산한 최신 상세는
+  //   실시간 구독(또는 조용한 재조회)으로 곧 이어서 덮어씀.
+  const job = TODAY_JOBS.find(j => j.invoice === invoice);
+  const prevJobMethod = job ? job.method : undefined;
+  const prevOv = _recentMethodOverrides[invoice];
+  if (job) job.method = newMethod;
+  _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 120000 };
+  const detailOpen = !!(CURRENT_ORDER && CURRENT_ORDER.invoice === invoice);
+  if (detailOpen){ CURRENT_ORDER.method = newMethod; renderDetail(CURRENT_ORDER); }
+  renderToday();
+  if (typeof renderShipping === 'function') renderShipping();
+
+  let res;
+  try {
+    const t0 = performance.now();
+    res = await _serial_(invoice, () => gasPostSmart_('updateOrderMethod', { invoice: invoice, method: newMethod, by: (authGetName() || 'Packing (Sales page)') }));
+    if (res && res.timing) console.log('%c[updateOrderMethod] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
+  } catch (e) {
+    res = { ok:false, error: String(e && e.message || e) };
+  }
   if (!res || !res.ok){
+    const j2 = TODAY_JOBS.find(j => j.invoice === invoice);
+    if (j2 && prevJobMethod !== undefined) j2.method = prevJobMethod;
+    if (prevOv) _recentMethodOverrides[invoice] = prevOv; else delete _recentMethodOverrides[invoice];
+    if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){ CURRENT_ORDER.method = oldMethod; renderDetail(CURRENT_ORDER); }
+    renderToday();
+    if (typeof renderShipping === 'function') renderShipping();
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  // ★ 2026-10-02 긴급 수정(현장 버그 리포트 — "Shipping Method를 바꾸고 저장해도
-  //   바깥 목록(Sales Sheet Preview/Recently Completed)은 계속 예전 값(PU)으로
-  //   남아있다") — 원인은 이 화면의 목록(TODAY_JOBS)이 Firestore 미러의
-  //   "sales_todayList" 캐시를 우선 쓰는데, 그 캐시는 1분마다 도는 정기
-  //   동기화에서만 다시 만들어짐. updateOrderMethod는 개별 인보이스 상세
-  //   미러(salesInvDetail_{invoice})만 갱신하고 이 목록 미러는 안 건드리므로,
-  //   최대 1분간 화면이 옛 값을 계속 보여주고 있었음 — Sales Confirm/결제상태에
-  //   이미 적용했던 것과 똑같은 "방금 확인된 값 우선 적용" 패턴을 Method에도
-  //   적용해서 즉시 반영되도록 함.
-  const job = TODAY_JOBS.find(j => j.invoice === invoice);
-  if (job) job.method = newMethod;
   _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 60000 };
-  renderToday();
-  if (typeof renderShipping === 'function') renderShipping();
-  await openInvoice(invoice); // 상세 팝업도 최신 상태로 다시 불러와서 갱신
+  _syncInvoiceMirror_(invoice);
+  if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
 }
 
 // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인 저장. Order Detail Lookup에서만
@@ -3415,7 +3587,7 @@ async function savePaymentStatus(invoice){
   let res;
   try {
     const t0 = performance.now();
-    res = await gasPostSmart_('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: (authGetName() || 'Sales (Order Detail Lookup)') });
+    res = await _serial_(invoice, () => gasPostSmart_('updatePaymentStatus', { invoice: invoice, paid: willBePaid, by: (authGetName() || 'Sales (Order Detail Lookup)') }));
     if (res && res.timing) console.log('%c[updatePaymentStatus] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
   } catch (e) {
     res = { ok:false, error: String(e && e.message || e) };
@@ -3443,9 +3615,7 @@ async function savePaymentStatus(invoice){
   // ★ 서버가 응답 전에 "낡은 상세 미러"를 무효화해뒀으므로, 이어서 최신 상세를 계산해 미러를
   //   다시 채우도록 요청(기다리지 않음 — 다른 직원 화면은 몇 초 안에 새 값을 받음).
   //   실패하면 한 번 더 시도(무효화된 채로 남아도 다른 직원은 서버 직접 조회로 정확한 값을 보게 됨).
-  gasPost('syncInvoiceMirror', { invoice: invoice }).then(r => {
-    if (!r || !r.ok) return gasPost('syncInvoiceMirror', { invoice: invoice });
-  }).catch(() => {});
+  _syncInvoiceMirror_(invoice);
 }
 
 
