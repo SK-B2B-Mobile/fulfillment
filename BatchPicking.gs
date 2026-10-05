@@ -1065,6 +1065,11 @@ function createBatch(data) {
  * 총량 쪽 화면·통계에 절대 끼어들 수 없는 구조.
  * ================================================================================ */
 const STANDALONE_BATCH_ID = 'STANDALONE_ORDERS';
+// ★ 2026-10-05 — "2차 검증까지 완료된" 단독 오더를 등록 후 며칠 지나면 Archive_ 시트로 옮길지(미완료는 절대 안 옮김).
+//   일반 배치(60일)와 별개로 짧게 — 완료된 단독 오더가 목록에 오래 쌓이지 않게. 바꾸려면 이 숫자만 수정.
+const STANDALONE_ARCHIVE_DAYS = 7;
+// ★ 2026-10-05 — 일반(총량) 배치: 완료 + 2차 검증까지 끝난 뒤 며칠 지나면 Archive_ 시트로 옮길지. 예전 60일은 너무 길어 14일로 단축.
+const BATCH_ARCHIVE_DAYS = 14;
 
 /* addStandaloneOrder — 단독 오더 PDF 파싱 결과(고객사명/상품목록)를 저장.
  * 이미 같은 인보이스로 등록된 게 있으면(재업로드) 깨끗이 지우고 새로 씀. */
@@ -4975,7 +4980,7 @@ function _clearRangeChunked_(sh, startRow, numRows, numCols, label) {
 }
 
 function archiveOldBatches(daysOld) {
-  daysOld = daysOld || 60; // ★ 2026-09-28 수정(사장님 지시) — 90일 대신 60일로. 완료+검증까지 다 끝난 지 60일 지난 배치만 대상.
+  daysOld = daysOld || BATCH_ARCHIVE_DAYS; // ★ 2026-10-05 — 60일 → 14일(상단 BATCH_ARCHIVE_DAYS). (2026-09-28: 90일→60일) 완료+검증까지 다 끝난 지 60일 지난 배치만 대상.
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
   try {
@@ -5052,6 +5057,35 @@ function archiveOldBatches(daysOld) {
     //   재실행해도 항상 같은 결과로 수렴하는(자가치유) 안전한 방식이 됨.
     const activeBatchIdSet = {};
     keepBatchRows.forEach(r => { activeBatchIdSet[String(r[0])] = true; });
+    // ★ 2026-10-05 긴급 수정 — 단독 오더(STANDALONE_ORDERS)는 Batches 시트에 행이 없는 "가상 배치"라서,
+    //   위 규칙대로면 매일 새벽 이 정리 작업이 단독 오더 전부를 "고아 행"으로 오인해 Archive_ 시트로 옮겨버렸음
+    //   (그 결과 하루 지나면 아직 끝나지 않은 단독 오더가 목록에서 사라짐). 항상 "살아있는 배치"로 취급.
+    activeBatchIdSet[STANDALONE_BATCH_ID] = true;
+    // ★ 단, "완료된" 단독 오더(2차 검증 PackVerified 끝남 + 등록 후 STANDALONE_ARCHIVE_DAYS일 지남)만 보관 대상으로 따로 뽑음.
+    //   미완료 단독 오더는 며칠이 지나도 절대 옮기지 않음. 등록시각(CreatedAt)이 비어있는 옛 건은 완료만 되었으면 대상.
+    const soCutoffMs = Date.now() - STANDALONE_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
+    const standaloneDoneOld = {}; // invoice -> true
+    try {
+      const bcS = bcustSheetSafe_();
+      const bcSLast = bcS.getLastRow();
+      if (bcSLast >= 2) {
+        const sRows = _readRangeChunked_(bcS, 2, bcSLast - 1, 14, 'BatchCustomers(단독 오더 완료 집계)');
+        sRows.forEach(r3 => {
+          if (String(r3[0]) !== STANDALONE_BATCH_ID) return;
+          const inv3 = String(r3[1] || '').trim();
+          if (!inv3 || !r3[12]) return; // M열 PackVerified가 아니면 미완료 → 절대 대상 아님
+          const cr = r3[13];
+          let createdMs = 0;
+          if (Object.prototype.toString.call(cr) === '[object Date]' && !isNaN(cr)) createdMs = cr.getTime();
+          else if (cr) { const t = new Date(String(cr).replace(' ', 'T')).getTime(); if (!isNaN(t)) createdMs = t; }
+          if (!createdMs || createdMs < soCutoffMs) standaloneDoneOld[inv3] = true;
+        });
+      }
+    } catch (eSo) {
+      Logger.log('⚠️ 단독 오더 완료 집계 실패 — 이번 실행은 단독 오더를 건드리지 않음: ' + String(eSo && eSo.message || eSo));
+    }
+    const SO_INV_IDX = {}; // 시트별 인보이스 열 위치(0부터) — 단독 오더 행을 인보이스로 판정하기 위함
+    SO_INV_IDX[BCUST_SHEET] = 1; SO_INV_IDX[BITEMS_SHEET] = 1; SO_INV_IDX[SCANLOG_SHEET] = 8; SO_INV_IDX[ISSUELOG_SHEET] = 7;
 
     // 2) 시트 6개 각각에 대해: 대상 배치 행은 Archive_ 시트로 복사 후 메인에서 제거
     const sheetsToArchive = [
@@ -5087,8 +5121,16 @@ function archiveOldBatches(daysOld) {
         //   시트가 너무 커서 단일 호출 자체가 무리인 것으로 보고, 이제 청크 단위로
         //   나눠서 읽는다 — 청크 하나가 실패해도 그 청크만 재시도되므로 훨씬 안전함.
         const allRows = _readRangeChunked_(sh, 2, totalRows, lastCol, name);
-        const toArchive = allRows.filter(r => !activeBatchIdSet[String(r[0])]);
-        const toKeep = allRows.filter(r => activeBatchIdSet[String(r[0])]);
+        const _isArch = function (r) {
+          const bid0 = String(r[0]);
+          if (bid0 === STANDALONE_BATCH_ID) {
+            const ix = SO_INV_IDX[name];
+            return ix !== undefined && !!standaloneDoneOld[String(r[ix] || '').trim()];
+          }
+          return !activeBatchIdSet[bid0];
+        };
+        const toArchive = allRows.filter(r => _isArch(r));
+        const toKeep = allRows.filter(r => !_isArch(r));
 
         // 보관 시트에 먼저 씀(메인 시트는 아직 전혀 건드리지 않으므로, 여기서
         // 중간에 실패해도 메인 데이터는 100% 안전함).
@@ -5141,9 +5183,75 @@ function archiveOldBatches(daysOld) {
   }
 }
 
+/* ★ 2026-10-05 신규 — 일회성 복구 함수: 새벽 보관 작업이 잘못 Archive_ 시트로 옮겨버린 "단독 오더(STANDALONE_ORDERS)"를
+ * 되돌림. 사용법: Apps Script 에디터에서 함수 목록 restoreStandaloneFromArchive 선택 → ▶ 실행 → 실행 로그 확인.
+ * - 아직 끝나지 않은 것(2차 검증 PackVerified가 아닌 것)만 복구. 이미 현재 BatchCustomers에 있는 인보이스는 건너뜀(중복 방지).
+ * - Archive_ 시트의 원본은 지우지 않고 그대로 둠(복사만) — 여러 번 실행해도 안전함.
+ * - 대상 시트: BatchCustomers / BatchItems / ScanLog / IssueLog (인보이스 기준으로 같이 복구). */
+function restoreStandaloneFromArchive() {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(20000);
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const out = [];
+    // 1) BatchCustomers: 복구 대상 인보이스 결정
+    const arcBc = ss.getSheetByName(ARCHIVE_PREFIX + BCUST_SHEET);
+    if (!arcBc || arcBc.getLastRow() < 2) { Logger.log('Archive_BatchCustomers 데이터 없음 — 복구할 것이 없습니다'); return { ok: true, restored: 0 }; }
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    const have = {};
+    if (bcLast >= 2) bc.getRange(2, 1, bcLast - 1, 2).getValues().forEach(r => { if (String(r[0]) === STANDALONE_BATCH_ID) have[String(r[1])] = true; });
+    const arcRows = arcBc.getRange(2, 1, arcBc.getLastRow() - 1, arcBc.getLastColumn()).getValues();
+    const bcCols = bc.getLastColumn();
+    const pick = {};           // invoice -> true (복구 대상)
+    const bcRestore = [];
+    arcRows.forEach(r => {
+      if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+      const inv = String(r[1] || '').trim();
+      if (!inv || have[inv] || pick[inv]) return;
+      if (r[12]) return; // M열 PackVerified — 이미 끝난 오더는 복구 안 함
+      pick[inv] = true;
+      const row = r.slice(0, bcCols); while (row.length < bcCols) row.push('');
+      bcRestore.push(row);
+    });
+    if (bcRestore.length) bc.getRange(bc.getLastRow() + 1, 1, bcRestore.length, bcCols).setValues(bcRestore);
+    out.push('BatchCustomers: ' + bcRestore.length + '건 복구');
+
+    // 2) 나머지 시트: 위 인보이스에 해당하는 행만 복구 (인보이스 열 위치가 시트마다 다름)
+    [ { name: BITEMS_SHEET, get: bitemsSheet_, invIdx: 1 },
+      { name: SCANLOG_SHEET, get: scanlogSheet_, invIdx: 8 },
+      { name: ISSUELOG_SHEET, get: issuelogSheet_, invIdx: 7 } ].forEach(cfg => {
+      try {
+        const arc = ss.getSheetByName(ARCHIVE_PREFIX + cfg.name);
+        if (!arc || arc.getLastRow() < 2) { out.push(cfg.name + ': 보관 데이터 없음'); return; }
+        const main = cfg.get();
+        const cols = main.getLastColumn();
+        const rows = arc.getRange(2, 1, arc.getLastRow() - 1, arc.getLastColumn()).getValues();
+        const add = [];
+        rows.forEach(r => {
+          if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+          if (!pick[String(r[cfg.invIdx] || '').trim()]) return;
+          const row = r.slice(0, cols); while (row.length < cols) row.push('');
+          add.push(row);
+        });
+        if (add.length) main.getRange(main.getLastRow() + 1, 1, add.length, cols).setValues(add);
+        out.push(cfg.name + ': ' + add.length + '행 복구');
+      } catch (eS) { out.push(cfg.name + ': 실패 — ' + String(eS && eS.message || eS)); }
+    });
+    try { bumpVersion_(); } catch (eB) {}
+    Logger.log('✅ 단독 오더 복구 완료 — ' + out.join(' / '));
+    return { ok: true, restored: bcRestore.length, summary: out };
+  } catch (e) {
+    Logger.log('❌ restoreStandaloneFromArchive 오류: ' + String(e && e.message || e));
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
 function archiveOldBatchesDaily() {
-  archiveOldBatches(60); // ★ 2026-09-28 수정(사장님 지시) — 14일 대신 60일
+  archiveOldBatches(BATCH_ARCHIVE_DAYS); // ★ 2026-10-05 — 상단 BATCH_ARCHIVE_DAYS(14일)
 }
 
 function setupArchiveTrigger() {
@@ -5378,6 +5486,24 @@ function buildDimsExistsMap_() {
       } else if (!map[child]) {
         map[child] = { count: 0, totalWt: 0, enteredAt: '', linkedTo: p, inherited: true };
       }
+    });
+
+    // ★ 2026-10-02 신규(현장 피드백) — "묶여 있다"는 표시가 LINKED(자식) 쪽
+    //   인보이스에만 🔗 primary로 붙고, PRIMARY(대표) 쪽에는 아무 표시가 없어서
+    //   영업팀이 리스트만 보고는 "이 오더도 묶여 있는 그룹이구나"를 알 수 없던
+    //   문제 수정. PRIMARY 인보이스에 linkedCount(묶인 자식 수)를 달아줘서,
+    //   Sales Sheet Preview / Order Detail Lookup 리스트에서도 PRIMARY 쪽에
+    //   "🔗+N" 표시가 가능하게 함(상세 팝업에서만 보이던 "N LINKED"와 동일 정보).
+    Object.keys(links.primaryToChildren).forEach(p => {
+      const kids = links.primaryToChildren[p] || [];
+      if (!kids.length) return;
+      if (!map[p]) map[p] = { count: 0, totalWt: 0, enteredAt: '' };
+      map[p].linkedCount = kids.length;
+      // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 전체를
+      //   팝업으로 보여주려면 개수(linkedCount)만으론 부족하고 실제 자식
+      //   인보이스 번호 목록이 필요함. Code.gs의 getSalesTodayList/
+      //   getSalesOverview가 이 배열을 그대로 내려받아 고객명과 합쳐 보냄.
+      map[p].linkedInvoices = kids.slice();
     });
   } catch (e) { /* best-effort — DimLinks 시트가 아직 없어도 정상 동작 */ }
 
@@ -5859,6 +5985,17 @@ function getSalesInvoiceDetail(invoice) {
     const paymentPaid = paymentStatusRaw === 'paid';
     const paymentUpdatedAt = iPayAt ? String(jobRow[iPayAt - 1] || '').trim() : '';
     const paymentUpdatedBy = iPayBy ? String(jobRow[iPayBy - 1] || '').trim() : '';
+    // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 전용 박스 수량
+    //   (TK/UPS의 전체 Dims 대신 숫자 하나만). 같은 이유로 getFreshColIndex_로
+    //   매번 새로 찾아서 쓰기(setPuTkBoxQty, Code.gs)와 항상 같은 컬럼을 보게 함.
+    const iPuTkQty = getFreshColIndex_(sh, 'PuTkBoxQty');
+    const iPuTkAt = getFreshColIndex_(sh, 'PuTkBoxQtyAt');
+    const iPuTkBy = getFreshColIndex_(sh, 'PuTkBoxQtyBy');
+    const puTkBoxQty = iPuTkQty ? Number(jobRow[iPuTkQty - 1] || 0) : 0;
+    // ★ 2026-10-02 긴급 수정 — fmtShortTs_(Code.gs)로 짧은 "MM/dd h:mm a" 형식
+    //   통일(길게 찍히는 Date.toString() 버그 수정, fmtShortTs_ 주석 참고).
+    const puTkBoxQtyAt = iPuTkAt ? fmtShortTs_(jobRow[iPuTkAt - 1]) : '';
+    const puTkBoxQtyBy = iPuTkBy ? String(jobRow[iPuTkBy - 1] || '').trim() : '';
     // ★ 2026-09-02 진단용 로그 — updatePaymentStatus(Code.gs)가 남기는
     //   [PaymentStatus WRITE] 로그와 이 [PaymentStatus READ] 로그를 Apps
     //   Script 실행 기록에서 나란히 비교하면, 쓰기와 읽기가 서로 다른
@@ -6072,6 +6209,10 @@ function getSalesInvoiceDetail(invoice) {
       paymentPaid: paymentPaid,
       paymentUpdatedAt: paymentUpdatedAt,
       paymentUpdatedBy: paymentUpdatedBy,
+      // ★ 2026-10-03 신규 — 'PU & TK' 전용 박스 수량
+      puTkBoxQty: puTkBoxQty,
+      puTkBoxQtyAt: puTkBoxQtyAt,
+      puTkBoxQtyBy: puTkBoxQtyBy,
       items: items,
       dims: dimsResult.dims,
       dimsBy: dimsResult.enteredBy,
