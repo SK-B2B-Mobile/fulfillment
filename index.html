@@ -56,6 +56,30 @@
     .logo-text{background:linear-gradient(135deg,var(--accent-primary),var(--accent-secondary));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
     .datetime-display{display:flex;align-items:center;gap:var(--sp-xs);font-family:'JetBrains Mono',monospace;font-size:var(--fs-sm);color:var(--text-secondary);font-weight:600;}
     .header-right{display:flex;align-items:center;gap:var(--sp-xs);flex-wrap:wrap;}
+    /* ★ 2026-10-05 — 24인치 이하(좁은 화면)에서 오른쪽 버튼(Records/Manager/이름/Account/Log Out)이 아래 줄로 떨어지던 문제.
+       화면이 좁아지면 왼쪽(로고·매출 카드)을 단계적으로 줄이고, 오른쪽은 한 줄을 유지(줄바꿈 금지). 아주 좁은 화면(≤1100px)만 예전처럼 줄바꿈 허용. */
+    @media (min-width:1101px){
+      .header{flex-wrap:nowrap;}
+      .header-left{min-width:0;flex:1 1 auto;gap:clamp(8px,0.8vw,16px);}
+      .header-right{flex:0 0 auto;flex-wrap:nowrap;white-space:nowrap;}
+      .rev-cards{min-width:0;flex-shrink:1;}
+      .rev-card{min-width:clamp(120px,11vw,220px);padding:5px clamp(10px,1.5vw,28px);}
+      .logo-text{white-space:nowrap;}
+    }
+    @media (min-width:1101px) and (max-width:1750px){ html:not(.hdr-auto) .hdr-built{display:none;} }
+    @media (min-width:1101px) and (max-width:1550px){ html:not(.hdr-auto) .hdr-ver{display:none;} html:not(.hdr-auto) .logo-text{font-size:clamp(14px,1.45vw,20px);} }
+    @media (min-width:1101px) and (max-width:1380px){ html:not(.hdr-auto) .rev-card-sub{display:none;} html:not(.hdr-auto) .rev-card{padding:4px 12px;} }
+    /* ★ 자동 맞춤(JS가 화면 폭·확대 비율·글자 길이를 재서 단계 0~4를 자동 선택). 단계가 높을수록 왼쪽을 더 압축. */
+    @media (min-width:1101px){
+      .header[data-fit="1"] .hdr-built,.header[data-fit="2"] .hdr-built,.header[data-fit="3"] .hdr-built,.header[data-fit="4"] .hdr-built{display:none;}
+      .header[data-fit="2"] .hdr-ver,.header[data-fit="3"] .hdr-ver,.header[data-fit="4"] .hdr-ver{display:none;}
+      .header[data-fit="3"] .rev-card-sub,.header[data-fit="4"] .rev-card-sub{display:none;}
+      .header[data-fit="3"] .rev-card,.header[data-fit="4"] .rev-card{padding:4px 12px;min-width:0;}
+      .header[data-fit="3"] .logo-text,.header[data-fit="4"] .logo-text{font-size:clamp(13px,1.3vw,18px);}
+      .header[data-fit="4"] .rev-card{padding:3px 8px;}
+      .header[data-fit="4"] .rev-card-label{font-size:9px;}
+      .header[data-fit="4"] .logo-text{display:none;}
+    }
     .sync-indicator{display:flex;align-items:center;gap:6px;padding:clamp(4px,0.4vw,7px) clamp(8px,0.7vw,14px);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-full);font-size:var(--fs-sm);font-weight:600;}
     .sync-dot{width:clamp(6px,0.5vw,9px);height:clamp(6px,0.5vw,9px);border-radius:50%;background:var(--accent-success);animation:pulse 2s infinite;}
     .sync-dot.syncing{background:#f59e0b;animation:spin 1s linear infinite;}
@@ -388,8 +412,8 @@
         <div class="logo-icon">📦</div>
         <div class="logo-text">StyleKorean B2B Fulfillment</div>
       </div>
-      <span style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);padding:3px 9px;border-radius:999px;font-size:var(--fs-xs);font-weight:700;">v2.1</span>
-      <span style="color:var(--text-dim);font-size:10px;margin-left:8px;">Built by David Kim · 2026</span>
+      <span class="hdr-ver" style="background:rgba(99,102,241,0.15);color:var(--accent-primary);border:1px solid rgba(99,102,241,0.3);padding:3px 9px;border-radius:999px;font-size:var(--fs-xs);font-weight:700;">v2.1</span>
+      <span class="hdr-built" style="color:var(--text-dim);font-size:10px;margin-left:8px;">Built by David Kim · 2026</span>
       <div class="rev-cards">
         <div class="rev-card" id="revCardCur">
           <div class="rev-card-label" id="revLabelCur">This Month</div>
@@ -1265,6 +1289,49 @@ businessDaysSince(dateStr){if(!dateStr)return -1;const s=String(dateStr).slice(0
 var _atmCancelCb=null;
 function showAutoTimeModal(icon,title,sub,color,cb,onCancel){document.getElementById('atmIcon').textContent=icon;document.getElementById('atmTitle').textContent=title;document.getElementById('atmSub').textContent=sub;document.getElementById('atmConfirm').style.background=color;document.getElementById('atmConfirm').onclick=function(){_atmCancelCb=null;closeAutoTimeModal();cb();};_atmCancelCb=onCancel||null;var m=document.getElementById('autoTimeModal');m.style.display='flex';}
 function closeAutoTimeModal(){document.getElementById('autoTimeModal').style.display='none';if(_atmCancelCb){_atmCancelCb();_atmCancelCb=null;}}
+</script>
+<script>
+/* ★ 2026-10-05 — 상단 헤더 자동 맞춤: 화면 폭/확대 비율/매출 글자 길이가 어떻게 바뀌어도, 오른쪽 버튼 묶음이
+   아래 줄로 떨어지거나 왼쪽 내용과 겹치지 않도록 단계(0~4)를 자동으로 골라 왼쪽을 압축함. 오류가 나도 CSS 기본 규칙이 그대로 동작. */
+(function(){
+  try{
+    var hdr = document.querySelector('.header');
+    if(!hdr) return;
+    document.documentElement.classList.add('hdr-auto');
+    var busy = false;
+    function fits(){
+      var l = hdr.querySelector('.header-left'), r = hdr.querySelector('.header-right');
+      if(!l || !r) return true;
+      var rr = r.getBoundingClientRect(), lr = l.getBoundingClientRect();
+      if(Math.abs(rr.top - lr.top) > 40 && rr.top > lr.top + 20) return false;   // 오른쪽 묶음이 아래 줄로 떨어짐
+      var maxR = 0;
+      l.querySelectorAll('*').forEach(function(e){
+        if(e.offsetParent === null) return; // display:none
+        var b = e.getBoundingClientRect(); if(b.width > 0 && b.right > maxR) maxR = b.right;
+      });
+      if(maxR > rr.left - 8) return false;                                       // 왼쪽 내용이 오른쪽 버튼과 겹침
+      return rr.right <= window.innerWidth + 1;                                   // 오른쪽 버튼이 화면 밖으로 나가면 안 됨
+    }
+    function fit(){
+      if(busy) return; busy = true;
+      try{
+        if(window.innerWidth <= 1100){ hdr.removeAttribute('data-fit'); return; } // 아주 좁은 화면은 줄바꿈 허용
+        for(var lvl = 0; lvl <= 4; lvl++){
+          hdr.setAttribute('data-fit', String(lvl));
+          if(fits()) break;
+        }
+      } finally { busy = false; }
+    }
+    var raf = 0;
+    function schedule(){ if(raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(function(){ raf = 0; fit(); }); }
+    window.addEventListener('resize', schedule);
+    window.addEventListener('load', schedule);
+    [300, 1200, 3500, 8000].forEach(function(ms){ setTimeout(schedule, ms); }); // 매출 금액 등이 나중에 채워진 뒤 재측정
+    if(window.ResizeObserver){ var ro = new ResizeObserver(schedule); var rc = hdr.querySelector('.rev-cards'); if(rc) ro.observe(rc); ro.observe(document.body); }
+    if(window.MutationObserver){ var rcEl = hdr.querySelector('.rev-cards'); if(rcEl) new MutationObserver(schedule).observe(rcEl, {childList:true, subtree:true, characterData:true}); }
+    schedule();
+  }catch(e){ console.warn('header auto-fit 비활성:', e); }
+})();
 </script>
 </body>
 </html>
