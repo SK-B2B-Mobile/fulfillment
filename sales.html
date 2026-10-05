@@ -951,6 +951,17 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         console.error('[mirror] onSnapshot 에러 (' + docPath + '):', err);
       });
     };
+    // ★ 2026-10-04 신규 — mirror/sales_patches 같은 "필드별 알림 문서"는 data(JSON 문자열) 스키마가 아니라
+    //   필드 그대로 구독해야 해서 별도 함수로 둠(기존 _subscribeMirror는 전혀 안 건드림).
+    window._subscribeRawDoc = function(docPath, onUpdate){
+      const ref = doc(db, 'mirror', docPath);
+      return onSnapshot(ref, (snap) => {
+        if(!snap.exists()) return;
+        try{ onUpdate(snap.data()); }catch(e){ console.error('[patch] 처리 실패 (' + docPath + '):', e); }
+      }, (err) => {
+        console.error('[patch] onSnapshot 에러 (' + docPath + '):', err);
+      });
+    };
     console.log('✅ Firestore 미러 연결 준비 완료');
   } catch(e) {
     console.error('❌ Firestore 초기화 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다:', e);
@@ -979,6 +990,11 @@ function _waitForMirrorInit(tries){
       _mirrorCache.today = p;
       if(typeof applyTodayResult === 'function') applyTodayResult(p);
     });
+    // ★ 2026-10-04 신규 — 다른 직원의 저장(Confirm/BOL/Shipped/배송방법/결제확인)을 1~2초 안에 받는 알림 구독.
+    //   실패해도(구독 불가 등) 기존 1분 주기 미러가 그대로 동작하므로 데이터는 항상 정확함.
+    try{
+      if(window._subscribeRawDoc) window._subscribeRawDoc('sales_patches', (d) => { if(typeof _onPatchDoc_ === 'function') _onPatchDoc_(d); });
+    }catch(ePatchSub){ console.warn('[patch] 구독 시작 실패(무시 — 1분 주기 갱신은 정상 동작):', ePatchSub); }
     console.log('✅ Firestore 미러 구독 시작 — 실시간 모드로 동작합니다');
     return;
   }
@@ -1863,6 +1879,83 @@ function applyTodayResult(res){
   renderToday();
   renderShipping();
 }
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-10-04 신규 — 다른 직원 화면 즉시 반영(저장 알림 "patch")
+//   서버(publishTodayPatch_)가 저장 직후 "방금 바뀐 값 몇 개"를 mirror/sales_patches 에 즉시 씀 →
+//   이 화면이 그걸 받아 기존 override(보호값) 방식 그대로 목록에 겹쳐 적용. 1분 주기 목록이 나중에 도착해도
+//   같은 값이라 화면이 흔들리지 않고(90초 연속 일치 시 보호 해제), 알림을 못 받아도 예전과 동일하게
+//   최대 1분 뒤 정확한 값이 반영됨(= 더 나빠지는 경우 없음).
+// ═══════════════════════════════════════════════════════════
+const _PATCH_MAX_AGE_MS = 180000;     // 이보다 오래된 알림은 무시(페이지를 막 열었을 때 쌓여 있던 것 등)
+const _patchSeen = {};                // { 필드키: 마지막으로 처리한 ts }
+const _localOpAt = {};                // { 'invoice|kind': 내가 이 저장을 시작한 시각 }
+function _markLocalOp_(invoice, kind){ _localOpAt[invoice + '|' + kind] = Date.now(); }
+function _patchBusy_(inv, kind){
+  // 내 저장이 아직 진행 중이면(응답 전) 남의 알림으로 내 화면을 흔들지 않음 — 내 응답 직후 서버 값 알림이 다시 옴
+  if (kind === 'ship' && typeof _shipInflight !== 'undefined' && _shipInflight[inv]) return true;
+  if (kind === 'bol'  && typeof _bolInflight  !== 'undefined' && _bolInflight[inv])  return true;
+  if (kind === 'conf' && typeof _confirmInflight !== 'undefined' && _confirmInflight[inv]) return true;
+  return false;
+}
+function _registerRemotePatch_(p, now){
+  const f = p.f || {};
+  const age = Math.max(0, now - p.ts);
+  const until = now + Math.max(5000, _PATCH_MAX_AGE_MS - age);
+  // 대표 인보이스 + 거기에 묶인(LINKED) 오더들(ship/bol/conf 는 묶인 오더도 대표 값을 따름)
+  const follows = (p.kind === 'ship' || p.kind === 'bol' || p.kind === 'conf');
+  const invs = [p.inv];
+  if (follows) TODAY_JOBS.forEach(j => { if (j.dimsLinkedTo === p.inv) invs.push(j.invoice); });
+  invs.forEach(inv => {
+    if (p.kind === 'ship') _recentShippedOverrides[inv] = { shipped: !!f.shipped, shippedAt: f.shippedAt || '', shippedBy: f.shippedBy || '', until: until };
+    else if (p.kind === 'bol') _recentBolOverrides[inv] = { bol: String(f.bol || ''), until: until };
+    else if (p.kind === 'conf') _recentSalesConfirmOverrides[inv] = {
+      confirmed: !!f.confirmed, confirmedAt: f.confirmedAt || '', confirmedBy: f.confirmedBy || '',
+      wasUndone: !!f.wasUndone, undoneAt: f.undoneAt || '', undoneBy: f.undoneBy || '', until: until };
+    else if (p.kind === 'method') _recentMethodOverrides[inv] = { method: f.method, until: until };
+    else if (p.kind === 'pay') _recentPaymentOverrides[inv] = { paid: !!f.paid, until: until };
+  });
+  return true;
+}
+function _onPatchDoc_(data){
+  if (!data) return;
+  const now = Date.now();
+  let changed = false;
+  Object.keys(data).forEach(key => {
+    if (key.indexOf('p_') !== 0) return;
+    let p; try { p = JSON.parse(data[key]); } catch (e) { return; }
+    if (!p || !p.inv || !p.kind || !p.f || !p.ts) return;
+    if (_patchSeen[key] && _patchSeen[key] >= p.ts) return;     // 이미 처리한 것
+    _patchSeen[key] = p.ts;
+    if (now - p.ts > _PATCH_MAX_AGE_MS) return;                 // 너무 오래된 알림
+    const lk = p.inv + '|' + p.kind;
+    if (_localOpAt[lk] && p.ts < _localOpAt[lk]) return;        // 내가 그 뒤에 한 저장이 더 최신
+    if (_patchBusy_(p.inv, p.kind)) return;
+    if (_registerRemotePatch_(p, now)) changed = true;
+  });
+  if (changed) _schedulePatchApply_(0);
+}
+let _patchApplyTimer = null;
+function _schedulePatchApply_(tries){
+  if (_patchApplyTimer) return;
+  _patchApplyTimer = setTimeout(() => {
+    _patchApplyTimer = null;
+    // 입력 중(BOL 번호 타이핑 등)이면 화면을 다시 그리지 않고 잠깐 뒤에 다시 시도(타이핑 방해 금지)
+    const ae = (typeof document !== 'undefined') ? document.activeElement : null;
+    const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
+    if (typing && tries < 40){ _schedulePatchApply_(tries + 1); return; }
+    try { if (_mirrorCache.today) applyTodayResult(_mirrorCache.today); } catch (e) { console.error('[patch] 적용 실패', e); }
+  }, tries === 0 ? 30 : 700);
+}
+// 저장 성공 직후 호출 — 서버가 이 인보이스의 "실제 저장된 값"을 읽어 다른 직원 화면용 알림을 씀(기다리지 않음, 1회 재시도)
+function _publishPatch_(invoice, kind){
+  try {
+    gasPost('publishTodayPatch', { invoice: invoice, kind: kind }).then(r => {
+      if (r && r.ok) console.log('%c[publishTodayPatch] ' + kind + ' 알림 전송 완료 (서버 ' + (r.ms || '?') + 'ms)', 'color:#0a7;');
+      if (!r || !r.ok) return gasPost('publishTodayPatch', { invoice: invoice, kind: kind });
+    }).catch(() => {});
+  } catch (e) { /* 알림 실패는 무시 — 1분 주기 갱신이 보장 */ }
+}
+
 // ★ 2026-08-19 신규 — today list 로컬 캐시 저장/조회
 function saveCachedTodayList_(jobs){
   try{
@@ -2263,6 +2356,7 @@ async function toggleShipped(invoice, nextShipped){
   const job = TODAY_JOBS.find(j => j.invoice === invoice);
   if (!job) return;
   _shipInflight[invoice] = true;
+  _markLocalOp_(invoice, 'ship');
   const by = authGetName() || 'Dispatch (tablet)';
   const nowIso = _fmtIsoNow_();
   const targets = [job].concat(TODAY_JOBS.filter(j => j.dimsLinkedTo === invoice));
@@ -2293,6 +2387,7 @@ async function toggleShipped(invoice, nextShipped){
       }
     });
     renderToday(); renderShipping();
+    _publishPatch_(invoice, 'ship');
   } else {
     snaps.forEach(sn => {
       const j = TODAY_JOBS.find(x => x.invoice === sn.inv);
@@ -2398,6 +2493,7 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
   const job = TODAY_JOBS.find(j => j.invoice === invoice);
   if (!job) return;
   _confirmInflight[invoice] = true;
+  _markLocalOp_(invoice, 'conf');
   const by = authGetName() || 'Sales';
   const nowTxt = _fmtShortNow_();
   // 이 오더(PRIMARY) + 여기에 묶인(LINKED) 오더들 — 서버는 묶인 오더도 PRIMARY 값을 그대로 읽어 계산함
@@ -2439,6 +2535,7 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
     };
     TODAY_JOBS.forEach(j => { if (j.invoice === invoice || j.dimsLinkedTo === invoice) apply(j); });
     renderShipping();
+    _publishPatch_(invoice, 'conf');
   } else {
     // 실패 — 원래 상태로 정확히 복구(override도 원래대로) 후 이유 안내
     snaps.forEach(sn => {
@@ -2487,6 +2584,7 @@ async function saveBol(invoice){
   const draft = BOL_EDIT[invoice] || '';
   const bol = draft.trim();
   _bolInflight[invoice] = true;
+  _markLocalOp_(invoice, 'bol');
   const targets = [job].concat(TODAY_JOBS.filter(j => j.dimsLinkedTo === invoice));
   const snaps = targets.map(j => ({ inv: j.invoice, bol: j.bol, ov: _recentBolOverrides[j.invoice] }));
   delete BOL_EDIT[invoice];
@@ -2514,6 +2612,7 @@ async function saveBol(invoice){
       }
     });
     renderShipping();
+    _publishPatch_(invoice, 'bol');
   } else {
     snaps.forEach(sn => {
       const j = TODAY_JOBS.find(x => x.invoice === sn.inv);
@@ -3523,6 +3622,7 @@ async function saveMethodChange(invoice){
   const prevJobMethod = job ? job.method : undefined;
   const prevOv = _recentMethodOverrides[invoice];
   if (job) job.method = newMethod;
+  _markLocalOp_(invoice, 'method');
   _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 120000 };
   const detailOpen = !!(CURRENT_ORDER && CURRENT_ORDER.invoice === invoice);
   if (detailOpen){ CURRENT_ORDER.method = newMethod; renderDetail(CURRENT_ORDER); }
@@ -3548,6 +3648,7 @@ async function saveMethodChange(invoice){
     return;
   }
   _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 180000 };
+  _publishPatch_(invoice, 'method');
   _syncInvoiceMirror_(invoice);
   if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
 }
@@ -3601,6 +3702,7 @@ async function savePaymentStatus(invoice){
   _paymentInflight[invoice] = true;
   const prevPaid = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? !!CURRENT_ORDER.paymentPaid : !willBePaid;
   const prevOv = _recentPaymentOverrides[invoice];
+  _markLocalOp_(invoice, 'pay');
   _recentPaymentOverrides[invoice] = { paid: willBePaid, until: Date.now() + 120000 };
   _applyPaymentUi_(invoice, willBePaid);
   const editRow = document.getElementById('paymentEditRow');
@@ -3630,6 +3732,7 @@ async function savePaymentStatus(invoice){
   // 서버가 "실제로 저장 확인한 값"이 최종값(요청값과 다르면 서버 값으로 바로잡음)
   const confirmedPaid = !!res.paid;
   _recentPaymentOverrides[invoice] = { paid: confirmedPaid, until: Date.now() + 180000 };
+  _publishPatch_(invoice, 'pay');
   if (confirmedPaid !== willBePaid) _applyPaymentUi_(invoice, confirmedPaid);
   const sel3 = document.getElementById('paymentSelect');
   if (sel3) sel3.value = confirmedPaid ? 'paid' : 'unpaid';
