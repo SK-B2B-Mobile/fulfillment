@@ -343,6 +343,8 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-btn.go{background:var(--green); border-color:var(--green); color:#07241a;}
 .ship2-btn.go:disabled{background:var(--surface2); border-color:var(--border2); color:var(--text-dim); cursor:not-allowed;}
 .ship2-btn.undo{background:transparent; color:var(--text-dim);}
+.ship2-done{display:inline-flex; align-items:center; gap:6px;}
+.ship2-btn.done{background:rgba(52,211,153,.15); border-color:var(--green); color:var(--green); cursor:default;}
 /* ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭). BOL#과 동일한
    .ship2-status-cell 안에 나란히 배치. */
 .confirm-chip{font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--green); white-space:nowrap;}
@@ -1806,7 +1808,9 @@ function applyTodayResult(res){
     const ov = _recentSalesConfirmOverrides[inv];
     if (ov.until < now) { delete _recentSalesConfirmOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
-    if (job){
+    if (job && !!job.salesConfirmed === !!ov.confirmed){
+      delete _recentSalesConfirmOverrides[inv]; // 서버 목록이 이미 같은 값 — 임시값 종료
+    } else if (job){
       job.salesConfirmed = ov.confirmed;
       job.salesConfirmedAt = ov.confirmedAt;
       job.salesConfirmedBy = ov.confirmedBy;
@@ -1827,13 +1831,20 @@ function applyTodayResult(res){
     const ov = _recentShippedOverrides[inv];
     if (ov.until < now) { delete _recentShippedOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
-    if (job){ job.shipped = ov.shipped; job.shippedAt = ov.shippedAt; job.shippedBy = ov.shippedBy; }
+    if (job){
+      // 서버 목록이 이미 같은 값이면 임시값 역할 끝(삭제). 아직 옛 값이면 계속 덮어씀.
+      if (!!job.shipped === !!ov.shipped){ delete _recentShippedOverrides[inv]; }
+      else { job.shipped = ov.shipped; job.shippedAt = ov.shippedAt; job.shippedBy = ov.shippedBy; }
+    }
   });
   Object.keys(_recentBolOverrides).forEach(inv => {
     const ov = _recentBolOverrides[inv];
     if (ov.until < now) { delete _recentBolOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
-    if (job) job.bol = ov.bol;
+    if (job){
+      if (String(job.bol || '') === String(ov.bol || '')){ delete _recentBolOverrides[inv]; }
+      else { job.bol = ov.bol; }
+    }
   });
   saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
@@ -2086,7 +2097,7 @@ function renderShipping(){
     if (isLinked){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
     } else if (j.shipped){
-      actionHtml = `<button class="ship2-btn undo" onclick="toggleShipped('${j.invoice}', false)">Undo</button>`;
+      actionHtml = `<span class="ship2-done"><span class="ship2-btn done" title="Shipped">✓ Shipped</span><button class="ship2-btn undo" onclick="toggleShipped('${j.invoice}', false)">Undo</button></span>`;
     } else if (!j.salesConfirmed || !hasBol){
       // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 영업 컨펌 전에는
       //   Mark Shipped 자체를 비활성화(서버도 setShippedStatus에서 동일하게
@@ -2267,7 +2278,7 @@ async function toggleShipped(invoice, nextShipped){
     TODAY_JOBS.forEach(j => {
       if (j.invoice === invoice || j.dimsLinkedTo === invoice){
         j.shipped = res.shipped; j.shippedAt = res.shippedAt; j.shippedBy = res.shippedBy;
-        _recentShippedOverrides[j.invoice] = { shipped: res.shipped, shippedAt: res.shippedAt, shippedBy: res.shippedBy, until: Date.now() + 60000 };
+        _recentShippedOverrides[j.invoice] = { shipped: res.shipped, shippedAt: res.shippedAt, shippedBy: res.shippedBy, until: Date.now() + 180000 };
       }
     });
     renderToday(); renderShipping();
@@ -2413,7 +2424,7 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
       j.salesConfirmWasUndone = res.wasUndone;
       j.salesConfirmUndoneAt = res.undoneAt;
       j.salesConfirmUndoneBy = res.undoneBy;
-      _recentSalesConfirmOverrides[j.invoice] = _confirmOverrideFromJob_(j, 60000);
+      _recentSalesConfirmOverrides[j.invoice] = _confirmOverrideFromJob_(j, 180000);
     };
     TODAY_JOBS.forEach(j => { if (j.invoice === invoice || j.dimsLinkedTo === invoice) apply(j); });
     renderShipping();
@@ -2488,7 +2499,7 @@ async function saveBol(invoice){
     TODAY_JOBS.forEach(j => {
       if (j.invoice === invoice || j.dimsLinkedTo === invoice){
         j.bol = res.bol;
-        _recentBolOverrides[j.invoice] = { bol: res.bol, until: Date.now() + 60000 };
+        _recentBolOverrides[j.invoice] = { bol: res.bol, until: Date.now() + 180000 };
       }
     });
     renderShipping();
@@ -3525,7 +3536,7 @@ async function saveMethodChange(invoice){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 60000 };
+  _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 180000 };
   _syncInvoiceMirror_(invoice);
   if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
 }
@@ -3607,7 +3618,7 @@ async function savePaymentStatus(invoice){
   }
   // 서버가 "실제로 저장 확인한 값"이 최종값(요청값과 다르면 서버 값으로 바로잡음)
   const confirmedPaid = !!res.paid;
-  _recentPaymentOverrides[invoice] = { paid: confirmedPaid, until: Date.now() + 60000 };
+  _recentPaymentOverrides[invoice] = { paid: confirmedPaid, until: Date.now() + 180000 };
   if (confirmedPaid !== willBePaid) _applyPaymentUi_(invoice, confirmedPaid);
   const sel3 = document.getElementById('paymentSelect');
   if (sel3) sel3.value = confirmedPaid ? 'paid' : 'unpaid';
