@@ -1769,6 +1769,12 @@ async function loadToday(){
 }
 // ★ 2026-08-19 신규(긴급, 요청 합치기) — 위 로직을 분리. autoSync()가 통합
 //   요청으로 받아온 결과를 여기 그대로 넣어서 재사용. 동작은 기존과 동일.
+// 보호(override) 해제 판정: 서버 값이 우리 값과 "연속 90초" 일치했을 때만 true. 한 번이라도 다르면 타이머 리셋.
+function _ovSettled_(ov, matches, now){
+  if (!matches){ ov.m = 0; return false; }
+  if (!ov.m){ ov.m = now; return false; }
+  return (now - ov.m) >= 90000;
+}
 function applyTodayResult(res){
   if (!res || !res.ok){
     // ★ 2026-08-10 — 위와 같은 이유로, 이미 받아둔 목록이 있으면 지우지 않음
@@ -1794,7 +1800,11 @@ function applyTodayResult(res){
     }
     return;
   }
-  TODAY_JOBS = res.jobs || [];
+  // ★ 2026-10-04 핵심 수정 — 서버/미러가 준 객체를 그대로 쓰지 않고 복사해서 사용.
+  //   예전엔 TODAY_JOBS가 미러 캐시(_mirrorCache.today.jobs)와 "같은 객체"여서, 아래 override나
+  //   낙관적 업데이트가 캐시 원본까지 덮어써 버렸고 → "서버도 이미 같은 값"으로 착각해 보호를
+  //   너무 일찍 해제 → 곧바로 오는 옛 스냅샷에 화면이 되돌아갔다가 다시 돌아오는 깜빡임이 생김.
+  TODAY_JOBS = (res.jobs || []).map(j => Object.assign({}, j));
   // ★ 2026-09-03 신규 — 방금 확인된 결제상태 우선 적용(위 설명 참고)
   const now = Date.now();
   Object.keys(_recentPaymentOverrides).forEach(inv => {
@@ -1808,8 +1818,8 @@ function applyTodayResult(res){
     const ov = _recentSalesConfirmOverrides[inv];
     if (ov.until < now) { delete _recentSalesConfirmOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
-    if (job && !!job.salesConfirmed === !!ov.confirmed){
-      delete _recentSalesConfirmOverrides[inv]; // 서버 목록이 이미 같은 값 — 임시값 종료
+    if (job && _ovSettled_(ov, !!job.salesConfirmed === !!ov.confirmed, now)){
+      delete _recentSalesConfirmOverrides[inv]; // 서버 값이 90초 연속 일치 — 임시값 종료
     } else if (job){
       job.salesConfirmed = ov.confirmed;
       job.salesConfirmedAt = ov.confirmedAt;
@@ -1833,7 +1843,8 @@ function applyTodayResult(res){
     const job = TODAY_JOBS.find(j => j.invoice === inv);
     if (job){
       // 서버 목록이 이미 같은 값이면 임시값 역할 끝(삭제). 아직 옛 값이면 계속 덮어씀.
-      if (!!job.shipped === !!ov.shipped){ delete _recentShippedOverrides[inv]; }
+      // 서버 값이 우리 값과 90초 연속 일치해야 보호 해제(저장 직전에 시작된 옛 동기화가 뒤늦게 도착해도 안전).
+      if (_ovSettled_(ov, !!job.shipped === !!ov.shipped, now)){ delete _recentShippedOverrides[inv]; }
       else { job.shipped = ov.shipped; job.shippedAt = ov.shippedAt; job.shippedBy = ov.shippedBy; }
     }
   });
@@ -1842,7 +1853,7 @@ function applyTodayResult(res){
     if (ov.until < now) { delete _recentBolOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
     if (job){
-      if (String(job.bol || '') === String(ov.bol || '')){ delete _recentBolOverrides[inv]; }
+      if (_ovSettled_(ov, String(job.bol || '') === String(ov.bol || ''), now)){ delete _recentBolOverrides[inv]; }
       else { job.bol = ov.bol; }
     }
   });
