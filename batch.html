@@ -2965,13 +2965,24 @@ async function doLogin(name){
   //   정상 적용된 상태라 작업에 지장 없음).
   try{
     if (typeof authGetToken === 'function' && authGetToken() && typeof authPost === 'function'){
-      authPost('linkWorkerName', { token: authGetToken(), workerName: name }).then(function(res){
-        if (res && res.ok){
-          try{ localStorage.setItem(AUTH_WORKER_KEY, name); }catch(e){}
-          const wrap = document.getElementById('loginBadgeWrap');
-          if (wrap) wrap.style.display = 'none';
+      // ★ 2026-10-05 — 서버 응답 지연/일시 오류로 연결이 조용히 실패해 Switch Worker가 계속 남던 문제:
+      //   최대 3번(2초·5초 간격) 재시도하고, 끝까지 실패하면 콘솔에 이유를 남김.
+      (async function(){
+        let last = null;
+        for (let attempt = 0; attempt < 3; attempt++){
+          if (attempt) await new Promise(function(r){ setTimeout(r, attempt === 1 ? 2000 : 5000); });
+          const tok = authGetToken();
+          if (!tok) return; // 그 사이 로그아웃됨
+          last = await authPost('linkWorkerName', { token: tok, workerName: name });
+          if (last && last.ok){
+            try{ localStorage.setItem(AUTH_WORKER_KEY, name); }catch(e){}
+            try{ updateLoginBadge(); }catch(e){}
+            return;
+          }
+          if (last && last.error === 'session expired') break; // 재시도해도 소용없음
         }
-      }).catch(function(){});
+        console.warn('[linkWorkerName] 계정 연결 실패 — Switch Worker가 계속 보일 수 있음:', last);
+      })();
     }
   }catch(e){}
 }
@@ -3017,7 +3028,11 @@ function updateLoginBadge(){
   if(!wrap || !nameEl) return;
   if(name){
     nameEl.textContent = name;
-    wrap.style.display = 'flex';
+    // ★ 2026-10-05 — 이 계정에 같은 이름이 이미 연결돼 있으면 Switch Worker는 불필요 → 항상 숨김
+    //   (예전엔 여기서 무조건 보이게 해서, 새로고침/재로그인 경로마다 다시 나타나는 틈이 있었음)
+    let linkedSame = false;
+    try{ linkedSame = (typeof authGetWorkerName === 'function') && authGetWorkerName() === name && !!authGetToken(); }catch(e){}
+    wrap.style.display = linkedSame ? 'none' : 'flex';
   } else {
     wrap.style.display = 'none';
   }
