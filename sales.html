@@ -1358,7 +1358,9 @@ function applySheetOverviewResult(res){
     }
     return;
   }
-  SHEET_JOBS = res.jobs || [];
+  // ★ 2026-10-05 — 미러 캐시와 같은 객체를 공유하지 않도록 복사(override가 캐시 원본을 덮어쓰지 않게) + Moved 보호값 적용
+  SHEET_JOBS = (res.jobs || []).map(j => Object.assign({}, j));
+  _applyMovedOverrides_(SHEET_JOBS, Date.now());
   saveCachedSheetOverview_(SHEET_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 수정(매니저 지적) — 예전엔 데이터를 새로 받을 때마다 무조건
   //   1페이지로 되돌렸음. 30초 자동 동기화가 이걸 계속 실행하는 바람에,
@@ -1778,6 +1780,29 @@ let _recentMethodOverrides = {}; // { invoice: { method, until } }
 // 대표(PRIMARY)의 값을 그대로 보여주므로 같은 값이 묶인 오더 항목에도 함께 등록됨.
 let _recentShippedOverrides = {}; // { invoice: { shipped, shippedAt, shippedBy, until } }
 let _recentBolOverrides = {};     // { invoice: { bol, until } }
+// ★ 2026-10-05 신규 — "Moved to Packing"(단독 오더 수동 표시) 저장도 같은 방식. { invoice: { mp, stage, until } }
+let _recentMovedOverrides = {};
+const _STAGE_RANK = { none:0, moved:1, taken:2, verified:3 };
+// 서버 규칙과 동일: 이동완료 = (배치/수동 이동) OR 디멘션 저장됨, 단계 = 둘 중 더 앞선 쪽
+function _movedExpected_(job, ov){
+  const dims = (job.dimsCount || 0) > 0;
+  let st = ov.stage || 'none';
+  if (dims && (_STAGE_RANK[st] || 0) < _STAGE_RANK.taken) st = 'taken';
+  return { mp: !!ov.mp || dims, stage: st };
+}
+function _applyMovedOv_(job, ov){ const e = _movedExpected_(job, ov); job.movedToPacking = e.mp; job.packStage = e.stage; }
+function _applyMovedOverrides_(arr, now){
+  Object.keys(_recentMovedOverrides).forEach(inv => {
+    const ov = _recentMovedOverrides[inv];
+    if (ov.until < now) { delete _recentMovedOverrides[inv]; return; }
+    const job = arr.find(j => j.invoice === inv);
+    if (!job) return;
+    const e = _movedExpected_(job, ov);
+    const matches = (!!job.movedToPacking === e.mp) && ((job.packStage || 'none') === e.stage);
+    if (_ovSettled_(ov, matches, now)) { delete _recentMovedOverrides[inv]; return; }
+    if (!matches) _applyMovedOv_(job, ov);
+  });
+}
 
 async function loadToday(){
   const res = await getSalesTodayListData_();
@@ -1873,6 +1898,7 @@ function applyTodayResult(res){
       else { job.bol = ov.bol; }
     }
   });
+  _applyMovedOverrides_(TODAY_JOBS, now); // ★ 2026-10-05 신규
   saveCachedTodayList_(TODAY_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 — 위와 같은 이유로 자동 갱신 시 페이지를 되돌리지 않음
   document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
@@ -1895,6 +1921,7 @@ function _patchBusy_(inv, kind){
   if (kind === 'ship' && typeof _shipInflight !== 'undefined' && _shipInflight[inv]) return true;
   if (kind === 'bol'  && typeof _bolInflight  !== 'undefined' && _bolInflight[inv])  return true;
   if (kind === 'conf' && typeof _confirmInflight !== 'undefined' && _confirmInflight[inv]) return true;
+  if (kind === 'moved' && typeof _movedInflight !== 'undefined' && _movedInflight[inv]) return true;
   return false;
 }
 function _registerRemotePatch_(p, now){
@@ -1913,6 +1940,7 @@ function _registerRemotePatch_(p, now){
       wasUndone: !!f.wasUndone, undoneAt: f.undoneAt || '', undoneBy: f.undoneBy || '', until: until };
     else if (p.kind === 'method') _recentMethodOverrides[inv] = { method: f.method, until: until };
     else if (p.kind === 'pay') _recentPaymentOverrides[inv] = { paid: !!f.paid, until: until };
+    else if (p.kind === 'moved') { _recentMovedOverrides[inv] = { mp: !!f.mp, stage: f.stage || 'none', until: until }; _patchNeedsOverview = true; }
   });
   return true;
 }
@@ -1935,6 +1963,7 @@ function _onPatchDoc_(data){
   if (changed) _schedulePatchApply_(0);
 }
 let _patchApplyTimer = null;
+let _patchNeedsOverview = false;
 function _schedulePatchApply_(tries){
   if (_patchApplyTimer) return;
   _patchApplyTimer = setTimeout(() => {
@@ -1943,7 +1972,10 @@ function _schedulePatchApply_(tries){
     const ae = (typeof document !== 'undefined') ? document.activeElement : null;
     const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
     if (typing && tries < 40){ _schedulePatchApply_(tries + 1); return; }
-    try { if (_mirrorCache.today) applyTodayResult(_mirrorCache.today); } catch (e) { console.error('[patch] 적용 실패', e); }
+    try {
+      if (_patchNeedsOverview){ _patchNeedsOverview = false; if (_mirrorCache.overview && typeof applySheetOverviewResult === 'function') applySheetOverviewResult(_mirrorCache.overview); }
+      if (_mirrorCache.today) applyTodayResult(_mirrorCache.today);
+    } catch (e) { console.error('[patch] 적용 실패', e); }
   }, tries === 0 ? 30 : 700);
 }
 // 저장 성공 직후 호출 — 서버가 이 인보이스의 "실제 저장된 값"을 읽어 다른 직원 화면용 알림을 씀(기다리지 않음, 1회 재시도)
@@ -3568,21 +3600,73 @@ function closeDetailCard(){
 // 실수 방지 안전장치: (1) 반드시 confirm() 확인 팝업을 거쳐야만 서버에 저장됨,
 // (2) 되돌리기도 같은 확인 절차를 거침, (3) 버튼 자체가 눈에 덜 띄는 작은
 // 텍스트 링크로 되어 있어(되돌리기 상태일 때) 우연히 클릭될 가능성이 낮음.
+const _movedInflight = {};
 async function markManualMoved(invoice, moved){
   const msg = moved
     ? `"${invoice}" Mark this order as moved to the packing zone?\n\nOnly do this if the shipping team actually moved it.`
     : `"${invoice}" Undo the packing-zone move for this order?\n\nUse this only if it was clicked by mistake.`;
   if (!confirm(msg)) return;
+  if (_movedInflight[invoice]) return;
+  _movedInflight[invoice] = true;
+  _markLocalOp_(invoice, 'moved');
+  const by = (authGetName() || 'Packing (Sales page)');
 
-  const res = await gasPostWithRetry('setManualPackingMoved', { invoice: invoice, moved: moved, by: (authGetName() || 'Packing (Sales page)') });
-  if (!res || !res.ok){
-    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
-    return;
+  // ★ 2026-10-05 개편(현장 보고 — 저장이 오래 걸리고, 팝업을 닫아도 목록에 한참 뒤 반영) —
+  //   OK를 누르는 즉시 팝업 + 두 목록(Order Detail / Sales Sheet Preview) + 진행 현황을 바꾸고,
+  //   저장은 뒤에서 진행. 실패하면 정확히 되돌리고 이유 안내. 예전엔 저장 후 팝업 전체를 다시 불러오고
+  //   (느림) 1분 묵은 목록을 다시 읽어 한참 뒤에야 바뀌어 보였음.
+  const cur = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
+  const tJob = TODAY_JOBS.find(j => j.invoice === invoice);
+  const sJob = SHEET_JOBS.find(j => j.invoice === invoice);
+  const objs = [cur, tJob, sJob].filter(Boolean);
+  const snaps = objs.map(o => ({ o: o, mp: o.movedToPacking, st: o.packStage }));
+  const prevOv = _recentMovedOverrides[invoice];
+  const curStage = (cur && cur.packStage) || (tJob && tJob.packStage) || (sJob && sJob.packStage) || 'none';
+  // 되돌리기는 총량피킹 배치 기록이 있는 오더면 "배치 기준 상태"를 서버만 알 수 있어서 응답 후에 반영(그 외엔 즉시)
+  const knowsResult = moved || !(cur && cur.hasBatchRecord);
+  const rerender = () => {
+    if (cur && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) renderDetail(CURRENT_ORDER);
+    renderToday();
+    if (typeof renderShipping === 'function') renderShipping();
+    renderProgressBoard(SHEET_JOBS); renderShipRow(SHEET_JOBS); renderSheet();
+  };
+  if (knowsResult){
+    const ov = { mp: moved, stage: moved ? (curStage === 'verified' ? 'verified' : 'taken') : 'none', until: Date.now() + 120000 };
+    _recentMovedOverrides[invoice] = ov;
+    objs.forEach(o => _applyMovedOv_(o, ov));
+    rerender();
+  } else {
+    const btn = document.querySelector('.manual-moved-undo');
+    if (btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
   }
-  // 성공 — 화면을 최신 상태로 다시 불러옴
-  const inv = (CURRENT_ORDER && CURRENT_ORDER.invoice) || '';
-  if (inv) await openInvoice(inv);
-  loadToday();
+
+  let res;
+  try {
+    const t0 = performance.now();
+    res = await _serial_(invoice, () => gasPostSmart_('setManualPackingMoved', { invoice: invoice, moved: moved, by: by }));
+    if (res && res.timing) console.log('%c[setManualPackingMoved] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
+  } catch (e) {
+    res = { ok:false, error: String(e && e.message || e) };
+  }
+  delete _movedInflight[invoice];
+
+  if (res && res.ok){
+    // 서버가 계산한 "실제 상태"(배치 기록 포함)로 확정 — 응답 후에는 지금의 객체들을 인보이스로 다시 찾아 반영
+    const ov = { mp: !!res.movedToPacking, stage: res.packStage || 'none', until: Date.now() + 180000 };
+    _recentMovedOverrides[invoice] = ov;
+    const cur2 = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
+    [cur2, TODAY_JOBS.find(j => j.invoice === invoice), SHEET_JOBS.find(j => j.invoice === invoice)].filter(Boolean).forEach(o => _applyMovedOv_(o, ov));
+    if (cur2) cur2.manualMoved = !!res.moved;
+    rerender();
+    _publishPatch_(invoice, 'moved');   // 다른 직원 화면에 1~2초 안에 알림
+    _syncInvoiceMirror_(invoice);       // 서버가 새 상세를 계산해 미러를 다시 채움(기다리지 않음)
+    if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
+  } else {
+    snaps.forEach(sn => { sn.o.movedToPacking = sn.mp; sn.o.packStage = sn.st; });
+    if (prevOv) _recentMovedOverrides[invoice] = prevOv; else delete _recentMovedOverrides[invoice];
+    rerender();
+    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
+  }
 }
 
 // ★ 2026-08-31 신규 — 검수완료 오더의 배송방법(Method) 수정.
