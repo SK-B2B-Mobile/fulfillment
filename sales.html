@@ -2511,6 +2511,7 @@ async function _refreshDetailSilently_(invoice){
     const res = await gasGetWithRetry({ op:'getSalesInvoiceDetail', invoice: invoice });
     const ov = document.getElementById('detail-overlay');
     if (res && res.ok && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice && ov && ov.classList.contains('show')){
+      try { const mov = _recentMovedOverrides[invoice]; if (mov && mov.until > Date.now()) _applyMovedOv_(res, mov); } catch(e){}
       CURRENT_ORDER = res;
       renderDetail(res);
     }
@@ -3349,6 +3350,8 @@ async function openInvoice(inv){
   //   검수·이슈등록·디멘션저장 하면 새로고침 없이 이 화면도 자동으로 갱신됨
   //   (예전엔 30초 캐시 + 수동 새로고침이 있어야만 보였음).
   const gotLive = await subscribeInvoiceDetailMirror_(inv, (payload) => {
+    // ★ 2026-10-05 — 방금 누른 "Moved to Packing" 상태가 아직 보호 중이면, 낡은 상세 미러가 와도 덮어쓰지 않게 함
+    try { const mov = _recentMovedOverrides[payload.invoice]; if (mov && mov.until > Date.now()) _applyMovedOv_(payload, mov); } catch(e){}
     CURRENT_ORDER = payload;
     renderDetail(payload);
   });
@@ -3373,6 +3376,7 @@ async function openInvoice(inv){
       <button class="link-btn" style="margin-left:10px;" onclick="closeDetailCard()">Close</button></div>`;
     return;
   }
+  try { const mov = _recentMovedOverrides[res.invoice]; if (mov && mov.until > Date.now()) _applyMovedOv_(res, mov); } catch(e){}
   CURRENT_ORDER = res;
   renderDetail(res);
 }
@@ -3652,15 +3656,24 @@ async function markManualMoved(invoice, moved){
 
   if (res && res.ok){
     // 서버가 계산한 "실제 상태"(배치 기록 포함)로 확정 — 응답 후에는 지금의 객체들을 인보이스로 다시 찾아 반영
-    const ov = { mp: !!res.movedToPacking, stage: res.packStage || 'none', until: Date.now() + 180000 };
+    // 서버가 상태(movedToPacking/packStage)를 안 돌려주면(예: Apps Script가 새 버전으로 배포 안 된 경우)
+    // 방금 누른 값을 그대로 신뢰 — 서버 응답 누락으로 화면이 거꾸로 돌아가지 않게.
+    const srvKnown = (typeof res.movedToPacking === 'boolean');
+    if (!srvKnown) console.warn('[setManualPackingMoved] 서버 응답에 movedToPacking 없음 — Code.gs 새 버전 배포 확인 필요', res);
+    const ov = srvKnown
+      ? { mp: !!res.movedToPacking, stage: res.packStage || 'none', until: Date.now() + 180000 }
+      : { mp: moved, stage: moved ? (curStage === 'verified' ? 'verified' : 'taken') : 'none', until: Date.now() + 180000 };
     _recentMovedOverrides[invoice] = ov;
     const cur2 = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
     [cur2, TODAY_JOBS.find(j => j.invoice === invoice), SHEET_JOBS.find(j => j.invoice === invoice)].filter(Boolean).forEach(o => _applyMovedOv_(o, ov));
     if (cur2) cur2.manualMoved = !!res.moved;
     rerender();
     _publishPatch_(invoice, 'moved');   // 다른 직원 화면에 1~2초 안에 알림
-    _syncInvoiceMirror_(invoice);       // 서버가 새 상세를 계산해 미러를 다시 채움(기다리지 않음)
-    if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
+    // 서버가 상세 미러를 직접 고쳐 썼으면(mirrorPatched) 무거운 재계산 불필요 — 못 했을 때만 예전 방식으로 채움
+    if (!res.mirrorPatched) {
+      _syncInvoiceMirror_(invoice);
+      if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
+    }
   } else {
     snaps.forEach(sn => { sn.o.movedToPacking = sn.mp; sn.o.packStage = sn.st; });
     if (prevOv) _recentMovedOverrides[invoice] = prevOv; else delete _recentMovedOverrides[invoice];
