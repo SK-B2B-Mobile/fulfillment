@@ -645,14 +645,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .role-badge.primary{background:var(--green-bg); color:var(--green); border:1px solid var(--green);}
 .role-badge.child{background:var(--blue-bg); color:#8FBBFF; border:1px solid var(--blue);}
 .dim-group-row.is-me{background:rgba(59,130,246,0.08); border-radius:7px; padding-left:8px; padding-right:8px;}
-.bundle-top{margin:14px 0 4px; padding:12px 16px; border-radius:12px; background:rgba(245,158,11,.12); border:1.5px solid #f59e0b; color:var(--text);}
-.bundle-top .bt-title{font-size:13px; font-weight:800; letter-spacing:.3px; color:#f59e0b; display:flex; align-items:center; gap:9px;}
-.bundle-top .bt-sub{font-size:12px; color:var(--text-dim); margin-top:4px;}
-.bundle-top .bt-list{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;}
-.bundle-top .bt-chip{padding:5px 11px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); font-size:12px; font-weight:700; cursor:pointer;}
+.bundle-top{margin:10px 0 2px; padding:6px 10px; border-radius:9px; background:rgba(245,158,11,.10); border-left:3px solid #f59e0b; font-size:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.bundle-top .bt-title{font-weight:800; letter-spacing:.3px; color:#f59e0b; white-space:nowrap;}
+.bundle-top .bt-sub{color:var(--text-dim);}
+.bundle-top .bt-chip{padding:2px 8px; border-radius:6px; background:var(--surface2); border:1px solid var(--border); font:700 11.5px ui-monospace,Menlo,monospace; cursor:pointer;}
 .bundle-top .bt-chip.me{border-color:#f59e0b; cursor:default;}
-.bundle-top .bt-chip small{font-weight:500; color:var(--text-dim); margin-left:6px;}
-.bundle-check{margin:10px 0 0; font-size:11.5px; color:var(--text-dim); display:flex; align-items:center; gap:8px;}
+.bundle-top .bt-chip small{font:500 11px system-ui,sans-serif; color:var(--text-dim); margin-left:5px;}
 .dim-extras-loading{margin-top:12px; padding:12px 16px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:12px; color:var(--text-dim); display:flex; align-items:center; gap:9px;}
 .moved-hint{font-size:10px; color:var(--text-dim); margin-top:5px; text-align:right; max-width:230px;}
 
@@ -3145,28 +3143,26 @@ function dimCandidatesWorthLoading(o){
  *   (1) 이 오더가 묶음이라는 사실을 이미 아는 경우(dimsLinkedTo / dimsChildren) → 팝업이 열리자마자 상단에 안내 + "Loading…" 표시
  *   (2) 아직 모르는 경우 → 조회 중에는 작은 "Checking…" 한 줄, 끝나면 묶음이면 상단 안내, 아니면 사라짐 */
 function bundleTopHtml_(o){
-  const known = !!(o.dimsLinkedTo || (o.dimsChildren||[]).length);
   const mem = o.dimsGroupMembers || [];
   if (mem.length >= 2) return bundleTopLoaded_(o, mem);
-  if (known) return `<div class="bundle-top"><div class="bt-title">🔗 BUNDLED ORDER — ships together with other orders</div>
-      <div class="bt-sub"><span class="spinner"></span> Loading the bundled orders… please wait before closing this window.</div></div>`;
-  return (o._bundleChecked || !dimCandidatesWorthLoading(o)) ? '' : `<div class="bundle-check"><span class="spinner"></span>Checking for bundled orders…</div>`;
+  const known = !!(o.dimsLinkedTo || (o.dimsChildren||[]).length);
+  if (known) return `<div class="bundle-top"><span class="bt-title">🔗 BUNDLED</span><span class="bt-sub"><span class="spinner"></span>Loading bundled orders… please wait before closing.</span></div>`;
+  return '';
 }
+function _custShort_(c){ return String(c||'').replace(/^.*\(([^)]*)\).*$/, '$1') || String(c||''); }
 function bundleTopLoaded_(o, mem){
-  return `<div class="bundle-top"><div class="bt-title">🔗 BUNDLED SHIPMENT — ${mem.length} orders ship together</div>
-    <div class="bt-sub">Check all of these orders before shipping.</div>
-    <div class="bt-list">${mem.map(m=>{
-      const me = m.invoice === o.invoice;
-      return `<span class="bt-chip${me?' me':''}" ${me?'':`onclick="jumpToInvoice('${m.invoice}')"`}>${m.isPrimary?'★ ':''}${m.invoice}<small>${m.customer||''}${me?' · this order':''}</small></span>`;
-    }).join('')}</div></div>`;
+  return `<div class="bundle-top"><span class="bt-title">🔗 BUNDLED · ${mem.length} orders</span>${mem.map(m=>{
+    const me = m.invoice === o.invoice;
+    const c = _custShort_(m.customer);
+    return `<span class="bt-chip${me?' me':''}" ${me?'':`onclick="jumpToInvoice('${m.invoice}')" title="Open ${m.invoice}"`}>${m.isPrimary?'★ ':''}${m.invoice}<small>${me?'this order':c}</small></span>`;
+  }).join('')}</div>`;
 }
 function updateBundleTop_(invoice, failed){
   if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return;
   const box = document.getElementById('bundle-top'); if (!box) return;
   CURRENT_ORDER._bundleChecked = true;
   if (failed && !(CURRENT_ORDER.dimsGroupMembers||[]).length && (CURRENT_ORDER.dimsLinkedTo || (CURRENT_ORDER.dimsChildren||[]).length)){
-    box.innerHTML = `<div class="bundle-top"><div class="bt-title">🔗 BUNDLED ORDER — ships together with other orders</div>
-      <div class="bt-sub">Could not load the list. <button class="link-btn" onclick="loadDimCandidates('${invoice}')">Retry</button></div></div>`;
+    box.innerHTML = `<div class="bundle-top"><span class="bt-title">🔗 BUNDLED</span><span class="bt-sub">Could not load the list. <button class="link-btn" onclick="loadDimCandidates('${invoice}')">Retry</button></span></div>`;
     return;
   }
   box.innerHTML = bundleTopHtml_(CURRENT_ORDER);
