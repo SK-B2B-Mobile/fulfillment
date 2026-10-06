@@ -402,6 +402,8 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .bolm-btns{display:flex; gap:8px; justify-content:flex-end; margin-top:14px;}
 .bolm-b{border-radius:8px; padding:9px 16px; font-weight:700; font-size:13px; cursor:pointer; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-family:var(--sans);}
 .bolm-b.pri{background:var(--green); border-color:var(--green); color:#07241a;}
+.bolm-b.edit{background:var(--blue); border-color:var(--blue); color:#fff;}
+.bolm-hist{white-space:pre-wrap; font-size:10.5px; color:#9fb0c8; max-height:90px; overflow:auto;}
 .ship2-bol-link{font-size:11px; font-weight:700; color:var(--blue); text-decoration:none; border-bottom:1px dashed var(--blue); cursor:pointer; background:none; border-top:none; border-left:none; border-right:none; padding:0; font-family:var(--sans);}
 .ship2-bol-chip{font-family:var(--mono); font-size:10.5px; font-weight:700; color:#C4B0FF; background:var(--purple-bg); border:1px solid rgba(139,92,246,0.4); border-radius:6px; padding:2px 7px; white-space:nowrap;}
 .ship2-bol-edit{background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:11px; padding:0 0 0 2px;}
@@ -1924,7 +1926,7 @@ function applyTodayResult(res){
     const job = TODAY_JOBS.find(j => j.invoice === inv);
     if (job){
       if (_ovSettled_(ov, String(job.bol || '') === String(ov.bol || '') && String(job.bolCost === undefined || job.bolCost === null ? '' : job.bolCost) === String(ov.cost === undefined || ov.cost === null ? '' : ov.cost), now)){ delete _recentBolOverrides[inv]; }
-      else { job.bol = ov.bol; job.bolCost = (ov.cost === undefined || ov.cost === null) ? '' : ov.cost; job.bolBy = ov.by || ''; job.bolAt = ov.at || ''; }
+      else { job.bol = ov.bol; job.bolCost = (ov.cost === undefined || ov.cost === null) ? '' : ov.cost; job.bolBy = ov.by || ''; job.bolAt = ov.at || ''; if (ov.hist !== undefined) job.bolHist = ov.hist; }
     }
   });
   _applyMovedOverrides_(TODAY_JOBS, now); // ★ 2026-10-05 신규
@@ -1963,7 +1965,7 @@ function _registerRemotePatch_(p, now){
   if (follows) TODAY_JOBS.forEach(j => { if (j.dimsLinkedTo === p.inv) invs.push(j.invoice); });
   invs.forEach(inv => {
     if (p.kind === 'ship') _recentShippedOverrides[inv] = { shipped: !!f.shipped, shippedAt: f.shippedAt || '', shippedBy: f.shippedBy || '', until: until };
-    else if (p.kind === 'bol') _recentBolOverrides[inv] = { bol: String(f.bol || ''), cost: (f.cost === undefined || f.cost === null) ? '' : f.cost, by: f.by || '', at: f.at || '', until: until };
+    else if (p.kind === 'bol') _recentBolOverrides[inv] = { bol: String(f.bol || ''), cost: (f.cost === undefined || f.cost === null) ? '' : f.cost, by: f.by || '', at: f.at || '', hist: (f.hist === undefined ? undefined : String(f.hist || '')), until: until };
     else if (p.kind === 'conf') _recentSalesConfirmOverrides[inv] = {
       confirmed: !!f.confirmed, confirmedAt: f.confirmedAt || '', confirmedBy: f.confirmedBy || '',
       wasUndone: !!f.wasUndone, undoneAt: f.undoneAt || '', undoneBy: f.undoneBy || '', until: until };
@@ -2634,29 +2636,43 @@ function openBolModal(invoice, draft){
   _bolModalInv = invoice;
   const isLinked = !!j.dimsLinkedTo;
   const complete = !!(j.bol && String(j.bol).trim()) && _hasBolCost_(j);
-  const editable = !isLinked && !!j.salesConfirmed && !j.shipped && !complete;
+  const canChange = !isLinked && !!j.salesConfirmed && !j.shipped;           // 입력/수정 가능한 상태(출고 전 + 영업 컨펌 후)
+  const editing = !!(draft && draft.editing) && canChange && complete;       // Edit 버튼을 눌러 수정 중
+  const editable = canChange && (!complete || editing);
+  _bolModalEditing = editing;
   const banner = document.getElementById('bolm-banner');
   let msg = '';
   if (isLinked) msg = 'Linked order — BOL# and trucking cost are managed on primary invoice ' + j.dimsLinkedTo + '.';
   else if (!j.salesConfirmed) msg = 'Locked — Sales must confirm this order before BOL# and trucking cost can be edited.';
   else if (j.shipped) msg = 'Shipped — view only.';
-  else if (complete) msg = 'Saved — view only. BOL# and trucking cost cannot be changed after saving.';
+  else if (editing) msg = 'Editing — your name and the time are recorded when you save.';
+  else if (complete) msg = 'Saved. Press Edit to change it (your name and time will be recorded).';
   banner.style.display = msg ? '' : 'none';
   banner.textContent = msg;
   document.getElementById('bolm-title').textContent = editable ? 'BOL# & Trucking Cost' : 'Shipping Info (BOL# & Trucking)';
   document.getElementById('bolm-sub').textContent = j.invoice + (j.remarks ? ' · ' + j.remarks : '');
   const fb = document.getElementById('bolm-bol'), fc = document.getElementById('bolm-cost');
-  fb.value = draft ? draft.bol : (j.bol || '');
-  fc.value = draft ? draft.cost : (_hasBolCost_(j) ? Number(j.bolCost).toFixed(2) : '');
+  fb.value = draft && draft.bol !== undefined ? draft.bol : (j.bol || '');
+  fc.value = draft && draft.cost !== undefined ? draft.cost : (_hasBolCost_(j) ? Number(j.bolCost).toFixed(2) : '');
   fb.readOnly = fc.readOnly = !editable;
   document.getElementById('bolm-save').style.display = editable ? '' : 'none';
+  document.getElementById('bolm-edit').style.display = (canChange && complete && !editing) ? '' : 'none';
   document.getElementById('bolm-err').textContent = (draft && draft.error) || '';
   const meta = document.getElementById('bolm-meta');
-  if (j.bolBy || j.bolAt){ meta.style.display = ''; meta.textContent = 'Entered by ' + (j.bolBy || '-') + (j.bolAt ? ' · ' + _fmtShipAt_(j.bolAt) : ''); }
+  if (j.bolBy || j.bolAt){ meta.style.display = ''; meta.textContent = (j.bolHist ? 'Last edited by ' : 'Entered by ') + (j.bolBy || '-') + (j.bolAt ? ' · ' + _fmtShipAt_(j.bolAt) : ''); }
   else meta.style.display = 'none';
+  const hi = document.getElementById('bolm-hist');
+  if (j.bolHist){ hi.style.display = ''; hi.textContent = 'Edit history\n' + String(j.bolHist).split('\n').reverse().join('\n'); }
+  else hi.style.display = 'none';
   document.getElementById('bolm-ov').classList.add('on');
   if (editable) setTimeout(() => { fb.focus(); fb.setSelectionRange(fb.value.length, fb.value.length); }, 30);
 }
+// Edit 버튼 — 저장된 값을 수정 모드로 전환(저장 시 서버가 입력자/시각을 갱신하고 이전 값을 이력에 남김)
+function startBolEdit(){
+  if (!_bolModalInv) return;
+  openBolModal(_bolModalInv, { editing: true });
+}
+let _bolModalEditing = false;
 function closeBolModal(){
   document.getElementById('bolm-ov').classList.remove('on');
   _bolModalInv = '';
@@ -2683,13 +2699,15 @@ async function saveBolModal(){
   const clearing = false;
   const cost = Math.round(parseFloat(costRaw) * 100) / 100;
   const by = authGetName() || 'Dispatch (tablet)';
-  const draft = { bol: bol, cost: costRaw };
+  const wasComplete = !!(job.bol && String(job.bol).trim()) && _hasBolCost_(job);
+  if (wasComplete && String(job.bol).trim() === bol && Number(job.bolCost) === Math.round(parseFloat(costRaw) * 100) / 100){ closeBolModal(); return; } // 바뀐 게 없으면 그냥 닫기
+  const draft = { bol: bol, cost: costRaw, editing: wasComplete };
   closeBolModal();
   _bolInflight[invoice] = true;
   _markLocalOp_(invoice, 'bol');
   const nowIso = _fmtIsoNow_();
   const targets = [job].concat(TODAY_JOBS.filter(j => j.dimsLinkedTo === invoice));
-  const snaps = targets.map(j => ({ inv: j.invoice, bol: j.bol, cost: j.bolCost, by: j.bolBy, at: j.bolAt, ov: _recentBolOverrides[j.invoice] }));
+  const snaps = targets.map(j => ({ inv: j.invoice, bol: j.bol, cost: j.bolCost, by: j.bolBy, at: j.bolAt, hist: j.bolHist, ov: _recentBolOverrides[j.invoice] }));
   targets.forEach(j => {
     j.bol = bol; j.bolCost = cost; j.bolBy = clearing ? '' : by; j.bolAt = clearing ? '' : nowIso;
     _recentBolOverrides[j.invoice] = { bol: bol, cost: cost, by: j.bolBy, at: j.bolAt, until: Date.now() + 120000 };
@@ -2699,7 +2717,7 @@ async function saveBolModal(){
   let res;
   try {
     const t0 = performance.now();
-    res = await _serial_(invoice, () => gasPostSmart_('setBolNumber', { invoice: invoice, bol: bol, cost: clearing ? '' : String(cost), by: by }));
+    res = await _serial_(invoice, () => gasPostSmart_('setBolNumber', { invoice: invoice, bol: bol, cost: clearing ? '' : String(cost), by: by, edit: wasComplete ? '1' : '' }));
     if (res && res.timing) console.log('%c[setBolNumber] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
   } catch (e) {
     res = { ok:false, error: String(e && e.message || e) };
@@ -2710,8 +2728,8 @@ async function saveBolModal(){
     const rc = (res.cost === undefined || res.cost === null) ? '' : res.cost;
     TODAY_JOBS.forEach(j => {
       if (j.invoice === invoice || j.dimsLinkedTo === invoice){
-        j.bol = res.bol; j.bolCost = rc; j.bolBy = res.by || ''; j.bolAt = res.at || '';
-        _recentBolOverrides[j.invoice] = { bol: res.bol, cost: rc, by: res.by || '', at: res.at || '', until: Date.now() + 420000 };
+        j.bol = res.bol; j.bolCost = rc; j.bolBy = res.by || ''; j.bolAt = res.at || ''; j.bolHist = res.hist || '';
+        _recentBolOverrides[j.invoice] = { bol: res.bol, cost: rc, by: res.by || '', at: res.at || '', hist: res.hist || '', until: Date.now() + 420000 };
       }
     });
     renderShipping();
@@ -2719,11 +2737,11 @@ async function saveBolModal(){
   } else {
     snaps.forEach(sn => {
       const j = TODAY_JOBS.find(x => x.invoice === sn.inv);
-      if (j){ j.bol = sn.bol; j.bolCost = sn.cost; j.bolBy = sn.by; j.bolAt = sn.at; }
+      if (j){ j.bol = sn.bol; j.bolCost = sn.cost; j.bolBy = sn.by; j.bolAt = sn.at; j.bolHist = sn.hist; }
       if (sn.ov) _recentBolOverrides[sn.inv] = sn.ov; else delete _recentBolOverrides[sn.inv];
     });
     renderShipping();
-    openBolModal(invoice, { bol: draft.bol, cost: draft.cost, error: (res && res.error) ? res.error : 'Could not save. Check your connection and try again.' });
+    openBolModal(invoice, { bol: draft.bol, cost: draft.cost, editing: draft.editing, error: (res && res.error) ? res.error : 'Could not save. Check your connection and try again.' });
   }
 }
 
@@ -4230,7 +4248,8 @@ authInit();
         <div class="bolm-money"><span>$</span><input class="bolm-f" id="bolm-cost" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
         <div class="bolm-err" id="bolm-err"></div>
         <div class="bolm-meta" id="bolm-meta" style="display:none"></div>
-        <div class="bolm-btns"><button class="bolm-b" onclick="closeBolModal()">Close</button><button class="bolm-b pri" id="bolm-save" onclick="saveBolModal()">Save</button></div>
+        <div class="bolm-meta bolm-hist" id="bolm-hist" style="display:none"></div>
+        <div class="bolm-btns"><button class="bolm-b" onclick="closeBolModal()">Close</button><button class="bolm-b edit" id="bolm-edit" style="display:none" onclick="startBolEdit()">✎ Edit</button><button class="bolm-b pri" id="bolm-save" onclick="saveBolModal()">Save</button></div>
       </div>
     </div>
 </body>
