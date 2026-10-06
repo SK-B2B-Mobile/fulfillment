@@ -1679,7 +1679,11 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
 
       <div class="pv-invoice-picker">
-        <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검수할 단독 오더 선택</label>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <label style="font-size:11px; color:var(--text-dim); font-weight:700;">검수할 단독 오더 선택</label>
+          <!-- ★ 2026-10-05 신규(현장 지적) — 오더를 고른 뒤 나가는(선택 해제) 버튼을 항상 눈에 보이게. 선택했을 때만 표시. -->
+          <button type="button" id="ssClearBtn" class="btn btn-ghost btn-sm" style="display:none; padding:2px 10px; font-size:11px;" onclick="clearSsSelection()">← 선택 안 함 (목록으로 돌아가기)</button>
+        </div>
         <input type="text" id="ssInvoiceSearch" placeholder="🔍 인보이스 번호 또는 고객사명 검색..." autocomplete="off" style="margin-top:8px; width:100%; box-sizing:border-box; padding:10px 12px; border-radius:8px; border:1.5px solid var(--border2); background:var(--surface2); color:var(--text); font-size:14px;">
         <select id="ssInvoiceSelect" style="margin-top:8px;" onchange="onSsInvoiceChange()"></select>
         <div class="pv-worker-row">
@@ -7911,10 +7915,22 @@ function renderSsInvoiceOptions(filterText, keepSelected){
     ? searchPool.filter(o => (o.invoice||'').toLowerCase().includes(q) || (o.customer||'').toLowerCase().includes(q))
     : searchPool;
   const prevSelected = keepSelected !== undefined ? keepSelected : sel.value;
+  // ★ 2026-10-05 버그 수정(현장 지적) — "1차 검수에서 오더를 고른 뒤 목록을 다시 열면 '← 선택 안 함' 줄이 없어서
+  //   나갈 수 없음". 원인: 검색으로 찾은 오더(예: 이미 패킹존으로 넘어간 완료 오더)나 검색창 문구로 걸러진 목록에는
+  //   선택된 오더가 없어서, 목록을 다시 그릴 때 선택값(sel.value)이 조용히 비워졌고 그래서 "선택 안 함" 줄도 사라졌음
+  //   (패널은 계속 열려 있는 어긋난 상태). 이제 선택된 오더가 현재 목록에 없어도 옵션을 유지해서 선택 상태와
+  //   "← 선택 안 함" 줄이 항상 일치하게 함.
+  let keepOpt = '';
+  if(prevSelected && !filtered.some(o => o.invoice === prevSelected)){
+    const so = _standaloneOrders.find(o => o.invoice === prevSelected);
+    keepOpt = so
+      ? `<option value="${so.invoice}">${so.invoice} · ${so.customer||''} (SKU ${so.totalSku})</option>`
+      : `<option value="${prevSelected}">${prevSelected}</option>`;
+  }
   sel.innerHTML = '<option value="">— 오더를 선택하세요 —</option>' + filtered.map(o =>
     `<option value="${o.invoice}">${o.invoice} · ${o.customer||''} (SKU ${o.totalSku})</option>`
-  ).join('');
-  if(prevSelected && filtered.some(o => o.invoice === prevSelected)) sel.value = prevSelected;
+  ).join('') + keepOpt;
+  if(prevSelected && (keepOpt || filtered.some(o => o.invoice === prevSelected))) sel.value = prevSelected;
 
   let list = document.getElementById('ssInvoiceList');
   if(!list){
@@ -8097,15 +8113,33 @@ async function populateSsInvoiceSelect(){
   if(empty) empty.style.display = 'none';
   const prevSelected = sel.value;
   const searchEl = document.getElementById('ssInvoiceSearch');
-  renderSsInvoiceOptions(searchEl ? searchEl.value : '', prevSelected);
+  // ★ 2026-10-05 — 오더를 고르면 검색창에 "IN… · 고객사 (SKU n)" 설명이 들어가는데, 새로고침 때 그 문구로 목록을 걸러
+  //   선택이 풀리던 문제 방지: 검색창이 선택 오더의 설명 문구면 필터 없이(전체) 다시 그림.
+  const _stTxt = searchEl ? searchEl.value : '';
+  const _filterTxt = (prevSelected && _stTxt.indexOf(prevSelected) === 0) ? '' : _stTxt;
+  renderSsInvoiceOptions(_filterTxt, prevSelected);
   if(!prevSelected || !candidates.some(o => o.invoice === prevSelected)) {
     if(!prevSelected && panel) panel.classList.remove('active');
   }
 }
 
+// ★ 2026-10-05 신규 — 1차 검수 오더 선택 해제(Pack Verify 의 "← 선택 안 함 (목록으로 돌아가기)"와 같은 동작).
+function clearSsSelection(){
+  const sel = document.getElementById('ssInvoiceSelect');
+  if(!sel) return;
+  sel.value = '';
+  const search = document.getElementById('ssInvoiceSearch');
+  if(search) search.value = '';
+  const list = document.getElementById('ssInvoiceList');
+  if(list) list.style.display = 'none';
+  sel.dispatchEvent(new Event('change'));
+  renderSsInvoiceOptions('', '');
+}
 async function onSsInvoiceChange(){
   const sel = document.getElementById('ssInvoiceSelect');
   const invoice = sel.value;
+  const _cb = document.getElementById('ssClearBtn');
+  if(_cb) _cb.style.display = invoice ? 'inline-block' : 'none';
   const panel = document.getElementById('ssScanPanel');
   // ★ 2026-09-01 신규 — 수량 확인 카드가 열려있는 채로 다른 오더로 넘어가면
   //   엉뚱한 오더에 그 수량이 저장될 위험이 있으므로, 오더를 바꾸는 순간 무조건
