@@ -2569,6 +2569,23 @@ function _serial_(key, fn){
 }
 // 서버가 응답 전에 "낡은 상세 미러"를 무효화해두므로, 이어서 최신 상세를 계산해 미러를 다시 채우도록
 // 요청(기다리지 않음 — 다른 직원 화면은 몇 초 안에 새 값을 받음). 실패하면 한 번 더 시도.
+
+// ★ 2026-10-06 버그 수정 — 목록은 1분마다 시트에서 새로 계산되는데, 상세 팝업 미러(salesInvDetail_)는
+//   "쓰기 시점"에만 갱신됨. 그래서 TV/배치 화면 등 다른 경로로 이동 처리되면 목록은 Moved인데 팝업은 No로 남을 수 있었음
+//   (Sales Confirm 잠김). 목록이 "이동 완료"라고 알고 있는데 팝업 데이터가 No면, 팝업 값을 목록 기준으로 맞추고
+//   서버에 상세 미러 재계산을 요청(1회·30초 간격 제한)해서 미러 자체도 바로잡음.
+const _movedHealAt = {};
+function _reconcileMovedWithList_(res){
+  try {
+    if (!res || !res.invoice || res.movedToPacking) return;
+    const lj = (TODAY_JOBS||[]).find(j => j.invoice === res.invoice) || (SHEET_JOBS||[]).find(j => j.invoice === res.invoice);
+    if (!lj || !lj.movedToPacking) return;
+    res.movedToPacking = true;
+    if ((_STAGE_RANK[res.packStage||'none']||0) < (_STAGE_RANK[lj.packStage||'taken']||2)) res.packStage = lj.packStage && lj.packStage !== 'none' ? lj.packStage : 'taken';
+    const now = Date.now();
+    if (!_movedHealAt[res.invoice] || now - _movedHealAt[res.invoice] > 30000) { _movedHealAt[res.invoice] = now; _syncInvoiceMirror_(res.invoice); }
+  } catch(e){}
+}
 function _syncInvoiceMirror_(invoice){
   gasPost('syncInvoiceMirror', { invoice: invoice }).then(r => {
     if (!r || !r.ok) return gasPost('syncInvoiceMirror', { invoice: invoice });
@@ -2581,6 +2598,7 @@ async function _refreshDetailSilently_(invoice){
     const ov = document.getElementById('detail-overlay');
     if (res && res.ok && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice && ov && ov.classList.contains('show')){
       try { const mov = _recentMovedOverrides[invoice]; if (mov && mov.until > Date.now()) _applyMovedOv_(res, mov); } catch(e){}
+      _reconcileMovedWithList_(res);
       CURRENT_ORDER = res;
       renderDetail(res);
     }
@@ -3478,6 +3496,7 @@ async function openInvoice(inv){
   const gotLive = await subscribeInvoiceDetailMirror_(inv, (payload) => {
     // ★ 2026-10-05 — 방금 누른 "Moved to Packing" 상태가 아직 보호 중이면, 낡은 상세 미러가 와도 덮어쓰지 않게 함
     try { const mov = _recentMovedOverrides[payload.invoice]; if (mov && mov.until > Date.now()) _applyMovedOv_(payload, mov); } catch(e){}
+    _reconcileMovedWithList_(payload);
     CURRENT_ORDER = payload;
     renderDetail(payload);
   });
@@ -3503,6 +3522,7 @@ async function openInvoice(inv){
     return;
   }
   try { const mov = _recentMovedOverrides[res.invoice]; if (mov && mov.until > Date.now()) _applyMovedOv_(res, mov); } catch(e){}
+  _reconcileMovedWithList_(res);
   CURRENT_ORDER = res;
   renderDetail(res);
 }
