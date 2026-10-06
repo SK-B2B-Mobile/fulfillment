@@ -1941,7 +1941,7 @@ function applyTodayResult(res){
 //   같은 값이라 화면이 흔들리지 않고(90초 연속 일치 시 보호 해제), 알림을 못 받아도 예전과 동일하게
 //   최대 1분 뒤 정확한 값이 반영됨(= 더 나빠지는 경우 없음).
 // ═══════════════════════════════════════════════════════════
-const _PATCH_MAX_AGE_MS = 180000;     // 이보다 오래된 알림은 무시(페이지를 막 열었을 때 쌓여 있던 것 등)
+const _PATCH_MAX_AGE_MS = 420000;     // 이보다 오래된 알림은 무시(페이지를 막 열었을 때 쌓여 있던 것 등)
 const _patchSeen = {};                // { 필드키: 마지막으로 처리한 ts }
 const _localOpAt = {};                // { 'invoice|kind': 내가 이 저장을 시작한 시각 }
 function _markLocalOp_(invoice, kind){ _localOpAt[invoice + '|' + kind] = Date.now(); }
@@ -2162,7 +2162,9 @@ function renderShipping(){
   //   Confirmed 양쪽에서 모두 빠지고 Shipped 칸으로만 집계(작업자·영업팀 모두
   //   "지금 해야 할 일"만 한눈에 보도록).
   const awaitingConfirmCount = primaries.filter(j => !j.shipped && !j.salesConfirmed).length;
-  const confirmedCount = primaries.filter(j => !j.shipped && j.salesConfirmed).length;
+  // ★ 2026-10-05 변경 — "Confirmed" 칸 = 컨펌은 됐지만 BOL#·트럭킹 비용이 아직 저장 안 된 건(= 앞으로 입력할 남은 건수).
+  //   BOL#과 비용이 둘 다 저장되면 하나씩 줄어듦. 출고 완료 건은 Shipped 칸으로만 집계.
+  const confirmedCount = primaries.filter(j => !j.shipped && j.salesConfirmed && !(j.bol && String(j.bol).trim() && _hasBolCost_(j))).length;
   // ★ 2026-10-02 수정(피드백 반영) — "지연" 개념을 행(Age 칸)뿐 아니라 맨 위
   //   요약 칸에도 노출. 2일 이상 밀린 미출고 팔렛 수를 한눈에 보여줌.
   const lateCount = primaries.filter(j => {
@@ -2171,9 +2173,9 @@ function renderShipping(){
     return d !== null && d >= 2;
   }).length;
   summaryEl.innerHTML = `
-    <div class="ship2-tile"><div class="num">${primaries.length}</div><div class="lbl">TK Pallets</div></div>
+    <div class="ship2-tile" title="All TK invoices (including linked orders)"><div class="num">${jobs.length}</div><div class="lbl">TK Orders</div></div>
     <div class="ship2-tile awaiting"><div class="num">${awaitingConfirmCount}</div><div class="lbl">Awaiting Confirm</div></div>
-    <div class="ship2-tile confirmed"><div class="num">${confirmedCount}</div><div class="lbl">Confirmed</div></div>
+    <div class="ship2-tile confirmed" title="Sales-confirmed orders still waiting for BOL# and trucking cost"><div class="num">${confirmedCount}</div><div class="lbl">Confirmed · Needs BOL/$</div></div>
     <div class="ship2-tile late"><div class="num">${lateCount}</div><div class="lbl">2+ Days Late</div></div>
     <div class="ship2-tile shipped"><div class="num">${shippedCount}</div><div class="lbl">Shipped</div></div>
   `;
@@ -2441,7 +2443,7 @@ async function toggleShipped(invoice, nextShipped){
     TODAY_JOBS.forEach(j => {
       if (j.invoice === invoice || j.dimsLinkedTo === invoice){
         j.shipped = res.shipped; j.shippedAt = res.shippedAt; j.shippedBy = res.shippedBy;
-        _recentShippedOverrides[j.invoice] = { shipped: res.shipped, shippedAt: res.shippedAt, shippedBy: res.shippedBy, until: Date.now() + 180000 };
+        _recentShippedOverrides[j.invoice] = { shipped: res.shipped, shippedAt: res.shippedAt, shippedBy: res.shippedBy, until: Date.now() + 420000 };
       }
     });
     renderToday(); renderShipping();
@@ -2590,7 +2592,7 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
       j.salesConfirmWasUndone = res.wasUndone;
       j.salesConfirmUndoneAt = res.undoneAt;
       j.salesConfirmUndoneBy = res.undoneBy;
-      _recentSalesConfirmOverrides[j.invoice] = _confirmOverrideFromJob_(j, 180000);
+      _recentSalesConfirmOverrides[j.invoice] = _confirmOverrideFromJob_(j, 420000);
     };
     TODAY_JOBS.forEach(j => { if (j.invoice === invoice || j.dimsLinkedTo === invoice) apply(j); });
     renderShipping();
@@ -2631,12 +2633,14 @@ function openBolModal(invoice, draft){
   if (!j) return;
   _bolModalInv = invoice;
   const isLinked = !!j.dimsLinkedTo;
-  const editable = !isLinked && !!j.salesConfirmed && !j.shipped;
+  const complete = !!(j.bol && String(j.bol).trim()) && _hasBolCost_(j);
+  const editable = !isLinked && !!j.salesConfirmed && !j.shipped && !complete;
   const banner = document.getElementById('bolm-banner');
   let msg = '';
   if (isLinked) msg = 'Linked order — BOL# and trucking cost are managed on primary invoice ' + j.dimsLinkedTo + '.';
   else if (!j.salesConfirmed) msg = 'Locked — Sales must confirm this order before BOL# and trucking cost can be edited.';
-  else if (j.shipped) msg = 'Shipped — locked. Undo the shipped status to edit.';
+  else if (j.shipped) msg = 'Shipped — view only.';
+  else if (complete) msg = 'Saved — view only. BOL# and trucking cost cannot be changed after saving.';
   banner.style.display = msg ? '' : 'none';
   banner.textContent = msg;
   document.getElementById('bolm-title').textContent = editable ? 'BOL# & Trucking Cost' : 'Shipping Info (BOL# & Trucking)';
@@ -2673,13 +2677,11 @@ async function saveBolModal(){
   const errEl = document.getElementById('bolm-err');
   const bol = document.getElementById('bolm-bol').value.trim();
   const costRaw = document.getElementById('bolm-cost').value.replace(/[$,\s]/g, '');
-  const clearing = !bol && costRaw === '';
-  if (!clearing){
-    if (!bol){ errEl.textContent = 'Please enter a BOL#.'; return; }
-    if (costRaw === ''){ errEl.textContent = 'Please enter the trucking cost (enter 0 if none).'; return; }
-    if (!/^\d+(\.\d{1,2})?$/.test(costRaw)){ errEl.textContent = 'Cost must be a number, 0 or more (up to 2 decimals).'; return; }
-  }
-  const cost = clearing ? '' : Math.round(parseFloat(costRaw) * 100) / 100;
+  if (!bol){ errEl.textContent = 'Please enter a BOL#.'; return; }
+  if (costRaw === ''){ errEl.textContent = 'Please enter the trucking cost (enter 0 if none).'; return; }
+  if (!/^\d+(\.\d{1,2})?$/.test(costRaw)){ errEl.textContent = 'Cost must be a number, 0 or more (up to 2 decimals).'; return; }
+  const clearing = false;
+  const cost = Math.round(parseFloat(costRaw) * 100) / 100;
   const by = authGetName() || 'Dispatch (tablet)';
   const draft = { bol: bol, cost: costRaw };
   closeBolModal();
@@ -2709,7 +2711,7 @@ async function saveBolModal(){
     TODAY_JOBS.forEach(j => {
       if (j.invoice === invoice || j.dimsLinkedTo === invoice){
         j.bol = res.bol; j.bolCost = rc; j.bolBy = res.by || ''; j.bolAt = res.at || '';
-        _recentBolOverrides[j.invoice] = { bol: res.bol, cost: rc, by: res.by || '', at: res.at || '', until: Date.now() + 180000 };
+        _recentBolOverrides[j.invoice] = { bol: res.bol, cost: rc, by: res.by || '', at: res.at || '', until: Date.now() + 420000 };
       }
     });
     renderShipping();
@@ -3728,8 +3730,8 @@ async function markManualMoved(invoice, moved){
     const srvKnown = (typeof res.movedToPacking === 'boolean');
     if (!srvKnown) console.warn('[setManualPackingMoved] 서버 응답에 movedToPacking 없음 — Code.gs 새 버전 배포 확인 필요', res);
     const ov = srvKnown
-      ? { mp: !!res.movedToPacking, stage: res.packStage || 'none', until: Date.now() + 180000 }
-      : { mp: moved, stage: moved ? (curStage === 'verified' ? 'verified' : 'taken') : 'none', until: Date.now() + 180000 };
+      ? { mp: !!res.movedToPacking, stage: res.packStage || 'none', until: Date.now() + 420000 }
+      : { mp: moved, stage: moved ? (curStage === 'verified' ? 'verified' : 'taken') : 'none', until: Date.now() + 420000 };
     _recentMovedOverrides[invoice] = ov;
     const cur2 = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
     [cur2, TODAY_JOBS.find(j => j.invoice === invoice), SHEET_JOBS.find(j => j.invoice === invoice)].filter(Boolean).forEach(o => _applyMovedOv_(o, ov));
@@ -3811,7 +3813,7 @@ async function saveMethodChange(invoice){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
     return;
   }
-  _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 180000 };
+  _recentMethodOverrides[invoice] = { method: newMethod, until: Date.now() + 420000 };
   _publishPatch_(invoice, 'method');
   _syncInvoiceMirror_(invoice);
   if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
@@ -3895,7 +3897,7 @@ async function savePaymentStatus(invoice){
   }
   // 서버가 "실제로 저장 확인한 값"이 최종값(요청값과 다르면 서버 값으로 바로잡음)
   const confirmedPaid = !!res.paid;
-  _recentPaymentOverrides[invoice] = { paid: confirmedPaid, until: Date.now() + 180000 };
+  _recentPaymentOverrides[invoice] = { paid: confirmedPaid, until: Date.now() + 420000 };
   _publishPatch_(invoice, 'pay');
   if (confirmedPaid !== willBePaid) _applyPaymentUi_(invoice, confirmedPaid);
   const sel3 = document.getElementById('paymentSelect');
