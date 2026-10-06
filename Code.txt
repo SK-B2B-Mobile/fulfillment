@@ -73,6 +73,28 @@ function bumpVersion_() {
   try { CacheService.getScriptCache().remove('openBatches_v1_meta'); } catch (e) {}
 }
 
+/* ★ 2026-10-04 신규(속도 — Sales Confirm 저장 15초 문제) — bumpVersion_()의
+ *   "경량" 버전. bumpVersion_()는 캐시 키 10개를 하나씩 지우고, 그중엔
+ *   "인보이스→행번호 인덱스", "Dimensions 전체 행", "DimLinks", "BatchCustomers
+ *   인덱스"처럼 다시 만들려면 시트를 통째로 읽어야 하는 무거운 캐시도 포함돼
+ *   있음. 그런데 Sales Confirm / 결제확인(PaymentStatus) 저장은 "기존 행의 셀
+ *   몇 개 값만 바꾸는" 작업이라 행 번호도, 디멘션도, 배치 데이터도 전혀 안
+ *   바뀜 → 그 무거운 캐시들을 지울 이유가 없음(지우면 저장할 때마다 모든
+ *   직원의 다음 조회가 전체 시트를 다시 읽게 되어 전체가 느려짐).
+ *   값이 바뀌면 영향받는 3개(listJobs/salesOverview/salesToday 목록 캐시)만
+ *   한 번의 removeAll로 지움. 행이 추가/삭제/이동되는 작업에는 절대 쓰지 말 것
+ *   (그런 곳은 기존 bumpVersion_() 그대로). */
+function bumpVersionLite_() {
+  PROP.setProperty('jobsVersion', _nowVer_());
+  try {
+    CacheService.getScriptCache().removeAll([
+      'listJobs_cache_v1_meta',
+      'salesOverview_cache_v1_meta',
+      'salesToday_cache_v1_meta'
+    ]);
+  } catch (e) { /* 캐시 정리 실패해도 저장 자체는 성공 — 캐시는 짧은 TTL로 곧 만료됨 */ }
+}
+
 // === Header map cache ===
 let __HDR_CACHE = null;
 
@@ -87,6 +109,222 @@ function headerMapCached_() {
   header.forEach((h, i) => { m[norm(String(h))] = i + 1; });
   __HDR_CACHE = { sig, map: m };
   return m;
+}
+
+/* ================= Auth (로그인/세션) ================
+ * ★ 2026-10-02 신규 — 외부에서 링크만 있으면 누구나 보이던 문제를 막기 위한
+ *   1단계 접속 제한. 직원마다 아이디+비밀번호를 발급하고, 로그인 성공 시
+ *   세션 토큰을 CacheService에 보관(최대 6시간 — GAS CacheService 자체 한도).
+ *   "Users" 시트에서 직접 직원 계정을 관리(새 직원 행 추가, Active 열로
+ *   비활성화). 비밀번호는 평문으로 저장되므로, 이 스프레드시트의 공유 권한을
+ *   반드시 제한된 인원에게만 열어두어야 함(Jobs 시트 등 기존 운영 데이터와
+ *   동일한 보호 수준).
+ *   1단계는 "화면 진입 시 로그인 게이트"까지만 — op별 서버 차단(세션 토큰
+ *   없으면 API 자체 거부)은 2단계에서 별도로 추가 예정.
+ */
+const USERS_SHEET = 'Users';
+const SESSION_TTL_SEC = 21600; // 6시간 — CacheService 최대 유효시간
+
+function usersSheet_() {
+  const ss = ss_();
+  let sh = ss.getSheetByName(USERS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(USERS_SHEET);
+    sh.getRange(1, 1, 1, 9).setValues([['ID', 'Name', 'Department', 'Password', 'Active', 'CreatedAt', 'LastLoginAt', 'MustChangePassword', 'WorkerName']]);
+    sh.getRange(1, 1, 1, 9).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  } else {
+    // ★ 2026-10-02 신규 — 기존에 생성된 Users 시트에 누락된 열을 마이그레이션으로 추가
+    if (sh.getLastColumn() < 8) {
+      sh.getRange(1, 8).setValue('MustChangePassword');
+      sh.getRange(1, 8).setFontWeight('bold');
+    }
+    if (sh.getLastColumn() < 9) {
+      sh.getRange(1, 9).setValue('WorkerName');
+      sh.getRange(1, 9).setFontWeight('bold');
+    }
+  }
+  return sh;
+}
+
+// Active 열은 비워두면 기본적으로 "활성"으로 취급 — 명시적으로 N/FALSE/0/아니오/비활성을
+// 적어야만 로그인을 막음. 체크박스(TRUE/FALSE)든 텍스트든 모두 안전하게 동작.
+function isUserActive_(v) {
+  const s = String(v == null ? '' : v).trim().toUpperCase();
+  return s !== 'N' && s !== 'FALSE' && s !== '0' && s !== '아니오' && s !== '비활성';
+}
+
+// MustChangePassword 열은 비워두면 기본적으로 "변경 불필요"로 취급 — 명시적으로
+// Y/TRUE/1/예를 적어야만 로그인 직후 강제 비밀번호 변경 화면을 띄움.
+// (신규 직원에게 임시 비밀번호를 줄 때 관리자가 이 열에 Y를 적어두면 됨)
+function isMustChangePassword_(v) {
+  const s = String(v == null ? '' : v).trim().toUpperCase();
+  return s === 'Y' || s === 'TRUE' || s === '1' || s === '예';
+}
+
+function login_(data) {
+  const id = String((data && data.id) || '').trim();
+  const password = String((data && data.password) || '');
+  if (!id || !password) return { ok: false, error: '아이디와 비밀번호를 입력하세요' };
+
+  const sh = usersSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return { ok: false, error: '등록된 사용자가 없습니다. 관리자에게 계정 생성을 요청하세요.' };
+
+  const rows = sh.getRange(2, 1, last - 1, 9).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowId = String(r[0] || '').trim();
+    // ★ 2026-10-02 수정 — ID는 대소문자 정확히 일치해야 로그인 허용(요청에 따라
+    //   대소문자 무시 매칭에서 변경). Password는 원래부터 대소문자 구분(변경 없음).
+    if (!rowId || rowId !== id) continue;
+
+    if (!isUserActive_(r[4])) return { ok: false, error: '비활성화된 계정입니다. 관리자에게 문의하세요.' };
+
+    const rowPw = String(r[3] || '');
+    if (rowPw !== password) return { ok: false, error: '아이디 또는 비밀번호가 올바르지 않습니다.' };
+
+    const mustChangePassword = isMustChangePassword_(r[7]);
+    const workerName = String(r[8] || '').trim(); // ★ 2026-10-02 신규 — batch.html 전용: 이 계정에 연결된 피킹 작업자 이름(없으면 '')
+    const token = Utilities.getUuid();
+    const userInfo = { id: rowId, name: String(r[1] || rowId), dept: String(r[2] || ''), mustChangePassword: mustChangePassword, workerName: workerName };
+    CacheService.getScriptCache().put('session_' + token, JSON.stringify(userInfo), SESSION_TTL_SEC);
+
+    try { sh.getRange(i + 2, 7).setValue(nowLocal_()); } catch (eLog) { /* best-effort, 로그인 자체는 성공 처리 */ }
+
+    return { ok: true, token: token, name: userInfo.name, dept: userInfo.dept, ttlSec: SESSION_TTL_SEC, mustChangePassword: mustChangePassword, workerName: workerName };
+  }
+  return { ok: false, error: '아이디 또는 비밀번호가 올바르지 않습니다.' };
+}
+
+// ★ 2026-10-02 신규 — 자율 변경(⚙ Account 메뉴)/강제 변경(최초 로그인) 공통 처리.
+// 두 경우 모두 "현재 비밀번호"를 입력받아 확인 후 변경(최초 로그인 시에도 방금
+// 입력한 임시 비밀번호를 다시 입력하게 해서 로직을 하나로 단순화).
+function changePassword_(data) {
+  const token = String((data && data.token) || '').trim();
+  const currentPassword = String((data && data.currentPassword) || '');
+  const newPassword = String((data && data.newPassword) || '');
+  // ★ 2026-10-02 수정 — 비밀번호 규칙: 4~6자, 영문 대/소문자 + 숫자만 허용(특수문자 불가).
+  //   대소문자는 서로 다른 문자로 구분됨(로그인 비교와 동일하게 대소문자 구분).
+  if (!newPassword || newPassword.length < 4 || newPassword.length > 6) {
+    return { ok: false, error: '새 비밀번호는 4~6자여야 합니다.' };
+  }
+  if (!/^[A-Za-z0-9]+$/.test(newPassword)) {
+    return { ok: false, error: '새 비밀번호는 영문과 숫자만 사용할 수 있습니다.' };
+  }
+
+  const info = validateSession_(token);
+  if (!info) return { ok: false, error: 'session expired' };
+
+  const sh = usersSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return { ok: false, error: '등록된 사용자가 없습니다.' };
+
+  const rows = sh.getRange(2, 1, last - 1, 8).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowId = String(r[0] || '').trim();
+    if (!rowId || rowId !== String(info.id || '')) continue;
+
+    const rowPw = String(r[3] || '');
+    if (rowPw !== currentPassword) return { ok: false, error: '현재 비밀번호가 올바르지 않습니다.' };
+
+    sh.getRange(i + 2, 4).setValue(newPassword);
+    sh.getRange(i + 2, 8).setValue(''); // MustChangePassword 해제
+
+    // 세션 캐시도 갱신(이후 whoAmI 등에서 mustChangePassword=false로 보이도록)
+    try {
+      info.mustChangePassword = false;
+      CacheService.getScriptCache().put('session_' + token, JSON.stringify(info), SESSION_TTL_SEC);
+    } catch (eCache) { /* best-effort */ }
+
+    return { ok: true };
+  }
+  return { ok: false, error: '계정을 찾을 수 없습니다.' };
+}
+
+// ★ 2026-10-02 신규 — Account 메뉴에서 소속(Department) 변경. 필수 아님(빈 값 허용),
+// 비밀번호 확인 없이 토큰(로그인 상태)만 있으면 변경 가능 — 민감정보가 아니므로.
+function updateDepartment_(data) {
+  const token = String((data && data.token) || '').trim();
+  const department = String((data && data.department) || '').trim();
+
+  const info = validateSession_(token);
+  if (!info) return { ok: false, error: 'session expired' };
+
+  const sh = usersSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return { ok: false, error: '등록된 사용자가 없습니다.' };
+
+  const rows = sh.getRange(2, 1, last - 1, 8).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowId = String(r[0] || '').trim();
+    if (!rowId || rowId !== String(info.id || '')) continue;
+
+    sh.getRange(i + 2, 3).setValue(department); // Department = C열
+
+    try {
+      info.dept = department;
+      CacheService.getScriptCache().put('session_' + token, JSON.stringify(info), SESSION_TTL_SEC);
+    } catch (eCache) { /* best-effort */ }
+
+    return { ok: true, department: department };
+  }
+  return { ok: false, error: '계정을 찾을 수 없습니다.' };
+}
+
+// ★ 2026-10-02 신규 — batch.html 전용. 이 계정을 피킹 작업자 명단의 한 이름과 영구
+// 연결함(한 작업자 = 기기 1대 = 계정 1개 전제). 한 번 연결되면 다음 로그인부터는
+// login_()이 workerName을 돌려줘서 batch.html이 "이름 선택" 화면을 건너뜀.
+function linkWorkerName_(data) {
+  const token = String((data && data.token) || '').trim();
+  const workerName = String((data && data.workerName) || '').trim();
+  if (!workerName) return { ok: false, error: '작업자 이름이 필요합니다.' };
+
+  const info = validateSession_(token);
+  if (!info) return { ok: false, error: 'session expired' };
+
+  const sh = usersSheet_();
+  const last = sh.getLastRow();
+  if (last < 2) return { ok: false, error: '등록된 사용자가 없습니다.' };
+
+  const rows = sh.getRange(2, 1, last - 1, 9).getValues();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowId = String(r[0] || '').trim();
+    if (!rowId || rowId !== String(info.id || '')) continue;
+
+    sh.getRange(i + 2, 9).setValue(workerName); // WorkerName = I열
+
+    try {
+      info.workerName = workerName;
+      CacheService.getScriptCache().put('session_' + token, JSON.stringify(info), SESSION_TTL_SEC);
+    } catch (eCache) { /* best-effort */ }
+
+    return { ok: true, workerName: workerName };
+  }
+  return { ok: false, error: '계정을 찾을 수 없습니다.' };
+}
+
+function validateSession_(token) {
+  token = String(token || '').trim();
+  if (!token) return null;
+  const raw = CacheService.getScriptCache().get('session_' + token);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
+}
+
+function logout_(data) {
+  const token = String((data && data.token) || '').trim();
+  if (token) { try { CacheService.getScriptCache().remove('session_' + token); } catch (e) {} }
+  return { ok: true };
+}
+
+function whoAmI_(data) {
+  const info = validateSession_(data && data.token);
+  if (!info) return { ok: false, error: 'session expired' };
+  return { ok: true, name: info.name, dept: info.dept, id: info.id, mustChangePassword: !!info.mustChangePassword };
 }
 
 /* ================= HTTP Entrypoints ================ */
@@ -565,10 +803,32 @@ function doPost(e) {
   if (op === 'updateOrderMethod') return json_(updateOrderMethod(data));
   // ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용)
   if (op === 'updatePaymentStatus') return json_(updatePaymentStatus(data));
+  // ★ 2026-10-04 신규 — 저장 응답을 빨리 돌려주기 위해 분리한 "상세 미러 재계산" 후속 요청
+  //   (updatePaymentStatus 참고). 실패해도 데이터엔 영향 없음(미러만 갱신) — 항상 ok.
+  if (op === 'publishTodayPatch') return json_(publishTodayPatch_(data));
+  if (op === 'syncInvoiceMirror') {
+    try { syncSalesInvoiceDetailMirrorFast_(String((data && data.invoice) || '').trim()); } catch (eSm) { /* best-effort */ }
+    return json_({ ok: true });
+  }
   // ★ 2026-08-06 신규 — 디멘션 합산(대표 인보이스 + 포함 오더). BatchPicking.gs에 구현됨.
   if (op === 'linkDimensions')   return json_(linkDimensions(data));
   if (op === 'unlinkDimensions') return json_(unlinkDimensions(data));
   if (op === 'setDimPrimary')    return json_(setDimPrimary(data));
+  // ★ 2026-10-02 신규 — Sales Lookup "Shipping Status" 탭: TK 팔렛 출고 확인 체크
+  if (op === 'setShippedStatus') return json_(setShippedStatus(data));
+  if (op === 'setBolNumber') return json_(setBolNumber(data));
+  // ★ 2026-10-03 신규 — Sales Confirm(영업 컨펌) 체크
+  if (op === 'setSalesConfirm') return json_(setSalesConfirm(data));
+  // ★ 2026-10-03 신규 — 'PU & TK' 전용 전체 박스 수량 입력
+  if (op === 'setPuTkBoxQty') return json_(setPuTkBoxQty(data));
+
+  // ★ 2026-10-02 신규 — 접속 제한(로그인) 1단계
+  if (op === 'login') return json_(login_(data));
+  if (op === 'logout') return json_(logout_(data));
+  if (op === 'whoAmI') return json_(whoAmI_(data));
+  if (op === 'changePassword') return json_(changePassword_(data));
+  if (op === 'updateDepartment') return json_(updateDepartment_(data));
+  if (op === 'linkWorkerName') return json_(linkWorkerName_(data));
 
   return json_({ ok: false, error: 'unknown op' });
 }
@@ -708,61 +968,81 @@ function ensureMethodChangeCol_(sh) {
  * 호출되는 걸 전제로 함(클라이언트에서 검수 완료된 오더에서만 수정 버튼을
  * 보여줌). 서버에서도 한 번 더 "검수가 완료된 오더인지"를 확인해서, 혹시
  * 다른 경로로 요청이 와도 검수 전 오더의 배송방법이 실수로 바뀌지 않게 막음.
- * 입력: { invoice, method('TK'|'UPS'|'PU'), by } */
+ * 입력: { invoice, method('TK'|'UPS'|'PU'|'PU & TK'), by }
+ * ★ 2026-10-03 수정(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 신규 Method 추가.
+ *   고객이 직접 픽업하지만 창고가 팔렛타이징(박스 포장)은 해줘야 하는 경우.
+ *   TK로 넘어가지 않고 계속 PU/UPS와 같은 그룹(Order Detail Lookup)에 남으며,
+ *   전체 치수(Dims) 대신 전체 박스 수량만 입력(setPuTkBoxQty 참고). */
 function updateOrderMethod(data) {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(15000);
+  // ★ 2026-10-04 전면 경량화 — 예전 구현은 "함수 전체"를 문서 락 안에 넣고, 그 안에서
+  //   오더 상세 전체를 다시 계산해 Firestore에 쓰는 무거운 작업(syncSalesInvoiceDetailMirror_)
+  //   까지 했음 → 그동안 다른 모든 직원의 저장이 줄줄이 막힘(15명이 동시에 쓰면 서로를 대기).
+  //   이제: 검증은 전부 락 밖에서(헤더 1번 + 행 1번), 락은 실제 쓰기 구간만, 낡은 상세 미러는
+  //   "무효화"만 하고(빠름) 실제 재계산은 클라이언트가 이어서 보내는 syncInvoiceMirror가 처리
+  //   (updatePaymentStatus와 동일한 구조). 값·검증 규칙·응답 형식은 그대로.
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const method = String((data && data.method) || '').trim().toUpperCase();
     const by = String((data && data.by) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
-    const allowed = ['TK', 'UPS', 'PU'];
-    if (allowed.indexOf(method) === -1) return { ok: false, error: 'method는 TK/UPS/PU 중 하나여야 합니다' };
+    const allowed = ['TK', 'UPS', 'PU', 'PU & TK'];
+    if (allowed.indexOf(method) === -1) return { ok: false, error: 'method는 TK/UPS/PU/PU & TK 중 하나여야 합니다' };
 
     const sh = SHEET_();
-    ensureMethodChangeCol_(sh);
-    const hdr = headerMapCached_();
+    mark('open');
     const norm = normalizeHeaderName_;
-    const row = findRowByKey_('invoice', invoice);
-    if (!row) return { ok: false, error: 'invoice not found' };
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    if (!ctx.hm[norm('MethodChangedAt')] || !ctx.hm[norm('MethodChangedBy')] || !ctx.hm[norm('OriginalMethod')]) {
+      ensureMethodChangeCol_(sh); // 드문 경우: 감사 추적 컬럼 추가 후 다시 읽기
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+    }
+    mark('row');
 
-    const iInsp = hdr[norm('Inspection')];
+    const iInsp = ctx.hm[norm('Inspection')];
     if (iInsp) {
-      const insp = String(sh.getRange(row, iInsp).getValue() || '').trim();
+      const insp = String(ctx.rowVals[iInsp - 1] || '').trim();
       if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 배송방법을 변경할 수 없습니다.' };
     }
 
-    const iTruck = hdr[norm('Trucking')];
+    const iTruck = ctx.hm[norm('Trucking')];
     if (!iTruck) return { ok: false, error: 'Trucking 컬럼을 찾지 못했습니다' };
-    const oldMethod = String(sh.getRange(row, iTruck).getValue() || '').trim();
-    if (oldMethod === method) return { ok: true, method: method, unchanged: true };
+    const oldMethod = String(ctx.rowVals[iTruck - 1] || '').trim();
+    if (oldMethod === method) return { ok: true, method: method, unchanged: true, timing: tm };
 
-    const iAt = hdr[norm('MethodChangedAt')];
-    const iBy = hdr[norm('MethodChangedBy')];
-    const iOrig = hdr[norm('OriginalMethod')];
-    sh.getRange(row, iTruck).setValue(method);
-    if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
-    if (iBy) sh.getRange(row, iBy).setValue(by);
-    // ★ 최초 원래 배송방법은 한 번만 기록(이미 있으면 덮어쓰지 않음) — 여러 번
-    //   바뀌어도 "영업팀이 처음에 뭐라고 했었는지"를 계속 추적할 수 있게 함.
-    if (iOrig) {
-      const existingOrig = String(sh.getRange(row, iOrig).getValue() || '').trim();
-      if (!existingOrig) sh.getRange(row, iOrig).setValue(oldMethod);
+    const iAt = ctx.hm[norm('MethodChangedAt')] || 0;
+    const iBy = ctx.hm[norm('MethodChangedBy')] || 0;
+    const iOrig = ctx.hm[norm('OriginalMethod')] || 0;
+    // ★ 최초 원래 배송방법은 한 번만 기록(이미 있으면 그대로 유지) — 여러 번 바뀌어도
+    //   "영업팀이 처음에 뭐라고 했었는지"를 계속 추적할 수 있게 함.
+    const existingOrig = iOrig ? String(ctx.rowVals[iOrig - 1] || '').trim() : '';
+
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    mark('lock');
+    try {
+      sh.getRange(ctx.row, iTruck).setValue(method);
+      _writeRowCells_(sh, ctx.row, [
+        { col: iAt, value: nowLocal_() },
+        { col: iBy, value: by },
+        { col: iOrig, value: existingOrig ? existingOrig : oldMethod }
+      ]);
+      mark('write');
+    } finally {
+      lock.releaseLock();
     }
 
-    bumpVersion_();
-    // ★ 세션A 수정 — 예전엔 여기서 salesInvDetail_v1_{invoice} 캐시만 직접
-    //   지웠음. 이제 syncSalesInvoiceDetailMirror_(FirestoreSync.gs)로 교체해서,
-    //   캐시 삭제와 동시에 Firestore mirror/salesInvDetail_{invoice} 문서도
-    //   최신 값으로 다시 씀 — 세션A 이전에는 배송방법을 바꿔도 상세조회를
-    //   구독 중인 다른 기기 화면이 실시간으로 안 바뀌었음.
-    try { syncSalesInvoiceDetailMirror_(invoice); } catch (e) { /* best-effort */ }
-    return { ok: true, method: method, oldMethod: oldMethod };
+    bumpVersionLite_();
+    // 낡은 상세 미러 무효화(빠름) — 실제 재계산/갱신은 클라이언트가 이어서 보내는 syncInvoiceMirror
+    try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (e) { /* best-effort */ }
+    mark('total');
+    return { ok: true, method: method, oldMethod: oldMethod, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
-  } finally {
-    lock.releaseLock();
   }
 }
 
@@ -794,10 +1074,14 @@ function getFreshColIndex_(sh, headerName) {
 // ★ 2026-09-03 소소한 성능수정 — 이미 헤더 행을 읽은 김에 3개 컬럼 위치를
 // 바로 계산해서 반환함(updatePaymentStatus가 곧바로 이어서 getFreshColIndex_를
 // 3번 또 부르며 헤더 행을 또 읽던 걸 없앰 — 헤더 행 읽기 4번→1번).
-function ensurePaymentStatusCol_(sh) {
-  const lastCol = sh.getLastColumn();
-  if (lastCol === 0) return { iStatus: 0, iAt: 0, iBy: 0 };
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+function ensurePaymentStatusCol_(sh, headersOpt) {
+  // ★ 2026-10-04 — 호출부가 이미 헤더 행을 읽어둔 경우 그 값을 재사용(시트 호출 절약)
+  let headers = headersOpt;
+  if (!headers) {
+    const lastCol = sh.getLastColumn();
+    if (lastCol === 0) return { iStatus: 0, iAt: 0, iBy: 0 };
+    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  }
   let iStatus = 0, iAt = 0, iBy = 0;
   headers.forEach((h, i) => {
     const v = String(h).trim().toLowerCase();
@@ -831,50 +1115,82 @@ function ensurePaymentStatusCol_(sh) {
  * 다른 경로로 요청이 와도 이르거나 잘못된 시점에 실수로 입력되지 않게 막음.
  * 입력: { invoice, paid(true|false), by } */
 function updatePaymentStatus(data) {
+  // ★ 2026-10-04 전면 경량화(현장 보고 — "Order Detail의 Sales Confirm 저장 15초")
+  //   저장 요청이 돌아오기 전에 하던 일 중 "무거운데 사용자가 기다릴 필요 없는"
+  //   것들을 정리함. 값·검증 규칙·응답 형식은 그대로:
+  //   1) 응답 전에 getSalesInvoiceDetail(오더 상세 전체 재계산 — 과거에 상세창이
+  //      30초 걸렸던 바로 그 무거운 함수)을 돌려 Firestore에 쓰던 것 →
+  //      응답 전에는 "낡은 미러 문서 무효화"(캐시 삭제 + 문서 1개 덮어쓰기)만 하고,
+  //      실제 재계산·미러 갱신은 클라이언트가 응답을 받은 직후 별도 요청
+  //      (op=syncInvoiceMirror)으로 이어서 처리. 사용자는 기다리지 않고, 다른 직원
+  //      화면은 몇 초 안에 새 값을 받음. 그 사이 상세창을 새로 여는 사람은 무효화
+  //      표시를 보고 서버 직접 조회로 폴백하므로 낡은 값을 볼 일이 없음(정확성 유지).
+  //   2) 시트 호출 정리 — 헤더 1번 + 대상 행 1번(행 전체)만 읽고, 3개 컬럼이
+  //      나란히 있으면 한 번에 씀. SpreadsheetApp.flush()는 제거(같은 실행 안의
+  //      읽기는 항상 방금 쓴 값을 보고, 응답이 나갈 때 자동 커밋됨).
+  //   3) bumpVersion_() → bumpVersionLite_() (행번호/디멘션 같은 무거운 캐시는
+  //      이 작업으로 안 바뀌므로 지우지 않음 — 지우면 모든 직원의 다음 요청이 느려짐).
+  //   4) 응답에 timing(구간별 ms) 포함 — 이후 느려지면 어느 구간인지 바로 확인.
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const paid = !!(data && data.paid);
     const by = String((data && data.by) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
 
-    // ★ 2026-09-02 긴급 수정 — 예전엔 이 함수 전체(무거운 검증 포함)를 락 안에
-    //   넣고 있었음. 이 스프레드시트는 batch.html/board.html/sales.html이 동시에
-    //   공유해서 쓰는 문서라, 락을 오래 붙잡으면 그동안 다른 모든 저장 작업
-    //   (스캔 기록·이슈 등록·슬롯 상태변경 등)이 줄줄이 밀려서, 심하면 읽기
-    //   요청까지 전부 타임아웃되는 연쇄 장애로 이어질 수 있음(실제 발생 확인됨).
-    //   그래서 읽기·검증(PU 여부, 검수완료 여부, 패킹존 이동 여부 확인)은 전부
-    //   락 밖에서 먼저 끝내고, 락은 아래 "실제 값 쓰기" 그 몇 줄만 최소한으로 잡음.
     const sh = SHEET_();
-    const _payCols = ensurePaymentStatusCol_(sh); // ★ 2026-09-03 — {iStatus, iAt, iBy}를 여기서 한 번에 확보
-    const hdr = headerMapCached_();
+    mark('open');
     const norm = normalizeHeaderName_;
-    const row = findRowByKey_('invoice', invoice);
+    const lastCol = sh.getLastColumn();
+    let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    let _payCols = ensurePaymentStatusCol_(sh, headers);
+    let hdrLastCol = lastCol;
+    if (sh.getLastColumn() !== lastCol) { // 컬럼이 새로 추가된 드문 경우 — 헤더 재확인
+      hdrLastCol = sh.getLastColumn();
+      headers = sh.getRange(1, 1, 1, hdrLastCol).getValues()[0];
+    }
+    let iInvoice = 0, iTruck = 0, iInsp = 0, iManualFlag = 0;
+    headers.forEach(function (h, i) {
+      const k = norm(String(h));
+      if (k === norm('Invoice')) iInvoice = i + 1;
+      else if (k === norm('Trucking')) iTruck = i + 1;
+      else if (k === norm('Inspection')) iInsp = i + 1;
+      else if (k === norm('PackingMovedManual')) iManualFlag = i + 1;
+    });
+    mark('header');
+
+    let row = findRowByKey_('invoice', invoice);
     if (!row) return { ok: false, error: 'invoice not found' };
+    let rowVals = sh.getRange(row, 1, 1, hdrLastCol).getValues()[0];
+    if (iInvoice && String(rowVals[iInvoice - 1] || '').trim() !== invoice) {
+      // 캐시 인덱스가 오래돼 행 번호가 틀어졌으면 버리고 전체 스캔으로 재확인(엉뚱한 행에 쓰는 사고 방지)
+      try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1_meta'); } catch (e) {}
+      row = 0;
+      const lastRow = sh.getLastRow();
+      if (lastRow >= 2) {
+        const invVals = sh.getRange(2, iInvoice, lastRow - 1, 1).getValues();
+        for (let i = 0; i < invVals.length; i++) {
+          if (String(invVals[i][0] || '').trim() === invoice) { row = i + 2; break; }
+        }
+      }
+      if (!row) return { ok: false, error: 'invoice not found' };
+      rowVals = sh.getRange(row, 1, 1, hdrLastCol).getValues()[0];
+    }
+    mark('row');
 
-    const iTruck = hdr[norm('Trucking')];
-    const method = iTruck ? String(sh.getRange(row, iTruck).getValue() || '').trim().toUpperCase() : '';
-    if (method !== 'PU') return { ok: false, error: 'PU(직접 픽업) 오더만 결제 상태를 관리합니다' };
+    const method = iTruck ? String(rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
+    // ★ 2026-10-03 수정 — "Payment Status"를 "Sales Confirm"으로 재활용하면서
+    //   PU 전용이던 노출 범위를 PU/UPS로 넓힘(사용자 요청). 신규 Method 'PU & TK'도 포함.
+    if (method !== 'PU' && method !== 'UPS' && method !== 'PU & TK') return { ok: false, error: 'PU/UPS/PU & TK 오더만 Sales Confirm을 관리합니다' };
 
-    const iInsp = hdr[norm('Inspection')];
-    const insp = iInsp ? String(sh.getRange(row, iInsp).getValue() || '').trim() : '';
+    const insp = iInsp ? String(rowVals[iInsp - 1] || '').trim() : '';
     if (!insp) return { ok: false, error: '검수가 아직 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
 
-    // ★ 2026-09-02 재수정(획기적 속도 개선) — buildMovedToPackingMap_()는 원래
-    //   "전체 인보이스 목록"을 한 번에 계산하려고 만든 함수라(BatchCustomers
-    //   전체 + Jobs.PackingMovedManual 전체 컬럼을 통째로 읽음), 오더 1건만
-    //   확인하는 데 쓰기엔 훨씬 무거웠음 — 이게 15초 지연의 핵심 원인. 지금 이미
-    //   손에 있는 것(이 인보이스의 Jobs 행 = row, hdr)을 그대로 활용해서 딱
-    //   필요한 값 2개만 좁게 읽는 방식으로 교체:
-    //   1) Jobs.PackingMovedManual — 이미 열어둔 행(row)에서 셀 1개만 읽음
-    //   2) BatchCustomers.TakenOut — 인보이스 컬럼(B)만 좁게 읽어 행을 찾고
-    //      그 행의 L열(TakenOut) 셀 1개만 읽음(전체 13개 컬럼을 안 읽음)
-    // ★ 2026-09-03 재수정 — 이 함수만 예전 방식(BatchCustomers 전체 스캔)이
-    //   그대로 남아있었음. getSalesInvoiceDetail(BatchPicking.gs)에 새로 만든
-    //   30초 캐시 인덱스(getBatchCustomersInvoiceRowIndex_)를 그대로 재사용 —
-    //   같은 인보이스를 반복 저장할 때(실수로 되돌리는 경우 등) 매번 전체를
-    //   다시 안 훑음.
-    const iManualFlag = hdr[norm('PackingMovedManual')];
-    let moved = iManualFlag ? !!sh.getRange(row, iManualFlag).getValue() : false;
+    // 패킹존 이동 확인 — Jobs의 수동 표시(이미 읽은 행)를 먼저 보고, 없을 때만
+    // BatchCustomers(캐시 인덱스)를 확인(기존 로직 그대로)
+    let moved = iManualFlag ? !!rowVals[iManualFlag - 1] : false;
     if (!moved) {
       try {
         const bc = bcustSheetSafe_();
@@ -893,56 +1209,178 @@ function updatePaymentStatus(data) {
       } catch (e) { /* best-effort */ }
     }
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
+    mark('checks');
 
-    // ★ 실제 시트 쓰기 — 여기서부터만 짧게 락으로 보호
-    // ★ 2026-09-03 재수정(속도) — 위에서 ensurePaymentStatusCol_이 이미 헤더
-    //   행을 읽으면서 컬럼 위치까지 같이 계산해뒀으므로, 여기서 getFreshColIndex_를
-    //   3번 또 불러서 헤더 행을 또 읽지 않고 그 결과를 그대로 재사용함
-    //   (헤더 행 읽기 4번 → 1번으로 감소).
     const iStatus = _payCols.iStatus;
     const iAt = _payCols.iAt;
     const iBy = _payCols.iBy;
-    // ★ 2026-09-02 긴급 수정 — "저장 성공했다고 떴는데 다시 열어보면 미납으로
-    //   돌아가 있다"는 사고의 진짜 원인 후보. 컬럼을 못 찾았는데도(iStatus가
-    //   비어있음) 그냥 아무것도 안 쓰고 조용히 {ok:true}를 돌려주고 있었음 —
-    //   화면은 성공한 줄 알고 낙관적으로 바로 PAID를 보여줬지만, 실제 시트엔
-    //   아무 값도 안 써졌던 것. 이제 컬럼을 못 찾으면 명확한 오류로 실패 처리함.
+    // ★ 컬럼을 못 찾으면 조용히 성공 처리하지 않고 명확한 오류(과거 "거짓 성공" 사고 방지)
     if (!iStatus) return { ok: false, error: 'PaymentStatus 컬럼을 찾지 못했습니다(서버 설정 오류) — 관리자에게 문의하세요' };
 
     const lock = LockService.getDocumentLock();
-    lock.waitLock(10000);
+    lock.waitLock(15000);
+    mark('lock');
     try {
-      sh.getRange(row, iStatus).setValue(paid ? 'paid' : 'unpaid');
-      if (iAt) sh.getRange(row, iAt).setValue(nowLocal_());
-      if (iBy) sh.getRange(row, iBy).setValue(by);
-      SpreadsheetApp.flush(); // ★ 신규 — 쓰기가 실제로 반영된 뒤에 읽도록 강제로 커밋시킴
-      bumpVersion_();
+      const statusVal = paid ? 'paid' : 'unpaid';
+      const atVal = nowLocal_();
+      const colList = [iStatus, iAt, iBy].filter(Boolean);
+      const minC = Math.min.apply(null, colList);
+      const maxC = Math.max.apply(null, colList);
+      if ((maxC - minC + 1) === colList.length) {
+        // 3개(또는 있는 만큼)가 나란히 있음 → 한 번에 씀(사이에 다른 컬럼 없음이 보장됨)
+        const arr = new Array(colList.length);
+        arr[iStatus - minC] = statusVal;
+        if (iAt) arr[iAt - minC] = atVal;
+        if (iBy) arr[iBy - minC] = by;
+        sh.getRange(row, minC, 1, colList.length).setValues([arr]);
+      } else {
+        sh.getRange(row, iStatus).setValue(statusVal);
+        if (iAt) sh.getRange(row, iAt).setValue(atVal);
+        if (iBy) sh.getRange(row, iBy).setValue(by);
+      }
+      bumpVersionLite_();
+    } finally {
+      lock.releaseLock();
+    }
+    mark('write');
+
+    Logger.log('[PaymentStatus WRITE] invoice=%s row=%s col=%s wroteValue=%s sheetName=%s',
+      invoice, row, iStatus, (paid ? 'paid' : 'unpaid'), sh.getName());
+
+    // ★ 낡은 상세 미러 무효화(위 설명 1번) — 빠름(캐시 삭제 + 문서 1개). 실제 재계산/갱신은
+    //   클라이언트가 이어서 보내는 syncInvoiceMirror 요청이 처리.
+    try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (e) { /* best-effort */ }
+    mark('total');
+    return { ok: true, paid: paid, timing: tm };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 전용 간편 입력.
+ * PU & TK는 TK/UPS처럼 박스마다 가로·세로·높이를 입력하는 전체 Dims가 아니라,
+ * "전체 박스 수량"만 숫자 하나로 관리한다(기존 Dims 테이블/합산(묶음) 로직과는
+ * 완전히 별개의 가벼운 컬럼 3개로 처리 — PU & TK는 Shipping Status(TK) 탭으로
+ * 넘어가지 않으므로 그 탭이 쓰는 dimsMap/묶음 기능과 엮을 필요가 없음). */
+function _scanPuTkBoxQtyCols_(sh, headersOpt) {
+  const r = { iQty: 0, iAt: 0, iBy: 0 };
+  // ★ 2026-10-04 — 호출부가 이미 헤더 행을 읽어둔 경우 그대로 재사용(시트 호출 절약)
+  let headers = headersOpt;
+  if (!headers) {
+    const lastCol = sh.getLastColumn();
+    if (lastCol === 0) return r;
+    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  }
+  // ★ 2026-10-02 긴급 수정 — 중복 컬럼이 있어도 항상 맨 처음(왼쪽) 컬럼을
+  //   기준으로 삼도록 고정(ensureSalesConfirmCol_과 동일한 방어).
+  headers.forEach((h, i) => {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'putkboxqty' && !r.iQty) r.iQty = i + 1;
+    else if (v === 'putkboxqtyat' && !r.iAt) r.iAt = i + 1;
+    else if (v === 'putkboxqtyby' && !r.iBy) r.iBy = i + 1;
+  });
+  return r;
+}
+
+function ensurePuTkBoxQtyCol_(sh) {
+  let cols = _scanPuTkBoxQtyCols_(sh);
+  const add = [];
+  if (!cols.iQty) add.push('PuTkBoxQty');
+  if (!cols.iAt) add.push('PuTkBoxQtyAt');
+  if (!cols.iBy) add.push('PuTkBoxQtyBy');
+  if (add.length) {
+    // ★ 2026-10-02 긴급 수정 — ensureSalesConfirmCol_과 동일한 이유로, 컬럼을
+    //   새로 만드는 순간에만 짧게 락을 걸고 재확인(double-check)해서 중복 컬럼
+    //   생성 경쟁 상태를 방지.
+    const colLock = LockService.getDocumentLock();
+    colLock.waitLock(15000);
+    try {
+      cols = _scanPuTkBoxQtyCols_(sh);
+      const add2 = [];
+      if (!cols.iQty) add2.push('PuTkBoxQty');
+      if (!cols.iAt) add2.push('PuTkBoxQtyAt');
+      if (!cols.iBy) add2.push('PuTkBoxQtyBy');
+      if (add2.length) {
+        const curLastCol = sh.getLastColumn();
+        sh.insertColumnsAfter(curLastCol, add2.length);
+        sh.getRange(1, curLastCol + 1, 1, add2.length).setValues([add2]);
+        __HDR_CACHE = null;
+        let nextCol = curLastCol + 1;
+        add2.forEach(name => {
+          if (name === 'PuTkBoxQty') cols.iQty = nextCol;
+          else if (name === 'PuTkBoxQtyAt') cols.iAt = nextCol;
+          else if (name === 'PuTkBoxQtyBy') cols.iBy = nextCol;
+          nextCol++;
+        });
+      }
+    } catch (insertErr) {
+      // ★ 2026-10-02 긴급 수정 — 시트 셀 한도 초과 시 전체 기능이 먹통되는 사고
+      // 방지(ensureSalesConfirmCol_과 동일한 방어 패턴). 컬럼을 못 넣으면
+      // 0(사용 불가)으로 남기고 조용히 넘어감.
+      Logger.log('ensurePuTkBoxQtyCol_: column insert skipped (sheet likely at cell limit): ' + insertErr);
+    } finally {
+      colLock.releaseLock();
+    }
+  }
+  return cols;
+}
+
+/* 입력: { invoice, qty(정수, 0 이상), by } */
+function setPuTkBoxQty(data) {
+  // ★ 2026-10-04 경량화 — 헤더 1번 + 행 1번, 3개 컬럼 한 번에 쓰기, bumpVersionLite_, 낡은 상세
+  //   미러는 무효화만(재계산은 클라이언트가 이어서 보내는 syncInvoiceMirror). 값/검증/응답 형식 그대로.
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    let qty = Number((data && data.qty));
+    const by = String((data && data.by) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    if (!isFinite(qty) || qty < 0) return { ok: false, error: 'qty는 0 이상의 숫자여야 합니다' };
+    qty = Math.round(qty);
+
+    const sh = SHEET_();
+    mark('open');
+    const norm = normalizeHeaderName_;
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    let cols = _scanPuTkBoxQtyCols_(sh, ctx.headers);
+    if (!cols.iQty || !cols.iAt || !cols.iBy) {
+      cols = ensurePuTkBoxQtyCol_(sh); // 드문 경우: 락 보호 컬럼 추가 후 다시 읽기
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+      cols = _scanPuTkBoxQtyCols_(sh, ctx.headers);
+    }
+    if (!cols.iQty) return { ok: false, error: 'PuTkBoxQty column unavailable (server setup) — please contact the administrator' };
+    mark('row');
+
+    const iTruck = ctx.hm[norm('Trucking')];
+    const method = iTruck ? String(ctx.rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
+    if (method !== 'PU & TK') {
+      return { ok: false, error: 'PU & TK 오더만 박스 수량을 관리합니다' };
+    }
+
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    mark('lock');
+    let atRaw = '';
+    try {
+      atRaw = nowLocal_();
+      _writeRowCells_(sh, ctx.row, [
+        { col: cols.iQty, value: qty },
+        { col: cols.iAt, value: atRaw, text: true }, // 텍스트 서식 고정(날짜 문자열 자동 변환 방지)
+        { col: cols.iBy, value: by }
+      ]);
+      mark('write');
     } finally {
       lock.releaseLock();
     }
 
-    // ★ 신규 — 방금 쓴 값을 곧바로 다시 읽어서 "진짜로 저장됐는지" 확인 후,
-    //   그 확인된 값을 그대로 돌려줌(요청한 값을 무조건 믿고 돌려주지 않음).
-    //   이러면 위 쓰기가 어떤 이유로든 실패해도 화면에 거짓 성공이 뜨는 일이
-    //   없음 — 대신 여기서 바로 명확한 오류로 알려줌.
-    const verifyRaw = String(sh.getRange(row, iStatus).getValue() || '').trim().toLowerCase();
-    const verifiedPaid = verifyRaw === 'paid';
-    // ★ 2026-09-02 진단용 로그 — "저장은 성공했다는데 나중에 다시 열면 되돌아가
-    //   있다"는 문제가 여러 번 재발해서, 다음에도 재발하면 Apps Script 실행
-    //   기록(왼쪽 시계 아이콘)에서 이 값을 직접 비교할 수 있게 남겨둠. 여기서
-    //   기록한 row/col과, getSalesInvoiceDetail이 읽을 때 쓰는 row/col이
-    //   서로 다르면(예: 같은 인보이스가 여러 행에 중복 존재) 바로 원인이 드러남.
-    Logger.log('[PaymentStatus WRITE] invoice=%s row=%s col=%s wroteValue=%s verifyRaw=%s sheetName=%s',
-      invoice, row, iStatus, (paid ? 'paid' : 'unpaid'), verifyRaw, sh.getName());
-    if (verifiedPaid !== paid) {
-      return { ok: false, error: '저장이 반영되지 않았습니다(확인 실패) — 다시 시도해주세요' };
-    }
-
-    // ★ 세션A 수정 — 예전엔 salesInvDetail_v1_{invoice} 캐시만 직접 지웠음.
-    //   syncSalesInvoiceDetailMirror_로 교체해서 캐시 삭제 + Firestore 미러
-    //   갱신을 동시에 함.
-    try { syncSalesInvoiceDetailMirror_(invoice); } catch (e) { /* best-effort */ }
-    return { ok: true, paid: verifiedPaid };
+    bumpVersionLite_();
+    try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort */ }
+    mark('total');
+    return { ok: true, invoice: invoice, qty: qty, qtyAt: fmtShortTs_(atRaw), qtyBy: by, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -1376,37 +1814,93 @@ function setArchived_(invoice, archived) {
  * 입력: { invoice, moved: true|false, by }
  * ============================================================ */
 function setManualPackingMoved(data) {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(15000);
+  // ★ 2026-10-05 경량화(현장 보고 — "Moved to Packing 저장이 오래 걸리고, 팝업을 닫아도 목록에 한참 뒤에 반영")
+  //   원인: (1) 락을 함수 전체에 잡고 있었고(그동안 다른 직원 저장이 줄줄이 대기), (2) 셀을 따로따로 쓰고,
+  //   (3) 무거운 캐시 10개를 지우는 bumpVersion_ 을 호출하고, (4) 응답 전에 "상세 미러 전체 재계산"
+  //   (syncSalesInvoiceDetailMirror_)을 끝까지 기다렸음. 이제 행 1개만 읽고, 락은 실제 쓰기 순간에만 잡고,
+  //   캐시는 경량 무효화, 상세 미러는 즉시 "무효 표시"만 하고(재계산은 클라이언트가 응답 후 따로 요청).
+  //   응답에는 이 오더의 "실제 이동/단계 상태"(배치 기록 포함)를 담아 화면이 정확히 맞추게 함.
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
   try {
     const invoice = String((data && data.invoice) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
     const moved = !!(data && data.moved);
     const by = String((data && data.by) || '').trim();
 
-    const sh = SHEET_(); // ensureJobsHeader_를 통해 컬럼 자동 보장됨
-    const hdr = headerMapCached_();
-    const norm = normalizeHeaderName_;
-    const row = findRowByKey_('invoice', invoice);
-    if (!row) return { ok: false, error: 'invoice not found' };
+    const sh = SHEET_();
+    mark('open');
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    const scan = function (headers) {
+      let f = 0, b = 0;
+      headers.forEach(function (h, i) {
+        const v = String(h).trim().toLowerCase();
+        if (v === 'packingmovedmanual' && !f) f = i + 1;
+        else if (v === 'packingmovedmanualby' && !b) b = i + 1;
+      });
+      return { f: f, b: b };
+    };
+    let cols = scan(ctx.headers);
+    if (!cols.f || !cols.b) {
+      ensureManualPackingCol_(sh); // 드문 경우: 컬럼이 아직 없음 → 기존 방식으로 추가 후 다시 읽기
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+      cols = scan(ctx.headers);
+    }
+    if (!cols.f) return { ok: false, error: 'PackingMovedManual column unavailable (server setup) — please contact the administrator' };
+    mark('row');
 
-    const cFlag = hdr[norm('PackingMovedManual')];
-    const cBy = hdr[norm('PackingMovedManualBy')];
-    if (cFlag) sh.getRange(row, cFlag).setValue(moved ? nowLocal_() : '');
-    if (cBy) sh.getRange(row, cBy).setValue(moved ? by : '');
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    mark('lock');
+    try {
+      _writeRowCells_(sh, ctx.row, [
+        { col: cols.f, value: moved ? nowLocal_() : '' },
+        { col: cols.b, value: moved ? by : '' }
+      ]);
+      mark('write');
+    } finally {
+      lock.releaseLock();
+    }
 
-    bumpVersion_();
-    // ★ 세션A 신규 — 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
-    //   건드렸음(신규 발견 버그). 단독 오더 패킹존 이동 표시를 바꿔도 상세조회
-    //   결과의 movedToPacking/packStage 필드가 최대 30초간 예전 값으로 보일 수
-    //   있었던 잠복 버그를 여기서 같이 고침.
-    try { syncSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort */ }
-    return { ok: true, moved: moved };
+    bumpVersionLite_(); // 값만 바뀌는 쓰기 — 목록 캐시만 즉시 무효화
+    const st = _packStateForInvoice_(invoice, moved);
+    // ★ 상세 미러는 "무효화 후 전체 재계산(9~18초, 서버 부하 큼)" 대신 기존 문서의 해당 필드만 바로 고쳐 씀(~0.5초).
+    //   실패하면 예전처럼 무효화(다음 조회 때 새로 계산)로 대체.
+    let mirrorPatched = false;
+    try { mirrorPatched = _patchDetailMirrorMoved_(invoice, st, moved, moved ? by : ''); } catch (ePm) { mirrorPatched = false; }
+    if (!mirrorPatched) { try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eInv) { /* best-effort */ } }
+    mark('total');
+    return { ok: true, moved: moved, movedToPacking: st.mp, packStage: st.stage, mirrorPatched: mirrorPatched, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
-  } finally {
-    lock.releaseLock();
   }
+}
+
+/* ★ 2026-10-05 신규 — 인보이스 1건의 "패킹존 이동 상태"를 buildMovedToPackingMap_/buildPackStageMap_와
+ * 똑같은 규칙으로 계산(BatchCustomers의 K/L/M 컬럼 + Jobs 수동 표시). 디멘션 저장에 의한 승격은
+ * 화면(목록/상세)이 dimsCount로 따로 합침. 반환: { mp: 이동완료 여부, stage: none|moved|taken|verified } */
+function _packStateForInvoice_(invoice, manualOn) {
+  let mp = false, stage = 'none';
+  try {
+    const bc = bcustSheetSafe_();
+    const last = bc.getLastRow();
+    if (last >= 2) {
+      const rows = bc.getRange(2, 2, last - 1, 12).getValues(); // B~M (idx0=B 인보이스, 9=K, 10=L, 11=M)
+      for (let i = 0; i < rows.length; i++) {
+        if (String(rows[i][0] || '').trim() !== invoice) continue; // 마지막(최신) 일치 행이 최종 — 기존 맵과 동일
+        mp = !!rows[i][10];
+        stage = rows[i][11] ? 'verified' : (rows[i][10] ? 'taken' : (rows[i][9] ? 'moved' : 'none'));
+      }
+    }
+  } catch (e) { /* best-effort — 실패 시 수동 표시만 반영 */ }
+  if (manualOn) {
+    mp = true;
+    if (stage !== 'verified') stage = 'taken';
+  }
+  return { mp: mp, stage: stage };
 }
 
 /* ★ 2026-08-06 긴급 신규 — 일회성 복구 함수. 자동보관 규칙이 "검수 다음날
@@ -1583,6 +2077,39 @@ function applyInvoiceTextFormat_(sh, lastRow) { if (lastRow < 2) return; sh.getR
 function nowLocal_() {
   const tz = Session.getScriptTimeZone();
   return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+}
+
+/* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — "Confirmed by David · Fri Oct 02
+ * 2026 21:07:56 GMT-0700 (Pacific Daylight Time)"처럼 화면에 지나치게 긴
+ * 날짜가 뜨는 사고. 원인: setValue()에 'yyyy-MM-dd HH:mm:ss' 문자열을 썼는데
+ * 구글시트가 "날짜처럼 생긴 문자열"을 자동으로 실제 Date 셀로 바꿔버림 → 나중에
+ * getValue()가 Date 객체를 돌려주고, 그걸 String()으로 감싸면 JS의 기본
+ * Date.toString() 형식(요일/월 이름/타임존까지 포함한 긴 영문)이 그대로 찍힘.
+ * 짧고 사람이 읽기 좋은 "MM/dd h:mm a" 형식으로 통일해서 반환하는 공용 함수 —
+ * 값이 Date 객체든 문자열이든 전부 안전하게 처리함(기존에 이미 Date로 굳어진
+ * 셀도 이 함수를 거치면 올바르게 표시됨 — 데이터 이전 작업 불필요). */
+function fmtShortTs_(v) {
+  try {
+    if (!v) return '';
+    let d = null;
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
+      d = v;
+    } else {
+      const s = String(v).trim();
+      if (!s) return '';
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+      if (m) {
+        d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+      } else {
+        const parsed = new Date(s);
+        if (!isNaN(parsed)) d = parsed;
+      }
+    }
+    if (!d || isNaN(d.getTime())) return String(v);
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd h:mm a');
+  } catch (e) {
+    return String(v || '');
+  }
 }
 
 function toLocalDateTimeString_(v) {
@@ -2529,6 +3056,23 @@ function formatInspEnd_(val) {
 /* =====================================================
  * ★ Sales Sheet — Pull & Mark
  * ===================================================== */
+/* ★ 2026-10-05 신규 — 영업 시트의 SHIPPING METHOD 값을 우리 쪽 Method 값으로 변환.
+ *   영업 시트에 'PICKUP&TK' 같은 복합 값이 생겼는데 예전 변환은 정확히 일치하는 값만 알아봐서 전부 'Other'가 됐음.
+ *   이제 공백·기호·대소문자를 무시하고 판정: PICK UP/PU 와 TRUCKING/TK 가 함께 있으면 'PU & TK'(우리 쪽 정식 값).
+ *   반환: 'TK' | 'PU' | 'UPS' | 'FedEx' | 'PU & TK' | 'Other' | ''(빈 값). */
+function normalizeSalesShipMethod_(raw) {
+  const t = String(raw == null ? '' : raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!t) return '';
+  const hasPU = t.indexOf('PICKUP') >= 0 || t.indexOf('PU') === 0;
+  const hasTK = t.indexOf('TRUCK') >= 0 || t.indexOf('TK') >= 0;
+  if (hasPU && hasTK) return 'PU & TK';
+  if (t === 'TRUCKING' || t === 'TK' || t === 'TRUCK') return 'TK';
+  if (t === 'PICKUP' || t === 'PU') return 'PU';
+  if (t === 'UPS') return 'UPS';
+  if (t === 'FEDEX') return 'FedEx';
+  return 'Other';
+}
+
 function pullFromSalesSheet(dateFrom, dateTo) {
   try {
     const today = new Date();
@@ -2744,12 +3288,7 @@ function pullFromSalesSheet(dateFrom, dateTo) {
 
       let trucking = '';
       if (colShipMethod >= 0) {
-        const rawMethod = String(row[colShipMethod] || '').trim().toUpperCase();
-        if (rawMethod === 'TRUCKING')                               trucking = 'TK';
-        else if (rawMethod === 'PICK UP' || rawMethod === 'PICKUP') trucking = 'PU';
-        else if (rawMethod === 'UPS')                               trucking = 'UPS';
-        else if (rawMethod === 'FEDEX')                             trucking = 'FedEx';
-        else if (rawMethod !== '')                                  trucking = 'Other';
+        trucking = normalizeSalesShipMethod_(row[colShipMethod]);
       }
 
       let amount = 0;
@@ -3651,6 +4190,731 @@ function buildMovedToPackingMap_() {
 }
 
 /* ---------------------------------------------------------------------
+ * ensureShippedCol_() — ★ 2026-10-02 신규(영업↔출고 소통 개선: TK 출고 확인)
+ * Jobs 시트에 Shipped/ShippedAt/ShippedBy 컬럼을 추가한다(없으면 자동 생성 —
+ * ensurePaymentStatusCol_/ensureManualPackingCol_와 완전히 동일한 패턴).
+ *
+ * 왜 필요한가 — 출고팀이 TK(트럭킹) 디멘션을 올려두면, 영업팀은 그 값으로
+ * 트럭킹 담당자에게 배차를 요청한다. 그런데 "실제로 이 팔렛이 트럭에
+ * 실려 나갔는지"는 그동안 아무 데도 기록되지 않아서, 영업/출고 양쪽 다
+ * 매번 서로에게 전화·카톡으로 확인해야 했다. 이 컬럼은 배차 담당자가
+ * 직접 체크하는 단일 진실(single source of truth)을 만든다.
+ * ------------------------------------------------------------------- */
+function ensureShippedCol_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return { iShipped: 0, iAt: 0, iBy: 0 };
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  let iShipped = 0, iAt = 0, iBy = 0;
+  headers.forEach((h, i) => {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'shipped') iShipped = i + 1;
+    else if (v === 'shippedat') iAt = i + 1;
+    else if (v === 'shippedby') iBy = i + 1;
+  });
+  const add = [];
+  if (!iShipped) add.push('Shipped');
+  if (!iAt) add.push('ShippedAt');
+  if (!iBy) add.push('ShippedBy');
+  if (add.length) {
+    const curLastCol = sh.getLastColumn();
+    sh.insertColumnsAfter(curLastCol, add.length);
+    sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
+    __HDR_CACHE = null;
+    let nextCol = curLastCol + 1;
+    add.forEach(name => {
+      if (name === 'Shipped') iShipped = nextCol;
+      else if (name === 'ShippedAt') iAt = nextCol;
+      else if (name === 'ShippedBy') iBy = nextCol;
+      nextCol++;
+    });
+  }
+  return { iShipped: iShipped, iAt: iAt, iBy: iBy };
+}
+
+/* ---------------------------------------------------------------------
+ * buildShippedMap_() — Jobs 시트를 한 번만 읽어서
+ * {invoice: {shipped, shippedAt, shippedBy}} 맵으로 만듦. getSalesTodayList/
+ * getSalesOverview가 TK 출고 상태를 붙일 때 재사용한다
+ * (buildMovedToPackingMap_와 동일한 "한 번 읽고 재사용" 원칙 — 인보이스마다
+ * 따로 시트를 뒤지지 않음).
+ * ------------------------------------------------------------------- */
+function buildShippedMap_() {
+  const map = {};
+  try {
+    const sh = SHEET_();
+    const cols = ensureShippedCol_(sh);
+    if (!cols.iShipped) return map;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return map;
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    if (!iInv) return map;
+    const n = lastRow - 1;
+    const invVals = sh.getRange(2, iInv, n, 1).getValues();
+    const shippedVals = sh.getRange(2, cols.iShipped, n, 1).getValues();
+    const atVals = cols.iAt ? sh.getRange(2, cols.iAt, n, 1).getValues() : null;
+    const byVals = cols.iBy ? sh.getRange(2, cols.iBy, n, 1).getValues() : null;
+    for (let i = 0; i < n; i++) {
+      const inv = String(invVals[i][0] || '').trim();
+      if (!inv) continue;
+      map[inv] = {
+        shipped: !!shippedVals[i][0],
+        shippedAt: atVals ? _tsToIso_(atVals[i][0]) : '', // ★ 2026-10-04 — Date로 굳어진 옛 셀도 같은 형식으로(정렬 일관성)
+        shippedBy: byVals ? String(byVals[i][0] || '') : ''
+      };
+    }
+  } catch (e) { /* best-effort — 실패해도 호출부는 shipped:false로 안전하게 처리됨 */ }
+  return map;
+}
+
+/* ---------------------------------------------------------------------
+ * setShippedStatus(data) — ★ 2026-10-02 신규. Sales Lookup "Shipping Status"
+ * 탭에서 트럭킹 배차 담당자가 직접 체크. 로그인 불필요(Dims 입력·패킹존
+ * 이동 표시와 동일한 원칙 — 창고 현장 공유 화면에서 바로 씀).
+ *
+ * 서버측 안전장치(클라이언트 UI 제약과 별개로 반드시 다시 검증 —
+ * updateOrderMethod/updatePaymentStatus와 동일한 설계 원칙):
+ *  1) method가 TK가 아니면 거부 — 이 기능은 트럭킹 팔렛 전용.
+ *  2) 이 인보이스가 다른 인보이스에 디멘션이 묶여있는(LINKED) 경우 거부 —
+ *     반드시 대표(PRIMARY) 인보이스에서만 체크해야 값이 두 군데서 갈리지
+ *     않는다(디멘션 자체가 이미 이 원칙으로 설계돼 있음 — linkDimensions 등 참고).
+ *
+ * 속도/안정성 메모(2026-10-01 Firestore 동시실행 장애 직후 설계) — 이 기능은
+ * 하루 몇 번 클릭하는 저빈도 작업이라 Firestore 미러를 추가하지 않는다.
+ * 기존 bumpVersion_()의 60초 캐시 무효화만으로 충분히 빠르고(저장 직후
+ * 다음 조회부터 즉시 반영), 불필요하게 1분 동기화 사이클의 무게를 늘리지
+ * 않는다 — 안정성을 위해 일부러 가볍게 유지함.
+ *
+ * 입력: { invoice, shipped(true|false), by }
+ * ------------------------------------------------------------------- */
+function setShippedStatus(data) {
+  // ★ 2026-10-04 경량화(Sales Confirm과 같은 방식) — 값·검증 규칙·응답 형식은 그대로.
+  //   예전엔 (1) Dimensions 시트 전체(buildDimsExistsMap_), (2) Mark Shipped 때 Jobs 전체
+  //   컬럼을 읽는 buildSalesConfirmMap_/buildBolMap_, (3) 셀별 개별 읽기·쓰기,
+  //   (4) 무거운 캐시 10개를 지우는 bumpVersion_ 을 매번 했음. 이제 헤더 1번 + 이 행 1번만
+  //   읽어서 Trucking/컨펌/BOL을 전부 이 행에서 확인하고, 묶음 판정은 30초 캐시 DimLinks 맵,
+  //   쓰기는 락 안에서 한 번에, 캐시 무효화는 bumpVersionLite_(). 응답에 timing 포함.
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const shipped = !!(data && data.shipped);
+    const by = String((data && data.by) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    const sh = SHEET_();
+    mark('open');
+    const norm = normalizeHeaderName_;
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    let cols = _scanShippedCols_(ctx.headers);
+    if (!cols.iShipped || !cols.iAt || !cols.iBy) {
+      // 드문 경우(컬럼이 아직 없음): 기존 컬럼 추가 로직 그대로 사용 후 다시 읽기
+      ensureShippedCol_(sh);
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+      cols = _scanShippedCols_(ctx.headers);
+    }
+    if (!cols.iShipped) return { ok: false, error: 'Shipped column unavailable (server setup) — please contact the administrator' };
+    mark('row');
+
+    const iTruck = ctx.hm[norm('Trucking')];
+    const method = iTruck ? String(ctx.rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
+    if (method !== 'TK' && method !== 'TRUCKING') {
+      return { ok: false, error: 'TK orders only — this invoice is ' + (method || 'unknown') };
+    }
+
+    // 이 인보이스가 다른(대표) 인보이스에 디멘션이 묶여있으면 거부 — 대표에서만 체크
+    let linkedTo = '';
+    try { linkedTo = (buildDimLinksMap_().childToPrimary || {})[invoice] || ''; } catch (eL) { linkedTo = ''; }
+    if (linkedTo) {
+      return { ok: false, error: 'Linked order — check shipping status on primary invoice ' + linkedTo };
+    }
+    mark('links');
+
+    // ★ Sales Confirm과 BOL#이 없으면 출고 체크 불가(화면 + 서버 이중 방어). Undo는 항상 허용.
+    if (shipped) {
+      const sc = _scanSalesConfirmCols_(sh, ctx.headers);
+      const confirmedNow = sc.iConfirmed ? !!ctx.rowVals[sc.iConfirmed - 1] : false;
+      if (!confirmedNow) {
+        return { ok: false, error: 'Sales must confirm this order before it can be marked shipped.' };
+      }
+      const iBol = _scanBolCol_(ctx.headers);
+      const bolNow = iBol ? String(ctx.rowVals[iBol - 1] || '').trim() : '';
+      if (!bolNow) {
+        return { ok: false, error: 'A BOL# must be entered before this order can be marked shipped.' };
+      }
+    }
+
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    mark('lock');
+    let shippedAtOut = '';
+    try {
+      shippedAtOut = shipped ? batchNow_() : '';
+      _writeRowCells_(sh, ctx.row, [
+        { col: cols.iShipped, value: shipped },
+        { col: cols.iAt, value: shippedAtOut, text: true }, // 텍스트 서식 고정 — Date로 자동 변환 방지(정렬 일관성)
+        { col: cols.iBy, value: shipped ? by : '' }
+      ]);
+      mark('write');
+    } finally {
+      lock.releaseLock();
+    }
+
+    bumpVersionLite_(); // sales 목록 캐시만 무효화 — 다음 조회부터 바로 반영
+    mark('total');
+    return { ok: true, invoice: invoice, shipped: shipped, shippedAt: shippedAtOut, shippedBy: shipped ? by : '', timing: tm };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * ensureBolCol_() — ★ 2026-10-02 신규(배차 담당자 요청: BOL 번호 기록)
+ * Jobs 시트에 BOL 컬럼을 추가한다(없으면 자동 생성 — ensureShippedCol_와
+ * 완전히 동일한 패턴, 그러나 Shipped와는 별개 컬럼/별개 op로 분리함 —
+ * BOL은 출고 체크 전/후 아무 때나 독립적으로 입력·수정할 수 있어야 하기
+ * 때문에 Shipped 쓰기 로직에 끼워넣지 않음).
+ * ------------------------------------------------------------------- */
+function ensureBolCol_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return { iBol: 0 };
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  let iBol = 0;
+  headers.forEach((h, i) => {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'bol' || v === 'bolnumber') iBol = i + 1;
+  });
+  if (!iBol) {
+    const curLastCol = sh.getLastColumn();
+    sh.insertColumnsAfter(curLastCol, 1);
+    sh.getRange(1, curLastCol + 1, 1, 1).setValues([['BOL']]);
+    __HDR_CACHE = null;
+    iBol = curLastCol + 1;
+  }
+  return { iBol: iBol };
+}
+
+/* ---------------------------------------------------------------------
+ * buildBolMap_() — Jobs 시트를 한 번만 읽어서 {invoice: "BOL번호"} 맵으로
+ * 만듦(buildShippedMap_와 동일한 "한 번 읽고 재사용" 원칙).
+ * ------------------------------------------------------------------- */
+function buildBolMap_() {
+  const map = {};
+  try {
+    const sh = SHEET_();
+    const cols = ensureBolCol_(sh);
+    if (!cols.iBol) return map;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return map;
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    if (!iInv) return map;
+    const n = lastRow - 1;
+    const invVals = sh.getRange(2, iInv, n, 1).getValues();
+    const bolVals = sh.getRange(2, cols.iBol, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      const inv = String(invVals[i][0] || '').trim();
+      if (!inv) continue;
+      const bol = String(bolVals[i][0] || '').trim();
+      if (bol) map[inv] = bol;
+    }
+  } catch (e) { /* best-effort — 실패해도 호출부는 bol:''로 안전하게 처리됨 */ }
+  return map;
+}
+
+/* ---------------------------------------------------------------------
+ * setBolNumber(data) — ★ 2026-10-02 신규. Sales Lookup "Shipping Status"
+ * 탭의 Status 칸에서 배차 담당자가 BOL 번호를 직접 입력.
+ *
+ * setShippedStatus와 동일한 서버측 가드(시뮬레이션에서 확정된 설계):
+ *  1) TK 전용.
+ *  2) LINKED 인보이스는 거부 — 반드시 대표(PRIMARY)에만 기록해서, 같은
+ *     팔렛의 BOL#이 인보이스마다 갈라지는 일이 없게 함(Shipped와 동일 원칙).
+ * Shipped 여부와는 완전히 독립 — 출고 체크 전/후 아무 때나 입력·수정 가능.
+ *
+ * 입력: { invoice, bol, by }  (bol = '' 이면 지우기)
+ * ------------------------------------------------------------------- */
+function setBolNumber(data) {
+  // ★ 2026-10-04 경량화 — setShippedStatus와 같은 방식(헤더 1번 + 행 1번, DimLinks 캐시 맵,
+  //   bumpVersionLite_). 추가 정확성 수정: BOL 셀을 텍스트('@') 서식으로 저장 — 예전엔
+  //   "00123" 같은 번호가 구글시트에서 숫자 123으로 바뀌어 앞의 0이 사라질 수 있었음.
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const bol = String((data && data.bol) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    const sh = SHEET_();
+    mark('open');
+    const norm = normalizeHeaderName_;
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    let iBol = _scanBolCol_(ctx.headers);
+    if (!iBol) {
+      ensureBolCol_(sh); // 드문 경우: 컬럼 추가 후 다시 읽기
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+      iBol = _scanBolCol_(ctx.headers);
+    }
+    if (!iBol) return { ok: false, error: 'BOL column unavailable (server setup) — please contact the administrator' };
+    mark('row');
+
+    const iTruck = ctx.hm[norm('Trucking')];
+    const method = iTruck ? String(ctx.rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
+    if (method !== 'TK' && method !== 'TRUCKING') {
+      return { ok: false, error: 'TK orders only — this invoice is ' + (method || 'unknown') };
+    }
+
+    let linkedTo = '';
+    try { linkedTo = (buildDimLinksMap_().childToPrimary || {})[invoice] || ''; } catch (eL) { linkedTo = ''; }
+    if (linkedTo) {
+      return { ok: false, error: 'Linked order — enter the BOL# on primary invoice ' + linkedTo };
+    }
+    mark('links');
+
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    mark('lock');
+    try {
+      sh.getRange(ctx.row, iBol).setNumberFormat('@').setValue(bol);
+      mark('write');
+    } finally {
+      lock.releaseLock();
+    }
+
+    bumpVersionLite_();
+    mark('total');
+    return { ok: true, invoice: invoice, bol: bol, timing: tm };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * ensureSalesConfirmCol_() / buildSalesConfirmMap_() / setSalesConfirm() —
+ * ★ 2026-10-03 신규(시뮬레이션에서 확정). Sales Lookup "Shipping Status" 탭
+ * 전용 "Sales Confirm" 체크 — 영업팀이 TK 팔렛 출고 전에 최종 확인하는 용도.
+ * setShippedStatus/setBolNumber와 완전히 동일한 패턴(TK 전용 + LINKED는
+ * PRIMARY에서만 기록)을 그대로 따름.
+ *
+ * 추가 규칙(시뮬레이션에서 확정):
+ *  1) Mark Shipped는 Sales Confirm이 true여야만 가능 — setShippedStatus 쪽에
+ *     이 검증을 추가함(아래).
+ *  2) 이미 Shipped된 오더는 Sales Confirm을 되돌릴(취소할) 수 없음 — 나간
+ *     화물의 컨펌 기록을 실수로 지우는 사고 방지.
+ * ------------------------------------------------------------------- */
+function _scanSalesConfirmCols_(sh, headersOpt) {
+  const r = { iConfirmed: 0, iAt: 0, iBy: 0, iWasUndone: 0, iUndoneAt: 0, iUndoneBy: 0 };
+  // ★ 2026-10-04 — 호출부가 이미 헤더 행을 읽어둔 경우(setSalesConfirm) 그 값을
+  //   그대로 받아 쓰면 시트 호출 2번(getLastColumn + 헤더 읽기)을 아낄 수 있음.
+  let headers = headersOpt;
+  if (!headers) {
+    const lastCol = sh.getLastColumn();
+    if (lastCol === 0) return r;
+    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  }
+  // ★ 2026-10-02 긴급 수정 — 아래 "중복 컬럼 방지 락"을 추가하기 전까지 실제로
+  //   중복 컬럼이 생겼을 가능성에 대비해, 같은 이름이 여러 개 있으면 항상
+  //   "맨 처음(왼쪽) 컬럼"을 기준으로 삼도록 고정(이미 값이 있으면 덮어쓰지 않음).
+  //   이렇게 하면 쓰기/읽기가 서로 다른 중복 컬럼을 보는 일 없이 항상 같은
+  //   컬럼으로 일관되게 동작함.
+  headers.forEach((h, i) => {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'salesconfirmed' && !r.iConfirmed) r.iConfirmed = i + 1;
+    else if (v === 'salesconfirmedat' && !r.iAt) r.iAt = i + 1;
+    else if (v === 'salesconfirmedby' && !r.iBy) r.iBy = i + 1;
+    // ★ 2026-10-02 신규(사용자 요청) — 컨펌을 취소(Undo)한 이력. 다시 컨펌해도
+    //   이 이력은 지우지 않고 계속 남겨서(영구 이력), 다른 직원이 "이 오더는
+    //   한번 취소됐다가 다시 컨펌된 것"임을 알아볼 수 있게 함.
+    else if (v === 'salesconfirmwasundone' && !r.iWasUndone) r.iWasUndone = i + 1;
+    else if (v === 'salesconfirmundoneat' && !r.iUndoneAt) r.iUndoneAt = i + 1;
+    else if (v === 'salesconfirmundoneby' && !r.iUndoneBy) r.iUndoneBy = i + 1;
+  });
+  return r;
+}
+
+function ensureSalesConfirmCol_(sh) {
+  let cols = _scanSalesConfirmCols_(sh);
+  const add = [];
+  if (!cols.iConfirmed) add.push('SalesConfirmed');
+  if (!cols.iAt) add.push('SalesConfirmedAt');
+  if (!cols.iBy) add.push('SalesConfirmedBy');
+  if (!cols.iWasUndone) add.push('SalesConfirmWasUndone');
+  if (!cols.iUndoneAt) add.push('SalesConfirmUndoneAt');
+  if (!cols.iUndoneBy) add.push('SalesConfirmUndoneBy');
+  if (add.length) {
+    // ★ 2026-10-02 긴급 수정(현장 버그 리포트 — "Undo 했더니 주황색이었다가
+    //   다시 회색으로 돌아간다") — 원인은 이 함수가 "컬럼이 있는지 확인 → 없으면
+    //   추가"를 락(lock) 없이 하고 있었던 것. 여러 요청이 거의 동시에 들어오면
+    //   (예: 셀 한도 문제로 재시도가 쌓였다가 한꺼번에 풀리는 순간) 둘 다 "컬럼이
+    //   없다"고 판단해서 각자 insertColumnsAfter를 호출 → 같은 이름의 컬럼이
+    //   중복으로 생겨버림. 그러면 쓰기와 읽기가 서로 다른 중복 컬럼을 보게 되어
+    //   값이 저장됐다 안 됐다 하는 것처럼 보이는 버그로 이어짐. 이제 컬럼을 새로
+    //   만드는 이 드문 순간에만 짧게 락을 걸고, 락을 얻은 직후 헤더를 다시 한 번
+    //   확인(double-check)해서 그 사이 다른 요청이 이미 추가했으면 또 추가하지
+    //   않도록 방어함.
+    const colLock = LockService.getDocumentLock();
+    colLock.waitLock(15000);
+    try {
+      cols = _scanSalesConfirmCols_(sh); // 락 대기 중 다른 요청이 이미 추가했을 수 있으므로 재확인
+      const add2 = [];
+      if (!cols.iConfirmed) add2.push('SalesConfirmed');
+      if (!cols.iAt) add2.push('SalesConfirmedAt');
+      if (!cols.iBy) add2.push('SalesConfirmedBy');
+      if (!cols.iWasUndone) add2.push('SalesConfirmWasUndone');
+      if (!cols.iUndoneAt) add2.push('SalesConfirmUndoneAt');
+      if (!cols.iUndoneBy) add2.push('SalesConfirmUndoneBy');
+      if (add2.length) {
+        const curLastCol = sh.getLastColumn();
+        sh.insertColumnsAfter(curLastCol, add2.length);
+        sh.getRange(1, curLastCol + 1, 1, add2.length).setValues([add2]);
+        __HDR_CACHE = null;
+        let nextCol = curLastCol + 1;
+        add2.forEach(name => {
+          if (name === 'SalesConfirmed') cols.iConfirmed = nextCol;
+          else if (name === 'SalesConfirmedAt') cols.iAt = nextCol;
+          else if (name === 'SalesConfirmedBy') cols.iBy = nextCol;
+          else if (name === 'SalesConfirmWasUndone') cols.iWasUndone = nextCol;
+          else if (name === 'SalesConfirmUndoneAt') cols.iUndoneAt = nextCol;
+          else if (name === 'SalesConfirmUndoneBy') cols.iUndoneBy = nextCol;
+          nextCol++;
+        });
+      }
+    } catch (insertErr) {
+      // ★ 2026-10-02 긴급 수정(현장 버그 리포트) — 구글 시트 전체 셀 수가 Google의
+      // 워크북당 한도(약 2천만 셀)에 가까워지면 새 컬럼 추가 자체가
+      // "This action would increase the number of cells... limit" 오류로 거부됨.
+      // 이 예외가 그대로 터지면 Sales Confirm/Undo 전체가 먹통이 되는 사고로
+      // 이어졌음(핵심 컬럼은 이미 있는데도 이력 컬럼 3개를 못 넣는다고 전체를
+      // 막아버렸기 때문). 이제는 새 이력 컬럼만 "사용 불가(0)"로 남기고, 이미
+      // 존재하는 핵심 컬럼(Confirmed/At/By)으로 기본 컨펌/취소 기능은 계속
+      // 정상 동작하도록 조용히 건너뜀. 시트 용량을 확보하면 다음 호출에서
+      // 자동으로 이력 컬럼이 추가됨.
+      Logger.log('ensureSalesConfirmCol_: history column insert skipped (sheet likely at cell limit): ' + insertErr);
+    } finally {
+      colLock.releaseLock();
+    }
+  }
+  return cols;
+}
+
+function buildSalesConfirmMap_() {
+  const map = {};
+  try {
+    const sh = SHEET_();
+    const cols = ensureSalesConfirmCol_(sh);
+    if (!cols.iConfirmed) return map;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return map;
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    if (!iInv) return map;
+    const n = lastRow - 1;
+    const invVals = sh.getRange(2, iInv, n, 1).getValues();
+    const confVals = sh.getRange(2, cols.iConfirmed, n, 1).getValues();
+    const atVals = cols.iAt ? sh.getRange(2, cols.iAt, n, 1).getValues() : null;
+    const byVals = cols.iBy ? sh.getRange(2, cols.iBy, n, 1).getValues() : null;
+    const wasUndoneVals = cols.iWasUndone ? sh.getRange(2, cols.iWasUndone, n, 1).getValues() : null;
+    const undoneAtVals = cols.iUndoneAt ? sh.getRange(2, cols.iUndoneAt, n, 1).getValues() : null;
+    const undoneByVals = cols.iUndoneBy ? sh.getRange(2, cols.iUndoneBy, n, 1).getValues() : null;
+    for (let i = 0; i < n; i++) {
+      const inv = String(invVals[i][0] || '').trim();
+      if (!inv) continue;
+      map[inv] = {
+        confirmed: !!confVals[i][0],
+        confirmedAt: atVals ? fmtShortTs_(atVals[i][0]) : '',
+        confirmedBy: byVals ? String(byVals[i][0] || '') : '',
+        // ★ 2026-10-02 신규(사용자 요청) — 취소(Undo) 이력. 재컨펌해도 지워지지
+        //   않는 영구 이력(setSalesConfirm 참고).
+        wasUndone: wasUndoneVals ? !!wasUndoneVals[i][0] : false,
+        undoneAt: undoneAtVals ? fmtShortTs_(undoneAtVals[i][0]) : '',
+        undoneBy: undoneByVals ? String(undoneByVals[i][0] || '') : ''
+      };
+    }
+  } catch (e) { /* best-effort — 실패해도 호출부는 confirmed:false로 안전하게 처리됨 */ }
+  return map;
+}
+
+/* ★ 2026-10-04 신규 — 열 번호(1=A) → A1 표기 열 글자. 시트 서비스 호출 없이
+ *   순수 계산이라 setSalesConfirm에서 getA1Notation() 호출을 없애는 용도. */
+function _colLetterA1_(n) {
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/* ★ 2026-10-04 신규 — 저장 계열 함수(BOL/Mark Shipped/배송방법/박스수량)가 공통으로 쓰는
+ *   "헤더 1번 + 대상 행 1번" 읽기. 예전엔 이런 함수들이 헤더를 여러 번, 셀을 하나씩
+ *   따로 읽고 시트 전체 컬럼을 훑는 맵(buildXxxMap_)까지 불러서 느렸음.
+ *   - headerMapCached_()와 같은 규칙(같은 이름이 여럿이면 마지막 컬럼)으로 hm 생성
+ *   - 캐시 인덱스로 찾은 행이 "정말 이 인보이스 행인지" 반드시 검증, 틀리면 전체 스캔으로
+ *     다시 찾음(행이 밀린 뒤 낡은 인덱스로 엉뚱한 행에 쓰는 사고 방지 — 정확성 최우선)
+ *   반환: { headers, lastCol, hm, row, rowVals } 또는 { error } */
+function _readJobRowFast_(sh, invoice) {
+  const norm = normalizeHeaderName_;
+  const lastCol = sh.getLastColumn();
+  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const hm = {};
+  headers.forEach(function (h, i) { hm[norm(String(h))] = i + 1; });
+  const iInvoice = hm[norm('Invoice')] || 0;
+  let row = findRowByKey_('invoice', invoice);
+  if (!row) return { error: 'invoice not found' };
+  let rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+  if (iInvoice && String(rowVals[iInvoice - 1] || '').trim() !== invoice) {
+    try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1_meta'); } catch (e) {}
+    row = 0;
+    const lastRow = sh.getLastRow();
+    if (lastRow >= 2) {
+      const invVals = sh.getRange(2, iInvoice, lastRow - 1, 1).getValues();
+      for (let i = 0; i < invVals.length; i++) {
+        if (String(invVals[i][0] || '').trim() === invoice) { row = i + 2; break; }
+      }
+    }
+    if (!row) return { error: 'invoice not found' };
+    rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+  }
+  return { headers: headers, lastCol: lastCol, hm: hm, row: row, rowVals: rowVals };
+}
+
+/* 컬럼들이 서로 "빈틈없이 나란히" 붙어 있으면 한 번의 setValues로, 아니면 셀별로 정확히
+ * 그 셀만 씀(사이에 낀 다른 컬럼은 절대 안 건드림). entries: [{col, value, text}] */
+function _writeRowCells_(sh, row, entries) {
+  const list = entries.filter(function (e) { return e.col; });
+  if (!list.length) return;
+  const cols = list.map(function (e) { return e.col; });
+  const minC = Math.min.apply(null, cols), maxC = Math.max.apply(null, cols);
+  const textRanges = list.filter(function (e) { return e.text; }).map(function (e) { return _colLetterA1_(e.col) + row; });
+  if ((maxC - minC + 1) === list.length) {
+    if (textRanges.length) sh.getRangeList(textRanges).setNumberFormat('@');
+    const arr = new Array(list.length);
+    list.forEach(function (e) { arr[e.col - minC] = e.value; });
+    sh.getRange(row, minC, 1, list.length).setValues([arr]);
+  } else {
+    list.forEach(function (e) {
+      const r = sh.getRange(row, e.col);
+      if (e.text) r.setNumberFormat('@');
+      r.setValue(e.value);
+    });
+  }
+}
+
+/* 시각 값을 'yyyy-MM-dd HH:mm:ss' 문자열로 통일(구글시트가 날짜처럼 보이는 문자열을 Date로
+ * 자동 변환해둔 옛 셀도 같은 형식으로 읽히게 함 — 정렬 기준이 항상 일관되도록). */
+function _tsToIso_(v) {
+  try {
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
+      return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    }
+  } catch (e) { /* 아래에서 문자열로 */ }
+  return String(v || '');
+}
+
+function _scanShippedCols_(headers) {
+  let iShipped = 0, iAt = 0, iBy = 0;
+  headers.forEach(function (h, i) {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'shipped') iShipped = i + 1;
+    else if (v === 'shippedat') iAt = i + 1;
+    else if (v === 'shippedby') iBy = i + 1;
+  });
+  return { iShipped: iShipped, iAt: iAt, iBy: iBy };
+}
+function _scanBolCol_(headers) {
+  let iBol = 0;
+  headers.forEach(function (h, i) {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'bol' || v === 'bolnumber') iBol = i + 1;
+  });
+  return iBol;
+}
+
+/* 입력: { invoice, confirmed(true|false), by }
+ *
+ * ★ 2026-10-04 전면 경량화(현장 보고 — "Confirm 저장에 15초, 영업 15명이 동시에
+ *   누르면 너무 오래 걸린다") — 원인: 예전 구현은 오더 1건을 저장하려고
+ *   (1) Dimensions 시트 "전체"를 읽는 buildDimsExistsMap_() (캐시 안 씀),
+ *   (2) Undo 때는 Jobs 시트 전체 컬럼을 읽는 buildShippedMap_(),
+ *   (3) 셀을 6~10번 따로따로 읽고/쓰는 개별 호출,
+ *   (4) 쓰기 후 bumpVersion_()이 무거운 캐시 10개(행번호 인덱스·Dimensions·
+ *       DimLinks 등)를 전부 지워서, 직후 모든 사람의 다음 요청이 전체 시트를
+ *       다시 읽게 만듦
+ *   을 매번 했음. 결과(값·검증 규칙·응답 형식)는 100% 그대로 두고 일하는
+ *   방식만 바꿈:
+ *   - 헤더 1번 + 대상 행 1번만 읽음(행 전체를 한 번에)
+ *   - 묶음(LINKED) 판정은 30초 캐시된 DimLinks 맵(buildDimLinksMap_) 사용 —
+ *     buildDimsExistsMap_이 linkedTo를 채우던 것과 동일한 소스
+ *   - 출고 여부는 이 행의 Shipped 셀 1개만 확인
+ *   - 컨펌 관련 6개 컬럼이 나란히 붙어 있으면 한 번의 setValues로 씀(안 붙어
+ *     있으면 예전처럼 셀별로 안전하게 씀)
+ *   - 캐시 무효화는 bumpVersionLite_() (값만 바뀌는 작업용)
+ *   - 인덱스 캐시로 찾은 행은 반드시 "이 행의 Invoice가 맞는지" 확인 — 틀리면
+ *     전체 스캔으로 다시 찾음(엉뚱한 행에 쓰는 사고 방지, 정확성 최우선)
+ *   - 응답에 timing(구간별 ms)을 같이 실어, 앞으로 느려지면 어느 구간인지 바로 확인 */
+function setSalesConfirm(data) {
+  const T0 = Date.now();
+  const tm = {};
+  const mark = function (k) { tm[k] = Date.now() - T0; };
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const confirmed = !!(data && data.confirmed);
+    const by = String((data && data.by) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+
+    const sh = SHEET_();
+    mark('open');
+    const norm = normalizeHeaderName_;
+
+    // 1) 헤더 1번 읽기 → 필요한 컬럼 위치를 전부 여기서 계산
+    let lastCol = sh.getLastColumn();
+    let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    let cols = _scanSalesConfirmCols_(sh, headers);
+    if (!cols.iConfirmed || !cols.iAt || !cols.iBy || !cols.iWasUndone || !cols.iUndoneAt || !cols.iUndoneBy) {
+      // 드문 경우(컬럼이 아직 없음): 기존의 락 보호 컬럼 추가 로직 그대로 사용
+      cols = ensureSalesConfirmCol_(sh);
+      lastCol = sh.getLastColumn();
+      headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+      cols = _scanSalesConfirmCols_(sh, headers);
+    }
+    if (!cols.iConfirmed) return { ok: false, error: 'SalesConfirmed column unavailable (server setup) — please contact the administrator' };
+    let iInvoice = 0, iTruck = 0, iShipped = 0;
+    headers.forEach(function (h, i) {
+      const k = norm(String(h));
+      if (k === norm('Invoice')) iInvoice = i + 1;
+      else if (k === norm('Trucking')) iTruck = i + 1;
+      const raw = String(h).trim().toLowerCase();
+      if (raw === 'shipped' && !iShipped) iShipped = i + 1;
+    });
+    mark('header');
+
+    // 2) 행 찾기(캐시 인덱스) + "정말 이 인보이스 행인지" 검증
+    let row = findRowByKey_('invoice', invoice);
+    if (!row) return { ok: false, error: 'invoice not found' };
+    let rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+    if (iInvoice && String(rowVals[iInvoice - 1] || '').trim() !== invoice) {
+      // 캐시 인덱스가 오래돼서 행 번호가 틀어진 경우 — 캐시를 버리고 전체 스캔으로 재확인
+      try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1_meta'); } catch (e) {}
+      row = 0;
+      const lastRow = sh.getLastRow();
+      if (lastRow >= 2) {
+        const invVals = sh.getRange(2, iInvoice, lastRow - 1, 1).getValues();
+        for (let i = 0; i < invVals.length; i++) {
+          if (String(invVals[i][0] || '').trim() === invoice) { row = i + 2; break; }
+        }
+      }
+      if (!row) return { ok: false, error: 'invoice not found' };
+      rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
+    }
+    mark('row');
+
+    const method = iTruck ? String(rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
+    if (method !== 'TK' && method !== 'TRUCKING') {
+      return { ok: false, error: 'TK orders only — this invoice is ' + (method || 'unknown') };
+    }
+
+    // 3) 묶음(LINKED) 오더는 PRIMARY에서만 — 30초 캐시된 DimLinks 맵으로 판정
+    let linkedTo = '';
+    try { linkedTo = (buildDimLinksMap_().childToPrimary || {})[invoice] || ''; } catch (eL) { linkedTo = ''; }
+    if (linkedTo) {
+      return { ok: false, error: 'Linked order — confirm on primary invoice ' + linkedTo };
+    }
+    mark('links');
+
+    // 4) 이미 출고된 오더는 컨펌 취소 불가 — 이 행의 Shipped 셀만 확인
+    if (!confirmed && iShipped && rowVals[iShipped - 1]) {
+      return { ok: false, error: 'This order has already shipped — sales confirm can no longer be undone.' };
+    }
+
+    // 5) 쓰기 — 락은 실제로 쓰는 구간만
+    const colList = [cols.iConfirmed, cols.iAt, cols.iBy, cols.iWasUndone, cols.iUndoneAt, cols.iUndoneBy].filter(Boolean);
+    const minC = Math.min.apply(null, colList);
+    const maxC = Math.max.apply(null, colList);
+    const contiguous = (maxC - minC + 1) === colList.length;
+
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    mark('lock');
+    let confirmedAtRaw = '';
+    let undoneAtRaw = '';
+    let undoneByOut = '';
+    let wasUndoneOut = false;
+    try {
+      const now = batchNow_();
+      confirmedAtRaw = confirmed ? now : '';
+      // 락을 얻은 "이후"의 최신 값을 기준으로 이력(취소 기록)을 다룸
+      const segRange = sh.getRange(row, minC, 1, maxC - minC + 1);
+      const seg = segRange.getValues()[0];
+      const at = function (c) { return c ? seg[c - minC] : ''; };
+      const put = function (c, v) { if (c) seg[c - minC] = v; };
+
+      put(cols.iConfirmed, confirmed);
+      put(cols.iAt, confirmedAtRaw);
+      put(cols.iBy, confirmed ? by : '');
+      if (!confirmed) {
+        // ★ 취소(Undo) 이력은 영구 보존(재컨펌해도 지우지 않음) — 취소하는 이 순간에만 기록
+        undoneAtRaw = now;
+        undoneByOut = by;
+        wasUndoneOut = true;
+        put(cols.iWasUndone, true);
+        put(cols.iUndoneAt, undoneAtRaw);
+        put(cols.iUndoneBy, by);
+      } else {
+        // 재컨펌 시에는 기존 취소 이력을 그대로 읽어 응답에만 실어줌(지우지 않음)
+        undoneAtRaw = at(cols.iUndoneAt);
+        undoneByOut = String(at(cols.iUndoneBy) || '');
+        wasUndoneOut = cols.iWasUndone ? !!at(cols.iWasUndone) : false;
+      }
+
+      // 날짜처럼 보이는 문자열이 구글시트에서 Date로 자동 변환되는 걸 막기 위해
+      // 시간 컬럼은 텍스트('@') 서식을 먼저 고정(기존 동작 그대로 — 취소 시각은 취소할 때만)
+      const textCols = [cols.iAt];
+      if (!confirmed && cols.iUndoneAt) textCols.push(cols.iUndoneAt);
+      const textRanges = textCols.filter(Boolean).map(function (c) { return _colLetterA1_(c) + row; });
+
+      if (contiguous) {
+        if (textRanges.length) sh.getRangeList(textRanges).setNumberFormat('@');
+        segRange.setValues([seg]);
+      } else {
+        // 컬럼이 서로 떨어져 있으면 예전처럼 셀별로 정확히 그 셀만 씀(사이에 낀 다른 컬럼은 절대 안 건드림)
+        sh.getRange(row, cols.iConfirmed).setValue(confirmed);
+        if (cols.iAt) sh.getRange(row, cols.iAt).setNumberFormat('@').setValue(confirmedAtRaw);
+        if (cols.iBy) sh.getRange(row, cols.iBy).setValue(confirmed ? by : '');
+        if (!confirmed) {
+          if (cols.iWasUndone) sh.getRange(row, cols.iWasUndone).setValue(true);
+          if (cols.iUndoneAt) sh.getRange(row, cols.iUndoneAt).setNumberFormat('@').setValue(undoneAtRaw);
+          if (cols.iUndoneBy) sh.getRange(row, cols.iUndoneBy).setValue(by);
+        }
+      }
+      mark('write');
+    } finally {
+      lock.releaseLock();
+    }
+
+    bumpVersionLite_();
+    mark('total');
+    return {
+      ok: true, invoice: invoice, confirmed: confirmed,
+      confirmedAt: fmtShortTs_(confirmedAtRaw), confirmedBy: confirmed ? by : '',
+      wasUndone: wasUndoneOut, undoneAt: fmtShortTs_(undoneAtRaw), undoneBy: undoneByOut,
+      timing: tm
+    };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+/* ---------------------------------------------------------------------
  * buildPackStageMap_() — ★ 2026-08-24 신규 (오출고 방지 신기능 연동)
  * sales.html이 기존의 boolean(movedToPacking)만으로는 파랑(패킹존 이동완료)과
  * 주황(최종 2차 검증완료)을 구분할 수 없어서, 4단계 문자열 상태를 별도로
@@ -4043,10 +5307,19 @@ function removeAutoDeleteOldJobsTrigger() {
 function getSalesTodayList() {
   try {
     const cache = CacheService.getScriptCache();
+    // ★ 2026-10-04 — 캐시 키에 데이터 버전을 포함. 저장(bumpVersion*)이 버전을 바꾸면 옛 키는 자동으로
+    //   읽히지 않음 → 1분 동기화가 "저장 직전에 읽기 시작한 옛 데이터"를 캐시에 늦게 써넣어도
+    //   저장 후 목록이 옛 값으로 60초간 되돌아가는 경합이 생기지 않음. (버전은 시트 읽기 전에 확보)
     const cacheKey = 'salesToday_cache_v1';
-    const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 그냥 새로 조회 */ }
+    const verAtStart = getVersion_();
+    const cachedRaw = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
+    if (cachedRaw) {
+      // ★ 2026-10-04 — 캐시 값 앞에 "읽기 시작 시점 버전|"을 붙여 저장. 지금 버전과 다르면(= 그 사이 저장이
+      //   있었던 옛 데이터) 무시하고 새로 읽음. 동기화가 저장 직전 데이터를 뒤늦게 캐시에 써도 되돌아가지 않음.
+      const bar = cachedRaw.indexOf('|');
+      if (bar > 0 && cachedRaw.substring(0, bar) === getVersion_()) {
+        try { return JSON.parse(cachedRaw.substring(bar + 1)); } catch (e) { /* 파싱 실패 시 새로 조회 */ }
+      }
     }
 
     const sh = SHEET_();
@@ -4082,6 +5355,19 @@ function getSalesTodayList() {
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
     const packStageMap = buildPackStageMap_(); // ★ 2026-08-24 신규 — 4단계 패킹 상태(none/moved/taken/verified)
+    const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+    const bolMap = buildBolMap_(); // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭)
+    const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+
+    // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
+    //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦.
+    //   invVals/remarksVals는 이미 전체가 메모리에 올라와 있으므로 추가 시트
+    //   조회 없이 한 번의 루프로 끝남.
+    const invoiceToCustomer_ = {};
+    for (let ci = 0; ci < invVals.length; ci++) {
+      const civ = String(invVals[ci][0] || '').trim();
+      if (civ && !invoiceToCustomer_[civ]) invoiceToCustomer_[civ] = remarksVals ? remarksVals[ci][0] : '';
+    }
 
     // ★ 2026-08-06 재설계(매니저 요청) — 예전엔 "오늘 날짜에 검수완료된 것"만
     //   보여줬음. 그런데 이제 자동보관 규칙이 "검수 다음날"이 아니라 "디멘션
@@ -4102,6 +5388,10 @@ function getSalesTodayList() {
       const invoice = String(invVals[i][0] || '');
       const shipRaw = shipVals ? shipVals[i][0] : '';
       const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
+      // ★ 2026-10-02 신규 — 같은 팔렛(LINKED 그룹)이면 항상 대표(PRIMARY)의
+      //   출고 상태를 그대로 보여줌(디멘션과 동일한 "대표에서만 진짜 값" 원칙).
+      const dimsLinkedTo_ = (dimsMap[invoice] || {}).linkedTo || '';
+      const shipInfo_ = shippedMap[dimsLinkedTo_ || invoice] || {};
       jobs.push({
         invoice: invoice,
         remarks: remarksVals ? remarksVals[i][0] : '',
@@ -4114,7 +5404,37 @@ function getSalesTodayList() {
         movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
         dimsCount: (dimsMap[invoice] || {}).count || 0,
         // ★ 2026-08-06 신규 — 이 오더의 디멘션이 다른(대표) 인보이스에 포함돼 있으면 그 번호
-        dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || '',
+        dimsLinkedTo: dimsLinkedTo_,
+        // ★ 2026-10-02 신규(현장 피드백) — 이 오더가 PRIMARY(대표)이고 다른 오더가
+        //   여기로 묶여 있으면(= DimLinks상 자식이 있으면) 그 자식 개수. 리스트
+        //   화면에서 "🔗 자식인보이스"는 자식 쪽에만 보이고 대표 쪽엔 아무 표시가
+        //   없어 헷갈린다는 지적 반영 — 대표 쪽도 이 값으로 링크 표시를 함.
+        dimsLinkedCount: (dimsMap[invoice] || {}).linkedCount || 0,
+        // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 전체를 팝업으로
+        //   보여주기 위한 실제 인보이스+고객명 목록. linkedCount>0인(= PRIMARY)
+        //   건에만 값이 들어있고, 그 외엔 항상 빈 배열.
+        dimsLinkedGroup: (((dimsMap[invoice] || {}).linkedInvoices) || []).map(function(inv){
+          return { invoice: inv, customer: invoiceToCustomer_[inv] || '' };
+        }),
+        // ★ 2026-10-02 신규 — 디멘션 저장 시각(Shipping Status 탭의 "경과일" 계산용)
+        dimsAt: (dimsMap[invoice] || {}).enteredAt || '',
+        // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭). LINKED 건은
+        //   항상 대표(PRIMARY)의 값을 그대로 받음(위 shipInfo_ 참고).
+        shipped: !!shipInfo_.shipped,
+        shippedAt: shipInfo_.shippedAt || '',
+        shippedBy: shipInfo_.shippedBy || '',
+        // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭). LINKED 건은 항상
+        //   대표(PRIMARY)의 값을 그대로 받음(shipInfo_와 동일한 원칙).
+        bol: bolMap[dimsLinkedTo_ || invoice] || '',
+        // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭). LINKED 건은
+        //   대표(PRIMARY)의 값을 그대로 받음.
+        salesConfirmed: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).confirmed,
+        salesConfirmedAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).confirmedAt || '',
+        salesConfirmedBy: (confirmMap[dimsLinkedTo_ || invoice] || {}).confirmedBy || '',
+        // ★ 2026-10-02 신규(사용자 요청) — 취소(Undo) 영구 이력
+        salesConfirmWasUndone: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).wasUndone,
+        salesConfirmUndoneAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).undoneAt || '',
+        salesConfirmUndoneBy: (confirmMap[dimsLinkedTo_ || invoice] || {}).undoneBy || '',
         // ★ 2026-08-24 신규 — 오출고 방지: 핑크(moved)/파랑(taken)/주황(verified, 최종 2차 검증완료) 4단계.
         //   디멘션이 이미 저장된 건(수기 배송 준비 완료로 간주) taken(파랑)으로 승격.
         // ★ 2026-09-25 긴급 수정(현장 지적 — "Moved to Packing ↔ 2nd Verification
@@ -4140,7 +5460,7 @@ function getSalesTodayList() {
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
 
     const out = { ok: true, jobs: jobs, date: today };
-    try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
+    try { _cachePutChunked_(cache, cacheKey, verAtStart + '|' + JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
@@ -4156,9 +5476,15 @@ function getSalesOverview() {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'salesOverview_cache_v1';
-    const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 그냥 새로 조회 */ }
+    const verAtStart = getVersion_();
+    const cachedRaw = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
+    if (cachedRaw) {
+      // ★ 2026-10-04 — 캐시 값 앞에 "읽기 시작 시점 버전|"을 붙여 저장. 지금 버전과 다르면(= 그 사이 저장이
+      //   있었던 옛 데이터) 무시하고 새로 읽음. 동기화가 저장 직전 데이터를 뒤늦게 캐시에 써도 되돌아가지 않음.
+      const bar = cachedRaw.indexOf('|');
+      if (bar > 0 && cachedRaw.substring(0, bar) === getVersion_()) {
+        try { return JSON.parse(cachedRaw.substring(bar + 1)); } catch (e) { /* 파싱 실패 시 새로 조회 */ }
+      }
     }
 
     const sh = SHEET_();
@@ -4203,6 +5529,18 @@ function getSalesOverview() {
 
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
+    const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+    const bolMap = buildBolMap_(); // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭)
+    const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+
+    // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
+    //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦
+    //   (getSalesTodayList와 동일한 방식 — 추가 시트 조회 없음).
+    const invoiceToCustomer_ = {};
+    for (let ci = 0; ci < invVals.length; ci++) {
+      const civ = String(invVals[ci][0] || '').trim();
+      if (civ && !invoiceToCustomer_[civ]) invoiceToCustomer_[civ] = remarksVals ? remarksVals[ci][0] : '';
+    }
 
     const jobs = [];
     for (let i = 0; i < n; i++) {
@@ -4253,6 +5591,9 @@ function getSalesOverview() {
       // 조용히 "완료"로 덮지 않고 화면에 경고로 드러냄(원인 파악이 가능하도록).
       const inspVal = inspVals ? String(inspVals[i][0] || '').trim() : '';
       const pickAnomaly = !!inspVal && !pickComplete;
+      // ★ 2026-10-02 신규 — LINKED 건은 항상 대표(PRIMARY)의 출고 상태를 그대로 보여줌.
+      const dimsLinkedTo_ = (dimsMap[invoice] || {}).linkedTo || '';
+      const shipInfo_ = shippedMap[dimsLinkedTo_ || invoice] || {};
       jobs.push({
         invoice: invoice,
         remarks: remarksVals ? remarksVals[i][0] : '',
@@ -4270,7 +5611,31 @@ function getSalesOverview() {
         movedToPacking: !!movedMap[invoice] || ((dimsMap[invoice] || {}).count || 0) > 0,
         dimsCount: (dimsMap[invoice] || {}).count || 0,
         // ★ 2026-08-06 신규 — 디멘션이 다른(대표) 인보이스에 포함돼 있으면 그 번호
-        dimsLinkedTo: (dimsMap[invoice] || {}).linkedTo || '',
+        dimsLinkedTo: dimsLinkedTo_,
+        // ★ 2026-10-02 신규(현장 피드백) — 이 오더가 PRIMARY(대표)이고 다른 오더가
+        //   여기로 묶여 있으면 그 자식 개수. getSalesTodayList와 동일한 이유.
+        dimsLinkedCount: (dimsMap[invoice] || {}).linkedCount || 0,
+        // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 전체를 팝업으로
+        //   보여주기 위한 실제 인보이스+고객명 목록. getSalesTodayList와 동일.
+        dimsLinkedGroup: (((dimsMap[invoice] || {}).linkedInvoices) || []).map(function(inv){
+          return { invoice: inv, customer: invoiceToCustomer_[inv] || '' };
+        }),
+        // ★ 2026-10-02 신규 — 디멘션 저장 시각(Shipping Status 탭의 "경과일" 계산용)
+        dimsAt: (dimsMap[invoice] || {}).enteredAt || '',
+        // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+        shipped: !!shipInfo_.shipped,
+        shippedAt: shipInfo_.shippedAt || '',
+        shippedBy: shipInfo_.shippedBy || '',
+        // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭)
+        bol: bolMap[dimsLinkedTo_ || invoice] || '',
+        // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+        salesConfirmed: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).confirmed,
+        salesConfirmedAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).confirmedAt || '',
+        salesConfirmedBy: (confirmMap[dimsLinkedTo_ || invoice] || {}).confirmedBy || '',
+        // ★ 2026-10-02 신규(사용자 요청) — 취소(Undo) 영구 이력
+        salesConfirmWasUndone: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).wasUndone,
+        salesConfirmUndoneAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).undoneAt || '',
+        salesConfirmUndoneBy: (confirmMap[dimsLinkedTo_ || invoice] || {}).undoneBy || '',
         createdAt: createdAt
       });
     }
@@ -4287,7 +5652,7 @@ function getSalesOverview() {
     jobs.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
 
     const out = { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
-    try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
+    try { _cachePutChunked_(cache, cacheKey, verAtStart + '|' + JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     return out;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e), jobs: [] };
