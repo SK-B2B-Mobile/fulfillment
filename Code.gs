@@ -35,6 +35,7 @@ function getVersion_() {
 
 function bumpVersion_() {
   PROP.setProperty('jobsVersion', _nowVer_());
+  __JOBS_BLOCK = null; __HDR_ROW = null; // ★ 저장 후에는 메모해 둔 Jobs 블록을 버림
   // ★ 2026-07-14 신규: 데이터가 실제로 바뀌면 listJobs 캐시를 즉시 지워서,
   //   다음 조회부터는(캐시 만료 8초를 기다리지 않고) 곧바로 최신 데이터를 읽음
   // ★ 2026-09-25 수정 — 아래 캐시들이 전부(또는 이미) 청크 캐시(_cacheGetChunked_/
@@ -86,6 +87,7 @@ function bumpVersion_() {
  *   (그런 곳은 기존 bumpVersion_() 그대로). */
 function bumpVersionLite_() {
   PROP.setProperty('jobsVersion', _nowVer_());
+  __JOBS_BLOCK = null; __HDR_ROW = null;
   try {
     CacheService.getScriptCache().removeAll([
       'listJobs_cache_v1_meta',
@@ -100,6 +102,7 @@ let __HDR_CACHE = null;
 
 function headerMapCached_() {
   const sh = SHEET_();
+  if (__JOBS_BLOCK_ON && __HDR_CACHE) return __HDR_CACHE.map; // ★ 블록 모드(읽기 전용 계산): 시그니처 확인 호출 생략
   const sig = sh.getSheetId() + ':' + sh.getMaxColumns();
   if (__HDR_CACHE && (__HDR_CACHE.sig === sig)) return __HDR_CACHE.map;
 
@@ -834,14 +837,24 @@ function doPost(e) {
 }
 
 /* ================= Sheet helpers =================== */
-function ss_() { return SpreadsheetApp.openById(SS_ID); }
+// ★ 2026-10-05 속도 — 실행(execution) 하나 안에서는 스프레드시트/Jobs 시트 객체를 한 번만 열고 재사용.
+//   측정 결과: SHEET_() 한 번에 openById + 시트 찾기 + 헤더 점검(시트 호출 5~6회)이 약 1.3초였고, 목록 계산 한 번에
+//   SHEET_()가 수십 번 불려서(보조표 6개 등) 서버가 바쁜 시간엔 30~90초까지 늘어났음. 이제 첫 호출만 열고 나머지는 즉시 반환.
+//   (Apps Script는 실행마다 전역 변수가 새로 만들어지므로 다른 요청의 값이 섞이지 않음. 시트 객체는 항상 최신 값을 읽음.)
+var __SS_MEMO = null, __JOBS_SH_MEMO = null;
+function ss_() {
+  if (!__SS_MEMO) __SS_MEMO = SpreadsheetApp.openById(SS_ID);
+  return __SS_MEMO;
+}
 function SHEET_() {
+  if (__JOBS_SH_MEMO) return __JOBS_SH_MEMO;
   const ss = ss_();
   let sh = ss.getSheetByName(JOBS_SHEET);
   if (!sh) {
     sh = ss.insertSheet(JOBS_SHEET);
   }
   ensureJobsHeader_(sh);
+  __JOBS_SH_MEMO = sh;
   return sh;
 }
 function sheet_(name) { const s = ss_().getSheetByName(name) || ss_().insertSheet(name); return s; }
@@ -901,7 +914,7 @@ function ensureISOColumns_(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return;
 
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   const hasStartISO = headers.some(h => String(h).trim().toLowerCase() === 'startatiso');
   const hasEndISO = headers.some(h => String(h).trim().toLowerCase() === 'endatiso');
 
@@ -925,7 +938,7 @@ function ensureISOColumns_(sh) {
 function ensureManualPackingCol_(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return;
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   const hasFlag = headers.some(h => String(h).trim().toLowerCase() === 'packingmovedmanual');
   const hasBy = headers.some(h => String(h).trim().toLowerCase() === 'packingmovedmanualby');
   const add = [];
@@ -948,7 +961,7 @@ function ensureManualPackingCol_(sh) {
 function ensureMethodChangeCol_(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return;
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   const hasAt = headers.some(h => String(h).trim().toLowerCase() === 'methodchangedat');
   const hasBy = headers.some(h => String(h).trim().toLowerCase() === 'methodchangedby');
   const hasOrig = headers.some(h => String(h).trim().toLowerCase() === 'originalmethod');
@@ -1056,7 +1069,7 @@ function updateOrderMethod(data) {
 function getFreshColIndex_(sh, headerName) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return 0;
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   const target = String(headerName).trim().toLowerCase();
   for (let c = 0; c < headers.length; c++) {
     if (String(headers[c]).trim().toLowerCase() === target) return c + 1;
@@ -1080,7 +1093,7 @@ function ensurePaymentStatusCol_(sh, headersOpt) {
   if (!headers) {
     const lastCol = sh.getLastColumn();
     if (lastCol === 0) return { iStatus: 0, iAt: 0, iBy: 0 };
-    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    headers = _hdrRow_(sh, lastCol);
   }
   let iStatus = 0, iAt = 0, iBy = 0;
   headers.forEach((h, i) => {
@@ -1144,7 +1157,7 @@ function updatePaymentStatus(data) {
     mark('open');
     const norm = normalizeHeaderName_;
     const lastCol = sh.getLastColumn();
-    let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    let headers = _hdrRow_(sh, lastCol);
     let _payCols = ensurePaymentStatusCol_(sh, headers);
     let hdrLastCol = lastCol;
     if (sh.getLastColumn() !== lastCol) { // 컬럼이 새로 추가된 드문 경우 — 헤더 재확인
@@ -1269,7 +1282,7 @@ function _scanPuTkBoxQtyCols_(sh, headersOpt) {
   if (!headers) {
     const lastCol = sh.getLastColumn();
     if (lastCol === 0) return r;
-    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    headers = _hdrRow_(sh, lastCol);
   }
   // ★ 2026-10-02 긴급 수정 — 중복 컬럼이 있어도 항상 맨 처음(왼쪽) 컬럼을
   //   기준으로 삼도록 고정(ensureSalesConfirmCol_과 동일한 방어).
@@ -1599,7 +1612,7 @@ function upsertJob_mergeText_(job) {
       }
     }
 
-    const hdr2 = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    const hdr2 = _hdrRow_(sh, lastCol);
     hdr2.forEach(function(h, i) {
       const n = String(h).trim().toLowerCase().replace(/\s/g,'');
       if (n === 'startatiso' || n === 'endatiso') {
@@ -1714,10 +1727,20 @@ function listJobs_textSafe_() {
     return !(v === 'true' || v === '1' || v === 'y' || v === 'yes');
   });
 
+  // ★ 2026-10-05 속도 개선 — 이슈(ISSUES) 행마다 getNote()를 개별 호출하던 것(행 수 × API 1회, 동기화가
+  //   몰리는 시간대엔 호출당 0.5~수 초 → 한 사이클 수백 초의 주원인)을, 검수 열 전체 메모를
+  //   getNotes() "한 번"으로 읽어 행 번호로 찾아 쓰도록 변경. 결과 값은 완전히 동일.
+  //   (한 번 읽기가 실패하면 예전 방식(행별 읽기)으로 자동 대체 — 안전망)
+  let notesCol = null;
+  const needNotes = iInsp && cleaned.some(j => String(j.inspection || '').indexOf('ISSUES') >= 0);
+  if (needNotes) {
+    try { notesCol = sh.getRange(2, iInsp, lastRow - 1, 1).getNotes(); } catch (eNotes) { notesCol = null; }
+  }
   cleaned.forEach(job => {
     if (String(job.inspection || '').indexOf('ISSUES') >= 0) {
       try {
-        job.inspectionNote = sh.getRange(job._rowIndex, iInsp).getNote() || '';
+        if (notesCol) job.inspectionNote = (notesCol[job._rowIndex - 2] && notesCol[job._rowIndex - 2][0]) || '';
+        else job.inspectionNote = sh.getRange(job._rowIndex, iInsp).getNote() || '';
       } catch(e) { job.inspectionNote = ''; }
     }
     delete job._rowIndex; // 내부용 필드라 응답에는 안 실어 보냄
@@ -3613,7 +3636,7 @@ function getRevenueSummary() {
       if (lastRow < 2) return;
       const lastCol = sh.getLastColumn();
       const norm = normalizeHeaderName_;
-      const headerRow = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+      const headerRow = _hdrRow_(sh, lastCol);
       const localHdr = {};
       headerRow.forEach((h, i) => { localHdr[norm(String(h || ''))] = i + 1; });
 
@@ -4176,8 +4199,8 @@ function buildMovedToPackingMap_() {
     const iManual = hdr[norm('PackingMovedManual')];
     const lastRow = sh.getLastRow();
     if (iInv && iManual && lastRow >= 2) {
-      const invVals = sh.getRange(2, iInv, lastRow - 1, 1).getValues();
-      const manualVals = sh.getRange(2, iManual, lastRow - 1, 1).getValues();
+      const invVals = _jobsCol_(sh, iInv, lastRow - 1);
+      const manualVals = _jobsCol_(sh, iManual, lastRow - 1);
       for (let i = 0; i < invVals.length; i++) {
         const inv = String(invVals[i][0] || '').trim();
         if (!inv) continue;
@@ -4203,7 +4226,7 @@ function buildMovedToPackingMap_() {
 function ensureShippedCol_(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return { iShipped: 0, iAt: 0, iBy: 0 };
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   let iShipped = 0, iAt = 0, iBy = 0;
   headers.forEach((h, i) => {
     const v = String(h).trim().toLowerCase();
@@ -4251,10 +4274,10 @@ function buildShippedMap_() {
     const iInv = hdr[norm('Invoice')];
     if (!iInv) return map;
     const n = lastRow - 1;
-    const invVals = sh.getRange(2, iInv, n, 1).getValues();
-    const shippedVals = sh.getRange(2, cols.iShipped, n, 1).getValues();
-    const atVals = cols.iAt ? sh.getRange(2, cols.iAt, n, 1).getValues() : null;
-    const byVals = cols.iBy ? sh.getRange(2, cols.iBy, n, 1).getValues() : null;
+    const invVals = _jobsCol_(sh, iInv, n);
+    const shippedVals = _jobsCol_(sh, cols.iShipped, n);
+    const atVals = cols.iAt ? _jobsCol_(sh, cols.iAt, n) : null;
+    const byVals = cols.iBy ? _jobsCol_(sh, cols.iBy, n) : null;
     for (let i = 0; i < n; i++) {
       const inv = String(invVals[i][0] || '').trim();
       if (!inv) continue;
@@ -4372,7 +4395,9 @@ function setShippedStatus(data) {
     }
 
     bumpVersionLite_(); // sales 목록 캐시만 무효화 — 다음 조회부터 바로 반영
+    mark('bump');
     mark('total');
+    _logSlowSave_('setShippedStatus', invoice, tm);
     return { ok: true, invoice: invoice, shipped: shipped, shippedAt: shippedAtOut, shippedBy: shipped ? by : '', timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -4389,7 +4414,7 @@ function setShippedStatus(data) {
 function ensureBolCol_(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return { iBol: 0 };
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   let iBol = 0;
   headers.forEach((h, i) => {
     const v = String(h).trim().toLowerCase();
@@ -4423,7 +4448,7 @@ function _scanBolExtraCols_(headers) {
 function ensureBolExtraCols_(sh, needHist) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return _scanBolExtraCols_([]);
-  let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  let headers = _hdrRow_(sh, lastCol);
   let c = _scanBolExtraCols_(headers);
   if (c.iCost && c.iBy && c.iAt && (!needHist || c.iHist)) return c;
   // 컬럼 추가는 락 안에서 "다시 확인 후" 한 번만 — 동시에 두 요청이 처음 저장하더라도 컬럼이 중복 생성되지 않게 함
@@ -4488,14 +4513,14 @@ function buildBolInfoMap_() {
     const iInv = hdr[norm('Invoice')];
     if (!iInv) return map;
     const n = lastRow - 1;
-    const invVals = sh.getRange(2, iInv, n, 1).getValues();
-    const bolVals = sh.getRange(2, cols.iBol, n, 1).getValues();
+    const invVals = _jobsCol_(sh, iInv, n);
+    const bolVals = _jobsCol_(sh, cols.iBol, n);
     // 비용/입력자/시각은 서로 붙어 있는 컬럼이라 한 번에 읽음(시트 호출 3번 → 1번)
     let costVals = null, byVals = null, atVals = null, histVals = null;
     if (ex.iCost && ex.iBy && ex.iAt) {
       const cs = [ex.iCost, ex.iBy, ex.iAt]; if (ex.iHist) cs.push(ex.iHist);
       const minC = Math.min.apply(null, cs), maxC = Math.max.apply(null, cs);
-      const blk = sh.getRange(2, minC, n, maxC - minC + 1).getValues();
+      const blk = _jobsCols_(sh, minC, maxC, n);
       costVals = blk.map(function (r) { return [r[ex.iCost - minC]]; });
       byVals = blk.map(function (r) { return [r[ex.iBy - minC]]; });
       atVals = blk.map(function (r) { return [r[ex.iAt - minC]]; });
@@ -4664,7 +4689,9 @@ function setBolNumber(data) {
     }
 
     bumpVersionLite_();
+    mark('bump');
     mark('total');
+    _logSlowSave_('setBolNumber', invoice, tm);
     return { ok: true, invoice: invoice, bol: bol, cost: cost, by: byOut, at: atOut, hist: histOut, edited: isEdit, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -4692,7 +4719,7 @@ function _scanSalesConfirmCols_(sh, headersOpt) {
   if (!headers) {
     const lastCol = sh.getLastColumn();
     if (lastCol === 0) return r;
-    headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    headers = _hdrRow_(sh, lastCol);
   }
   // ★ 2026-10-02 긴급 수정 — 아래 "중복 컬럼 방지 락"을 추가하기 전까지 실제로
   //   중복 컬럼이 생겼을 가능성에 대비해, 같은 이름이 여러 개 있으면 항상
@@ -4792,13 +4819,13 @@ function buildSalesConfirmMap_() {
     const iInv = hdr[norm('Invoice')];
     if (!iInv) return map;
     const n = lastRow - 1;
-    const invVals = sh.getRange(2, iInv, n, 1).getValues();
-    const confVals = sh.getRange(2, cols.iConfirmed, n, 1).getValues();
-    const atVals = cols.iAt ? sh.getRange(2, cols.iAt, n, 1).getValues() : null;
-    const byVals = cols.iBy ? sh.getRange(2, cols.iBy, n, 1).getValues() : null;
-    const wasUndoneVals = cols.iWasUndone ? sh.getRange(2, cols.iWasUndone, n, 1).getValues() : null;
-    const undoneAtVals = cols.iUndoneAt ? sh.getRange(2, cols.iUndoneAt, n, 1).getValues() : null;
-    const undoneByVals = cols.iUndoneBy ? sh.getRange(2, cols.iUndoneBy, n, 1).getValues() : null;
+    const invVals = _jobsCol_(sh, iInv, n);
+    const confVals = _jobsCol_(sh, cols.iConfirmed, n);
+    const atVals = cols.iAt ? _jobsCol_(sh, cols.iAt, n) : null;
+    const byVals = cols.iBy ? _jobsCol_(sh, cols.iBy, n) : null;
+    const wasUndoneVals = cols.iWasUndone ? _jobsCol_(sh, cols.iWasUndone, n) : null;
+    const undoneAtVals = cols.iUndoneAt ? _jobsCol_(sh, cols.iUndoneAt, n) : null;
+    const undoneByVals = cols.iUndoneBy ? _jobsCol_(sh, cols.iUndoneBy, n) : null;
     for (let i = 0; i < n; i++) {
       const inv = String(invVals[i][0] || '').trim();
       if (!inv) continue;
@@ -4836,6 +4863,48 @@ function _colLetterA1_(n) {
  *   - 캐시 인덱스로 찾은 행이 "정말 이 인보이스 행인지" 반드시 검증, 틀리면 전체 스캔으로
  *     다시 찾음(행이 밀린 뒤 낡은 인덱스로 엉뚱한 행에 쓰는 사고 방지 — 정확성 최우선)
  *   반환: { headers, lastCol, hm, row, rowVals } 또는 { error } */
+/* ★ 2026-10-05 속도 — Jobs 시트 "컬럼 단위 읽기"를 한 번의 "블록 읽기"로 합침(실행 하나 안에서만).
+ * 측정: 시트 호출 1번이 서버가 바쁠 때 약 1초 → 목록 계산 한 번에 컬럼 읽기가 20번 넘게 나가 25~65초가 걸렸음.
+ * sales 목록 계산(getSalesOverview/getSalesTodayList)과 그 보조표(출고·컨펌·BOL·패킹이동)가 도는 동안만(__JOBS_BLOCK_ON)
+ * Jobs 시트 전체를 한 번 읽어 메모리에서 컬럼을 잘라 씀. 다른 곳(저장 등)에서는 예전처럼 필요한 컬럼만 직접 읽음.
+ * 저장(bumpVersion*)이 일어나면 메모를 비움. 블록 읽기가 실패하거나 요청한 행/컬럼이 더 크면 예전 방식으로 대체. */
+var __JOBS_BLOCK = null, __JOBS_BLOCK_ON = 0;
+// 헤더 행 읽기 메모(블록 모드에서만, 같은 시트 객체 + 같은 컬럼 수일 때만 재사용 — 컬럼이 추가되면 컬럼 수가 달라져 자동으로 다시 읽음)
+var __HDR_ROW = null;
+function _hdrRow_(sh, lastCol) {
+  if (!__JOBS_BLOCK_ON) return sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (__HDR_ROW && __HDR_ROW.sh === sh && __HDR_ROW.lc === lastCol) return __HDR_ROW.vals.slice();
+  const vals = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  __HDR_ROW = { sh: sh, lc: lastCol, vals: vals.slice() };
+  return vals;
+}
+function _jobsBlockFor_(sh, n) {
+  if (!__JOBS_BLOCK_ON) return null;
+  let b = __JOBS_BLOCK;
+  if (b && b.vals.length >= n) return b;
+  try {
+    const lc = sh.getLastColumn();
+    b = { vals: sh.getRange(2, 1, n, lc).getValues(), lc: lc };
+    __JOBS_BLOCK = b;
+    _prof_('blk_read');
+    return b;
+  } catch (e) { __JOBS_BLOCK = null; return null; }
+}
+function _jobsCol_(sh, col, n) {
+  const b = _jobsBlockFor_(sh, n);
+  if (!b || col > b.lc || col < 1) return sh.getRange(2, col, n, 1).getValues();
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = [b.vals[i][col - 1]];
+  return out;
+}
+function _jobsCols_(sh, minC, maxC, n) {
+  const b = _jobsBlockFor_(sh, n);
+  if (!b || maxC > b.lc || minC < 1) return sh.getRange(2, minC, n, maxC - minC + 1).getValues();
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = b.vals[i].slice(minC - 1, maxC);
+  return out;
+}
+
 /* ★ 2026-10-05 — 구간별 시간 측정(원인 파악용). __PROF 가 객체일 때만 기록되고, 아니면 아무 일도 안 함(성능 영향 없음).
  * 사용: __PROF = 객체; __PROF_T0 = 기준시각(ms) 로 켜두면 _prof_('이름') 이 "기준시각 이후 누적 ms"를 그 객체에 기록. */
 var __PROF = null, __PROF_T0 = 0;
@@ -4843,12 +4912,25 @@ function _prof_(k) { if (__PROF) __PROF[k] = Date.now() - __PROF_T0; }
 function _readJobRowFast_(sh, invoice) {
   const norm = normalizeHeaderName_;
   const lastCol = sh.getLastColumn();
-  const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  const headers = _hdrRow_(sh, lastCol);
   _prof_('r_hdr');
   const hm = {};
   headers.forEach(function (h, i) { hm[norm(String(h))] = i + 1; });
   const iInvoice = hm[norm('Invoice')] || 0;
-  let row = findRowByKey_('invoice', invoice);
+  // ★ 2026-10-05 속도 — 예전엔 "인보이스→행번호 캐시"를 불러오는데(캐시 조각 여러 개 + 비었으면 컬럼 전체 재조회·재저장)
+  //   약 2초가 걸렸음(측정: r_find). 시트 내장 검색(TextFinder) 한 번으로 바로 찾음 — 항상 시트의 현재 상태 기준이라 정확.
+  //   못 찾거나 오류면 기존 방식으로 자동 대체. 아래에서 인보이스가 실제로 일치하는지 다시 검증함(기존 그대로).
+  let row = 0;
+  if (iInvoice) {
+    try {
+      const lastR = sh.getLastRow();
+      if (lastR >= 2) {
+        const hit = sh.getRange(2, iInvoice, lastR - 1, 1).createTextFinder(invoice).matchEntireCell(true).matchCase(true).findNext();
+        if (hit) row = hit.getRow();
+      }
+    } catch (eTf) { row = 0; }
+  }
+  if (!row) row = findRowByKey_('invoice', invoice);
   _prof_('r_find');
   if (!row) return { error: 'invoice not found' };
   let rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
@@ -4867,6 +4949,20 @@ function _readJobRowFast_(sh, invoice) {
   }
   _prof_('r_row');
   return { headers: headers, lastCol: lastCol, hm: hm, row: row, rowVals: rowVals };
+}
+
+/* ★ 2026-10-05 — 저장이 느렸을 때(6초 초과) 구간별 시간을 서버에 남김(최근 8건).
+ *   브라우저 콘솔을 안 펼쳐도 FirestoreSync.gs 의 showLastSyncTiming 실행으로 원인(links/lock/write/bump)을 바로 확인.
+ *   느린 경우에만 속성 1회 기록하므로 평소 저장 속도에는 영향 없음. 실패해도 저장 결과에는 영향 없음. */
+function _logSlowSave_(op, invoice, tm) {
+  try {
+    if (!tm || !(tm.total > 6000)) return;
+    const pr = PropertiesService.getScriptProperties();
+    const prev = String(pr.getProperty('saveSlowLog') || '');
+    const arr = prev ? prev.split('\n') : [];
+    arr.push(nowLocal_() + ' ' + op + ' ' + invoice + ' ' + JSON.stringify(tm));
+    pr.setProperty('saveSlowLog', arr.slice(-8).join('\n'));
+  } catch (e) { /* 무시 */ }
 }
 
 /* 컬럼들이 서로 "빈틈없이 나란히" 붙어 있으면 한 번의 setValues로, 아니면 셀별로 정확히
@@ -4962,13 +5058,13 @@ function setSalesConfirm(data) {
 
     // 1) 헤더 1번 읽기 → 필요한 컬럼 위치를 전부 여기서 계산
     let lastCol = sh.getLastColumn();
-    let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    let headers = _hdrRow_(sh, lastCol);
     let cols = _scanSalesConfirmCols_(sh, headers);
     if (!cols.iConfirmed || !cols.iAt || !cols.iBy || !cols.iWasUndone || !cols.iUndoneAt || !cols.iUndoneBy) {
       // 드문 경우(컬럼이 아직 없음): 기존의 락 보호 컬럼 추가 로직 그대로 사용
       cols = ensureSalesConfirmCol_(sh);
       lastCol = sh.getLastColumn();
-      headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+      headers = _hdrRow_(sh, lastCol);
       cols = _scanSalesConfirmCols_(sh, headers);
     }
     if (!cols.iConfirmed) return { ok: false, error: 'SalesConfirmed column unavailable (server setup) — please contact the administrator' };
@@ -5143,8 +5239,8 @@ function buildPackStageMap_() {
     const iManual = hdr[norm('PackingMovedManual')];
     const lastRow = sh.getLastRow();
     if (iInv && iManual && lastRow >= 2) {
-      const invVals = sh.getRange(2, iInv, lastRow - 1, 1).getValues();
-      const manualVals = sh.getRange(2, iManual, lastRow - 1, 1).getValues();
+      const invVals = _jobsCol_(sh, iInv, lastRow - 1);
+      const manualVals = _jobsCol_(sh, iManual, lastRow - 1);
       for (let i = 0; i < invVals.length; i++) {
         const inv = String(invVals[i][0] || '').trim();
         if (!inv) continue;
@@ -5208,7 +5304,7 @@ function archiveOldJobs(daysOld) {
     // ★ 현재 시점의 헤더를 그대로 스냅샷 — 나중에 Jobs에 컬럼이 더 늘어나도
     //   (예: PaymentStatus처럼) 지금 만드는 Archive_Jobs는 "지금 있는 컬럼
     //   그대로"로 만들어져서 문제 없음(archiveOldBatches와 동일한 원칙).
-    const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    const headers = _hdrRow_(sh, lastCol);
     const dataRange = sh.getRange(2, 1, last - 1, lastCol);
     const allRows = dataRange.getValues();
     // ★ 2026-09-03 재수정(긴급) — 이전 수정(clear() 후 값만 setValues)은
@@ -5444,13 +5540,18 @@ function autoDeleteOldJobs() {
     }
 
     let deleted = 0;
-    targets.forEach(invoice => {
-      const chk = jobArchiveCheck_(invoice); // ★ sales.html/index.html과 완전히 동일한 규칙으로 판정
-      if (chk.eligible) { deleteJob_(invoice); deleted++; }
-    });
+    __ARCH_MEMO = {}; // ★ 2026-10-05 — 이 실행 동안만 Dimensions/출고 맵을 한 번씩만 읽음
+    try {
+      targets.forEach(invoice => {
+        const chk = jobArchiveCheck_(invoice); // ★ sales.html/index.html과 완전히 동일한 규칙으로 판정
+        if (chk.eligible) { deleteJob_(invoice); deleted++; }
+      });
+    } finally {
+      __ARCH_MEMO = null;
+    }
 
     if (deleted > 0) bumpVersion_(); // 캐시 무효화 — 다음 조회부터 바로 반영
-    Logger.log('autoDeleteOldJobs: 완료건 ' + targets.length + '건 검사, ' + deleted + '건 보관 처리(3일/영업일 기준 충족)');
+    Logger.log('autoDeleteOldJobs: 완료건 ' + targets.length + '건 검사, ' + deleted + '건 보관 처리(TK는 출고 후 영업일 ' + KEEP_BUSINESS_DAYS_TK_SHIPPED + '일, 그 외는 ' + KEEP_BUSINESS_DAYS_SERVER + '일 기준 충족)');
     return { ok: true, checked: targets.length, deleted: deleted };
   } catch (e) {
     Logger.log('autoDeleteOldJobs 오류: ' + String(e && e.message || e));
@@ -5489,6 +5590,10 @@ function removeAutoDeleteOldJobsTrigger() {
  * ISSUES 건마다 getNote()를 개별 호출하지 않으므로 훨씬 빠름.
  * ===================================================== */
 function getSalesTodayList() {
+  __JOBS_BLOCK_ON++;
+  try { return getSalesTodayList_impl_(); } finally { __JOBS_BLOCK_ON--; if (!__JOBS_BLOCK_ON) { __JOBS_BLOCK = null; __HDR_ROW = null; } }
+}
+function getSalesTodayList_impl_() {
   try {
     const cache = CacheService.getScriptCache();
     // ★ 2026-10-04 — 캐시 키에 데이터 버전을 포함. 저장(bumpVersion*)이 버전을 바꾸면 옛 키는 자동으로
@@ -5527,14 +5632,14 @@ function getSalesTodayList() {
     const tz = Session.getScriptTimeZone();
     const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
 
-    const invVals     = sh.getRange(2, iInv, lastRow - 1, 1).getValues();
-    const remarksVals = iRemarks ? sh.getRange(2, iRemarks, lastRow - 1, 1).getValues() : null;
-    const shipVals    = iShip ? sh.getRange(2, iShip, lastRow - 1, 1).getValues() : null;
-    const truckVals   = iTruck ? sh.getRange(2, iTruck, lastRow - 1, 1).getValues() : null;
-    const inspVals    = sh.getRange(2, iInsp, lastRow - 1, 1).getValues();
-    const inspEndVals = sh.getRange(2, iInspEnd, lastRow - 1, 1).getValues();
-    const archVals    = iArch ? sh.getRange(2, iArch, lastRow - 1, 1).getValues() : null; // ★ 2026-08-06 신규
-    const payVals     = iPayStatus ? sh.getRange(2, iPayStatus, lastRow - 1, 1).getValues() : null; // ★ 2026-09-02 신규
+    const invVals     = _jobsCol_(sh, iInv, lastRow - 1);
+    const remarksVals = iRemarks ? _jobsCol_(sh, iRemarks, lastRow - 1) : null;
+    const shipVals    = iShip ? _jobsCol_(sh, iShip, lastRow - 1) : null;
+    const truckVals   = iTruck ? _jobsCol_(sh, iTruck, lastRow - 1) : null;
+    const inspVals    = _jobsCol_(sh, iInsp, lastRow - 1);
+    const inspEndVals = _jobsCol_(sh, iInspEnd, lastRow - 1);
+    const archVals    = iArch ? _jobsCol_(sh, iArch, lastRow - 1) : null; // ★ 2026-08-06 신규
+    const payVals     = iPayStatus ? _jobsCol_(sh, iPayStatus, lastRow - 1) : null; // ★ 2026-09-02 신규
     _prof_('td_cols');
 
     const movedMap = buildMovedToPackingMap_();
@@ -5669,6 +5774,10 @@ function getSalesTodayList() {
  * "① Sales Sheet Preview" 화면을 실제 데이터로 재현.
  * ===================================================== */
 function getSalesOverview() {
+  __JOBS_BLOCK_ON++;
+  try { return getSalesOverview_impl_(); } finally { __JOBS_BLOCK_ON--; if (!__JOBS_BLOCK_ON) { __JOBS_BLOCK = null; __HDR_ROW = null; } }
+}
+function getSalesOverview_impl_() {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'salesOverview_cache_v1';
@@ -5710,18 +5819,18 @@ function getSalesOverview() {
     //   읽었는데, 실제 쓰는 건 9개뿐이라 나머지(잠금·비고 등)까지 매번 읽는
     //   낭비가 있었음. 필요한 컬럼만 각각 읽도록 바꿔서 시트에서 오고가는
     //   데이터량을 크게 줄임(getSalesTodayList와 동일한 방식).
-    const invVals      = sh.getRange(2, iInv, n, 1).getValues();
-    const remarksVals  = iRemarks  ? sh.getRange(2, iRemarks,  n, 1).getValues() : null;
-    const shipVals      = iShip    ? sh.getRange(2, iShip,     n, 1).getValues() : null;
-    const truckVals    = iTruck    ? sh.getRange(2, iTruck,    n, 1).getValues() : null;
-    const amountVals   = iAmount   ? sh.getRange(2, iAmount,   n, 1).getValues() : null;
-    const inspVals     = iInsp     ? sh.getRange(2, iInsp,     n, 1).getValues() : null;
-    const inspEndVals  = iInspEnd  ? sh.getRange(2, iInspEnd,  n, 1).getValues() : null;
-    const archVals     = iArch     ? sh.getRange(2, iArch,     n, 1).getValues() : null;
-    const createdVals  = iCreated  ? sh.getRange(2, iCreated,  n, 1).getValues() : null;
-    const startISOVals = iStartISO ? sh.getRange(2, iStartISO, n, 1).getValues() : null;
-    const endISOVals   = iEndISO   ? sh.getRange(2, iEndISO,   n, 1).getValues() : null; // ★ 2026-08-05 신규
-    const statusVals   = iStatus   ? sh.getRange(2, iStatus,   n, 1).getValues() : null; // ★ 2026-08-06 신규
+    const invVals      = _jobsCol_(sh, iInv, n);
+    const remarksVals  = iRemarks  ? _jobsCol_(sh, iRemarks,  n) : null;
+    const shipVals      = iShip    ? _jobsCol_(sh, iShip,     n) : null;
+    const truckVals    = iTruck    ? _jobsCol_(sh, iTruck,    n) : null;
+    const amountVals   = iAmount   ? _jobsCol_(sh, iAmount,   n) : null;
+    const inspVals     = iInsp     ? _jobsCol_(sh, iInsp,     n) : null;
+    const inspEndVals  = iInspEnd  ? _jobsCol_(sh, iInspEnd,  n) : null;
+    const archVals     = iArch     ? _jobsCol_(sh, iArch,     n) : null;
+    const createdVals  = iCreated  ? _jobsCol_(sh, iCreated,  n) : null;
+    const startISOVals = iStartISO ? _jobsCol_(sh, iStartISO, n) : null;
+    const endISOVals   = iEndISO   ? _jobsCol_(sh, iEndISO,   n) : null; // ★ 2026-08-05 신규
+    const statusVals   = iStatus   ? _jobsCol_(sh, iStatus,   n) : null; // ★ 2026-08-06 신규
     _prof_('ov_cols');
 
     const movedMap = buildMovedToPackingMap_();
@@ -5871,12 +5980,15 @@ function getSalesOverview() {
 //   이걸 한 요청으로 합침. 폴링 주기(30초)는 그대로, 요청 개수만 절반으로
 //   줄임. 기존 두 함수는 그대로 남겨둠(다른 곳에서 개별로 계속 씀).
 function getSalesOverviewAndToday() {
+  __JOBS_BLOCK_ON++; // ★ 두 계산이 같은 Jobs 블록 읽기를 공유(시트 호출 절약)
   try {
     const overviewRes = getSalesOverview();
     const todayRes = getSalesTodayList();
     return { ok: true, overview: overviewRes, today: todayRes };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    __JOBS_BLOCK_ON--; if (!__JOBS_BLOCK_ON) { __JOBS_BLOCK = null; __HDR_ROW = null; }
   }
 }
 
@@ -5915,6 +6027,17 @@ function testWorkerKPI() {
  * ===================================================================== */
 
 const KEEP_BUSINESS_DAYS_SERVER = 3;
+// ★ 2026-10-05 신규(매니저 요청) — TK(트럭킹) 오더의 보관 규칙: "출고(Shipped) 완료 후" 영업일 N일이 지나야만 자동 보관.
+//   - 미출고 TK 건은 절대 자동 보관하지 않음(영업팀이 출고 여부를 확인할 수 있도록).
+//   - 토·일·미국 공휴일은 날짜로 세지 않음(businessDaysSince_ 와 동일한 규칙).
+//   - 기간을 바꾸려면 이 숫자만 고치면 됨. (보관 = archived 표시만 켬. 시트 데이터는 지우지 않음.)
+const KEEP_BUSINESS_DAYS_TK_SHIPPED = 7;
+
+// ★ 2026-10-05 — autoDeleteOldJobs 한 번 도는 동안만 Dimensions/출고 맵을 재사용(건마다 시트를 다시 읽지 않도록).
+//   꺼져 있으면(평소 모든 호출) 예전처럼 매번 새로 읽음.
+var __ARCH_MEMO = null;
+function _archDimsMap_()    { if (__ARCH_MEMO) { if (!__ARCH_MEMO.dims) __ARCH_MEMO.dims = buildDimsExistsMap_(); return __ARCH_MEMO.dims; } return buildDimsExistsMap_(); }
+function _archShippedMap_() { if (__ARCH_MEMO) { if (!__ARCH_MEMO.ship) __ARCH_MEMO.ship = buildShippedMap_(); return __ARCH_MEMO.ship; } return buildShippedMap_(); }
 
 function nthDow_(y, m, dow, n) {
   const d = new Date(y, m, 1);
@@ -6023,9 +6146,23 @@ function jobArchiveCheck_(invoice) {
     // 검수가 안 끝난 건 절대 보관 대상 아님
     if (!insp) return { eligible: false, reason: '아직 검수되지 않음' };
 
-    const needsDims = (method === 'TK' || method === 'TRUCKING' || method === 'UPS');
+    // ★ 2026-10-05 — TK: "출고 완료 후 영업일 7일"만 기준. 미출고면 절대 보관 안 함. (묶인 오더는 대표 인보이스의 출고 상태를 따름)
+    if (method === 'TK' || method === 'TRUCKING') {
+      const dm = _archDimsMap_()[invoice] || {};
+      const shipInfo = _archShippedMap_()[dm.linkedTo || invoice] || {};
+      if (!shipInfo.shipped) return { eligible: false, reason: 'TK 미출고 — 출고 완료 전에는 보관하지 않음' };
+      const shippedYmd = ymdOf_(shipInfo.shippedAt);
+      if (!shippedYmd) return { eligible: false, reason: 'TK 출고 시각을 읽을 수 없음(안전하게 보관 안 함)' };
+      const sdays = businessDaysSince_(shippedYmd);
+      if (sdays < KEEP_BUSINESS_DAYS_TK_SHIPPED) {
+        return { eligible: false, reason: 'TK 출고 후 영업일 ' + sdays + '일 경과 (' + KEEP_BUSINESS_DAYS_TK_SHIPPED + '일 필요)' };
+      }
+      return { eligible: true, reason: 'ok' };
+    }
+
+    const needsDims = (method === 'UPS');
     if (needsDims) {
-      const dimsMap = buildDimsExistsMap_();
+      const dimsMap = _archDimsMap_();
       const d = dimsMap[invoice] || {};
       if (!d.count || d.count <= 0) return { eligible: false, reason: '디멘션 미입력 (TK/UPS는 필수)' };
       const days = businessDaysSince_(ymdOf_(d.enteredAt));
