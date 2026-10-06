@@ -6247,6 +6247,7 @@ function getSalesInvoiceDetail(invoice) {
       dimsLinkedTo: dimGroup.dimsLinkedTo,                  // 내가 포함된 대표 인보이스('' 이면 단독/대표)
       dimsLinkedToCustomer: '',                             // 화면이 getDimCandidates로 따로 채움
       dimsChildren: dimGroup.dimsChildren,                  // 내 디멘션에 포함된 추가 오더 목록
+      dimsGroupMembers: _dimGroupMembersFast_(invoice, hm['remarks'], sh), // ★ 2026-10-06 — 묶음 명단(고객사명 포함)을 처음부터 내려줌
       dimsJoinTargets: null,                                // null = 아직 안 불러옴(화면이 비동기로 채움)
       dimsAddCandidates: null
     };
@@ -6800,6 +6801,24 @@ function cleanupOrphanDimLinks_() {
     Logger.log('cleanupOrphanDimLinks_ 오류: ' + String(e && e.message || e));
     return 0;
   }
+}
+
+/* ★ 2026-10-06 신규 — 상세조회 응답에 "같은 팔렛에 묶인 오더 명단"을 바로 담음(팝업 상단 묶음 안내용).
+ *   DimLinks(작은 시트)만 보고, 고객사명은 인보이스당 셀 1개만 읽음 → 느린 getDimCandidates를 기다릴 필요 없음.
+ *   묶여 있지 않으면 [] 반환. 실패해도 [] (화면은 기존 방식으로 폴백). */
+function _dimGroupMembersFast_(invoice, remarksCol, sh) {
+  try {
+    const links = buildDimLinksMap_();
+    const primary = links.childToPrimary[invoice] || invoice;
+    const kids = links.primaryToChildren[primary] || [];
+    if (!kids.length) return [];
+    const idx = getJobsInvoiceRowIndex_();
+    return [primary].concat(kids).map(function (m) {
+      let cust = '';
+      try { if (remarksCol && idx[m]) cust = String(sh.getRange(idx[m], remarksCol).getValue() || ''); } catch (e) { /* 이름만 비움 */ }
+      return { invoice: m, customer: cust, shipDate: '', isPrimary: m === primary };
+    });
+  } catch (e) { return []; }
 }
 
 /* ---------------------------------------------------------------------
