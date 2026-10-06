@@ -4563,11 +4563,9 @@ function setBolNumber(data) {
     // ★ 2026-10-05 — 트럭킹 비용. BOL#과 비용은 항상 한 쌍으로 저장(둘 다 입력 / 둘 다 비움=지우기).
     const cost = _parseBolCost_(data && data.cost);
     if (cost !== null && isNaN(cost)) return { ok: false, error: 'Trucking cost must be a number (0 or more, up to 2 decimals).' };
-    const clearing = !bol && cost === null;
-    if (!clearing) {
-      if (!bol) return { ok: false, error: 'Please enter a BOL#.' };
-      if (cost === null) return { ok: false, error: 'Please enter the trucking cost (enter 0 if none).' };
-    }
+    const clearing = false; // ★ 2026-10-05 — 저장 후에는 수정/삭제 불가 규칙(아래 참고)이라 "지우기"는 없음
+    if (!bol) return { ok: false, error: 'Please enter a BOL#.' };
+    if (cost === null) return { ok: false, error: 'Please enter the trucking cost (enter 0 if none).' };
 
     const sh = SHEET_();
     mark('open');
@@ -4609,7 +4607,13 @@ function setBolNumber(data) {
     }
     const shc = _scanShippedCols_(ctx.headers);
     if (shc.iShipped && ctx.rowVals[shc.iShipped - 1]) {
-      return { ok: false, error: 'This order is already shipped — undo the shipped status before editing BOL# / trucking cost.' };
+      return { ok: false, error: 'This order is already shipped — BOL# and trucking cost are view only.' };
+    }
+    // ★ 2026-10-05 규칙: BOL#과 비용이 둘 다 저장된 뒤에는 수정 불가(보기 전용). BOL#만 있고 비용이 없는 옛 건은 비용 입력 가능.
+    const existBol = String(ctx.rowVals[iBol - 1] || '').trim();
+    const existCost = ex.iCost ? _parseBolCost_(ctx.rowVals[ex.iCost - 1]) : null;
+    if (existBol && existCost !== null && !isNaN(existCost)) {
+      return { ok: false, error: 'BOL# and trucking cost are already saved — view only.' };
     }
 
     const lock = LockService.getDocumentLock();
