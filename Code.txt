@@ -4298,6 +4298,7 @@ function setShippedStatus(data) {
   const T0 = Date.now();
   const tm = {};
   const mark = function (k) { tm[k] = Date.now() - T0; };
+  __PROF = tm; __PROF_T0 = T0; // ★ 구간별 측정 켜기(결과는 반환값 timing 에 포함)
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const shipped = !!(data && data.shipped);
@@ -4567,6 +4568,7 @@ function setBolNumber(data) {
   const T0 = Date.now();
   const tm = {};
   const mark = function (k) { tm[k] = Date.now() - T0; };
+  __PROF = tm; __PROF_T0 = T0;
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const bol = String((data && data.bol) || '').trim();
@@ -4834,14 +4836,20 @@ function _colLetterA1_(n) {
  *   - 캐시 인덱스로 찾은 행이 "정말 이 인보이스 행인지" 반드시 검증, 틀리면 전체 스캔으로
  *     다시 찾음(행이 밀린 뒤 낡은 인덱스로 엉뚱한 행에 쓰는 사고 방지 — 정확성 최우선)
  *   반환: { headers, lastCol, hm, row, rowVals } 또는 { error } */
+/* ★ 2026-10-05 — 구간별 시간 측정(원인 파악용). __PROF 가 객체일 때만 기록되고, 아니면 아무 일도 안 함(성능 영향 없음).
+ * 사용: __PROF = 객체; __PROF_T0 = 기준시각(ms) 로 켜두면 _prof_('이름') 이 "기준시각 이후 누적 ms"를 그 객체에 기록. */
+var __PROF = null, __PROF_T0 = 0;
+function _prof_(k) { if (__PROF) __PROF[k] = Date.now() - __PROF_T0; }
 function _readJobRowFast_(sh, invoice) {
   const norm = normalizeHeaderName_;
   const lastCol = sh.getLastColumn();
   const headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  _prof_('r_hdr');
   const hm = {};
   headers.forEach(function (h, i) { hm[norm(String(h))] = i + 1; });
   const iInvoice = hm[norm('Invoice')] || 0;
   let row = findRowByKey_('invoice', invoice);
+  _prof_('r_find');
   if (!row) return { error: 'invoice not found' };
   let rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
   if (iInvoice && String(rowVals[iInvoice - 1] || '').trim() !== invoice) {
@@ -4857,6 +4865,7 @@ function _readJobRowFast_(sh, invoice) {
     if (!row) return { error: 'invoice not found' };
     rowVals = sh.getRange(row, 1, 1, lastCol).getValues()[0];
   }
+  _prof_('r_row');
   return { headers: headers, lastCol: lastCol, hm: hm, row: row, rowVals: rowVals };
 }
 
@@ -5526,13 +5535,20 @@ function getSalesTodayList() {
     const inspEndVals = sh.getRange(2, iInspEnd, lastRow - 1, 1).getValues();
     const archVals    = iArch ? sh.getRange(2, iArch, lastRow - 1, 1).getValues() : null; // ★ 2026-08-06 신규
     const payVals     = iPayStatus ? sh.getRange(2, iPayStatus, lastRow - 1, 1).getValues() : null; // ★ 2026-09-02 신규
+    _prof_('td_cols');
 
     const movedMap = buildMovedToPackingMap_();
+    _prof_('td_moved');
     const dimsMap = buildDimsExistsMap_();
+    _prof_('td_dims');
     const packStageMap = buildPackStageMap_(); // ★ 2026-08-24 신규 — 4단계 패킹 상태(none/moved/taken/verified)
+    _prof_('td_pack');
     const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+    _prof_('td_shipped');
     const bolInfoMap = buildBolInfoMap_(); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
+    _prof_('td_bol');
     const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+    _prof_('td_conf');
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
     //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦.
@@ -5638,6 +5654,7 @@ function getSalesTodayList() {
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
 
+    _prof_('td_loop');
     const out = { ok: true, jobs: jobs, date: today };
     try { _cachePutChunked_(cache, cacheKey, verAtStart + '|' + JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     return out;
@@ -5705,12 +5722,18 @@ function getSalesOverview() {
     const startISOVals = iStartISO ? sh.getRange(2, iStartISO, n, 1).getValues() : null;
     const endISOVals   = iEndISO   ? sh.getRange(2, iEndISO,   n, 1).getValues() : null; // ★ 2026-08-05 신규
     const statusVals   = iStatus   ? sh.getRange(2, iStatus,   n, 1).getValues() : null; // ★ 2026-08-06 신규
+    _prof_('ov_cols');
 
     const movedMap = buildMovedToPackingMap_();
+    _prof_('ov_moved');
     const dimsMap = buildDimsExistsMap_();
+    _prof_('ov_dims');
     const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+    _prof_('ov_shipped');
     const bolInfoMap = buildBolInfoMap_(); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
+    _prof_('ov_bol');
     const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+    _prof_('ov_conf');
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
     //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦
@@ -5835,6 +5858,7 @@ function getSalesOverview() {
     jobs.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
 
     const out = { ok: true, jobs: jobs.slice(0, 500) }; // 화면이 감당 못 할 정도로 많아지는 것 방지, 최근 500건
+    _prof_('ov_loop');
     try { _cachePutChunked_(cache, cacheKey, verAtStart + '|' + JSON.stringify(out), 60); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ } // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
     return out;
   } catch (e) {
