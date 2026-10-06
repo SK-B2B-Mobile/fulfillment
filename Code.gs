@@ -4409,21 +4409,22 @@ function ensureBolCol_(sh) {
  * 컬럼을 자동 추가(없으면 생성 — ensureBolCol_와 동일한 패턴). 영업팀이 비용을 볼 수 있게 목록에 실려 감.
  * ------------------------------------------------------------------- */
 function _scanBolExtraCols_(headers) {
-  let iCost = 0, iBy = 0, iAt = 0;
+  let iCost = 0, iBy = 0, iAt = 0, iHist = 0;
   headers.forEach(function (h, i) {
     const v = String(h).trim().toLowerCase();
     if (v === 'bolcost') iCost = i + 1;
     else if (v === 'bolby') iBy = i + 1;
     else if (v === 'bolat') iAt = i + 1;
+    else if (v === 'bolhistory') iHist = i + 1; // ★ 2026-10-05 — 수정 이력(수정 기능에서만 사용, 선택 컬럼)
   });
-  return { iCost: iCost, iBy: iBy, iAt: iAt };
+  return { iCost: iCost, iBy: iBy, iAt: iAt, iHist: iHist };
 }
-function ensureBolExtraCols_(sh) {
+function ensureBolExtraCols_(sh, needHist) {
   const lastCol = sh.getLastColumn();
   if (lastCol === 0) return _scanBolExtraCols_([]);
   let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
   let c = _scanBolExtraCols_(headers);
-  if (c.iCost && c.iBy && c.iAt) return c;
+  if (c.iCost && c.iBy && c.iAt && (!needHist || c.iHist)) return c;
   // 컬럼 추가는 락 안에서 "다시 확인 후" 한 번만 — 동시에 두 요청이 처음 저장하더라도 컬럼이 중복 생성되지 않게 함
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
@@ -4435,6 +4436,7 @@ function ensureBolExtraCols_(sh) {
     if (!c.iCost) add.push('BolCost');
     if (!c.iBy) add.push('BolBy');
     if (!c.iAt) add.push('BolAt');
+    if (needHist && !c.iHist) add.push('BolHistory');
     if (add.length) {
       sh.insertColumnsAfter(lc, add.length);
       sh.getRange(1, lc + 1, 1, add.length).setValues([add]);
@@ -4442,7 +4444,7 @@ function ensureBolExtraCols_(sh) {
       let k = lc;
       add.forEach(function (name) {
         k++;
-        if (name === 'BolCost') c.iCost = k; else if (name === 'BolBy') c.iBy = k; else c.iAt = k;
+        if (name === 'BolCost') c.iCost = k; else if (name === 'BolBy') c.iBy = k; else if (name === 'BolAt') c.iAt = k; else c.iHist = k;
       });
     }
   } finally {
@@ -4453,6 +4455,13 @@ function ensureBolExtraCols_(sh) {
 /* 비용 값 정규화: '', null → null(미입력) / "$1,234.5" → 1234.5 / 잘못된 값 → NaN */
 function _parseBolCost_(v) {
   if (v === null || v === undefined) return null;
+  // ★ 2026-10-05 — 구글시트가 비용 셀을 "날짜 서식"으로 보관한 경우(새로 만든 컬럼이 옆 날짜 컬럼의 서식을 물려받음)
+  //   숫자 1111111 이 날짜(4942-02-22)로 읽혀 비용이 비어 보이던 문제 — 날짜를 다시 일련번호(=원래 금액)로 환산해 복구.
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v)) return NaN;
+    const serial = (Date.UTC(v.getFullYear(), v.getMonth(), v.getDate(), v.getHours(), v.getMinutes(), v.getSeconds()) - Date.UTC(1899, 11, 30)) / 86400000;
+    return Math.round(serial * 100) / 100;
+  }
   const t = String(v).replace(/[$,\s]/g, '');
   if (t === '') return null;
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
@@ -4472,7 +4481,7 @@ function buildBolInfoMap_() {
       ensureBolExtraCols_(sh);
       hdr = headerMapCached_();
     }
-    const ex = { iCost: hdr[norm('BolCost')] || 0, iBy: hdr[norm('BolBy')] || 0, iAt: hdr[norm('BolAt')] || 0 };
+    const ex = { iCost: hdr[norm('BolCost')] || 0, iBy: hdr[norm('BolBy')] || 0, iAt: hdr[norm('BolAt')] || 0, iHist: hdr[norm('BolHistory')] || 0 };
     const lastRow = sh.getLastRow();
     if (lastRow < 2) return map;
     const iInv = hdr[norm('Invoice')];
@@ -4481,13 +4490,15 @@ function buildBolInfoMap_() {
     const invVals = sh.getRange(2, iInv, n, 1).getValues();
     const bolVals = sh.getRange(2, cols.iBol, n, 1).getValues();
     // 비용/입력자/시각은 서로 붙어 있는 컬럼이라 한 번에 읽음(시트 호출 3번 → 1번)
-    let costVals = null, byVals = null, atVals = null;
+    let costVals = null, byVals = null, atVals = null, histVals = null;
     if (ex.iCost && ex.iBy && ex.iAt) {
-      const minC = Math.min(ex.iCost, ex.iBy, ex.iAt), maxC = Math.max(ex.iCost, ex.iBy, ex.iAt);
+      const cs = [ex.iCost, ex.iBy, ex.iAt]; if (ex.iHist) cs.push(ex.iHist);
+      const minC = Math.min.apply(null, cs), maxC = Math.max.apply(null, cs);
       const blk = sh.getRange(2, minC, n, maxC - minC + 1).getValues();
       costVals = blk.map(function (r) { return [r[ex.iCost - minC]]; });
       byVals = blk.map(function (r) { return [r[ex.iBy - minC]]; });
       atVals = blk.map(function (r) { return [r[ex.iAt - minC]]; });
+      if (ex.iHist) histVals = blk.map(function (r) { return [r[ex.iHist - minC]]; });
     }
     for (let i = 0; i < n; i++) {
       const inv = String(invVals[i][0] || '').trim();
@@ -4500,7 +4511,8 @@ function buildBolInfoMap_() {
         bol: bol,
         cost: cost,
         by: byVals ? String(byVals[i][0] || '') : '',
-        at: atVals ? _tsToIso_(atVals[i][0]) : ''
+        at: atVals ? _tsToIso_(atVals[i][0]) : '',
+        hist: histVals ? String(histVals[i][0] || '') : ''
       };
     }
   } catch (e) { /* best-effort — 실패해도 호출부는 빈 값으로 안전하게 처리됨 */ }
@@ -4559,6 +4571,7 @@ function setBolNumber(data) {
     const invoice = String((data && data.invoice) || '').trim();
     const bol = String((data && data.bol) || '').trim();
     const by = String((data && data.by) || '').trim();
+    const wantEdit = !!(data && (data.edit === true || data.edit === '1' || data.edit === 1 || data.edit === 'true')); // ★ 저장된 값 수정(Edit 버튼)
     if (!invoice) return { ok: false, error: 'invoice required' };
     // ★ 2026-10-05 — 트럭킹 비용. BOL#과 비용은 항상 한 쌍으로 저장(둘 다 입력 / 둘 다 비움=지우기).
     const cost = _parseBolCost_(data && data.cost);
@@ -4574,9 +4587,9 @@ function setBolNumber(data) {
     if (ctx.error) return { ok: false, error: ctx.error };
     let iBol = _scanBolCol_(ctx.headers);
     let ex = _scanBolExtraCols_(ctx.headers);
-    if (!iBol || !ex.iCost || !ex.iBy || !ex.iAt) {
+    if (!iBol || !ex.iCost || !ex.iBy || !ex.iAt || (wantEdit && !ex.iHist)) {
       ensureBolCol_(sh); // 드문 경우: 컬럼 추가 후 다시 읽기
-      ensureBolExtraCols_(sh);
+      ensureBolExtraCols_(sh, wantEdit);
       ctx = _readJobRowFast_(sh, invoice);
       if (ctx.error) return { ok: false, error: ctx.error };
       iBol = _scanBolCol_(ctx.headers);
@@ -4612,8 +4625,15 @@ function setBolNumber(data) {
     // ★ 2026-10-05 규칙: BOL#과 비용이 둘 다 저장된 뒤에는 수정 불가(보기 전용). BOL#만 있고 비용이 없는 옛 건은 비용 입력 가능.
     const existBol = String(ctx.rowVals[iBol - 1] || '').trim();
     const existCost = ex.iCost ? _parseBolCost_(ctx.rowVals[ex.iCost - 1]) : null;
-    if (existBol && existCost !== null && !isNaN(existCost)) {
-      return { ok: false, error: 'BOL# and trucking cost are already saved — view only.' };
+    const wasComplete = !!(existBol && existCost !== null && !isNaN(existCost));
+    if (wasComplete && !wantEdit) {
+      return { ok: false, error: 'BOL# and trucking cost are already saved — press Edit to change them.' };
+    }
+    // ★ 2026-10-05 — Edit: 값이 그대로면 아무것도 쓰지 않음. 바뀌면 "이전 값 → 새 값 · 누가 · 언제"를 BolHistory 에 누적(최근 5건).
+    const isEdit = wasComplete && wantEdit;
+    const existHist = (isEdit && ex.iHist) ? String(ctx.rowVals[ex.iHist - 1] || '') : '';
+    if (isEdit && existBol === bol && existCost === cost) {
+      return { ok: true, unchanged: true, invoice: invoice, bol: existBol, cost: existCost, by: ex.iBy ? String(ctx.rowVals[ex.iBy - 1] || '') : '', at: ex.iAt ? _tsToIso_(ctx.rowVals[ex.iAt - 1]) : '', hist: existHist, timing: tm };
     }
 
     const lock = LockService.getDocumentLock();
@@ -4621,14 +4641,21 @@ function setBolNumber(data) {
     mark('lock');
     const atOut = clearing ? '' : batchNow_();
     const byOut = clearing ? '' : by;
+    let histOut = existHist;
+    if (isEdit) {
+      const prevBy = ex.iBy ? String(ctx.rowVals[ex.iBy - 1] || '') : '';
+      const prevAt = ex.iAt ? _tsToIso_(ctx.rowVals[ex.iAt - 1]) : '';
+      const line = atOut + ' ' + (by || '-') + ' edited: BOL# ' + existBol + ' → ' + bol + ' · $' + existCost.toFixed(2) + ' → $' + cost.toFixed(2) + ' (previously entered by ' + (prevBy || '-') + ' ' + prevAt + ')';
+      histOut = (existHist ? existHist.split('\n').filter(Boolean) : []).concat([line]).slice(-5).join('\n');
+    }
     try {
       // 속도: BOL 은 앞쪽 컬럼, 비용/입력자/시각은 서로 붙은 컬럼 → 시트 쓰기 2번(셀 4번 따로 쓰기보다 빠름)
       _writeRowCells_(sh, ctx.row, [{ col: iBol, value: bol, text: true }]); // 텍스트 서식 — "00123"의 앞자리 0 보존
       _writeRowCells_(sh, ctx.row, [
-        { col: ex.iCost, value: cost === null ? '' : cost },
+        { col: ex.iCost, value: cost === null ? '' : cost, num: true }, // 숫자 서식 강제
         { col: ex.iBy, value: byOut },
         { col: ex.iAt, value: atOut, text: true }
-      ]);
+      ].concat(isEdit && ex.iHist ? [{ col: ex.iHist, value: histOut, text: true }] : []));
       mark('write');
     } finally {
       lock.releaseLock();
@@ -4636,7 +4663,7 @@ function setBolNumber(data) {
 
     bumpVersionLite_();
     mark('total');
-    return { ok: true, invoice: invoice, bol: bol, cost: cost, by: byOut, at: atOut, timing: tm };
+    return { ok: true, invoice: invoice, bol: bol, cost: cost, by: byOut, at: atOut, hist: histOut, edited: isEdit, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -4841,8 +4868,10 @@ function _writeRowCells_(sh, row, entries) {
   const cols = list.map(function (e) { return e.col; });
   const minC = Math.min.apply(null, cols), maxC = Math.max.apply(null, cols);
   const textRanges = list.filter(function (e) { return e.text; }).map(function (e) { return _colLetterA1_(e.col) + row; });
+  const numRanges = list.filter(function (e) { return e.num; }).map(function (e) { return _colLetterA1_(e.col) + row; }); // ★ 숫자 서식 강제(날짜 서식 상속 방지)
   if ((maxC - minC + 1) === list.length) {
     if (textRanges.length) sh.getRangeList(textRanges).setNumberFormat('@');
+    if (numRanges.length) sh.getRangeList(numRanges).setNumberFormat('0.00');
     const arr = new Array(list.length);
     list.forEach(function (e) { arr[e.col - minC] = e.value; });
     sh.getRange(row, minC, 1, list.length).setValues([arr]);
@@ -4850,6 +4879,7 @@ function _writeRowCells_(sh, row, entries) {
     list.forEach(function (e) {
       const r = sh.getRange(row, e.col);
       if (e.text) r.setNumberFormat('@');
+      if (e.num) r.setNumberFormat('0.00');
       r.setValue(e.value);
     });
   }
@@ -5574,6 +5604,7 @@ function getSalesTodayList() {
         bolCost: ((bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === undefined || (bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === null) ? '' : bolInfoMap[dimsLinkedTo_ || invoice].cost,
         bolBy: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).by || '',
         bolAt: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).at || '',
+        bolHist: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).hist || '', // ★ 수정 이력(없으면 빈 문자열)
         // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭). LINKED 건은
         //   대표(PRIMARY)의 값을 그대로 받음.
         salesConfirmed: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).confirmed,
@@ -5779,6 +5810,7 @@ function getSalesOverview() {
         bolCost: ((bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === undefined || (bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === null) ? '' : bolInfoMap[dimsLinkedTo_ || invoice].cost,
         bolBy: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).by || '',
         bolAt: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).at || '',
+        bolHist: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).hist || '', // ★ 수정 이력(없으면 빈 문자열)
         // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
         salesConfirmed: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).confirmed,
         salesConfirmedAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).confirmedAt || '',
