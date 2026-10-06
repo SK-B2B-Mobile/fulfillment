@@ -322,13 +322,13 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-tile.confirmed .num{color:var(--blue);}
 .ship2-tile.late .num{color:var(--red);}
 .ship2-tile.shipped .num{color:var(--green);}
-.ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden;}
-.ship2-header{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.6fr) minmax(100px,0.9fr) minmax(100px,0.9fr) minmax(50px,0.5fr) minmax(150px,1.1fr) minmax(100px,0.7fr); gap:10px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1020px;}
+.ship2-table{background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow-x:auto; overflow-y:hidden;}
+.ship2-header{display:grid; grid-template-columns:minmax(110px,0.8fr) minmax(200px,1.4fr) minmax(95px,0.7fr) minmax(150px,0.9fr) minmax(46px,0.4fr) minmax(380px,2.2fr) minmax(130px,1fr); gap:20px; padding:9px 24px; background:var(--surface2); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1; min-width:1290px;}
 .ship2-header span{font-family:var(--mono); font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;}
 /* ★ 2026-10-02 수정(피드백 반영) — Status&BOL# 칸 폭을 줄이고 간격(gap)도
    좁혀서 Action 버튼이 뚝 떨어져 보이지 않게 함. 행 높이는 54px로 통일(세로
    패딩 대신 min-height + align-items:center). */
-.ship2-row{display:grid; grid-template-columns:minmax(110px,1.1fr) minmax(130px,1.6fr) minmax(100px,0.9fr) minmax(100px,0.9fr) minmax(50px,0.5fr) minmax(150px,1.1fr) minmax(100px,0.7fr); gap:10px; align-items:center; min-height:60px; padding:0 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1020px;}
+.ship2-row{display:grid; grid-template-columns:minmax(110px,0.8fr) minmax(200px,1.4fr) minmax(95px,0.7fr) minmax(150px,0.9fr) minmax(46px,0.4fr) minmax(380px,2.2fr) minmax(130px,1fr); gap:20px; align-items:center; min-height:60px; padding:0 24px; border-bottom:1px solid var(--border); white-space:nowrap; min-width:1290px; padding-top:6px; padding-bottom:6px;}
 .ship2-row > *{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .ship2-row > .ship2-status-cell{overflow:visible;}
 .ship2-action-cell{overflow:visible;}
@@ -375,6 +375,33 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
    바로 아래에 붙여서, 배차 담당자가 출고 체크와 별개로 아무 때나 적을 수
    있게 함. */
 .ship2-status-cell{display:flex; flex-direction:column; gap:5px; align-items:flex-start; white-space:normal;}
+
+/* ★ 2026-10-05 신규(시뮬레이션 승인) — 트럭킹 비용 칩 / 잠금 표시 / 출고 일시 / BOL·비용 팝업 */
+.ship2-bol-btn{display:inline-flex; gap:6px; align-items:center; background:none; border:none; padding:0; cursor:pointer; font-family:var(--sans);}
+.ship2-bol-btn.ro{cursor:default;}
+.ship2-bol-btn:not(.ro):hover .ship2-bol-chip, .ship2-bol-btn:not(.ro):hover .ship2-cost-chip{filter:brightness(1.25);}
+.ship2-cost-chip{font-family:var(--mono); font-size:10.5px; font-weight:800; color:#7DE8B5; background:var(--green-bg); border:1px solid rgba(16,217,126,0.4); border-radius:6px; padding:2px 7px; white-space:nowrap;}
+.ship2-lock{font-size:11px; font-weight:700; color:var(--text-dim); border:1px dashed var(--border2); border-radius:6px; padding:2px 8px; white-space:nowrap;}
+.ship2-lock i{font-style:normal; font-weight:500; opacity:.8;}
+.ship2-shipline{display:flex; align-items:center; gap:8px; flex-wrap:nowrap;}
+.ship2-shipat{font-family:var(--mono); font-size:11px; font-weight:700; color:#7DE8B5; background:var(--green-bg); border:1px solid rgba(16,217,126,0.35); border-radius:6px; padding:2px 8px; white-space:nowrap;}
+.bolm-ov{position:fixed; inset:0; background:rgba(0,0,0,0.65); display:none; align-items:center; justify-content:center; z-index:9000; padding:16px;}
+.bolm-ov.on{display:flex;}
+.bolm{background:var(--surface); border:1px solid var(--border2); border-radius:14px; width:100%; max-width:440px; padding:20px; box-shadow:0 20px 60px rgba(0,0,0,0.6);}
+.bolm h3{font-size:16px; margin-bottom:2px;}
+.bolm-sub{font-size:12px; color:var(--text-dim); margin-bottom:12px; font-family:var(--mono);}
+.bolm label{display:block; font-size:11px; font-weight:700; color:var(--text-dim); margin:10px 0 4px; letter-spacing:.04em;}
+.bolm input.bolm-f{width:100%; background:var(--bg); border:1px solid var(--border2); border-radius:8px; padding:10px 12px; color:var(--text); font-size:14px; font-family:var(--mono);}
+.bolm input.bolm-f:focus{outline:none; border-color:var(--blue);}
+.bolm input.bolm-f[readonly]{opacity:.85; border-style:dashed;}
+.bolm-money{position:relative;} .bolm-money span{position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--text-dim); font-family:var(--mono);}
+.bolm-money input.bolm-f{padding-left:26px;}
+.bolm-banner{font-size:12px; color:#FCD58A; background:var(--amber-bg); border:1px solid rgba(245,158,11,0.4); border-radius:8px; padding:7px 10px; margin-bottom:6px;}
+.bolm-err{color:var(--red); font-size:12px; margin-top:8px; min-height:16px;}
+.bolm-meta{margin-top:8px; font-size:11.5px; color:var(--text-dim); font-family:var(--mono); line-height:1.7; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px;}
+.bolm-btns{display:flex; gap:8px; justify-content:flex-end; margin-top:14px;}
+.bolm-b{border-radius:8px; padding:9px 16px; font-weight:700; font-size:13px; cursor:pointer; border:1px solid var(--border2); background:var(--surface2); color:var(--text); font-family:var(--sans);}
+.bolm-b.pri{background:var(--green); border-color:var(--green); color:#07241a;}
 .ship2-bol-link{font-size:11px; font-weight:700; color:var(--blue); text-decoration:none; border-bottom:1px dashed var(--blue); cursor:pointer; background:none; border-top:none; border-left:none; border-right:none; padding:0; font-family:var(--sans);}
 .ship2-bol-chip{font-family:var(--mono); font-size:10.5px; font-weight:700; color:#C4B0FF; background:var(--purple-bg); border:1px solid rgba(139,92,246,0.4); border-radius:6px; padding:2px 7px; white-space:nowrap;}
 .ship2-bol-edit{background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:11px; padding:0 0 0 2px;}
@@ -897,7 +924,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         <span>Ship Out</span>
         <span>Dims</span>
         <span>Age</span>
-        <span>Status &amp; BOL# &amp; Confirm</span>
+        <span>Status &amp; BOL# &amp; Trucking $ &amp; Confirm</span>
         <span>Action</span>
       </div>
       <div id="ship2-list"></div>
@@ -1896,8 +1923,8 @@ function applyTodayResult(res){
     if (ov.until < now) { delete _recentBolOverrides[inv]; return; }
     const job = TODAY_JOBS.find(j => j.invoice === inv);
     if (job){
-      if (_ovSettled_(ov, String(job.bol || '') === String(ov.bol || ''), now)){ delete _recentBolOverrides[inv]; }
-      else { job.bol = ov.bol; }
+      if (_ovSettled_(ov, String(job.bol || '') === String(ov.bol || '') && String(job.bolCost === undefined || job.bolCost === null ? '' : job.bolCost) === String(ov.cost === undefined || ov.cost === null ? '' : ov.cost), now)){ delete _recentBolOverrides[inv]; }
+      else { job.bol = ov.bol; job.bolCost = (ov.cost === undefined || ov.cost === null) ? '' : ov.cost; job.bolBy = ov.by || ''; job.bolAt = ov.at || ''; }
     }
   });
   _applyMovedOverrides_(TODAY_JOBS, now); // ★ 2026-10-05 신규
@@ -1936,7 +1963,7 @@ function _registerRemotePatch_(p, now){
   if (follows) TODAY_JOBS.forEach(j => { if (j.dimsLinkedTo === p.inv) invs.push(j.invoice); });
   invs.forEach(inv => {
     if (p.kind === 'ship') _recentShippedOverrides[inv] = { shipped: !!f.shipped, shippedAt: f.shippedAt || '', shippedBy: f.shippedBy || '', until: until };
-    else if (p.kind === 'bol') _recentBolOverrides[inv] = { bol: String(f.bol || ''), until: until };
+    else if (p.kind === 'bol') _recentBolOverrides[inv] = { bol: String(f.bol || ''), cost: (f.cost === undefined || f.cost === null) ? '' : f.cost, by: f.by || '', at: f.at || '', until: until };
     else if (p.kind === 'conf') _recentSalesConfirmOverrides[inv] = {
       confirmed: !!f.confirmed, confirmedAt: f.confirmedAt || '', confirmedBy: f.confirmedBy || '',
       wasUndone: !!f.wasUndone, undoneAt: f.undoneAt || '', undoneBy: f.undoneBy || '', until: until };
@@ -2209,8 +2236,9 @@ function renderShipping(){
     const ageDays = ageDaysFromShipDate_(j.shipDate);
     const overdue = !j.shipped && ageDays !== null && ageDays >= 1;
     const ageTxt = (ageDays === null) ? '-' : (overdue ? `${ageDays}d late` : `${ageDays}d`);
+    // ★ 2026-10-05 — 출고되면 상태 옆에 출고 일시·담당자도 표시(서버가 이미 저장해 둔 ShippedAt/ShippedBy)
     const statusHtml = j.shipped
-      ? `<span class="ship2-status shipped">✓ SHIPPED</span>`
+      ? `<div class="ship2-shipline"><span class="ship2-status shipped">✓ SHIPPED</span>${j.shippedAt ? `<span class="ship2-shipat" title="Shipped ${_escH_(j.shippedAt)}${j.shippedBy ? ' by ' + _escH_(j.shippedBy) : ''}">${_escH_(_fmtShipAt_(j.shippedAt))}${j.shippedBy ? ' · ' + _escH_(j.shippedBy) : ''}</span>` : ''}</div>`
       : `<span class="ship2-status pending">PENDING</span>`;
     // ★ 2026-10-02 수정(질문 답변) — 이 숫자는 Order Detail Lookup의 Dims
     //   편집기에서 실제로 저장된 팔렛 치수 행 개수(dimsCount, buildDimsExistsMap_
@@ -2231,21 +2259,21 @@ function renderShipping(){
       ? `<span class="ship2-linked">🔗 ${j.dimsLinkedTo}</span>`
       : `<span class="cell-mono-dim">${dCount} Pallet${dCount===1?'':'s'}${linkedInnerShip}</span>`;
     const hasBol = !!(j.bol && String(j.bol).trim());
+    const hasCost = _hasBolCost_(j);
     let actionHtml;
     if (isLinked){
       actionHtml = `<span class="ship2-linked">See ${j.dimsLinkedTo}</span>`;
     } else if (j.shipped){
       actionHtml = `<span class="ship2-done"><span class="ship2-btn done" title="Shipped">✓ Shipped</span><button class="ship2-btn undo" onclick="toggleShipped('${j.invoice}', false)">Undo</button></span>`;
-    } else if (!j.salesConfirmed || !hasBol){
+    } else if (!j.salesConfirmed || !hasBol || !hasCost){
       // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 영업 컨펌 전에는
       //   Mark Shipped 자체를 비활성화(서버도 setShippedStatus에서 동일하게
       //   막음 — 화면·서버 이중 방어).
       // ★ 2026-10-02 추가(사용자 요청, 시뮬레이션 승인) — BOL# 없이는 출고
       //   확정 불가. 무엇이 빠졌는지에 따라 안내 문구를 다르게 보여줌.
-      const missTitle = (!j.salesConfirmed && !hasBol)
-        ? 'Sales Confirm and BOL# are both required before marking shipped'
-        : (!j.salesConfirmed ? 'Sales must confirm before this order can be marked shipped'
-        : 'Enter a BOL# before marking shipped');
+      const missTitle = !j.salesConfirmed
+        ? 'Sales must confirm this order first (then enter BOL# and trucking cost)'
+        : 'Save the BOL# and trucking cost before marking shipped';
       actionHtml = `<button class="ship2-btn go" disabled title="${missTitle}">Mark Shipped</button>`;
     } else {
       actionHtml = `<button class="ship2-btn go" onclick="toggleShipped('${j.invoice}', true)">Mark Shipped</button>`;
@@ -2303,20 +2331,22 @@ function renderShipping(){
     //   완전히 독립적으로 아무 때나 입력/수정. LINKED 행은 PRIMARY의 BOL을
     //   서버가 이미 계산해서 내려준 값을 그대로 읽기 전용으로만 보여줌
     //   (Shipped 상태와 동일한 "대표에서만 진짜 값" 원칙).
+    // ★ 2026-10-05 개편(시뮬레이션 승인) — BOL# + 트럭킹 비용을 팝업으로 입력/조회.
+    //   Sales Confirm 전에는 입력 잠금(🔒), 확인되면 "+ Add BOL# / Trucking $" 링크 활성화,
+    //   저장되면 BOL# 칩 + 비용 칩을 나란히 표시(칩 클릭 = 팝업 열기). LINKED 행은 대표 값을 읽기 전용으로.
     let bolHtml;
-    if (isLinked){
-      bolHtml = j.bol ? `<span class="ship2-bol-chip">BOL# ${j.bol}</span>` : '';
-    } else if (BOL_EDIT.hasOwnProperty(j.invoice)){
-      const draft = (BOL_EDIT[j.invoice] || '').replace(/"/g,'&quot;');
-      bolHtml = `<div class="ship2-bol-row">
-        <input class="ship2-bol-input" id="bol-input-${j.invoice}" value="${draft}" placeholder="BOL number" oninput="onBolDraftInput('${j.invoice}', this.value)" onkeydown="if(event.key==='Enter')saveBol('${j.invoice}'); if(event.key==='Escape')cancelBolEdit('${j.invoice}');">
-        <button class="ship2-bol-save" title="Save" onclick="saveBol('${j.invoice}')">✓</button>
-        <button class="ship2-bol-cancel" title="Cancel" onclick="cancelBolEdit('${j.invoice}')">✕</button>
-      </div>`;
-    } else if (j.bol){
-      bolHtml = `<div class="ship2-bol-row"><span class="ship2-bol-chip">BOL# ${j.bol}</span><button class="ship2-bol-edit" title="Edit BOL#" onclick="startBolEdit('${j.invoice}', '${j.bol.replace(/'/g,"&#39;")}')">✎</button></div>`;
+    const invAttr = String(j.invoice || '').replace(/'/g, '');
+    if (hasBol || hasCost){
+      const chips = `<span class="ship2-bol-chip">BOL# ${_escH_(hasBol ? j.bol : '—')}</span><span class="ship2-cost-chip">${hasCost ? _fmtMoney_(j.bolCost) : '$ —'}</span>`;
+      bolHtml = isLinked
+        ? `<span class="ship2-bol-btn ro" title="Shown from primary invoice ${_escH_(j.dimsLinkedTo)}">${chips}</span>`
+        : `<button class="ship2-bol-btn" title="Click to view / edit BOL# and trucking cost" onclick="openBolModal('${invAttr}')">${chips}</button>`;
+    } else if (isLinked){
+      bolHtml = '';
+    } else if (!j.salesConfirmed){
+      bolHtml = `<span class="ship2-lock" title="Locked until Sales confirms this order">🔒 BOL# / Trucking $ <i>(locked until Sales Confirm)</i></span>`;
     } else {
-      bolHtml = `<a class="ship2-bol-link" onclick="startBolEdit('${j.invoice}', '')">+ Add BOL#</a>`;
+      bolHtml = `<a class="ship2-bol-link" onclick="openBolModal('${invAttr}')">+ Add BOL# / Trucking $</a>`;
     }
 
     return `<div class="ship2-row ${j.shipped?'shipped':''}">
@@ -2332,12 +2362,6 @@ function renderShipping(){
       <span class="ship2-action-cell">${actionHtml}</span>
     </div>`;
   }).join('');
-
-  // 방금 그린 BOL 입력창에 자동 포커스 — 링크를 클릭한 직후 바로 타이핑 가능하게
-  Object.keys(BOL_EDIT).forEach(inv => {
-    const el = document.getElementById('bol-input-' + inv);
-    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-  });
 
   document.getElementById('ship2-pager-summary').textContent =
     `${start+1}–${Math.min(start+SHIP_PAGE_SIZE, sorted.length)} of ${sorted.length}`;
@@ -2588,51 +2612,92 @@ async function undoSalesConfirm(invoice){
 }
 
 /* ═══════════════════════════════════════════════════════════
-   ★ 2026-10-02 신규(시뮬레이션에서 확정) — BOL# 입력. Shipping Status의
-   Status 칸에서 트럭킹 BOL 번호를 바로 입력. Shipped 체크와는 완전히
-   독립적인 별도 op(setBolNumber)로 서버에 저장되며, 언제든 수정 가능.
-   BOL_EDIT는 "지금 이 인보이스가 입력창이 열려 있는지 + 임시로 타이핑 중인
-   값"만 들고 있는 클라이언트 전용 상태 — 저장 성공 시 지워지고 서버값(j.bol)이
-   그 자리를 대신한다. */
-let BOL_EDIT = {};
-
-function startBolEdit(invoice, current){
-  BOL_EDIT[invoice] = current || '';
-  renderShipping();
-}
-function cancelBolEdit(invoice){
-  delete BOL_EDIT[invoice];
-  renderShipping();
-}
-function onBolDraftInput(invoice, value){
-  // 매 타이핑마다 다시 그리면 입력창 포커스/커서 위치를 잃으므로, 여기서는
-  // 값만 저장하고 화면은 다시 그리지 않음 — 저장(Enter/✓) 시에만 반영.
-  BOL_EDIT[invoice] = value;
-}
-// ★ 2026-10-04 개편 — Enter/✓를 누르는 즉시 BOL# 칩으로 바뀜(묶인 오더 포함). 저장은 뒤에서 진행되고,
-//   실패하면 방금 입력한 글자를 입력창에 그대로 되돌려놓고(다시 입력할 필요 없음) 이유를 알려줌.
+   ★ 2026-10-05 개편 — BOL# + 트럭킹 비용 팝업. 규칙: ① Sales Confirm 전에는 입력 잠금 ② 둘 다 저장돼야
+   Mark Shipped 가능 ③ 출고 후에는 잠김(Undo 후 수정). 서버(setBolNumber)에서도 같은 규칙을 한 번 더 검사. */
 const _bolInflight = {};
-async function saveBol(invoice){
-  if (_bolInflight[invoice]) return;
+let _bolModalInv = '';
+function _escH_(v){ return String(v === undefined || v === null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _hasBolCost_(j){ return !!j && j.bolCost !== '' && j.bolCost !== null && j.bolCost !== undefined && !isNaN(Number(j.bolCost)); }
+function _fmtMoney_(n){ return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+// 'yyyy-MM-dd HH:mm:ss' → 'MM/DD/YYYY h:mm AM'(저장된 값 그대로의 시각 — 시간대 변환 없음). 형식이 다르면 원문 그대로.
+function _fmtShipAt_(t){
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(t || ''));
+  if (!m) return String(t || '');
+  const h = parseInt(m[4], 10), ap = h >= 12 ? 'PM' : 'AM';
+  return m[2] + '/' + m[3] + '/' + m[1] + ' ' + ((h % 12) || 12) + ':' + m[5] + ' ' + ap;
+}
+function openBolModal(invoice, draft){
+  const j = TODAY_JOBS.find(x => x.invoice === invoice);
+  if (!j) return;
+  _bolModalInv = invoice;
+  const isLinked = !!j.dimsLinkedTo;
+  const editable = !isLinked && !!j.salesConfirmed && !j.shipped;
+  const banner = document.getElementById('bolm-banner');
+  let msg = '';
+  if (isLinked) msg = 'Linked order — BOL# and trucking cost are managed on primary invoice ' + j.dimsLinkedTo + '.';
+  else if (!j.salesConfirmed) msg = 'Locked — Sales must confirm this order before BOL# and trucking cost can be edited.';
+  else if (j.shipped) msg = 'Shipped — locked. Undo the shipped status to edit.';
+  banner.style.display = msg ? '' : 'none';
+  banner.textContent = msg;
+  document.getElementById('bolm-title').textContent = editable ? 'BOL# & Trucking Cost' : 'Shipping Info (BOL# & Trucking)';
+  document.getElementById('bolm-sub').textContent = j.invoice + (j.remarks ? ' · ' + j.remarks : '');
+  const fb = document.getElementById('bolm-bol'), fc = document.getElementById('bolm-cost');
+  fb.value = draft ? draft.bol : (j.bol || '');
+  fc.value = draft ? draft.cost : (_hasBolCost_(j) ? Number(j.bolCost).toFixed(2) : '');
+  fb.readOnly = fc.readOnly = !editable;
+  document.getElementById('bolm-save').style.display = editable ? '' : 'none';
+  document.getElementById('bolm-err').textContent = (draft && draft.error) || '';
+  const meta = document.getElementById('bolm-meta');
+  if (j.bolBy || j.bolAt){ meta.style.display = ''; meta.textContent = 'Entered by ' + (j.bolBy || '-') + (j.bolAt ? ' · ' + _fmtShipAt_(j.bolAt) : ''); }
+  else meta.style.display = 'none';
+  document.getElementById('bolm-ov').classList.add('on');
+  if (editable) setTimeout(() => { fb.focus(); fb.setSelectionRange(fb.value.length, fb.value.length); }, 30);
+}
+function closeBolModal(){
+  document.getElementById('bolm-ov').classList.remove('on');
+  _bolModalInv = '';
+}
+document.addEventListener('keydown', function(e){
+  const ov = document.getElementById('bolm-ov');
+  if (!ov || !ov.classList.contains('on')) return;
+  if (e.key === 'Escape'){ closeBolModal(); e.stopPropagation(); }
+  else if (e.key === 'Enter' && document.getElementById('bolm-save').style.display !== 'none'){ e.preventDefault(); saveBolModal(); }
+}, true);
+// ★ 2026-10-05 — 저장 즉시 칩으로 바뀜(낙관적 갱신, 묶인 오더 포함). 저장은 뒤에서 진행되고, 실패하면
+//   팝업을 다시 열어 방금 입력한 값을 그대로 되돌려놓고(재입력 불필요) 이유를 알려줌.
+async function saveBolModal(){
+  const invoice = _bolModalInv;
+  if (!invoice || _bolInflight[invoice]) return;
   const job = TODAY_JOBS.find(j => j.invoice === invoice);
   if (!job) return;
-  const draft = BOL_EDIT[invoice] || '';
-  const bol = draft.trim();
+  const errEl = document.getElementById('bolm-err');
+  const bol = document.getElementById('bolm-bol').value.trim();
+  const costRaw = document.getElementById('bolm-cost').value.replace(/[$,\s]/g, '');
+  const clearing = !bol && costRaw === '';
+  if (!clearing){
+    if (!bol){ errEl.textContent = 'Please enter a BOL#.'; return; }
+    if (costRaw === ''){ errEl.textContent = 'Please enter the trucking cost (enter 0 if none).'; return; }
+    if (!/^\d+(\.\d{1,2})?$/.test(costRaw)){ errEl.textContent = 'Cost must be a number, 0 or more (up to 2 decimals).'; return; }
+  }
+  const cost = clearing ? '' : Math.round(parseFloat(costRaw) * 100) / 100;
+  const by = authGetName() || 'Dispatch (tablet)';
+  const draft = { bol: bol, cost: costRaw };
+  closeBolModal();
   _bolInflight[invoice] = true;
   _markLocalOp_(invoice, 'bol');
+  const nowIso = _fmtIsoNow_();
   const targets = [job].concat(TODAY_JOBS.filter(j => j.dimsLinkedTo === invoice));
-  const snaps = targets.map(j => ({ inv: j.invoice, bol: j.bol, ov: _recentBolOverrides[j.invoice] }));
-  delete BOL_EDIT[invoice];
+  const snaps = targets.map(j => ({ inv: j.invoice, bol: j.bol, cost: j.bolCost, by: j.bolBy, at: j.bolAt, ov: _recentBolOverrides[j.invoice] }));
   targets.forEach(j => {
-    j.bol = bol;
-    _recentBolOverrides[j.invoice] = { bol: bol, until: Date.now() + 120000 };
+    j.bol = bol; j.bolCost = cost; j.bolBy = clearing ? '' : by; j.bolAt = clearing ? '' : nowIso;
+    _recentBolOverrides[j.invoice] = { bol: bol, cost: cost, by: j.bolBy, at: j.bolAt, until: Date.now() + 120000 };
   });
   renderShipping();
 
   let res;
   try {
     const t0 = performance.now();
-    res = await _serial_(invoice, () => gasPostSmart_('setBolNumber', { invoice: invoice, bol: bol, by: (authGetName() || 'Dispatch (tablet)') }));
+    res = await _serial_(invoice, () => gasPostSmart_('setBolNumber', { invoice: invoice, bol: bol, cost: clearing ? '' : String(cost), by: by }));
     if (res && res.timing) console.log('%c[setBolNumber] 클라이언트 왕복 ' + Math.round(performance.now() - t0) + 'ms · 서버 구간별(누적 ms):', 'color:#0a7;font-weight:bold;', res.timing);
   } catch (e) {
     res = { ok:false, error: String(e && e.message || e) };
@@ -2640,10 +2705,11 @@ async function saveBol(invoice){
   delete _bolInflight[invoice];
 
   if (res && res.ok){
+    const rc = (res.cost === undefined || res.cost === null) ? '' : res.cost;
     TODAY_JOBS.forEach(j => {
       if (j.invoice === invoice || j.dimsLinkedTo === invoice){
-        j.bol = res.bol;
-        _recentBolOverrides[j.invoice] = { bol: res.bol, until: Date.now() + 180000 };
+        j.bol = res.bol; j.bolCost = rc; j.bolBy = res.by || ''; j.bolAt = res.at || '';
+        _recentBolOverrides[j.invoice] = { bol: res.bol, cost: rc, by: res.by || '', at: res.at || '', until: Date.now() + 180000 };
       }
     });
     renderShipping();
@@ -2651,12 +2717,11 @@ async function saveBol(invoice){
   } else {
     snaps.forEach(sn => {
       const j = TODAY_JOBS.find(x => x.invoice === sn.inv);
-      if (j) j.bol = sn.bol;
+      if (j){ j.bol = sn.bol; j.bolCost = sn.cost; j.bolBy = sn.by; j.bolAt = sn.at; }
       if (sn.ov) _recentBolOverrides[sn.inv] = sn.ov; else delete _recentBolOverrides[sn.inv];
     });
-    BOL_EDIT[invoice] = draft; // 입력했던 글자 그대로 복구(다시 입력 불필요)
     renderShipping();
-    alert((res && res.error) ? res.error : 'Could not save BOL#. Check your connection and try again.');
+    openBolModal(invoice, { bol: draft.bol, cost: draft.cost, error: (res && res.error) ? res.error : 'Could not save. Check your connection and try again.' });
   }
 }
 
@@ -4151,5 +4216,20 @@ async function deptSubmit(){
 authInit();
 </script>
 
+<!-- ★ 2026-10-05 신규 — BOL# + 트럭킹 비용 팝업 (탭과 무관하게 항상 보이도록 body 바로 아래에 둠) -->
+    <div class="bolm-ov" id="bolm-ov" onclick="if(event.target===this)closeBolModal()">
+      <div class="bolm">
+        <h3 id="bolm-title">BOL# &amp; Trucking Cost</h3>
+        <div class="bolm-sub" id="bolm-sub"></div>
+        <div class="bolm-banner" id="bolm-banner" style="display:none"></div>
+        <label>BOL #</label>
+        <input class="bolm-f" id="bolm-bol" placeholder="BOL number" autocomplete="off">
+        <label>TRUCKING COST (USD)</label>
+        <div class="bolm-money"><span>$</span><input class="bolm-f" id="bolm-cost" inputmode="decimal" placeholder="0.00" autocomplete="off"></div>
+        <div class="bolm-err" id="bolm-err"></div>
+        <div class="bolm-meta" id="bolm-meta" style="display:none"></div>
+        <div class="bolm-btns"><button class="bolm-b" onclick="closeBolModal()">Close</button><button class="bolm-b pri" id="bolm-save" onclick="saveBolModal()">Save</button></div>
+      </div>
+    </div>
 </body>
 </html>
