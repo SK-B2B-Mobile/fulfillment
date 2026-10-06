@@ -517,7 +517,28 @@ function diagnoseJobsInspectionStatus() {
   return { ok: true, results: results };
 }
 
+/* ===================== 동기화 사이클 전용 읽기 메모 (★ 2026-10-05 신규, 속도) =====================
+ * 1분 동기화(syncToFirestore_batched_)는 열린 배치 최대 8개 × (getBatch / getScanState / getSlotProgress)를
+ * 돌면서 같은 큰 시트(ScanLog 수만 행, BatchItems 수만 행, IssueLog, BatchCustomers, PackScanLog)를
+ * 배치마다 통째로 다시 읽었음(시트 읽기 수십~백 회, 동기화가 몰리면 한 번에 수십 초).
+ * 사이클 동안만 "같은 시트·같은 행 수·같은 열 수" 읽기 결과를 재사용 → 계산 결과는 동일, 읽기 횟수만 감소.
+ * - 메모는 동기화 함수가 켜고(_syncMemoOn_) 끝나면 반드시 끔(_syncMemoOff_). 꺼져 있으면(= 평소 모든 호출) 예전과 100% 동일.
+ * - 키에 "행 수"가 들어가므로 사이클 중 행이 추가되면 자동으로 새로 읽음. 반환 배열은 읽기 전용으로만 사용됨.
+ * ================================================================================ */
+var __SYNC_MEMO = null;
+function _syncMemoOn_()  { __SYNC_MEMO = { vals: {}, sheets: {}, hit: 0, miss: 0 }; }
+function _syncMemoOff_() { __SYNC_MEMO = null; }
+function _vals_(sh, nRows, nCols) {
+  if (!__SYNC_MEMO) return sh.getRange(2, 1, nRows, nCols).getValues();
+  var k = sh.getName() + '|' + nRows + '|' + nCols;
+  var m = __SYNC_MEMO.vals;
+  if (m[k]) { __SYNC_MEMO.hit++; return m[k]; }
+  __SYNC_MEMO.miss++;
+  return (m[k] = sh.getRange(2, 1, nRows, nCols).getValues());
+}
+
 function ensureBatchSheet_(name, headers) {
+  if (__SYNC_MEMO && __SYNC_MEMO.sheets[name]) return __SYNC_MEMO.sheets[name]; // ★ 동기화 사이클 중에는 시트 객체/헤더 확인을 1번만
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
   let sh = ss.getSheetByName(name);
   if (!sh) {
@@ -528,6 +549,7 @@ function ensureBatchSheet_(name, headers) {
     sh.appendRow(headers);
     sh.setFrozenRows(1);
   }
+  if (__SYNC_MEMO) __SYNC_MEMO.sheets[name] = sh;
   return sh;
 }
 
@@ -552,6 +574,7 @@ function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId',
 //   안 생김(ensureBatchSheet_는 신규 생성 시에만 헤더를 씀). 그래서 실제 사용
 //   시점에 헤더가 비어있으면 한 번만 채워주는 안전장치.
 function bcustSheetSafe_() {
+  if (__SYNC_MEMO && __SYNC_MEMO.sheets['__bcustSafe']) return __SYNC_MEMO.sheets['__bcustSafe']; // ★ 동기화 중엔 헤더 점검(getRange 3~4회)을 사이클당 1번만
   const bc = bcustSheet_();
   if (!bc.getRange(1, 11).getValue()) bc.getRange(1, 11).setValue('MovedToPacking');
   if (!bc.getRange(1, 12).getValue()) bc.getRange(1, 12).setValue('TakenOut'); // ★ 2026-08-04 신규 — 출고팀이 실제로 가져간 시각(파란색 상태)
@@ -565,6 +588,7 @@ function bcustSheetSafe_() {
   //   패턴으로 안전하게 14번째 컬럼만 새로 추가 — 기존 총량피킹 행은 이 값이
   //   비어있어도 전혀 문제 없음(단독오더 목록에서만 사용).
   if (!bc.getRange(1, 14).getValue()) bc.getRange(1, 14).setValue('CreatedAt');
+  if (__SYNC_MEMO) __SYNC_MEMO.sheets['__bcustSafe'] = bc;
   return bc;
 }
 function bitemsSheet_()   { return ensureBatchSheet_(BITEMS_SHEET,   ['BatchId','Invoice','SKU','Name','Barcode','ReqQty','Rack']); }
@@ -944,7 +968,7 @@ function _findBatchRow_(batchId) {
   const sh = batchesSheet_();
   const last = sh.getLastRow();
   if (last < 2) return 0;
-  const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  const ids = _vals_(sh, last - 1, 1);
   for (let i = 0; i < ids.length; i++) {
     if (String(ids[i][0]) === String(batchId)) return i + 2;
   }
@@ -1286,7 +1310,7 @@ function getBatch(batchId) {
       const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
       const last = bSh.getLastRow();
       if (last >= 2) {
-        const vals = bSh.getRange(2, 1, last - 1, 7).getValues();
+        const vals = _vals_(bSh, last - 1, 7);
         for (let i = vals.length - 1; i >= 0; i--) {
           let rowDateStr = vals[i][1];
           if (Object.prototype.toString.call(rowDateStr) === '[object Date]') {
@@ -1318,7 +1342,7 @@ function getBatch(batchId) {
       // ★ 2026-08-07 수정 — 11개 컬럼만 읽어서 12번째인 TakenOut(파란)이
       //   배열에 아예 안 들어왔음. 그래서 batch.html은 항상 false를 받았고,
       //   TV 현황판에서 파란으로 바꿔도 계속 핵크로 보였음 — 색 불일치의 진짜 원인.
-      const rows = bc.getRange(2, 1, bcLast - 1, 13).getValues();
+      const rows = _vals_(bc, bcLast - 1, 13);
       customers = rows.filter(r => String(r[0]) === String(resolvedId)).map(r => ({
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
         totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || '',
@@ -1334,7 +1358,7 @@ function getBatch(batchId) {
     const biLast = bi.getLastRow();
     let sumItems = [], custItemsMap = {};
     if (biLast >= 2) {
-      const rows = bi.getRange(2, 1, biLast - 1, 7).getValues();
+      const rows = _vals_(bi, biLast - 1, 7);
       rows.forEach(r => {
         if (String(r[0]) !== String(resolvedId)) return;
         const item = { sku:r[2], name:r[3], barcode:r[4], req_qty:r[5], rack:r[6] };
@@ -3878,7 +3902,7 @@ function _buildBatchAggregates_(batchId) {
   const slLast = sl.getLastRow();
   const scannedByKey = {}; // "invoice|barcode|sku"
   if (slLast >= 2) {
-    sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+    _vals_(sl, slLast - 1, 12).forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       if (r[10] === 'undone') return;
       if (r[9] !== 'pass') return;
@@ -3899,7 +3923,7 @@ function _buildBatchAggregates_(batchId) {
   const issueQtyByKey = {};
   const issuesByInvoice = {};
   if (ilLast >= 2) {
-    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+    _vals_(il, ilLast - 1, 13).forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       if (r[12] === 'undone') return;
       const inv = r[7];
@@ -3923,7 +3947,7 @@ function _buildBatchAggregates_(batchId) {
   const biLast = bi.getLastRow();
   const skuLinesByKey = {}; // "invoice|barcode|sku" -> {invoice, reqQty, sku, name, barcode}
   if (biLast >= 2) {
-    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+    _vals_(bi, biLast - 1, 7).forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       const inv = r[1];
       if (!inv) return; // 총량 행(Invoice 빈값)은 제외
@@ -4107,7 +4131,7 @@ function getSlotProgress(batchId) {
     const plLast = pl.getLastRow();
     const packedByInvBarcode = {}; // "invoice|바코드"
     if (plLast >= 2) {
-      pl.getRange(2, 1, plLast - 1, 10).getValues().forEach(r => {
+      _vals_(pl, plLast - 1, 10).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[8] === 'undone') return;
         if (r[7] !== 'pass') return;
@@ -4117,7 +4141,7 @@ function getSlotProgress(batchId) {
     }
     const packReqByInvBarcode = {}; // "invoice|바코드" -> 필요수량(합산)
     if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      _vals_(bi, biLast - 1, 7).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const inv = r[1];
         if (!inv) return;
@@ -4127,7 +4151,7 @@ function getSlotProgress(batchId) {
     }
     const packIssueByInvBarcode = {}; // 검수 단계 이슈 반영(같은 바코드 기준으로 재집계)
     if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      _vals_(il, ilLast - 1, 13).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[12] === 'undone') return;
         const key = String(r[7]) + '|' + normBarcode_(r[4]);
@@ -4154,7 +4178,7 @@ function getSlotProgress(batchId) {
     const slots = [];
     if (bcLast >= 2) {
       // ★ 2026-08-24 확장 — 13번째 컬럼(PackVerified, 주황/최종 2차 검증완료)까지 읽음
-      bc.getRange(2, 1, bcLast - 1, 13).getValues().forEach(r => {
+      _vals_(bc, bcLast - 1, 13).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (!r[7] && r[7] !== 0) return; // 슬롯 미배정이면 현황판에 안 띄움
         const invoice = r[1];
@@ -4270,7 +4294,7 @@ function getUnfulfilledSkuAlerts(batchId) {
     const biLast = bi.getLastRow();
     const custLines = [];
     if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      _vals_(bi, biLast - 1, 7).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const inv = String(r[1]);
         if (!inv) return;
@@ -4283,7 +4307,7 @@ function getUnfulfilledSkuAlerts(batchId) {
     const slLast = sl.getLastRow();
     const allScanRows = [];
     if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      _vals_(sl, slLast - 1, 12).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[9] !== 'pass' || r[10] === 'undone') return;
         allScanRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[8]), qty: Number(r[11]) || 0 });
@@ -4294,7 +4318,7 @@ function getUnfulfilledSkuAlerts(batchId) {
     const ilLast = il.getLastRow();
     const allIssueRows = [];
     if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      _vals_(il, ilLast - 1, 13).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[12] === 'undone') return;
         allIssueRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[7]), qty: Number(r[10]) || 0 });
@@ -4306,7 +4330,7 @@ function getUnfulfilledSkuAlerts(batchId) {
     const bcLast = bc.getLastRow();
     const custNameByInvoice = {}, slotByInvoice = {};
     if (bcLast >= 2) {
-      bc.getRange(2, 1, bcLast - 1, 8).getValues().forEach(r => {
+      _vals_(bc, bcLast - 1, 8).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         custNameByInvoice[String(r[1])] = r[2];
         slotByInvoice[String(r[1])] = r[7];
@@ -4384,7 +4408,7 @@ function getScanState(batchId) {
     const scans = [];
 
     if (last >= 2) {
-      const rows = sl.getRange(2, 1, last - 1, 12).getValues();
+      const rows = _vals_(sl, last - 1, 12);
       rows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[10] === 'undone') return; // 취소된 스캔은 진행률/로그에서 제외
@@ -4427,7 +4451,7 @@ function getScanState(batchId) {
     const il = issuelogSheet_();
     const ilLast = il.getLastRow();
     if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      _vals_(il, ilLast - 1, 13).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[12] === 'undone') return;
         const inv = r[7], bc = String(r[4]), skuCode = String(r[5]);
@@ -4634,7 +4658,7 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     const last = bSh.getLastRow();
     if (last < 2) return { ok: true, batches: [] };
 
-    const rows = bSh.getRange(2, 1, last - 1, 8).getValues();
+    const rows = _vals_(bSh, last - 1, 8);
     const open = [];
     const openIds = {};
 
@@ -4655,7 +4679,7 @@ function _computeOpenBatches_(_cache, _cacheKey) {
       const bc = bcustSheetSafe_();
       const bcLast = bc.getLastRow();
       if (bcLast >= 2) {
-        const bcRows = bc.getRange(2, 1, bcLast - 1, 13).getValues();
+        const bcRows = _vals_(bc, bcLast - 1, 13);
         bcRows.forEach(r2 => {
           const bid = String(r2[0] || '').trim();
           if (!bid) return;
@@ -4768,7 +4792,7 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     //   스캔량 집계(오늘 다른 함수들과 동일한 원칙 — 초과분은 그 줄 자체 몫만 인정)
     const scannedByKey = {};
     if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      _vals_(sl, slLast - 1, 12).forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         if (r[10] === 'undone') return;
@@ -4789,7 +4813,7 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     const ilLast = il.getLastRow();
     const issueByKey = {};
     if (ilLast >= 2) {
-      il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
+      _vals_(il, ilLast - 1, 13).forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         if (r[12] === 'undone') return;
@@ -4804,7 +4828,7 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     const skuLinesByKey = {}; // "batchId|invoice|barcode|sku" -> reqQty(합산)
     const linesByInvoiceKey = {}; // "batchId|invoice" -> [key,...] (고객사별 완료판정용)
     if (biLast >= 2) {
-      bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
+      _vals_(bi, biLast - 1, 7).forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         const inv = r[1];
@@ -4835,7 +4859,7 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     const bcLast = bc.getLastRow();
     const doneCustByBatch = {}, totalCustByBatch = {};
     if (bcLast >= 2) {
-      bc.getRange(2, 1, bcLast - 1, 6).getValues().forEach(r => {
+      _vals_(bc, bcLast - 1, 6).forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         const inv = String(r[1]);
