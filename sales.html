@@ -334,6 +334,14 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ship2-action-cell{overflow:visible;}
 .ship2-row:last-child{border-bottom:none;}
 .ship2-row.shipped{background:rgba(16,217,126,0.05);}
+/* ★ 2026-10-05 — Shipping Status 목록 구간 머리글(Open / Recently shipped / Earlier shipped) */
+.ship2-sec{display:flex; align-items:center; gap:10px; padding:8px 24px; min-width:1290px; background:var(--surface2); border-bottom:1px solid var(--border); border-top:1px solid var(--border); font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-dim);}
+.ship2-sec .sec-count{background:rgba(255,255,255,0.08); border-radius:10px; padding:1px 8px; color:var(--text);}
+.ship2-sec .sec-note{font-weight:500; text-transform:none; letter-spacing:0; opacity:0.8;}
+.ship2-sec.open{color:#f5a623;}
+.ship2-sec.recent{color:#10d97e;}
+.ship2-sec.earlier{color:var(--text-dim);}
+.ship2-sec:first-child{border-top:none;}
 .ship2-inv{font-family:var(--mono); font-weight:800; font-size:14px;} /* ★ 2026-10-02 수정 — 3탭 통일(.cell-inv와 동일) */
 .ship2-linked{font-family:var(--mono); font-size:11px; color:#C4B0FF; font-weight:700;}
 .ship2-status{font-family:var(--mono); font-size:11px; font-weight:800; padding:3px 8px; border-radius:6px; white-space:nowrap; display:inline-block;}
@@ -2163,6 +2171,10 @@ function renderShipping(){
   // ★ 2026-10-03 신규(사용자 요청) — Sales Confirm 반영. 출고 완료되면 Awaiting/
   //   Confirmed 양쪽에서 모두 빠지고 Shipped 칸으로만 집계(작업자·영업팀 모두
   //   "지금 해야 할 일"만 한눈에 보도록).
+  // ★ 2026-10-05 변경 — 맨 왼쪽 칸 "TK Orders"(전체) → "TK Open Orders"(미출고만, 묶인 오더 포함).
+  //   묶인(Linked) 오더의 shipped 는 서버가 대표(PRIMARY) 값으로 내려주므로 대표가 출고되면 같이 빠짐.
+  //   전체/출고 수는 칸에 마우스를 올리면 툴팁으로 표시. 목록은 출고 완료 건도 그대로 보임(아래 목록 로직 변경 없음).
+  const openOrderCount = jobs.filter(j => !j.shipped).length;
   const awaitingConfirmCount = primaries.filter(j => !j.shipped && !j.salesConfirmed).length;
   // ★ 2026-10-05 변경 — "Confirmed" 칸 = 컨펌은 됐지만 BOL#·트럭킹 비용이 아직 저장 안 된 건(= 앞으로 입력할 남은 건수).
   //   BOL#과 비용이 둘 다 저장되면 하나씩 줄어듦. 출고 완료 건은 Shipped 칸으로만 집계.
@@ -2175,7 +2187,7 @@ function renderShipping(){
     return d !== null && d >= 2;
   }).length;
   summaryEl.innerHTML = `
-    <div class="ship2-tile" title="All TK invoices (including linked orders)"><div class="num">${jobs.length}</div><div class="lbl">TK Orders</div></div>
+    <div class="ship2-tile" title="Not yet shipped TK invoices (including linked orders) · Total ${jobs.length} · Shipped ${jobs.length - openOrderCount}"><div class="num">${openOrderCount}</div><div class="lbl">TK Open Orders</div></div>
     <div class="ship2-tile awaiting"><div class="num">${awaitingConfirmCount}</div><div class="lbl">Awaiting Confirm</div></div>
     <div class="ship2-tile confirmed" title="Sales-confirmed orders still waiting for BOL# and trucking cost"><div class="num">${confirmedCount}</div><div class="lbl">Confirmed · Needs BOL/$</div></div>
     <div class="ship2-tile late"><div class="num">${lateCount}</div><div class="lbl">2+ Days Late</div></div>
@@ -2219,6 +2231,9 @@ function renderShipping(){
     g.rows.sort((a,b) => (a.dimsLinkedTo?1:0) - (b.dimsLinkedTo?1:0)); // PRIMARY 먼저
     g.shipped = !!primary.shipped;
     g.sortDate = primary.shipped ? (primary.shippedAt || '') : (primary.shipDate || '');
+    // ★ 2026-10-05 — 구간: 미출고(open) / 출고 후 SHIP_RECENT_DAYS 일 이내(recent) / 그 이후(earlier).
+    //   숨기거나 접지 않고 전부 계속 보여줌(영업팀이 출고 후에도 확인) — 구간 머리글만 다름.
+    g.section = _shipSection_(primary);
     return g;
   });
   groups.sort((a,b) => {
@@ -2227,7 +2242,8 @@ function renderShipping(){
     return a.sortDate < b.sortDate ? 1 : -1; // 최신순(내림차순)
   });
   const sorted = [];
-  groups.forEach(g => sorted.push.apply(sorted, g.rows));
+  const secCount = { open: 0, recent: 0, earlier: 0 };
+  groups.forEach(g => { g.rows.forEach(r => { r._sec = g.section; secCount[g.section]++; }); sorted.push.apply(sorted, g.rows); });
 
   // ★ 2026-10-02 신규 — 페이지네이션 (82건 전체가 한 화면에 쏟아지던 문제 해결)
   const totalPages = Math.max(1, Math.ceil(sorted.length / SHIP_PAGE_SIZE));
@@ -2235,7 +2251,10 @@ function renderShipping(){
   const start = (SHIP_PAGE - 1) * SHIP_PAGE_SIZE;
   const pageJobs = sorted.slice(start, start + SHIP_PAGE_SIZE);
 
-  listEl.innerHTML = pageJobs.map(j => {
+  listEl.innerHTML = pageJobs.map((j, pi) => {
+    // ★ 2026-10-05 — 구간이 바뀌는 곳(또는 페이지 맨 위)에 머리글. 이전 페이지에서 이어지면 "(continued)".
+    const prevSec = pi > 0 ? pageJobs[pi - 1]._sec : (start > 0 ? sorted[start - 1]._sec : null);
+    const secHtml = (pi === 0 || j._sec !== prevSec) ? _shipSecHeader_(j._sec, secCount[j._sec], pi === 0 && prevSec === j._sec) : '';
     const isLinked = !!j.dimsLinkedTo;
     const ageDays = ageDaysFromShipDate_(j.shipDate);
     const overdue = !j.shipped && ageDays !== null && ageDays >= 1;
@@ -2353,7 +2372,7 @@ function renderShipping(){
       bolHtml = `<a class="ship2-bol-link" onclick="openBolModal('${invAttr}')">+ Add BOL# / Trucking $</a>`;
     }
 
-    return `<div class="ship2-row ${j.shipped?'shipped':''}">
+    return secHtml + `<div class="ship2-row ${j.shipped?'shipped':''}">
       <span class="ship2-inv">${j.invoice||''}</span>
       <span class="cell-body" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
       <span class="cell-mono-dim">${j.shipDate||'-'}</span>
@@ -2393,6 +2412,26 @@ function renderShipPager_(totalPages){
   btns.push(`<button class="pg-btn" ${cur>=totalPages?'disabled':''} onclick="gotoShipPage(${cur+1})">Next ›</button>`);
   const el = document.getElementById('ship2-pager-buttons');
   if (el) el.innerHTML = btns.join('');
+}
+
+// ★ 2026-10-05 — "최근 출고" 기간(일). 영업팀이 출고 여부를 확인하는 기간 — 이 값만 바꾸면 2일/5일 등으로 조정.
+const SHIP_RECENT_DAYS = 3;
+function _shipSection_(j){
+  if (!j.shipped) return 'open';
+  const raw = String(j.shippedAt || '').trim();
+  if (!raw) return 'recent'; // 출고 시각을 못 읽으면 눈에 띄는 쪽에 둠(안전)
+  const t = new Date(raw.replace(' ', 'T')).getTime();
+  if (isNaN(t)) return 'recent';
+  return (Date.now() - t) < SHIP_RECENT_DAYS * 86400000 ? 'recent' : 'earlier';
+}
+function _shipSecHeader_(sec, n, cont){
+  const title = sec === 'open' ? 'Open — not shipped yet'
+    : sec === 'recent' ? 'Recently shipped'
+    : 'Earlier shipped';
+  const note = sec === 'recent' ? `last ${SHIP_RECENT_DAYS} days`
+    : sec === 'earlier' ? `shipped more than ${SHIP_RECENT_DAYS} days ago · still shown`
+    : '';
+  return `<div class="ship2-sec ${sec}"><span>${title}</span><span class="sec-count">${n}</span>${note ? `<span class="sec-note">${note}</span>` : ''}${cont ? '<span class="sec-note">(continued)</span>' : ''}</div>`;
 }
 
 function ageDaysFromShipDate_(shipDate){
