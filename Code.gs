@@ -4346,6 +4346,12 @@ function setShippedStatus(data) {
       if (!bolNow) {
         return { ok: false, error: 'A BOL# must be entered before this order can be marked shipped.' };
       }
+      // ★ 2026-10-05 — 트럭킹 비용도 저장되어 있어야 출고 가능(0 은 허용, 빈칸은 불가)
+      const exc = _scanBolExtraCols_(ctx.headers);
+      const costNow = exc.iCost ? _parseBolCost_(ctx.rowVals[exc.iCost - 1]) : null;
+      if (costNow === null || isNaN(costNow)) {
+        return { ok: false, error: 'The trucking cost must be saved before this order can be marked shipped.' };
+      }
     }
 
     const lock = LockService.getDocumentLock();
@@ -4399,6 +4405,109 @@ function ensureBolCol_(sh) {
 }
 
 /* ---------------------------------------------------------------------
+ * ★ 2026-10-05 신규 — 트럭킹 비용(BOL 생성 후 나오는 금액). Jobs 시트에 BolCost / BolBy / BolAt
+ * 컬럼을 자동 추가(없으면 생성 — ensureBolCol_와 동일한 패턴). 영업팀이 비용을 볼 수 있게 목록에 실려 감.
+ * ------------------------------------------------------------------- */
+function _scanBolExtraCols_(headers) {
+  let iCost = 0, iBy = 0, iAt = 0;
+  headers.forEach(function (h, i) {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'bolcost') iCost = i + 1;
+    else if (v === 'bolby') iBy = i + 1;
+    else if (v === 'bolat') iAt = i + 1;
+  });
+  return { iCost: iCost, iBy: iBy, iAt: iAt };
+}
+function ensureBolExtraCols_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return _scanBolExtraCols_([]);
+  let headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  let c = _scanBolExtraCols_(headers);
+  if (c.iCost && c.iBy && c.iAt) return c;
+  // 컬럼 추가는 락 안에서 "다시 확인 후" 한 번만 — 동시에 두 요청이 처음 저장하더라도 컬럼이 중복 생성되지 않게 함
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  try {
+    const lc = sh.getLastColumn();
+    headers = sh.getRange(1, 1, 1, lc).getValues()[0];
+    c = _scanBolExtraCols_(headers);
+    const add = [];
+    if (!c.iCost) add.push('BolCost');
+    if (!c.iBy) add.push('BolBy');
+    if (!c.iAt) add.push('BolAt');
+    if (add.length) {
+      sh.insertColumnsAfter(lc, add.length);
+      sh.getRange(1, lc + 1, 1, add.length).setValues([add]);
+      __HDR_CACHE = null;
+      let k = lc;
+      add.forEach(function (name) {
+        k++;
+        if (name === 'BolCost') c.iCost = k; else if (name === 'BolBy') c.iBy = k; else c.iAt = k;
+      });
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  return c;
+}
+/* 비용 값 정규화: '', null → null(미입력) / "$1,234.5" → 1234.5 / 잘못된 값 → NaN */
+function _parseBolCost_(v) {
+  if (v === null || v === undefined) return null;
+  const t = String(v).replace(/[$,\s]/g, '');
+  if (t === '') return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return NaN;
+  return Math.round(parseFloat(t) * 100) / 100;
+}
+/* {invoice: {bol, cost, by, at}} — BOL / 비용을 Jobs 시트에서 한 번만 읽음(buildBolMap_ 대체). */
+function buildBolInfoMap_() {
+  const map = {};
+  try {
+    const sh = SHEET_();
+    const cols = ensureBolCol_(sh);
+    if (!cols.iBol) return map;
+    let hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    // 속도: 비용 컬럼이 이미 있으면(캐시된 헤더로 확인) 헤더를 또 읽지 않음. 없을 때만 락 안에서 한 번 생성.
+    if (!hdr[norm('BolCost')] || !hdr[norm('BolBy')] || !hdr[norm('BolAt')]) {
+      ensureBolExtraCols_(sh);
+      hdr = headerMapCached_();
+    }
+    const ex = { iCost: hdr[norm('BolCost')] || 0, iBy: hdr[norm('BolBy')] || 0, iAt: hdr[norm('BolAt')] || 0 };
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return map;
+    const iInv = hdr[norm('Invoice')];
+    if (!iInv) return map;
+    const n = lastRow - 1;
+    const invVals = sh.getRange(2, iInv, n, 1).getValues();
+    const bolVals = sh.getRange(2, cols.iBol, n, 1).getValues();
+    // 비용/입력자/시각은 서로 붙어 있는 컬럼이라 한 번에 읽음(시트 호출 3번 → 1번)
+    let costVals = null, byVals = null, atVals = null;
+    if (ex.iCost && ex.iBy && ex.iAt) {
+      const minC = Math.min(ex.iCost, ex.iBy, ex.iAt), maxC = Math.max(ex.iCost, ex.iBy, ex.iAt);
+      const blk = sh.getRange(2, minC, n, maxC - minC + 1).getValues();
+      costVals = blk.map(function (r) { return [r[ex.iCost - minC]]; });
+      byVals = blk.map(function (r) { return [r[ex.iBy - minC]]; });
+      atVals = blk.map(function (r) { return [r[ex.iAt - minC]]; });
+    }
+    for (let i = 0; i < n; i++) {
+      const inv = String(invVals[i][0] || '').trim();
+      if (!inv) continue;
+      const bol = String(bolVals[i][0] || '').trim();
+      let cost = costVals ? _parseBolCost_(costVals[i][0]) : null;
+      if (cost !== null && isNaN(cost)) cost = null;
+      if (!bol && cost === null) continue;
+      map[inv] = {
+        bol: bol,
+        cost: cost,
+        by: byVals ? String(byVals[i][0] || '') : '',
+        at: atVals ? _tsToIso_(atVals[i][0]) : ''
+      };
+    }
+  } catch (e) { /* best-effort — 실패해도 호출부는 빈 값으로 안전하게 처리됨 */ }
+  return map;
+}
+
+/* ---------------------------------------------------------------------
  * buildBolMap_() — Jobs 시트를 한 번만 읽어서 {invoice: "BOL번호"} 맵으로
  * 만듦(buildShippedMap_와 동일한 "한 번 읽고 재사용" 원칙).
  * ------------------------------------------------------------------- */
@@ -4449,7 +4558,16 @@ function setBolNumber(data) {
   try {
     const invoice = String((data && data.invoice) || '').trim();
     const bol = String((data && data.bol) || '').trim();
+    const by = String((data && data.by) || '').trim();
     if (!invoice) return { ok: false, error: 'invoice required' };
+    // ★ 2026-10-05 — 트럭킹 비용. BOL#과 비용은 항상 한 쌍으로 저장(둘 다 입력 / 둘 다 비움=지우기).
+    const cost = _parseBolCost_(data && data.cost);
+    if (cost !== null && isNaN(cost)) return { ok: false, error: 'Trucking cost must be a number (0 or more, up to 2 decimals).' };
+    const clearing = !bol && cost === null;
+    if (!clearing) {
+      if (!bol) return { ok: false, error: 'Please enter a BOL#.' };
+      if (cost === null) return { ok: false, error: 'Please enter the trucking cost (enter 0 if none).' };
+    }
 
     const sh = SHEET_();
     mark('open');
@@ -4457,13 +4575,16 @@ function setBolNumber(data) {
     let ctx = _readJobRowFast_(sh, invoice);
     if (ctx.error) return { ok: false, error: ctx.error };
     let iBol = _scanBolCol_(ctx.headers);
-    if (!iBol) {
+    let ex = _scanBolExtraCols_(ctx.headers);
+    if (!iBol || !ex.iCost || !ex.iBy || !ex.iAt) {
       ensureBolCol_(sh); // 드문 경우: 컬럼 추가 후 다시 읽기
+      ensureBolExtraCols_(sh);
       ctx = _readJobRowFast_(sh, invoice);
       if (ctx.error) return { ok: false, error: ctx.error };
       iBol = _scanBolCol_(ctx.headers);
+      ex = _scanBolExtraCols_(ctx.headers);
     }
-    if (!iBol) return { ok: false, error: 'BOL column unavailable (server setup) — please contact the administrator' };
+    if (!iBol || !ex.iCost) return { ok: false, error: 'BOL column unavailable (server setup) — please contact the administrator' };
     mark('row');
 
     const iTruck = ctx.hm[norm('Trucking')];
@@ -4479,11 +4600,31 @@ function setBolNumber(data) {
     }
     mark('links');
 
+    // ★ 2026-10-05 규칙(화면 + 서버 이중 방어): Sales Confirm 전에는 BOL#/비용 저장 불가,
+    //   출고(Shipped) 후에는 잠김(수정하려면 먼저 Shipped Undo).
+    const sc = _scanSalesConfirmCols_(sh, ctx.headers);
+    const confirmedNow = sc.iConfirmed ? !!ctx.rowVals[sc.iConfirmed - 1] : false;
+    if (!confirmedNow) {
+      return { ok: false, error: 'Sales must confirm this order before BOL# and trucking cost can be entered.' };
+    }
+    const shc = _scanShippedCols_(ctx.headers);
+    if (shc.iShipped && ctx.rowVals[shc.iShipped - 1]) {
+      return { ok: false, error: 'This order is already shipped — undo the shipped status before editing BOL# / trucking cost.' };
+    }
+
     const lock = LockService.getDocumentLock();
     lock.waitLock(15000);
     mark('lock');
+    const atOut = clearing ? '' : batchNow_();
+    const byOut = clearing ? '' : by;
     try {
-      sh.getRange(ctx.row, iBol).setNumberFormat('@').setValue(bol);
+      // 속도: BOL 은 앞쪽 컬럼, 비용/입력자/시각은 서로 붙은 컬럼 → 시트 쓰기 2번(셀 4번 따로 쓰기보다 빠름)
+      _writeRowCells_(sh, ctx.row, [{ col: iBol, value: bol, text: true }]); // 텍스트 서식 — "00123"의 앞자리 0 보존
+      _writeRowCells_(sh, ctx.row, [
+        { col: ex.iCost, value: cost === null ? '' : cost },
+        { col: ex.iBy, value: byOut },
+        { col: ex.iAt, value: atOut, text: true }
+      ]);
       mark('write');
     } finally {
       lock.releaseLock();
@@ -4491,7 +4632,7 @@ function setBolNumber(data) {
 
     bumpVersionLite_();
     mark('total');
-    return { ok: true, invoice: invoice, bol: bol, timing: tm };
+    return { ok: true, invoice: invoice, bol: bol, cost: cost, by: byOut, at: atOut, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -5356,7 +5497,7 @@ function getSalesTodayList() {
     const dimsMap = buildDimsExistsMap_();
     const packStageMap = buildPackStageMap_(); // ★ 2026-08-24 신규 — 4단계 패킹 상태(none/moved/taken/verified)
     const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
-    const bolMap = buildBolMap_(); // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭)
+    const bolInfoMap = buildBolInfoMap_(); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
     const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
@@ -5425,7 +5566,10 @@ function getSalesTodayList() {
         shippedBy: shipInfo_.shippedBy || '',
         // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭). LINKED 건은 항상
         //   대표(PRIMARY)의 값을 그대로 받음(shipInfo_와 동일한 원칙).
-        bol: bolMap[dimsLinkedTo_ || invoice] || '',
+        bol: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).bol || '',
+        bolCost: ((bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === undefined || (bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === null) ? '' : bolInfoMap[dimsLinkedTo_ || invoice].cost,
+        bolBy: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).by || '',
+        bolAt: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).at || '',
         // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭). LINKED 건은
         //   대표(PRIMARY)의 값을 그대로 받음.
         salesConfirmed: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).confirmed,
@@ -5530,7 +5674,7 @@ function getSalesOverview() {
     const movedMap = buildMovedToPackingMap_();
     const dimsMap = buildDimsExistsMap_();
     const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
-    const bolMap = buildBolMap_(); // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭)
+    const bolInfoMap = buildBolInfoMap_(); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
     const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
@@ -5627,7 +5771,10 @@ function getSalesOverview() {
         shippedAt: shipInfo_.shippedAt || '',
         shippedBy: shipInfo_.shippedBy || '',
         // ★ 2026-10-02 신규 — BOL 번호(Shipping Status 탭)
-        bol: bolMap[dimsLinkedTo_ || invoice] || '',
+        bol: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).bol || '',
+        bolCost: ((bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === undefined || (bolInfoMap[dimsLinkedTo_ || invoice] || {}).cost === null) ? '' : bolInfoMap[dimsLinkedTo_ || invoice].cost,
+        bolBy: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).by || '',
+        bolAt: (bolInfoMap[dimsLinkedTo_ || invoice] || {}).at || '',
         // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
         salesConfirmed: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).confirmed,
         salesConfirmedAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).confirmedAt || '',
