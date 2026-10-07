@@ -5892,6 +5892,18 @@ function getIssueLogRowsCached_() {
   return rows;
 }
 
+/* ★ 2026-10-07 신규 — Insp. End 값을 팝업용 짧은 표기('yyyy-MM-dd HH:mm')로. Date면 포맷, 문자열이면 앞 16자(초 제거). */
+function _fmtInspEndShort_(v) {
+  if (!v) return '';
+  const tz = Session.getScriptTimeZone();
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return isNaN(v) ? '' : Utilities.formatDate(v, tz, 'yyyy-MM-dd HH:mm');
+  }
+  const str = String(v).trim();
+  const m = str.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
+  return m ? (m[1] + ' ' + m[2]) : str;
+}
+
 function getSalesInvoiceDetail(invoice) {
   __DIAG__ = []; // ★ 2026-09-24 신규 — 이 호출 한 건의 진단 로그만 담기게 매번 리셋(board.html의 getInvoiceItemStatus와 동일한 방식)
   const _t0 = Date.now();
@@ -5995,7 +6007,7 @@ function getSalesInvoiceDetail(invoice) {
     const amount = jv('amount');
     const inspectionRaw = String(jv('inspection') || '').trim();
     const inspector = String(jv('inspector') || '').trim();
-    const inspEndRaw = String(jv('insp end') || '');
+    const inspEndRaw = _fmtInspEndShort_(jv('insp end')); // ★ 2026-10-07 — 'Tue Oct 06 2026 16:51:57 GMT-0700 (...)' 같은 긴 표기 대신 'yyyy-MM-dd HH:mm'
     // ★ 2026-09-02 최종 수정 — hm(캐시)이 아니라 시트에서 매번 직접 새로 찾은
     //   컬럼 위치로 읽음. updatePaymentStatus(Code.gs)의 쓰기·getSalesTodayList의
     //   읽기와 전부 같은 함수(getFreshColIndex_)로 통일해서, "쓰기와 읽기가
@@ -6020,6 +6032,26 @@ function getSalesInvoiceDetail(invoice) {
     //   통일(길게 찍히는 Date.toString() 버그 수정, fmtShortTs_ 주석 참고).
     const puTkBoxQtyAt = iPuTkAt ? fmtShortTs_(jobRow[iPuTkAt - 1]) : '';
     const puTkBoxQtyBy = iPuTkBy ? String(jobRow[iPuTkBy - 1] || '').trim() : '';
+    // ★ 2026-10-07 신규 — 출고(Shipped) 정보. 묶인(LINKED) 오더는 대표(PRIMARY) 인보이스의 값을 그대로 보여줌(목록과 동일 규칙).
+    let shippedFlag = false, shippedAtOut = '', shippedByOut = '';
+    try {
+      const iShp = getFreshColIndex_(sh, 'Shipped');
+      const iShpAt = getFreshColIndex_(sh, 'ShippedAt');
+      const iShpBy = getFreshColIndex_(sh, 'ShippedBy');
+      let srcRow = jobRow;
+      try {
+        const _lk = (buildDimLinksMap_().childToPrimary || {})[invoice] || '';
+        if (_lk && sh.getName() === SHEET_().getName()) {
+          const _pr = getJobsInvoiceRowIndex_()[_lk];
+          if (_pr) srcRow = sh.getRange(_pr, 1, 1, sh.getLastColumn()).getValues()[0];
+        }
+      } catch (eLk) { /* 대표 조회 실패 시 자기 행 값 사용 */ }
+      if (iShp) shippedFlag = !!srcRow[iShp - 1];
+      if (shippedFlag) {
+        shippedAtOut = iShpAt ? _tsToIso_(srcRow[iShpAt - 1]) : '';
+        shippedByOut = iShpBy ? String(srcRow[iShpBy - 1] || '').trim() : '';
+      }
+    } catch (eShp) { /* 출고 컬럼이 없으면 미출고로 취급 */ }
     // ★ 2026-09-02 진단용 로그 — updatePaymentStatus(Code.gs)가 남기는
     //   [PaymentStatus WRITE] 로그와 이 [PaymentStatus READ] 로그를 Apps
     //   Script 실행 기록에서 나란히 비교하면, 쓰기와 읽기가 서로 다른
@@ -6235,6 +6267,9 @@ function getSalesInvoiceDetail(invoice) {
       paymentUpdatedBy: paymentUpdatedBy,
       // ★ 2026-10-03 신규 — 'PU & TK' 전용 박스 수량
       puTkBoxQty: puTkBoxQty,
+      shipped: shippedFlag,        // ★ 2026-10-07 — 출고 완료 여부(PU/UPS/PU & TK 팝업의 Shipped 칸)
+      shippedAt: shippedAtOut,
+      shippedBy: shippedByOut,
       puTkBoxQtyAt: puTkBoxQtyAt,
       puTkBoxQtyBy: puTkBoxQtyBy,
       items: items,
