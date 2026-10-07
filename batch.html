@@ -1079,6 +1079,13 @@ select option:disabled{color:var(--text-dim2);}
   .slot-meta .slot-sku, .slot-meta .slot-qty{font-size:clamp(8.5px,2.4vw,11px);}
   .slot-qty{font-weight:800;}
 }
+
+/* 2026-10-07 긴급 수정 — "⇄ Switch batch" 목록 맨 위 줄의 [전환] 버튼이 안 눌리던 문제.
+   원인: 상단바(.topbar)의 backdrop-filter 때문에 드롭다운이 상단바 안쪽 쌓임 순서에 갇혀,
+   아래쪽 탭 메뉴(nav)·화면 내용이 드롭다운 위에 겹쳐 터치를 가로챔. 상단바 전체를 위로 올려 해결. */
+.topbar{position:relative; z-index:5000;}
+nav{position:relative; z-index:1;}
+#switchBatchDropdown{z-index:5001 !important; background:var(--surface) !important;}
 </style>
 </head>
 <body>
