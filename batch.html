@@ -1045,6 +1045,40 @@ select option:disabled{color:var(--text-dim2);}
   .slot-meta{font-size:11px;}
   .slot-invoice{font-size:15px;}
 }
+
+/* 2026-10-07 — 슬롯 카드 높이 통일: 진행바는 메타 바로 아래 고정, 하단(체크+Mark packed) 영역은 모든 카드가 동일 높이로 예약 */
+.slot-meta{justify-content:space-between;}
+.slot-ship{white-space:nowrap; text-align:right;}
+@media (max-width:700px){ .slot-meta{flex-wrap:nowrap;} }
+.slot-progress{margin-top:0; padding-top:7px;}
+.slot-foot{margin-top:auto; min-height:70px; display:flex; flex-direction:column; justify-content:flex-end;}
+.slot.empty .slot-foot{display:none;}
+.slot-pack-check .label{white-space:nowrap; letter-spacing:0; font-size:11.5px;}
+.slot-pack-check{flex-wrap:nowrap;}
+.slot-pack-check{min-height:22px;}
+.slot-co{min-height:2.7em; line-height:1.3;}
+
+/* 2026-10-07 — 카드 안 모든 줄 한 줄 고정(폰 폭에 비례해 글자 크기 자동 조절) */
+@media (max-width:700px){
+  .slot{padding:9px 7px 7px;}
+  .slot-meta{font-size:clamp(9.5px,2.6vw,11.5px); gap:4px; flex-wrap:nowrap; white-space:nowrap;}
+  .slot-meta .slot-invoice{font-size:clamp(11.5px,3.2vw,14px); letter-spacing:0;}
+  .slot-meta .slot-ship{font-size:clamp(9.5px,2.5vw,11px); font-weight:700;}
+  .slot-badge{white-space:nowrap;}
+  .slot-badges{flex-wrap:nowrap; gap:3px;}
+  .slot-pack-check{gap:5px; flex-wrap:nowrap;}
+  .slot-pack-check .box{width:16px; height:16px;}
+  .slot-pack-check .label{font-family:var(--sans); font-size:clamp(9px,2.9vw,12px); font-weight:800; letter-spacing:-0.02em; white-space:nowrap;}
+}
+@media (max-width:380px){ .slot-badge{font-size:10px !important; padding:3px 4px !important;} .slot-num{font-size:14px;} }
+
+/* 2026-10-07 — 현황판(board.html)과 동일 표기: "SKU 82/82   511/511 pcs" — 수량은 항상 완료/전체 */
+.slot-progress{padding-top:6px;}
+.slot-progress-bar{flex:1;}
+@media (max-width:700px){
+  .slot-meta .slot-sku, .slot-meta .slot-qty{font-size:clamp(8.5px,2.4vw,11px);}
+  .slot-qty{font-weight:800;}
+}
 </style>
 </head>
 <body>
@@ -5634,17 +5668,17 @@ function renderSlots(){
       </div>
       <div class="slot-co">${cf.meta.customer}</div>
       <div class="slot-meta">
-        <span>SKU ${sp.doneSku}/${sp.totalSku}</span>
-        <span>QTY ${cf.totalQty.toLocaleString()}</span>
+        <span class="slot-sku">SKU ${sp.doneSku}/${sp.totalSku}</span>
+        <span class="slot-qty">${p.done.toLocaleString()}/${p.need.toLocaleString()} pcs</span>
       </div>
       <div class="slot-meta">
-        <span>Ship ${fmtShipMD_(cf.meta.ship_date)}</span>
         <span class="slot-invoice">${cf.meta.invoice_no}</span>
+        <span class="slot-ship">Ship ${fmtShipMD_(cf.meta.ship_date)}</span>
       </div>
       <div class="slot-progress">
         <div class="slot-progress-bar"><div style="width:${pct}%"></div></div>
-        <span class="slot-progress-txt">${p.done}/${p.need} pcs</span>
       </div>
+      <div class="slot-foot">
       <div class="slot-pack-check" data-pack-invoice="${cf.meta.invoice_no}" onclick="event.stopPropagation(); togglePackingMoved('${cf.meta.invoice_no}')">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
         <span class="label">${verified ? '2nd verified' : moved ? 'Moved to packing' : 'Done · move to packing'}</span>
@@ -5654,6 +5688,7 @@ function renderSlots(){
           ? `<div class="slot-cleared-tag">✓ Slot cleared — reusable in the next batch</div>`
           : `<button class="slot-clear-btn" data-clear="${cf.meta.invoice_no}">📦 Mark packed</button>`
       ) : ''}
+      </div>
     </div>`;
   }
 
