@@ -1012,6 +1012,39 @@ select option:disabled{color:var(--text-dim2);}
 .pwm-actions{display:flex; gap:8px; margin-top:4px;}
 .pwm-actions .auth-btn{flex:1;}
 .pwm-cancel-btn{flex:1; font-weight:700; font-size:13.5px; padding:11px; border:1px solid var(--border2); border-radius:8px; background:var(--surface3); color:var(--text); cursor:pointer; font-family:inherit;}
+
+/* ★ 2026-10-07 — 실제 스캔 기기(폰) 가독성 개선: 색 채운 슬롯 카드(초록·핑크·파랑·보라) 위의 작은 글씨·흐린 글씨를 키우고 진하게.
+   (기존: 9~10px + opacity .75 → 햇빛/형광등 아래에서 SKU·Ship·진행수량이 거의 안 보였음) */
+.slot-co{font-size:14px; line-height:1.25; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; word-break:break-word;}
+.slot-meta{font-size:11.5px; font-weight:700;}
+.slot.done .slot-meta{opacity:1; color:#04140D;}
+.slot-badge{font-size:11px; padding:3px 7px;}
+.slot-progress-bar{height:5px;}
+.slot-progress-txt{font-size:11.5px; font-weight:800;}
+.slot.done .slot-progress-txt{color:#04140D;}
+.slot-pack-check .label{font-size:12px;}
+.slot-pack-check .box{width:18px; height:18px;}
+.slot-clear-btn{font-size:12.5px; padding:9px;}
+.slot-cleared-tag{font-size:11px; opacity:1;}
+.slot-empty-msg{font-size:12.5px;}
+.slot-section-title{flex-wrap:wrap; gap:4px 10px;}
+.slot-section-title h3{font-size:13px;}
+.slot-section-title .range{white-space:nowrap;}
+.slot-section-title .count{white-space:nowrap;}
+/* 이슈 버튼: 색 채운 카드 위에서는 흰 바탕 + 진한 빨강 글씨로(기존 분홍 글씨는 파랑/초록 위에서 안 보였음) */
+.slot.done .slot-issue-btn{background:#FFFFFF !important; color:#B91C1C !important; border:1px solid #B91C1C !important; font-weight:800;}
+/* 최종 2차 검증완료(보라): 글씨·배지·진행수량 모두 흰색 */
+.slot.done.taken.verified .slot-meta, .slot.done.taken.verified .slot-progress-txt, .slot.done.taken.verified .slot-cleared-tag{color:#FFFFFF !important;}
+.slot.done.taken.verified .slot-badge:not(.slot-issue-btn){background:rgba(255,255,255,0.22); color:#FFFFFF;}
+.slot.done.taken.verified .slot-progress-bar{background:rgba(255,255,255,0.3);}
+.slot.done.taken.verified .slot-progress-bar > div{background:#FFFFFF;}
+.slot.done.taken.verified .slot-clear-btn{border-color:#FFFFFF; color:#FFFFFF; background:rgba(255,255,255,0.15);}
+@media (max-width:700px){
+  .slot-num{font-size:19px;}
+  .slot-co{font-size:13.5px;}
+  .slot-meta{font-size:11px;}
+  .slot-invoice{font-size:15px;}
+}
 </style>
 </head>
 <body>
@@ -1392,9 +1425,9 @@ document.addEventListener('DOMContentLoaded', function(){
       </div>
       <span style="font-family:var(--mono); font-size:10px; color:var(--text-dim2); margin-right:8px;" title="이 코드가 언제 마지막으로 수정됐는지 — 화면이 예상과 다르면 이 숫자로 최신 배포 여부를 확인하세요">CODE v2026-07-14-17:55</span>
       <span style="font-size:10px; color:var(--text-dim2); margin-right:8px;">Built by David Kim · 2026</span>
-      <div class="batch-chip" id="batchChip">배치 없음</div>
+      <div class="batch-chip" id="batchChip">No batch</div>
       <div style="position:relative;">
-        <button class="btn btn-ghost btn-sm" id="btnSwitchBatch" title="다른 미완료 배치로 전환">⇄ 다른 배치</button>
+        <button class="btn btn-ghost btn-sm" id="btnSwitchBatch" title="Switch to another open batch">⇄ Switch batch</button>
         <div id="switchBatchDropdown" style="display:none; position:absolute; top:calc(100% + 6px); right:0; z-index:9999; background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:8px; min-width:280px; max-height:calc(100vh - 200px); overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
       </div>
     </div>
@@ -1404,7 +1437,7 @@ document.addEventListener('DOMContentLoaded', function(){
   <nav id="mainNav">
     <button class="active" data-view="v-batch"><span class="step">01</span> Batch</button>
     <button class="tab-standalone" data-view="v-standalone-upload"><span class="step">01-S</span> Standalone Upload</button>
-    <button data-view="v-slots" disabled><span class="step">02</span> Slot Layout</button>
+    <button data-view="v-slots" disabled><span class="step">02</span> Slot &amp; Pick</button>
     <button data-view="v-scan" disabled><span class="step">03</span> Scan & Sort</button>
     <button class="tab-standalone" data-view="v-standalone-scan"><span class="step">04</span> Standalone Scan</button>
     <button data-view="v-log"><span class="step">05</span> Scan Log</button>
@@ -1498,9 +1531,8 @@ document.addEventListener('DOMContentLoaded', function(){
 
     <!-- ─── VIEW 2: Slot Layout ─── -->
     <div class="view" id="v-slots">
-      <div class="eyebrow">Step 02 · Slot layout</div>
-      <h2 class="h-page">슬롯 배치도</h2>
-      <p class="sub">고객사별 <b>SKU 개수가 많은 순</b>(동률이면 QTY 많은 순)으로 <b>슬롯 1~16은 고정 대량 렉</b>, <b>17~30은 무빙카트(소량)</b>에 자동 배정됩니다. 매니저는 드래그로 재배치할 수 있습니다.</p>
+      <div class="eyebrow">Step 02 · Slot &amp; Pick</div>
+      <h2 class="h-page">Slot Layout &amp; Picking Start</h2>
 
       <div class="card" style="margin-bottom:16px; padding:14px 16px;">
         <div class="row" style="align-items:center; gap:10px;">
@@ -1512,7 +1544,7 @@ document.addEventListener('DOMContentLoaded', function(){
             <div id="pickStateBanner" style="display:none; align-items:center; gap:12px; padding:14px 18px; border-radius:12px; border:2px solid var(--border); background:var(--surface3);">
               <span id="pickStateIcon" style="font-size:22px;">⏸</span>
               <div style="flex:1; min-width:0;">
-                <div id="pickStateTitle" style="font-size:17px; font-weight:800; color:var(--text);">대기 중</div>
+                <div id="pickStateTitle" style="font-size:17px; font-weight:800; color:var(--text);">Waiting</div>
                 <div id="pickStateSub" style="font-size:13px; color:var(--text-dim); margin-top:3px;"></div>
               </div>
               <div id="pickStateClock" style="font-family:var(--mono); font-size:26px; font-weight:800; color:var(--text); letter-spacing:0.02em;">00:00</div>
@@ -1525,30 +1557,30 @@ document.addEventListener('DOMContentLoaded', function(){
                  그대로 반영하므로, 배치가 여러 개여도 시스템이 자동으로
                  구분해서 항상 지금 열려있는 배치 번호만 보여줌. -->
             <div style="display:flex; align-items:center; gap:8px; padding:10px 14px; border-radius:10px; background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.35); width:fit-content;">
-              <span style="font-size:12px; font-weight:700; color:var(--text-dim);">지금 시작하는 배치</span>
+              <span style="font-size:12px; font-weight:700; color:var(--text-dim);">Batch starting now</span>
               <span id="pickAreaBatchChip" style="font-family:var(--mono); font-size:15px; font-weight:800; color:#B39CFF;">—</span>
             </div>
 
             <div style="display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;">
               <div>
                 <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">
-                  <span id="pickWorkerDot" title="Off/Active" style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-dim2); margin-right:6px; transition:background 0.2s;"></span>작업자 이름
+                  <span id="pickWorkerDot" title="Off/Active" style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-dim2); margin-right:6px; transition:background 0.2s;"></span>Worker name
                 </label>
                 <select id="pickWorkerSelect" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 14px; font-size:17px; font-weight:700; min-width:190px;"></select>
               </div>
 
               <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">담당 페이지 <span style="font-weight:500; color:var(--text-dim2);">(한 장이면 앞칸만)</span></label>
+                <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Pages assigned <span style="font-weight:500; color:var(--text-dim2);">(one page: first box only)</span></label>
                 <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="number" id="pickPageFrom" placeholder="시작" min="1" inputmode="numeric" oninput="updatePickPageCount()" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
+                  <input type="number" id="pickPageFrom" placeholder="From" min="1" inputmode="numeric" oninput="updatePickPageCount()" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
                   <span style="color:var(--text-dim); font-size:18px; font-weight:800;">~</span>
-                  <input type="number" id="pickPageTo" placeholder="끝" min="1" inputmode="numeric" oninput="updatePickPageCount()" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
-                  <span id="pickPageCount" style="font-size:14px; font-weight:800; color:var(--text-dim); white-space:nowrap; min-width:96px;">— 장</span>
+                  <input type="number" id="pickPageTo" placeholder="To" min="1" inputmode="numeric" oninput="updatePickPageCount()" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
+                  <span id="pickPageCount" style="font-size:14px; font-weight:800; color:var(--text-dim); white-space:nowrap; min-width:96px;">— sheets</span>
                 </div>
               </div>
 
-              <button class="btn btn-primary" id="btnPickStart" style="font-size:17px; font-weight:800; padding:14px 26px; border-radius:10px;">▶ 피킹 시작</button>
-              <button class="btn btn-ghost" id="btnPickEnd" disabled style="font-size:17px; font-weight:800; padding:14px 26px; border-radius:10px;">■ 피킹 종료</button>
+              <button class="btn btn-primary" id="btnPickStart" style="font-size:17px; font-weight:800; padding:14px 14px; border-radius:10px; flex:1 1 150px; white-space:nowrap;">▶ Start Picking</button>
+              <button class="btn btn-ghost" id="btnPickEnd" disabled style="font-size:17px; font-weight:800; padding:14px 14px; border-radius:10px; flex:1 1 150px; white-space:nowrap;">■ End Picking</button>
             </div>
 
             <span id="pickTimerStat" style="font-size:12px; color:var(--text-dim); font-family:var(--mono);"></span>
@@ -1559,7 +1591,7 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="split-layout">
         <div class="queue-panel">
           <div class="queue-head">
-            <h3>미배정 대기</h3>
+            <h3>Unassigned Queue</h3>
             <span class="count" id="queueCount">0</span>
           </div>
           <div id="queueList"></div>
@@ -1567,8 +1599,8 @@ document.addEventListener('DOMContentLoaded', function(){
 
         <div>
           <div class="row" style="margin-bottom:14px;">
-            <button class="btn btn-ghost btn-sm" id="btnRedoAuto">자동 재배정</button>
-            <button class="btn btn-ghost btn-sm" id="btnClearSlots">전체 초기화</button>
+            <button class="btn btn-ghost btn-sm" id="btnRedoAuto">Auto-reassign</button>
+            <button class="btn btn-ghost btn-sm" id="btnClearSlots">Reset all</button>
             <div class="spacer"></div>
             <span style="font-size:11px; color:var(--text-dim); font-family:var(--mono)" id="slotStat">-</span>
           </div>
@@ -1576,7 +1608,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="slot-section large" style="margin-bottom:16px;">
             <div class="slot-section-head">
               <div class="slot-section-title">
-                <h3>대량 오더 구역 (고정 렉)</h3>
+                <h3>Large Orders (Fixed Rack)</h3>
                 <span class="range">SLOT 01–16</span>
                 <span class="divider"></span>
                 <span class="count" id="largeCount">0 / 16</span>
@@ -1588,7 +1620,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="slot-section small" style="margin-bottom:16px;">
             <div class="slot-section-head">
               <div class="slot-section-title">
-                <h3>소량 오더 구역 (무빙카트)</h3>
+                <h3>Small Orders (Moving Cart)</h3>
                 <span class="range">SLOT 17–30</span>
                 <span class="divider"></span>
                 <span class="count" id="smallCount">0 / 14</span>
@@ -1602,8 +1634,8 @@ document.addEventListener('DOMContentLoaded', function(){
           <div class="slot-section" id="manualSlotSection" style="display:none; border-color:var(--purple);">
             <div class="slot-section-head">
               <div class="slot-section-title">
-                <h3>임시 배정 구역 (매니저 수동 지정)</h3>
-                <span class="range">30개 슬롯 밖 · 미배정 고객사용</span>
+                <h3>Temporary Slots (Manager-assigned)</h3>
+                <span class="range">Outside the 30 slots · unassigned customers</span>
                 <span class="divider"></span>
                 <span class="count" id="manualCount">0</span>
               </div>
@@ -2444,10 +2476,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if(!bar || !txt) return;
   if(GAS_READY && API_READY){
     bar.style.background = 'linear-gradient(90deg,rgba(16,185,129,0.18),rgba(16,185,129,0.08))';
-    txt.innerHTML = '🟢 <b>LIVE</b> · 실시간 저장 중';
+    txt.innerHTML = '🟢 <b>LIVE</b> · Saving in real time';
   } else if(GAS_READY && !API_READY){
     bar.style.background = 'linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08))';
-    txt.innerHTML = '🟡 <b>부분연결</b> · PDF 서버 미연결';
+    txt.innerHTML = '🟡 <b>Partly connected</b> · PDF server not connected';
   } else {
     txt.innerHTML = '🧪 <b>SIMULATION</b> 모드';
   }
@@ -3946,7 +3978,7 @@ async function restoreBatchFromServer(){
       } else if(openRes.ok && trulyOpen.length > 1){
         // 2개 이상 — 절대 임의로 안 고름. 사람이 "⇄ 다른 배치"에서 직접 선택.
         state.bootSyncPending = false; showBootSyncChip(false);
-        toast(`진행 중인 배치가 ${trulyOpen.length}개 있습니다 — 상단 "⇄ 다른 배치"에서 작업할 배치를 선택해주세요`, 'success');
+        toast(`진행 중인 배치가 ${trulyOpen.length}개 있습니다 — 상단 "⇄ Switch batch"에서 작업할 배치를 선택해주세요`, 'success');
         tryRestoreDraftFromLocalStorage();
         return;
       }
@@ -4537,7 +4569,7 @@ function renderActiveBatchNotice(){
       </div>
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:14px;">이미 배치가 만들어져 있어 새로 만들 필요가 없습니다. 이어서 작업하시려면 아래에서 이동하세요.</div>
       <div style="display:flex; gap:8px;">
-        <button class="btn btn-primary" style="flex:1; padding:10px;" id="btnGotoSlotsFromNotice">→ Slot Layout으로 이동</button>
+        <button class="btn btn-primary" style="flex:1; padding:10px;" id="btnGotoSlotsFromNotice">→ Go to Slot &amp; Pick</button>
         <button class="btn btn-ghost" style="padding:10px 16px;" id="btnMakeNewBatchFromNotice">＋ 새 배치 만들기</button>
       </div>
     </div>`;
@@ -5504,6 +5536,8 @@ function gotoView(vid){
 //   나머지는 ship-other)으로 교체.
 // ★ 2026-10-02 신규(사용자 요청) — 저장되는 실제 값("PU & TK")은 안 건드리고
 //   화면에 "보여줄 때"만 공백 없이 "PU&TK"로 표시 통일(sales.html/board.html과 동일).
+// ★ 2026-10-07 — 'Ship 10-09T07:00:00.000Z' 처럼 원본 날짜 문자열이 그대로 보이던 것을 'Ship 10/9'로
+function fmtShipMD_(v){ const m = String(v||'').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? (parseInt(m[2],10) + '/' + parseInt(m[3],10)) : String(v||'-'); }
 function fmtMethodLabel_(v){ return String(v||'-').replace(' & ', '&'); }
 function shipViaBadgeClass_(v){
   const s = String(v || '').trim().toUpperCase();
@@ -5564,7 +5598,7 @@ function renderSlots(){
     if(!cf){
       return `<div class="slot empty" data-slot="${slot.num}">
         <div class="slot-head"><span class="slot-num">${numLabel}</span></div>
-        <div class="slot-empty-msg">비어있음</div>
+        <div class="slot-empty-msg">Empty</div>
       </div>`;
     }
     const moved = state.movedToPackingInvoices.has(cf.meta.invoice_no);
@@ -5581,7 +5615,7 @@ function renderSlots(){
       <div class="slot-head">
         <span class="slot-num">${numLabel}</span>
         <div class="slot-badges">
-          ${slot.otherBatchWarning ? `<span class="slot-badge" style="background:rgba(255,77,109,0.18); color:#FF4D6D; border:1px solid rgba(255,77,109,0.5);" title="${slot.otherBatchWarning.batchId}(${slot.otherBatchWarning.batchDate}) 배치의 &quot;${slot.otherBatchWarning.customer}&quot;도 이 번호를 쓰고 있습니다 — 실제 자리가 겹치는지 현장에서 확인하세요">⚠ 다른 배치와 번호 겹침</span>` : ''}
+          ${slot.otherBatchWarning ? `<span class="slot-badge" style="background:rgba(255,77,109,0.18); color:#FF4D6D; border:1px solid rgba(255,77,109,0.5);" title="${slot.otherBatchWarning.batchId}(${slot.otherBatchWarning.batchDate}) batch: &quot;${slot.otherBatchWarning.customer}&quot; also uses this number — check on the floor whether the spots really overlap">⚠ Overlaps another batch</span>` : ''}
           <span class="slot-badge ${shipViaBadgeClass_(cf.meta.ship_via)}">${fmtMethodLabel_(cf.meta.ship_via)}</span>
           ${(() => {
             // ★ 2026-07-24 신규 — 이 버튼은 항상 떠 있는 "이슈 등록 팝업 열기" 버튼이라,
@@ -5590,11 +5624,11 @@ function renderSlots(){
             //   등록된 이슈가 있을 때만 수량을 같이 보여줘서 TV와 한눈에 비교되게 함.
             const invIssues = (state.issues || []).filter(i => i.invoice === cf.meta.invoice_no);
             const invIssueQty = invIssues.reduce((a, i) => a + (Number(i.qty) || 0), 0);
-            const label = invIssueQty > 0 ? `⚠ 이슈 ${invIssueQty.toLocaleString()}` : '⚠ 이슈 등록';
+            const label = invIssueQty > 0 ? `⚠ Issue ${invIssueQty.toLocaleString()}` : '⚠ Issue';
             const tip = invIssueQty > 0
-              ? `이미 등록된 이슈 ${invIssues.length}건(${invIssueQty}pcs) — 클릭해서 확인/추가`
-              : '이 고객사에 이슈를 나중에라도 등록/조회합니다';
-            return `<button class="slot-badge" style="background:rgba(255,77,109,0.12); color:var(--red); border:1px solid rgba(255,77,109,0.4); cursor:pointer;" onclick="event.stopPropagation(); openRetroIssueModal('${cf.meta.invoice_no}')" title="${tip}">${label}</button>`;
+              ? `${invIssues.length} issue(s) already registered (${invIssueQty} pcs) — tap to view/add`
+              : 'Register or view issues for this customer';
+            return `<button class="slot-badge slot-issue-btn" style="background:rgba(255,77,109,0.12); color:var(--red); border:1px solid rgba(255,77,109,0.4); cursor:pointer;" onclick="event.stopPropagation(); openRetroIssueModal('${cf.meta.invoice_no}')" title="${tip}">${label}</button>`;
           })()}
         </div>
       </div>
@@ -5604,7 +5638,7 @@ function renderSlots(){
         <span>QTY ${cf.totalQty.toLocaleString()}</span>
       </div>
       <div class="slot-meta">
-        <span>Ship ${cf.meta.ship_date.slice(5)}</span>
+        <span>Ship ${fmtShipMD_(cf.meta.ship_date)}</span>
         <span class="slot-invoice">${cf.meta.invoice_no}</span>
       </div>
       <div class="slot-progress">
@@ -5613,12 +5647,12 @@ function renderSlots(){
       </div>
       <div class="slot-pack-check" data-pack-invoice="${cf.meta.invoice_no}" onclick="event.stopPropagation(); togglePackingMoved('${cf.meta.invoice_no}')">
         <span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></span>
-        <span class="label">${verified ? '최종 2차 검증완료' : moved ? '패킹존 이동 완료' : '완료 · 패킹존 이동'}</span>
+        <span class="label">${verified ? '2nd verified' : moved ? 'Moved to packing' : 'Done · move to packing'}</span>
       </div>
       ${status==='done' ? (
         (state.clearedInvoices && state.clearedInvoices.has(cf.meta.invoice_no))
-          ? `<div class="slot-cleared-tag">✓ 슬롯 비워짐 — 다음 배치에서 재사용 가능</div>`
-          : `<button class="slot-clear-btn" data-clear="${cf.meta.invoice_no}">📦 패킹완료 처리</button>`
+          ? `<div class="slot-cleared-tag">✓ Slot cleared — reusable in the next batch</div>`
+          : `<button class="slot-clear-btn" data-clear="${cf.meta.invoice_no}">📦 Mark packed</button>`
       ) : ''}
     </div>`;
   }
@@ -5632,7 +5666,7 @@ function renderSlots(){
   if(manualSlots.length){
     manualSection.style.display = 'block';
     manualEl.innerHTML = manualSlots.map(slotHtml).join('');
-    document.getElementById('manualCount').textContent = manualSlots.length + '개';
+    document.getElementById('manualCount').textContent = manualSlots.length;
   } else {
     manualSection.style.display = 'none';
     manualEl.innerHTML = '';
@@ -5667,11 +5701,11 @@ function renderSlots(){
     if(clearBtn) clearBtn.onclick = async (e) => {
       e.stopPropagation();
       const invoice = clearBtn.dataset.clear;
-      clearBtn.disabled = true; clearBtn.textContent = '처리 중...';
+      clearBtn.disabled = true; clearBtn.textContent = 'Processing...';
       const res = await gasCallWithRetry('clearSlot', { batchId: state.batchId, invoice, worker: state.currentWorker || '' });
       if(!res.ok){
-        toast('슬롯 비우기 실패: ' + (res.error||'서버 오류'), 'error');
-        clearBtn.disabled = false; clearBtn.textContent = '📦 패킹완료 처리';
+        toast('Could not clear the slot: ' + (res.error||'server error'), 'error');
+        clearBtn.disabled = false; clearBtn.textContent = '📦 Mark packed';
         return;
       }
       if(!state.clearedInvoices) state.clearedInvoices = new Set();
@@ -5680,7 +5714,7 @@ function renderSlots(){
       //   고객사가 자동으로 채워지지 않음. 이 슬롯의 오더 정보는 배치가 끝날
       //   때까지(=다른 배치로 전환하기 전까지) 그대로 화면에 남아있음 — 패킹/
       //   출고 작업자가 계속 보면서 물건을 챙길 수 있게 하기 위함.
-      toast('패킹완료 처리됨 — 이 오더 정보는 배치가 끝날 때까지 그대로 남아있습니다', 'success');
+      toast('Marked packed — this order stays on screen until the batch ends', 'success');
       renderSlots();
     };
   });
@@ -5694,7 +5728,7 @@ function renderSlots(){
     //   초기화(초록으로 리셋)되는 심각한 사고 위험이 있었음. 파랑 이후 단계는
     //   이제 TV 현황판 또는 Pack Verify 탭에서만 다루도록 여기서는 막음.
     if(state.takenOutInvoices.has(invoice) || state.packVerifiedInvoices.has(invoice)){
-      toast('이미 패킹존 이동/검증완료된 오더입니다 — TV 현황판 또는 Pack Verify 탭에서 확인하세요', 'info');
+      toast('This order is already moved/verified — check the TV board or the Pack Verify tab', 'info');
       return;
     }
     const wasMoved = state.movedToPackingInvoices.has(invoice);
@@ -5709,7 +5743,7 @@ function renderSlots(){
       // 실패하면 원상복구
       if(wasMoved) state.movedToPackingInvoices.add(invoice); else state.movedToPackingInvoices.delete(invoice);
       renderSlots();
-      toast('패킹존 이동 상태 저장 실패: ' + (res.error||'서버 오류'), 'error');
+      toast('Could not save the packing-zone status: ' + (res.error||'server error'), 'error');
     }
   };
 
@@ -5723,7 +5757,7 @@ function renderQueue(){
   document.getElementById('queueCount').textContent = unassigned.length;
   const el = document.getElementById('queueList');
   if(unassigned.length === 0){
-    el.innerHTML = `<div class="empty-queue">✓ 전체 배정 완료</div>`;
+    el.innerHTML = `<div class="empty-queue">✓ All assigned</div>`;
     return;
   }
   el.innerHTML = unassigned.map(cf => `
@@ -5735,9 +5769,9 @@ function renderQueue(){
       <div class="meta">
         <span>SKU ${cf.totalSkus}</span>
         <span>QTY ${cf.totalQty.toLocaleString()}</span>
-        <span>Ship ${cf.meta.ship_date.slice(5)}</span>
+        <span>Ship ${fmtShipMD_(cf.meta.ship_date)}</span>
       </div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%; font-size:10.5px;" data-manual-assign="${cf.meta.invoice_no}">📍 임시 번호 부여</button>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%; font-size:10.5px;" data-manual-assign="${cf.meta.invoice_no}">📍 Assign temp slot</button>
     </div>`).join('');
   el.querySelectorAll('[data-manual-assign]').forEach(btn => {
     btn.onclick = (e) => { e.stopPropagation(); assignManualSlot(btn.dataset.manualAssign); };
@@ -5756,17 +5790,17 @@ function renderQueue(){
 function assignManualSlot(invoice){
   const cf = state.custFiles.find(c => c.meta.invoice_no === invoice);
   if(!cf) return;
-  const input = prompt(`"${cf.meta.customer}"에게 부여할 임시 슬롯 번호를 입력하세요.\n(예: 31, 32 ... 또는 "임시A" 같은 라벨도 가능)`, '');
+  const input = prompt(`Enter a temporary slot number for "${cf.meta.customer}".\n(e.g. 31, 32 ... or a label such as "TempA")`, '');
   if(input === null) return;
   const label = input.trim();
-  if(!label){ toast('번호를 입력해주세요', 'error'); return; }
+  if(!label){ toast('Enter a slot number', 'error'); return; }
 
   const numVal = /^\d+$/.test(label) ? Number(label) : label;
   let slot = state.slots.find(s => String(s.num) === String(numVal));
 
   if(slot && slot.assignedTo && slot.assignedTo !== invoice){
     const other = state.custFiles.find(c => c.meta.invoice_no === slot.assignedTo);
-    if(!confirm(`슬롯 "${label}"은 이미 "${other ? other.meta.customer : slot.assignedTo}"가 쓰고 있습니다.\n교체하시겠습니까?`)) return;
+    if(!confirm(`Slot "${label}" is already used by "${other ? other.meta.customer : slot.assignedTo}".\nReplace it?`)) return;
   }
 
   if(!slot){
@@ -5826,11 +5860,11 @@ function updatePickPageCount(){
   const t = document.getElementById('pickPageTo').value.trim();
   const el = document.getElementById('pickPageCount');
   const n = pickPageCountOf(f, t);
-  if (!n){ el.textContent = '— 장'; el.style.color = 'var(--text-dim2)'; return; }
-  el.textContent = n + '장';
+  if (!n){ el.textContent = '— sheets'; el.style.color = 'var(--text-dim2)'; return; }
+  el.textContent = n + (n === 1 ? ' sheet' : ' sheets');
   el.style.color = 'var(--purple)';
   if (t && parseInt(t,10) < parseInt(f,10)){
-    el.textContent = '끝이 더 작음';
+    el.textContent = 'End is before start';
     el.style.color = 'var(--red)';
   }
 }
@@ -5855,8 +5889,8 @@ function setPickBanner(mode, worker, pageLabel, extra){
     wrap.style.borderColor = 'var(--green)';
     wrap.style.background  = 'var(--green-bg)';
     icon.textContent = '🟢';
-    title.textContent = worker + '님 피킹 중';
-    sub.textContent = pageLabel || '담당 페이지 미입력';
+    title.textContent = worker + ' is picking';
+    sub.textContent = pageLabel || 'No pages entered';
     const tick = () => {
       const ms = Date.now() - (state.pickTimerStart || Date.now());
       const m = Math.floor(ms/60000), sec = Math.floor(ms/1000)%60;
@@ -5869,7 +5903,7 @@ function setPickBanner(mode, worker, pageLabel, extra){
     wrap.style.borderColor = 'var(--purple)';
     wrap.style.background  = 'var(--purple-bg)';
     icon.textContent = '✅';
-    title.textContent = worker + '님 피킹 완료';
+    title.textContent = worker + ' finished picking';
     sub.textContent = (pageLabel ? pageLabel + ' · ' : '') + (extra || '');
     clock.textContent = extra || '';
     clock.style.color = 'var(--purple)';
@@ -5923,7 +5957,7 @@ function onPickWorkerChange(userInitiated){
       const d = new Date(); d.setHours(parseInt(m[1],10), parseInt(m[2],10), 0, 0);
       state.pickTimerStart = d.getTime();
     }
-    setPickBanner('running', w, since + '부터 피킹 중 · 여기서 종료할 수 있습니다');
+    setPickBanner('running', w, 'Picking since ' + since + ' · you can end it here');
   } else {
     btnStart.disabled = false;
     btnEnd.disabled = true;
@@ -5941,10 +5975,10 @@ function onPickWorkerChange(userInitiated){
         const fromV = rm ? rm[1] : lastPr.pageRange;
         const toV = rm ? rm[2] : '';
         const ok = confirm(
-          `${w}님이 이 배치에서 이전에 담당했던 페이지: ${lastPr.pageRange}\n\n` +
-          `이어서 같은 페이지로 시작할까요?\n\n` +
-          `[확인] 이어서 시작 — 페이지가 자동으로 채워집니다\n` +
-          `[취소] 새로 입력 — 직접 입력합니다`
+          `Pages previously assigned to ${w} in this batch: ${lastPr.pageRange}\n\n` +
+          `Continue with the same pages?\n\n` +
+          `[OK] Continue — the pages are filled in automatically\n` +
+          `[Cancel] Enter new pages — type them yourself`
         );
         if (ok){ pf.value = fromV; pt.value = toV; }
         else { pf.value = ''; pt.value = ''; }
@@ -5964,8 +5998,8 @@ document.getElementById('btnPickStart').onclick = async () => {
   const pageFrom = document.getElementById('pickPageFrom').value.trim();
   const pageTo = document.getElementById('pickPageTo').value.trim();
   const pageRange = pageFrom ? (pageTo ? `${pageFrom}-${pageTo}` : pageFrom) : '';
-  if(!worker){ toast('작업자를 선택하세요', 'error'); return; }
-  if(!state.batchId){ toast('먼저 배치를 시작하세요', 'error'); return; }
+  if(!worker){ toast('Select a worker', 'error'); return; }
+  if(!state.batchId){ toast('Start a batch first', 'error'); return; }
   await startPickTimer(worker, pageRange, false);
 };
 
@@ -5977,11 +6011,11 @@ async function startPickTimer(worker, pageRange, force){
   // ★ 2026-07-22 신규: 다른 기기에서 이미 피킹 중인 사람이면 즉시 차단(화면단 1차 확인)
   if(!force && state.activePickers[worker]){
     const ok = confirm(
-      `⚠ ${worker}님은 이미 피킹 중으로 등록되어 있습니다 (${state.activePickers[worker]}부터).\n\n` +
-      `실제로 다른 기기에서 작업 중이면 취소를 눌러주세요.\n` +
-      `만약 이 기기가 새로고침되면서 세션 기록만 남은 경우라면(교착 상태),\n` +
-      `강제로 그 세션을 종료 처리하고 새로 시작할 수 있습니다.\n\n` +
-      `강제 종료 후 새로 시작할까요?`
+      `⚠ ${worker} is already registered as picking (since ${state.activePickers[worker]}).\n\n` +
+      `If they are really working on another device, press Cancel.\n` +
+      `If this device was refreshed and only the session record is left (stuck state),\n` +
+      `you can force-end that session and start a new one.\n\n` +
+      `Force-end and start a new session?`
     );
     if(!ok) return;
     force = true;
@@ -5995,7 +6029,7 @@ async function startPickTimer(worker, pageRange, force){
   const _pt = document.getElementById('pickPageTo').value.trim();
   const _cnt = pickPageCountOf(_pf, _pt);
   // "7~12페이지 (6장)" 처럼 페이지 번호와 장수를 함께 보여줌 — 20을 20장으로 오해하지 않도록
-  const _label = pageRange ? (pageRange + '페이지 · ' + _cnt + '장') : '';
+  const _label = pageRange ? ('Pages ' + pageRange + ' · ' + _cnt + (_cnt === 1 ? ' sheet' : ' sheets')) : '';
   document.getElementById('pickPageFrom').disabled = true;
   document.getElementById('pickPageTo').disabled = true;
   setPickBanner('running', worker, _label);
@@ -6022,26 +6056,26 @@ async function startPickTimer(worker, pageRange, force){
         //   한 번도 안 뜨고 같은 요청을 무한 반복하며 절대 성공하지 못했음.
         //   이제 여기서 서버가 알려준 시작시각(res.startedAt)으로 직접 확인창을
         //   띄우고, 동의하면 그때 한 번만 force:true로 재시도함.
-        const startedLabel = res.startedAt ? new Date(res.startedAt).toLocaleString('ko-KR') : '알 수 없는 시각';
+        const startedLabel = res.startedAt ? new Date(res.startedAt).toLocaleString('en-US') : 'unknown time';
         const ok = confirm(
-          `⚠ ${worker}님은 이미 피킹 중으로 등록되어 있습니다 (${startedLabel}부터).\n\n` +
-          `실제로 다른 기기에서 작업 중이면 취소를 눌러주세요.\n` +
-          `전날 세션을 종료하지 않고 퇴근한 경우라면(예: 어제 시작해서 아직 안 끝난 세션),\n` +
-          `강제로 그 세션을 종료 처리하고 새로 시작할 수 있습니다.\n\n` +
-          `강제 종료 후 새로 시작할까요?`
+          `⚠ ${worker} is already registered as picking (since ${startedLabel}).\n\n` +
+          `If they are really working on another device, press Cancel.\n` +
+          `If the previous session was never ended (for example, started yesterday and left open),\n` +
+          `you can force-end that session and start a new one.\n\n` +
+          `Force-end and start a new session?`
         );
         if(ok){
           await startPickTimer(worker, pageRange, true);
         }
         return;
       }
-      toast(`⚠ ${worker}님은 방금 다른 기기에서 먼저 피킹을 시작했습니다`, 'error');
+      toast(`⚠ ${worker} just started picking on another device`, 'error');
       pollActivePickers();
       return;
     }
-    if(force) toast(`✓ 이전 세션을 강제 종료하고 ${worker}님 피킹을 새로 시작했습니다`, 'success');
+    if(force) toast(`✓ Previous session force-ended — ${worker} started a new picking session`, 'success');
   } else {
-    toast('데모모드 — 저장은 안 되지만 타이머는 작동합니다', 'success');
+    toast('Demo mode — nothing is saved, but the timer works', 'success');
   }
 
   // ★ 2026-09-01 삭제(중요 버그 예방) — 예전엔 여기서 피킹 시작 시 w.status를
@@ -6089,7 +6123,7 @@ document.getElementById('btnPickEnd').onclick = async () => {
   const _ecnt = pickPageCountOf(_ef.value.trim(), _et.value.trim());
   const _erange = _ef.value.trim() ? (_et.value.trim() ? _ef.value.trim()+'-'+_et.value.trim() : _ef.value.trim()) : '';
   _ef.disabled = false; _et.disabled = false;
-  setPickBanner('done', worker, _erange ? (_erange + '페이지 · ' + _ecnt + '장') : '', mins + '분');
+  setPickBanner('done', worker, _erange ? ('Pages ' + _erange + ' · ' + _ecnt + (_ecnt === 1 ? ' sheet' : ' sheets')) : '', mins + ' min');
   document.getElementById('pickTimerStat').textContent = '';
   let realMins = mins;
   if(GAS_READY){
@@ -6098,11 +6132,11 @@ document.getElementById('btnPickEnd').onclick = async () => {
     //   다른 기기에서 시작한 세션을 여기서 종료하는 경우, 이 기기의 타이머는
     //   실제 시작시각을 모르므로 서버 값이 정확함.
     if(endRes && endRes.ok && typeof endRes.durationMinutes === 'number') realMins = endRes.durationMinutes;
-    else if(endRes && !endRes.ok) toast('⚠ 종료 저장 실패: ' + (endRes.error||''), 'error');
+    else if(endRes && !endRes.ok) toast('⚠ Could not save the end time: ' + (endRes.error||''), 'error');
   }
   document.getElementById('pickStateSub').textContent = '';
-  setPickBanner('done', worker, _erange ? (_erange + '페이지 · ' + _ecnt + '장') : '', realMins + '분');
-  toast(`피킹 완료 · ${realMins}분 소요`, 'success');
+  setPickBanner('done', worker, _erange ? ('Pages ' + _erange + ' · ' + _ecnt + (_ecnt === 1 ? ' sheet' : ' sheets')) : '', realMins + ' min');
+  toast(`Picking complete · ${realMins} min`, 'success');
 
   // ★ 2026-09-01 삭제(중요 버그 예방) — 피킹 종료 시 w.status를 자동으로 'off'로
   //   되돌리던 코드. 위 피킹 시작 쪽과 같은 이유로 제거함 — 이제 w.status는
@@ -6129,11 +6163,11 @@ document.getElementById('btnRedoAuto').onclick = async () => {
   renderSlots();
   syncSlotsToServer();
   if(assignResult && assignResult.overflowCount > 0){
-    toast(`자동 재배정 완료 · ⚠ 이 배치가 30개보다 커서 ${assignResult.overflowCount}명은 31번 이후로 배정됨`, 'error');
+    toast(`Auto-reassign done · ⚠ this batch is larger than 30, so ${assignResult.overflowCount} customer(s) were assigned slot 31 or higher`, 'error');
   } else if(state.occupiedSlots.size > 0){
-    toast(`자동 재배정 완료 (1번부터 독립 배정 · ⚠ ${state.occupiedSlots.size}개 슬롯은 다른 배치와 번호 겹침 — 배지 확인)`, 'success');
+    toast(`Auto-reassign done (assigned from slot 1 · ⚠ ${state.occupiedSlots.size} slot(s) overlap with another batch — check the badges)`, 'success');
   } else {
-    toast('자동 재배정 완료', 'success');
+    toast('Auto-reassign done', 'success');
   }
 };
 document.getElementById('btnClearSlots').onclick = () => {
@@ -6141,7 +6175,7 @@ document.getElementById('btnClearSlots').onclick = () => {
   updateSlotQueueNumbers();
   renderSlots();
   syncSlotsToServer();
-  toast('전체 초기화', 'success');
+  toast('All slots reset', 'success');
 };
 
 // ═══════════════════════════════════════════════════════════
