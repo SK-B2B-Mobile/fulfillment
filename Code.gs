@@ -1222,6 +1222,13 @@ function updatePaymentStatus(data) {
       } catch (e) { /* best-effort */ }
     }
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
+    // ★ 2026-10-07 — 이미 출고(Shipped)된 오더는 Sales Confirm을 해제할 수 없음(나간 오더). 출고를 먼저 취소(Undo)해야 함.
+    if (!paid) {
+      try {
+        const shc = _scanShippedCols_(headers);
+        if (shc.iShipped && rowVals[shc.iShipped - 1]) return { ok: false, error: 'This order is already marked shipped — undo the shipment first to change Sales Confirm.' };
+      } catch (eSh) { /* 컬럼이 아직 없으면 출고된 적 없음 */ }
+    }
     mark('checks');
 
     const iStatus = _payCols.iStatus;
@@ -4346,8 +4353,10 @@ function setShippedStatus(data) {
 
     const iTruck = ctx.hm[norm('Trucking')];
     const method = iTruck ? String(ctx.rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
-    if (method !== 'TK' && method !== 'TRUCKING') {
-      return { ok: false, error: 'TK orders only — this invoice is ' + (method || 'unknown') };
+    const isTkMethod = (method === 'TK' || method === 'TRUCKING');
+    // ★ 2026-10-07 — PU / UPS / PU & TK 도 출고 체크 가능(Order Detail Lookup 팝업). 조건은 아래에서 방식별로 다름.
+    if (!isTkMethod && !_isNonTkShipMethod_(method)) {
+      return { ok: false, error: 'Shipping can be marked for TK, UPS, PU and PU & TK orders only — this invoice is ' + (method || 'unknown') };
     }
 
     // 이 인보이스가 다른(대표) 인보이스에 디멘션이 묶여있으면 거부 — 대표에서만 체크
@@ -4358,8 +4367,24 @@ function setShippedStatus(data) {
     }
     mark('links');
 
+    // ★ 2026-10-07 — PU/UPS/PU & TK: Moved to Packing + Sales Confirm(PaymentStatus=paid)이 있어야 출고 체크 가능. BOL#/트럭킹 비용은 불필요. Undo는 항상 허용.
+    if (shipped && !isTkMethod) {
+      let iPay = 0, iManual = 0;
+      ctx.headers.forEach(function (h, i) {
+        const v = String(h).trim().toLowerCase();
+        if (v === 'paymentstatus' && !iPay) iPay = i + 1;
+        else if (v === 'packingmovedmanual' && !iManual) iManual = i + 1;
+      });
+      const paidNow = iPay ? String(ctx.rowVals[iPay - 1] || '').trim().toLowerCase() === 'paid' : false;
+      if (!paidNow) return { ok: false, error: 'Sales must confirm this order before it can be marked shipped.' };
+      let movedNow = iManual ? !!ctx.rowVals[iManual - 1] : false;
+      if (!movedNow) { try { movedNow = !!_packStateForInvoice_(invoice, false).mp; } catch (eMv) { movedNow = false; } }
+      if (!movedNow) { try { const dd = getDimensions_(invoice); movedNow = !!(dd && dd.dims && dd.dims.length > 0); } catch (eDm) { movedNow = false; } }
+      if (!movedNow) return { ok: false, error: 'This order must be moved to Packing before it can be marked shipped.' };
+    }
+
     // ★ Sales Confirm과 BOL#이 없으면 출고 체크 불가(화면 + 서버 이중 방어). Undo는 항상 허용.
-    if (shipped) {
+    if (shipped && isTkMethod) {
       const sc = _scanSalesConfirmCols_(sh, ctx.headers);
       const confirmedNow = sc.iConfirmed ? !!ctx.rowVals[sc.iConfirmed - 1] : false;
       if (!confirmedNow) {
@@ -4396,6 +4421,8 @@ function setShippedStatus(data) {
 
     bumpVersionLite_(); // sales 목록 캐시만 무효화 — 다음 조회부터 바로 반영
     mark('bump');
+    // ★ 2026-10-07 — PU/UPS/PU & TK는 상세 팝업에도 출고 정보가 보이므로 낡은 상세 미러를 무효화(클라이언트가 이어서 syncInvoiceMirror로 다시 채움)
+    if (!isTkMethod) { try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eInv) { /* best-effort */ } }
     mark('total');
     _logSlowSave_('setShippedStatus', invoice, tm);
     return { ok: true, invoice: invoice, shipped: shipped, shippedAt: shippedAtOut, shippedBy: shipped ? by : '', timing: tm };
@@ -6033,6 +6060,17 @@ const KEEP_BUSINESS_DAYS_SERVER = 3;
 //   - 기간을 바꾸려면 이 숫자만 고치면 됨. (보관 = archived 표시만 켬. 시트 데이터는 지우지 않음.)
 const KEEP_BUSINESS_DAYS_TK_SHIPPED = 7;
 
+// ★ 2026-10-07 신규(매니저 요청) — PU / UPS / PU & TK 도 "출고(Shipped) 완료 후" 기준으로 보관.
+//   - 출고일(Ship Date)이 SHIPPED_RULE_START_YMD 이후인 오더에만 적용(그 이전 오더는 예전 규칙 그대로 — 과거 건이 쌓이지 않게).
+//   - 미출고면 절대 보관 안 함(Overdue에서 사라지면 안 되므로). 출고되면 출고 후 영업일 N일 뒤 보관.
+//   - 기간/시작일을 바꾸려면 아래 두 값만 고치면 됨.
+const SHIPPED_RULE_START_YMD = '2026-10-07';
+const KEEP_BUSINESS_DAYS_NONTK_SHIPPED = 3;
+function _isNonTkShipMethod_(method) {
+  const m = String(method || '').trim().toUpperCase();
+  return m === 'PU' || m === 'UPS' || m === 'PU & TK';
+}
+
 // ★ 2026-10-05 — autoDeleteOldJobs 한 번 도는 동안만 Dimensions/출고 맵을 재사용(건마다 시트를 다시 읽지 않도록).
 //   꺼져 있으면(평소 모든 호출) 예전처럼 매번 새로 읽음.
 var __ARCH_MEMO = null;
@@ -6158,6 +6196,23 @@ function jobArchiveCheck_(invoice) {
         return { eligible: false, reason: 'TK 출고 후 영업일 ' + sdays + '일 경과 (' + KEEP_BUSINESS_DAYS_TK_SHIPPED + '일 필요)' };
       }
       return { eligible: true, reason: 'ok' };
+    }
+
+    // ★ 2026-10-07 — PU / UPS / PU & TK (출고일이 규칙 시작일 이후): 출고 완료 후 영업일 N일. 미출고는 보관 안 함. (묶인 오더는 대표 출고 상태를 따름)
+    if (_isNonTkShipMethod_(method)) {
+      const shipYmd = ymdOf_(get('Ship Date'));
+      if (shipYmd && shipYmd >= SHIPPED_RULE_START_YMD) {
+        const dm2 = _archDimsMap_()[invoice] || {};
+        const shipInfo2 = _archShippedMap_()[dm2.linkedTo || invoice] || {};
+        if (!shipInfo2.shipped) return { eligible: false, reason: method + ' 미출고 — 출고 완료 전에는 보관하지 않음' };
+        const shippedYmd2 = ymdOf_(shipInfo2.shippedAt);
+        if (!shippedYmd2) return { eligible: false, reason: method + ' 출고 시각을 읽을 수 없음(안전하게 보관 안 함)' };
+        const sdays2 = businessDaysSince_(shippedYmd2);
+        if (sdays2 < KEEP_BUSINESS_DAYS_NONTK_SHIPPED) {
+          return { eligible: false, reason: method + ' 출고 후 영업일 ' + sdays2 + '일 경과 (' + KEEP_BUSINESS_DAYS_NONTK_SHIPPED + '일 필요)' };
+        }
+        return { eligible: true, reason: 'ok' };
+      }
     }
 
     const needsDims = (method === 'UPS');
