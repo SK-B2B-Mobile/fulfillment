@@ -1127,7 +1127,9 @@ nav{position:relative; z-index:1;}
 .as-qty.un{color:var(--amber);}
 .as-none{font-size:11.5px; color:var(--text-dim); padding:14px 4px; text-align:center;}
 .as-hidden-note{font-size:11px; color:var(--text-dim); padding:10px 2px 2px;}
-#assignSkuModal{z-index:210;}
+/* 상단바(.topbar, z-index 5000)가 모달 윗부분을 가리던 문제 — 모달 배경을 상단바보다 위로 */
+.modal-bg{z-index:6000;}
+#assignSkuModal{z-index:6010;}
 .as-row{display:flex; align-items:center; gap:8px; background:var(--surface3); border:1px solid var(--border2); border-radius:8px; padding:7px 9px; margin-bottom:7px;}
 .as-row .as-rl{font-size:12px; font-weight:700; color:var(--text-dim); flex-shrink:0;}
 .as-row input{background:var(--surface2); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-family:var(--mono); font-weight:700; padding:7px 9px; min-width:0;}
