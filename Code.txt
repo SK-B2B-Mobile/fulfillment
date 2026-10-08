@@ -776,6 +776,8 @@ function doPost(e) {
   if (op === 'splitScannedItemBox') return json_(splitScannedItemBox(data));
   // ★ 2026-09-08 신규 — 박스(또는 팔렛) 하나에 담긴 상품 전체를 한 번에 이동
   if (op === 'moveBoxOrPallet') return json_(moveBoxOrPallet(data));
+  // ★ 2026-10-08 신규 — 스캔 완료 후 박스/팔렛 배정 수정(주문 전체 화면): 한 SKU의 번호별 수량을 한 번에 재배정
+  if (op === 'reassignPackScanBoxes') return json_(reassignPackScanBoxes(data));
   // ★ 2026-09-01 신규 — 관리자 강제확정 시 남은 수량을 실제로 채워서, 화면/슬립이 항상 일치하게 함
   if (op === 'forceCompletePackScan') return json_(forceCompletePackScan(data));
   if (op === 'undoPackScan')  return json_(undoPackScan(data));
