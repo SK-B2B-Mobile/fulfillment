@@ -1086,6 +1086,58 @@ select option:disabled{color:var(--text-dim2);}
 .topbar{position:relative; z-index:5000;}
 nav{position:relative; z-index:1;}
 #switchBatchDropdown{z-index:5001 !important; background:var(--surface) !important;}
+
+/* 2026-10-08 — 박스/팔렛 번호 자유 선택(−/+ · 번호 탭 · 사용 중 번호 칩) */
+.pv-numpick{display:flex; align-items:center; gap:6px;}
+.pv-numbtn{width:44px; height:40px; border-radius:8px; border:1px solid var(--border2); background:var(--surface3); color:var(--text); font-size:22px; font-weight:800; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; line-height:1;}
+.pv-numbtn:active{background:#8B5CF6; color:#fff; border-color:#8B5CF6;}
+.pv-numval{min-width:56px; height:40px; border-radius:8px; border:1px dashed #8B5CF6; background:transparent; cursor:pointer; text-align:center; padding:0 8px; font-family:var(--mono);}
+.pv-usedrow{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px;}
+.pv-used-lbl{font-size:11px; color:var(--text-dim); font-weight:700; margin-right:2px;}
+.pv-chip{border:1px solid var(--border2); background:var(--surface2); color:var(--text); border-radius:999px; padding:6px 11px; font-size:12.5px; font-weight:700; cursor:pointer; font-family:var(--sans); display:inline-flex; align-items:center; gap:6px; min-height:34px;}
+.pv-chip b{font-family:var(--mono); font-size:11.5px; color:var(--text-dim); font-weight:700;}
+.pv-chip.on{background:#8B5CF6; border-color:#8B5CF6; color:#fff;}
+.pv-chip.on b{color:#EDE7FF;}
+.pv-chip.new{border-style:dashed; color:#C4B0FF;}
+
+/* ★ 2026-10-08 — 박스/팔렛 배정 수정(주문 전체) 모달 */
+.as-modal{max-width:560px;}
+.as-title{display:flex; align-items:center; gap:8px; font-size:16px !important; margin-bottom:10px !important;}
+.as-info{font-size:11px; color:var(--text-dim); background:var(--surface3); border:1px solid var(--border2); border-radius:8px; padding:8px 10px; line-height:1.55; margin-bottom:10px;}
+.as-unitrow{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; font-size:11.5px;}
+.as-unit-lbl{color:var(--text-dim); font-weight:700;}
+.as-unit{font-weight:800; border-radius:999px; padding:3px 10px; border:1px solid #8B5CF6; color:#C4B0FF; background:var(--purple-bg);}
+.as-order{margin-left:auto; font-family:var(--mono); color:var(--text-dim);}
+.as-sumrow{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;}
+.as-sumchip{font-size:11px; font-weight:700; border-radius:999px; padding:4px 10px; border:1px solid var(--border2); background:var(--surface2); color:var(--text);}
+.as-sumchip b{font-family:var(--mono); color:#C4B0FF;}
+.as-sumchip.warn{border-color:var(--amber); color:var(--amber); background:var(--amber-bg);}
+.as-sumchip.warn b{color:var(--amber);}
+.as-list{max-height:52vh; overflow-y:auto; border-top:1px solid var(--border2);}
+.as-sku{padding:10px 2px; border-bottom:1px solid var(--border2);}
+.as-sku-top{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;}
+.as-sku-code{font-family:var(--mono); font-size:12px; font-weight:700;}
+.as-sku-bc{font-family:var(--mono); font-size:11px; color:var(--text-dim);}
+.as-sku-name{font-size:11px; color:var(--text-dim); margin:1px 0 7px; line-height:1.4;}
+.as-sku-bottom{display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;}
+.as-tags{display:flex; flex-wrap:wrap; gap:5px;}
+.as-tag{display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:700; border-radius:999px; padding:4px 10px; cursor:pointer; background:var(--blue-bg); border:1px solid rgba(59,130,246,0.5); color:#7FB0FF; font-family:var(--sans); min-height:28px;}
+.as-tag.un{background:var(--amber-bg); border-color:rgba(245,158,11,0.55); color:var(--amber);}
+.as-qty{font-family:var(--mono); font-weight:800; font-size:12.5px; color:var(--green);}
+.as-qty.un{color:var(--amber);}
+.as-none{font-size:11.5px; color:var(--text-dim); padding:14px 4px; text-align:center;}
+.as-hidden-note{font-size:11px; color:var(--text-dim); padding:10px 2px 2px;}
+#assignSkuModal{z-index:210;}
+.as-row{display:flex; align-items:center; gap:8px; background:var(--surface3); border:1px solid var(--border2); border-radius:8px; padding:7px 9px; margin-bottom:7px;}
+.as-row .as-rl{font-size:12px; font-weight:700; color:var(--text-dim); flex-shrink:0;}
+.as-row input{background:var(--surface2); border:1px solid var(--border2); border-radius:6px; color:var(--text); font-family:var(--mono); font-weight:700; padding:7px 9px; min-width:0;}
+.as-row input.n{width:62px; text-align:center;}
+.as-row input.q{flex:1; text-align:right;}
+.as-row .x{width:28px; height:28px; border-radius:50%; border:none; background:transparent; color:var(--text-dim); font-size:15px; flex-shrink:0; cursor:pointer;}
+.as-sum{display:flex; justify-content:space-between; font-size:12.5px; font-weight:700; padding:9px 10px; border-radius:8px; margin-top:4px;}
+.as-sum.ok{background:var(--green-bg); color:var(--green);}
+.as-sum.bad{background:var(--red-bg); color:var(--red);}
+.as-warn{background:var(--amber-bg); border:1px solid rgba(245,158,11,0.45); color:var(--amber); border-radius:8px; padding:8px 10px; font-size:11px; line-height:1.5; margin-bottom:12px;}
 </style>
 </head>
 <body>
@@ -1902,20 +1954,27 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="pv-boxpallet-row">
           <div class="pv-boxpallet-field" id="pvBoxField">
             <label>Current Box</label>
-            <span class="pv-boxpallet-display" id="pvBoxNum">1</span>
+            <div class="pv-numpick">
+              <button type="button" class="pv-numbtn" onclick="nudgePv('box',-1)" aria-label="Previous box">−</button>
+              <button type="button" class="pv-numval pv-boxpallet-display" id="pvBoxNum" onclick="editPvBox()" title="Tap to type a box number">1</button>
+              <button type="button" class="pv-numbtn" onclick="nudgePv('box',1)" aria-label="Next box">+</button>
+            </div>
           </div>
           <div class="pv-boxpallet-field" id="pvPalletField">
-            <label>Pallet</label>
-            <span class="pv-boxpallet-display" id="pvPalletNum">1</span>
+            <label>Current Pallet</label>
+            <div class="pv-numpick">
+              <button type="button" class="pv-numbtn" onclick="nudgePv('pallet',-1)" aria-label="Previous pallet">−</button>
+              <button type="button" class="pv-numval pv-boxpallet-display" id="pvPalletNum" onclick="editPvPallet()" title="Tap to type a pallet number">1</button>
+              <button type="button" class="pv-numbtn" onclick="nudgePv('pallet',1)" aria-label="Next pallet">+</button>
+            </div>
           </div>
         </div>
+        <div class="pv-usedrow" id="pvUsedRow"></div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-primary pv-btn-big" id="pvBoxCompleteBtn" style="flex:2;" onclick="stepPvBox(1)">✅ Finish This Box → Next Box</button>
-          <button type="button" class="btn btn-primary pv-btn-big" id="pvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPvPallet(1)">✅ Finish This Pallet → Next Pallet</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:2; border-color:#8B5CF6; color:#C4B0FF;" onclick="openAssignModal('pv')" title="Review and fix which box/pallet every item went into — works after scanning is finished too">✎ Edit Box/Pallet Assignment</button>
           <button type="button" class="btn btn-ghost" id="pvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePvPalletMode()" title="If the shipping method changed, you can manually switch between box/pallet tracking">📦→🚚 Switch to Pallet</button>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPv()">📦↔️📦 Move Box/Pallet</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPv()">🏷 Print Label</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPvManual()" title="Enter quantity manually to print">✏️</button>
         </div>
@@ -1977,20 +2036,27 @@ document.addEventListener('DOMContentLoaded', function(){
         <div class="pv-boxpallet-row">
           <div class="pv-boxpallet-field" id="psvBoxField">
             <label>Current Box</label>
-            <span class="pv-boxpallet-display" id="psvBoxNum">1</span>
+            <div class="pv-numpick">
+              <button type="button" class="pv-numbtn" onclick="nudgePsv('box',-1)" aria-label="Previous box">−</button>
+              <button type="button" class="pv-numval pv-boxpallet-display" id="psvBoxNum" onclick="editPsvBox()" title="Tap to type a box number">1</button>
+              <button type="button" class="pv-numbtn" onclick="nudgePsv('box',1)" aria-label="Next box">+</button>
+            </div>
           </div>
           <div class="pv-boxpallet-field" id="psvPalletField">
-            <label>Pallet</label>
-            <span class="pv-boxpallet-display" id="psvPalletNum">1</span>
+            <label>Current Pallet</label>
+            <div class="pv-numpick">
+              <button type="button" class="pv-numbtn" onclick="nudgePsv('pallet',-1)" aria-label="Previous pallet">−</button>
+              <button type="button" class="pv-numval pv-boxpallet-display" id="psvPalletNum" onclick="editPsvPallet()" title="Tap to type a pallet number">1</button>
+              <button type="button" class="pv-numbtn" onclick="nudgePsv('pallet',1)" aria-label="Next pallet">+</button>
+            </div>
           </div>
         </div>
+        <div class="pv-usedrow" id="psvUsedRow"></div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-primary pv-btn-big" id="psvBoxCompleteBtn" style="flex:2;" onclick="stepPsvBox(1)">✅ Finish This Box → Next Box</button>
-          <button type="button" class="btn btn-primary pv-btn-big" id="psvPalletCompleteBtn" style="flex:2; display:none;" onclick="stepPsvPallet(1)">✅ Finish This Pallet → Next Pallet</button>
+          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:2; border-color:#8B5CF6; color:#C4B0FF;" onclick="openAssignModal('psv')" title="Review and fix which box/pallet every item went into — works after scanning is finished too">✎ Edit Box/Pallet Assignment</button>
           <button type="button" class="btn btn-ghost" id="psvModeToggleBtn" style="flex:1; font-size:12px;" onclick="togglePsvPalletMode()" title="If the shipping method changed, you can manually switch between box/pallet tracking">📦→🚚 Switch to Pallet</button>
         </div>
         <div class="pv-btnrow">
-          <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1.35; font-size:12.5px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="moveBoxOrPalletPsv()">📦↔️📦 Move Box/Pallet</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:1; font-size:12px !important; white-space:nowrap; padding-left:6px !important; padding-right:6px !important;" onclick="triggerPrintPalletLabelPsv()">🏷 Print Label</button>
           <button type="button" class="btn btn-ghost pv-btn-big" style="flex:0 0 40px; font-size:15px !important; padding:0 !important; justify-content:center;" onclick="triggerPrintPalletLabelPsvManual()" title="Enter quantity manually to print">✏️</button>
         </div>
@@ -2183,6 +2249,40 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="modal-actions">
       <button class="btn btn-ghost" data-modal-close>Cancel</button>
       <button class="btn btn-primary" onclick="confirmMoveBox()">Confirm Move</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-10-08 신규 — 박스/팔렛 배정 수정(주문 전체). 스캔 도중에도, 검수 완료 후에도 열 수 있음.
+     총량(pv)/단독(psv) 공용 — 어느 쪽에서 열렸는지는 _asCtx로 추적. -->
+<div class="modal-bg" id="assignModal">
+  <div class="modal as-modal">
+    <h3 class="as-title">📦 Edit Box/Pallet Assignment — Whole Order</h3>
+    <div class="as-info">Shows everything scanned for this order, no matter who scanned it. Tap a tag to re-split that item between numbers — changes are saved straight to the Google Sheet.</div>
+    <div class="as-unitrow"><span class="as-unit-lbl">Unit</span><span class="as-unit" id="asUnit">Box</span><span class="as-order" id="asOrder"></span></div>
+    <div class="as-sumrow" id="asSumRow"></div>
+    <div class="as-list" id="asList"></div>
+    <div class="modal-actions" style="justify-content:space-between;">
+      <button class="btn btn-ghost btn-sm" onclick="asOpenMove()" title="Move every item in one box/pallet to another number in one step">📦↔️📦 Move Whole Box/Pallet</button>
+      <button class="btn btn-primary" data-modal-close>Close</button>
+    </div>
+  </div>
+</div>
+<div class="modal-bg" id="assignSkuModal">
+  <div class="modal as-modal" style="max-width:440px;">
+    <h3 class="as-title" id="asSkuTitle">Re-assign</h3>
+    <div style="display:flex; align-items:flex-start; gap:10px; margin-bottom:12px;">
+      <span class="as-sku-bc" id="asSkuBc" style="white-space:nowrap; padding-top:2px;"></span>
+      <span style="font-size:12.5px; line-height:1.5; flex:1;" id="asSkuName"></span>
+    </div>
+    <div id="asSkuWarn"></div>
+    <div style="font-size:11.5px; color:var(--text-dim); margin-bottom:10px; text-align:center;" id="asSkuTotalLine"></div>
+    <div id="asSkuRows"></div>
+    <button type="button" class="btn btn-ghost btn-sm" style="width:100%; border-style:dashed; margin-bottom:10px;" onclick="asRowAdd()">＋ Add number</button>
+    <div id="asSkuSum"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="asSkuClose()">Cancel</button>
+      <button class="btn btn-primary" id="asSaveBtn" onclick="asSave()">✓ Save</button>
     </div>
   </div>
 </div>
@@ -7519,47 +7619,92 @@ let _pvCurrentPallet = 1;
 //   각 스텝 함수에 짧은 쿨다운(400ms)을 걸어서 같은 시간 안에 두 번째 호출은
 //   무시하도록 막음. 그리고 버튼을 눌러도 스캔칸의 깜빡이는 커서가 안
 //   없어지도록, 끝나고 항상 스캔칸으로 포커스를 돌려줌.
-let __pvStepLock = 0;
-function stepPvBox(delta){
-  const now = Date.now();
-  if(now - __pvStepLock < 400) return; // 더블탭/중복 클릭 방지
-  __pvStepLock = now;
-  _pvCurrentBox = Math.max(1, _pvCurrentBox + delta);
-  document.getElementById('pvBoxNum').textContent = _pvCurrentBox;
+// ★ 2026-10-08 개편(현장 요청) — 박스/팔렛 번호를 작업자가 자유롭게 고르며 스캔(−/+, 번호 탭 입력, 이미 쓴 번호 칩).
+//   예) 2번 박스 스캔하다가 4번 박스로, 끝나면 1번 박스로 돌아가 스캔. "Finish This Box/Pallet → Next" 버튼은 삭제
+//   (칩 줄의 "＋ New N"이 같은 역할). 서버 저장은 스캔 순간의 번호가 그대로 기록됨(번호만 바꾸는 건 서버와 무관).
+
+function _pvKind_(){
+  const pf = document.getElementById('pvPalletField');
+  return (pf && pf.style.display !== 'none') ? 'pallet' : 'box';
+}
+function _pvCur_(kind){ return kind === 'pallet' ? _pvCurrentPallet : _pvCurrentBox; }
+// 이 오더에서 이미 기록된 번호별 수량 {번호: pcs}. 서버가 주는 line.assign(전체 기록)을 우선 사용 —
+// history는 최근 40건만 내려와서 오래된 번호가 빠질 수 있음(구버전 서버일 때만 history로 대체).
+function _pvUsed_(kind){
+  const used = {};
+  const st = _pvState;
+  const lines = (st && st.lines) || [];
+  if(lines.some(l => Array.isArray(l.assign))){
+    lines.forEach(l => (l.assign || []).forEach(a => {
+      const n = parseInt(kind === 'pallet' ? a.pallet : a.box, 10);
+      if(!n || n < 1) return;
+      used[n] = (used[n] || 0) + (Number(a.qty) || 0);
+    }));
+    return used;
+  }
+  const hs = (st && st.history) || [];
+  hs.forEach(h => {
+    if(h.status === 'undone' || h.result !== 'pass') return;
+    const n = parseInt(kind === 'pallet' ? h.pallet : h.box, 10);
+    if(!n || n < 1) return;
+    used[n] = (used[n] || 0) + (Number(h.qty) || 0);
+  });
+  return used;
+}
+function renderPvUsed_(){
+  const row = document.getElementById('pvUsedRow');
+  if(!row) return;
+  if(!_pvInvoice){ row.innerHTML = ''; return; }
+  const kind = _pvKind_();
+  const label = kind === 'pallet' ? 'Pallet' : 'Box';
+  const cur = _pvCur_(kind);
+  const used = _pvUsed_(kind);
+  const nums = Array.from(new Set(Object.keys(used).map(Number).concat([cur]))).sort((a,b) => a - b);
+  const mx = Math.max.apply(null, nums);
+  const chips = nums.map(n =>
+    `<button type="button" class="pv-chip${n === cur ? ' on' : ''}" onclick="setPvNum_('${kind}',${n})">${label} ${n}<b>${used[n] || 0}</b></button>`
+  ).join('');
+  row.innerHTML = `<span class="pv-used-lbl">Tap to switch ${label.toLowerCase()}:</span>${chips}<button type="button" class="pv-chip new" onclick="setPvNum_('${kind}',${mx + 1})">＋ New ${mx + 1}</button>`;
+}
+function setPvNum_(kind, n){
+  n = parseInt(n, 10);
+  if(!n || n < 1) n = 1;
+  if(kind === 'pallet'){
+    _pvCurrentPallet = n;
+    const el = document.getElementById('pvPalletNum'); if(el) el.textContent = n;
+  } else {
+    _pvCurrentBox = n;
+    const el = document.getElementById('pvBoxNum'); if(el) el.textContent = n;
+  }
+  renderPvUsed_();
   const si = document.getElementById('pvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
-function stepPvPallet(delta){
-  const now = Date.now();
-  if(now - __pvStepLock < 400) return;
-  __pvStepLock = now;
-  _pvCurrentPallet = Math.max(1, _pvCurrentPallet + delta);
-  document.getElementById('pvPalletNum').textContent = _pvCurrentPallet;
-  const si = document.getElementById('pvScanInput');
-  if(si) setTimeout(() => si.focus(), 50);
-}
-// ★ 2026-09-08 신규(현장 요청) — 박스 번호를 눌러서 직접 고칠 수 있게 함
-//   (잘못 넘어갔거나 나중에 바로잡아야 할 때). prompt()는 어떤 기기에서도
-//   확실히 뜨는 가장 단순하고 안전한 방식이라 채택.
+function nudgePv(kind, d){ setPvNum_(kind, Math.max(1, _pvCur_(kind) + d)); }
 function editPvBox(){
   const v = prompt('Enter the box number', _pvCurrentBox);
   if(v === null) return;
   const n = parseInt(v, 10);
   if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
-  _pvCurrentBox = n;
-  document.getElementById('pvBoxNum').textContent = _pvCurrentBox;
-  const si = document.getElementById('pvScanInput');
-  if(si) setTimeout(() => si.focus(), 50);
+  setPvNum_('box', n);
 }
 function editPvPallet(){
   const v = prompt('Enter the pallet number', _pvCurrentPallet);
   if(v === null) return;
   const n = parseInt(v, 10);
   if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
-  _pvCurrentPallet = n;
-  document.getElementById('pvPalletNum').textContent = _pvCurrentPallet;
-  const si = document.getElementById('pvScanInput');
-  if(si) setTimeout(() => si.focus(), 50);
+  setPvNum_('pallet', n);
+}
+// 오더를 열 때: 이미 스캔한 기록이 있으면 마지막으로 스캔한 박스/팔렛에서 이어서 시작(없으면 1번)
+function pvResumeNumbers_(){
+  const hs = (_pvState && _pvState.history) || [];
+  const last = hs.find(h => h.status !== 'undone' && h.result === 'pass');
+  if(last){
+    const b = parseInt(last.box, 10), p = parseInt(last.pallet, 10);
+    if(b > 0){ _pvCurrentBox = b; const el = document.getElementById('pvBoxNum'); if(el) el.textContent = b; }
+    if(p > 0){ _pvCurrentPallet = p; const el = document.getElementById('pvPalletNum'); if(el) el.textContent = p; }
+  }
+  renderPvUsed_();
 }
 // ★ 2026-09-08 신규 — 배송방법 수동 전환(박스 기준 ⇄ 팔렛 기준). 세 단계로
 //   순환: 자동판단 → 팔렛 강제 → 박스 강제 → 자동판단...
@@ -8793,44 +8938,92 @@ let _psvState = null;
 let _psvCurrentBox = 1;
 let _psvPalletModeOverride = null;
 let _psvCurrentPallet = 1;
-let __psvStepLock = 0;
-function stepPsvBox(delta){
-  const now = Date.now();
-  if(now - __psvStepLock < 400) return;
-  __psvStepLock = now;
-  _psvCurrentBox = Math.max(1, _psvCurrentBox + delta);
-  document.getElementById('psvBoxNum').textContent = _psvCurrentBox;
+// ★ 2026-10-08 개편(현장 요청) — 박스/팔렛 번호를 작업자가 자유롭게 고르며 스캔(−/+, 번호 탭 입력, 이미 쓴 번호 칩).
+//   예) 2번 박스 스캔하다가 4번 박스로, 끝나면 1번 박스로 돌아가 스캔. "Finish This Box/Pallet → Next" 버튼은 삭제
+//   (칩 줄의 "＋ New N"이 같은 역할). 서버 저장은 스캔 순간의 번호가 그대로 기록됨(번호만 바꾸는 건 서버와 무관).
+
+function _psvKind_(){
+  const pf = document.getElementById('psvPalletField');
+  return (pf && pf.style.display !== 'none') ? 'pallet' : 'box';
+}
+function _psvCur_(kind){ return kind === 'pallet' ? _psvCurrentPallet : _psvCurrentBox; }
+// 이 오더에서 이미 기록된 번호별 수량 {번호: pcs}. 서버가 주는 line.assign(전체 기록)을 우선 사용 —
+// history는 최근 40건만 내려와서 오래된 번호가 빠질 수 있음(구버전 서버일 때만 history로 대체).
+function _psvUsed_(kind){
+  const used = {};
+  const st = _psvState;
+  const lines = (st && st.lines) || [];
+  if(lines.some(l => Array.isArray(l.assign))){
+    lines.forEach(l => (l.assign || []).forEach(a => {
+      const n = parseInt(kind === 'pallet' ? a.pallet : a.box, 10);
+      if(!n || n < 1) return;
+      used[n] = (used[n] || 0) + (Number(a.qty) || 0);
+    }));
+    return used;
+  }
+  const hs = (st && st.history) || [];
+  hs.forEach(h => {
+    if(h.status === 'undone' || h.result !== 'pass') return;
+    const n = parseInt(kind === 'pallet' ? h.pallet : h.box, 10);
+    if(!n || n < 1) return;
+    used[n] = (used[n] || 0) + (Number(h.qty) || 0);
+  });
+  return used;
+}
+function renderPsvUsed_(){
+  const row = document.getElementById('psvUsedRow');
+  if(!row) return;
+  if(!_psvInvoice){ row.innerHTML = ''; return; }
+  const kind = _psvKind_();
+  const label = kind === 'pallet' ? 'Pallet' : 'Box';
+  const cur = _psvCur_(kind);
+  const used = _psvUsed_(kind);
+  const nums = Array.from(new Set(Object.keys(used).map(Number).concat([cur]))).sort((a,b) => a - b);
+  const mx = Math.max.apply(null, nums);
+  const chips = nums.map(n =>
+    `<button type="button" class="pv-chip${n === cur ? ' on' : ''}" onclick="setPsvNum_('${kind}',${n})">${label} ${n}<b>${used[n] || 0}</b></button>`
+  ).join('');
+  row.innerHTML = `<span class="pv-used-lbl">Tap to switch ${label.toLowerCase()}:</span>${chips}<button type="button" class="pv-chip new" onclick="setPsvNum_('${kind}',${mx + 1})">＋ New ${mx + 1}</button>`;
+}
+function setPsvNum_(kind, n){
+  n = parseInt(n, 10);
+  if(!n || n < 1) n = 1;
+  if(kind === 'pallet'){
+    _psvCurrentPallet = n;
+    const el = document.getElementById('psvPalletNum'); if(el) el.textContent = n;
+  } else {
+    _psvCurrentBox = n;
+    const el = document.getElementById('psvBoxNum'); if(el) el.textContent = n;
+  }
+  renderPsvUsed_();
   const si = document.getElementById('psvScanInput');
   if(si) setTimeout(() => si.focus(), 50);
 }
-function stepPsvPallet(delta){
-  const now = Date.now();
-  if(now - __psvStepLock < 400) return;
-  __psvStepLock = now;
-  _psvCurrentPallet = Math.max(1, _psvCurrentPallet + delta);
-  document.getElementById('psvPalletNum').textContent = _psvCurrentPallet;
-  const si = document.getElementById('psvScanInput');
-  if(si) setTimeout(() => si.focus(), 50);
-}
+function nudgePsv(kind, d){ setPsvNum_(kind, Math.max(1, _psvCur_(kind) + d)); }
 function editPsvBox(){
   const v = prompt('Enter the box number', _psvCurrentBox);
   if(v === null) return;
   const n = parseInt(v, 10);
   if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
-  _psvCurrentBox = n;
-  document.getElementById('psvBoxNum').textContent = _psvCurrentBox;
-  const si = document.getElementById('psvScanInput');
-  if(si) setTimeout(() => si.focus(), 50);
+  setPsvNum_('box', n);
 }
 function editPsvPallet(){
   const v = prompt('Enter the pallet number', _psvCurrentPallet);
   if(v === null) return;
   const n = parseInt(v, 10);
   if(!n || n < 1){ alert('Enter a number of 1 or more'); return; }
-  _psvCurrentPallet = n;
-  document.getElementById('psvPalletNum').textContent = _psvCurrentPallet;
-  const si = document.getElementById('psvScanInput');
-  if(si) setTimeout(() => si.focus(), 50);
+  setPsvNum_('pallet', n);
+}
+// 오더를 열 때: 이미 스캔한 기록이 있으면 마지막으로 스캔한 박스/팔렛에서 이어서 시작(없으면 1번)
+function psvResumeNumbers_(){
+  const hs = (_psvState && _psvState.history) || [];
+  const last = hs.find(h => h.status !== 'undone' && h.result === 'pass');
+  if(last){
+    const b = parseInt(last.box, 10), p = parseInt(last.pallet, 10);
+    if(b > 0){ _psvCurrentBox = b; const el = document.getElementById('psvBoxNum'); if(el) el.textContent = b; }
+    if(p > 0){ _psvCurrentPallet = p; const el = document.getElementById('psvPalletNum'); if(el) el.textContent = p; }
+  }
+  renderPsvUsed_();
 }
 function togglePsvPalletMode(){
   if(_psvPalletModeOverride === null) _psvPalletModeOverride = true;
@@ -8922,17 +9115,31 @@ function switchMoveBoxMode(){
   if(txt) txt.textContent = _moveBoxMode === 'box' ? 'Viewing by box — switch to pallet view' : 'Viewing by pallet — switch to box view';
   populateMoveBoxSelect();
 }
-function populateMoveBoxSelect(){
+// 박스/팔렛 번호별로 "어떤 상품이 몇 개 들어있는지" 묶음. 서버가 주는 전체 기록(line.assign)을 쓰고,
+// 없으면(구버전 서버) 예전처럼 줄마다 마지막 번호 기준.
+function _mbGroups_(){
   const st = _moveBoxState_();
   const key = _moveBoxMode === 'pallet' ? 'pallet' : 'box';
-  const label = _moveBoxMode === 'pallet' ? 'Pallet' : 'Box';
   const groups = {};
-  (st.lines || []).forEach(l => {
-    const k = l[key];
+  const add = (k, l, qty) => {
+    k = String(k == null ? '' : k);
     if(!k) return;
-    if(!groups[k]) groups[k] = [];
-    groups[k].push(l);
+    (groups[k] || (groups[k] = [])).push({ l: l, qty: qty });
+  };
+  (st.lines || []).forEach(l => {
+    if(Array.isArray(l.assign)){
+      const m = {};
+      l.assign.forEach(a => { const k = String(a[key] || ''); if(k) m[k] = (m[k] || 0) + (Number(a.qty) || 0); });
+      Object.keys(m).forEach(k => add(k, l, m[k]));
+    } else {
+      add(l[key], l, l.packed);
+    }
   });
+  return groups;
+}
+function populateMoveBoxSelect(){
+  const label = _moveBoxMode === 'pallet' ? 'Pallet' : 'Box';
+  const groups = _mbGroups_();
   const keys = Object.keys(groups).sort((a, b) => {
     const na = parseInt(a, 10), nb = parseInt(b, 10);
     if(!isNaN(na) && !isNaN(nb)) return na - nb;
@@ -8948,17 +9155,15 @@ function populateMoveBoxSelect(){
   updateMoveBoxPreview();
 }
 function updateMoveBoxPreview(){
-  const st = _moveBoxState_();
-  const key = _moveBoxMode === 'pallet' ? 'pallet' : 'box';
+  const label = _moveBoxMode === 'pallet' ? 'pallet' : 'box';
   const sel = document.getElementById('moveBoxFromSelect');
-  const val = sel.value;
-  const items = (st.lines || []).filter(l => String(l[key]) === String(val));
+  const items = (_mbGroups_()[String(sel.value)]) || [];
   const list = document.getElementById('moveBoxPreviewList');
   list.innerHTML = items.length
-    ? items.map(l => `
+    ? items.map(it => `
       <div style="padding:7px 0; border-bottom:1px solid var(--border2);">
-        <div style="font-size:13px; font-weight:700;">${l.name || l.sku}</div>
-        <div style="font-size:11px; color:var(--text-dim);">${l.sku} · Barcode ${l.barcode} · ${l.packed}/${l.effectiveReq} pcs</div>
+        <div style="font-size:13px; font-weight:700;">${it.l.name || it.l.sku}</div>
+        <div style="font-size:11px; color:var(--text-dim);">${it.l.sku} · Barcode ${it.l.barcode} · ${it.qty} pcs in this ${label}</div>
       </div>`).join('')
     : `<div style="padding:8px 0; font-size:12px; color:var(--text-dim);">No items in this one</div>`;
 }
@@ -8974,6 +9179,197 @@ async function confirmMoveBox(){
   closeAllModals();
   toast(`${res.updated} item(s) moved`, 'success');
   if(_moveBoxContext === 'psv') await refreshPsvState(); else await refreshPvState();
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-10-08 신규(현장 요청) — "박스/팔렛 배정 수정 — 주문 전체"
+//   스캔을 다 끝낸 뒤에도(검수 완료 후에도) 이 오더의 모든 SKU가 몇 번 박스/팔렛에 몇 개씩
+//   들어갔는지 한 화면에서 보고, 태그를 눌러 번호별 수량을 다시 나눠 저장(즉시 구글시트 반영).
+//   번호가 없는 몫(강제확정 등)은 "Unassigned"로 따로 표시. 총량(pv)/단독(psv) 공용.
+// ═══════════════════════════════════════════════════════════
+let _asCtx = null;
+let _asEdit = null;
+function _asInfo_(ctx){
+  return ctx === 'psv'
+    ? { st: _psvState, invoice: _psvInvoice, batchId: STANDALONE_BATCH_ID, kind: _psvKind_(), refresh: refreshPsvState, used: _psvUsed_ }
+    : { st: _pvState, invoice: _pvInvoice, batchId: state.batchId, kind: _pvKind_(), refresh: refreshPvState, used: _pvUsed_ };
+}
+function _asEsc_(t){ return String(t == null ? '' : t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// 한 줄(SKU)의 기록을 현재 단위(box/pallet) 기준으로 번호별로 묶음. 번호 없는 몫은 un.
+function _asGroup_(l, kind){
+  const m = {}; let un = 0, total = 0;
+  (l.assign || []).forEach(a => {
+    const q = Number(a.qty) || 0;
+    total += q;
+    const n = parseInt(kind === 'pallet' ? a.pallet : a.box, 10);
+    if(n > 0) m[n] = (m[n] || 0) + q; else un += q;
+  });
+  const rows = Object.keys(m).map(Number).sort((a, b) => a - b).map(n => ({ n: n, q: m[n] }));
+  return { rows: rows, un: un, total: total };
+}
+function openAssignModal(ctx){
+  const I = _asInfo_(ctx);
+  if(!I.invoice || !I.st){ alert('Please select an order first'); return; }
+  if(!(I.st.lines || []).every(l => Array.isArray(l.assign))){
+    alert('The server needs to be updated for this feature.\n(Deploy the latest BatchPicking.gs and Code.gs first, then refresh this page.)');
+    return;
+  }
+  _asCtx = ctx;
+  renderAssignModal_();
+  document.getElementById('assignModal').classList.add('open');
+}
+function renderAssignModal_(){
+  const ctx = _asCtx; if(!ctx) return;
+  const I = _asInfo_(ctx); const st = I.st; if(!st) return;
+  const kind = I.kind;
+  const label = kind === 'pallet' ? 'Pallet' : 'Box';
+  document.getElementById('asUnit').textContent = label;
+  document.getElementById('asOrder').textContent = I.invoice || '';
+  const lines = st.lines || [];
+  // 번호별 요약 칩
+  const agg = {}; let unTotal = 0, hidden = 0;
+  const items = lines.map(l => ({ l: l, g: _asGroup_(l, kind) }));
+  items.forEach(it => {
+    if(it.g.total <= 0){ hidden++; return; }
+    it.g.rows.forEach(r => { const a = agg[r.n] || (agg[r.n] = { q: 0, sku: 0 }); a.q += r.q; a.sku++; });
+    unTotal += it.g.un;
+  });
+  const nums = Object.keys(agg).map(Number).sort((a, b) => a - b);
+  document.getElementById('asSumRow').innerHTML =
+    nums.map(n => `<span class="as-sumchip">${label} ${n} · <b>${agg[n].q.toLocaleString()}</b> pcs · ${agg[n].sku} SKU</span>`).join('') +
+    (unTotal > 0 ? `<span class="as-sumchip warn">Unassigned · <b>${unTotal.toLocaleString()}</b> pcs</span>` : '');
+  const listHtml = items.filter(it => it.g.total > 0).map(it => {
+    const l = it.l, g = it.g;
+    const tags = g.rows.map(r => `<button type="button" class="as-tag" data-bc="${_asEsc_(l.barcode)}" onclick="openAssignSku(this.dataset.bc)">${label} ${r.n} · ${r.q.toLocaleString()}</button>`).join('') +
+      (g.un > 0 ? `<button type="button" class="as-tag un" data-bc="${_asEsc_(l.barcode)}" onclick="openAssignSku(this.dataset.bc)">⚠ Unassigned ${g.un.toLocaleString()}</button>` : '');
+    return `<div class="as-sku">
+      <div class="as-sku-top"><span class="as-sku-code">${_asEsc_(l.sku)}</span><span class="as-sku-bc">${_asEsc_(l.barcode)}</span></div>
+      <div class="as-sku-name">${_asEsc_(l.name)}</div>
+      <div class="as-sku-bottom"><div class="as-tags">${tags}</div><span class="as-qty${g.un > 0 ? ' un' : ''}">${g.total.toLocaleString()}/${(Number(l.effectiveReq) || 0).toLocaleString()}</span></div>
+    </div>`;
+  }).join('');
+  document.getElementById('asList').innerHTML = (listHtml || '<div class="as-none">Nothing has been scanned for this order yet.</div>') +
+    (hidden > 0 && listHtml ? `<div class="as-hidden-note">${hidden} SKU(s) not scanned yet are not shown.</div>` : '');
+}
+function openAssignSku(bc){
+  if(!_asCtx) return;
+  const I = _asInfo_(_asCtx);
+  const l = ((I.st && I.st.lines) || []).find(x => String(x.barcode) === String(bc));
+  if(!l) return;
+  const g = _asGroup_(l, I.kind);
+  if(g.total <= 0) return;
+  const rows = g.rows.map(r => ({ n: r.n, q: r.q }));
+  if(g.un > 0){
+    // 번호 없는 몫은 "이 주문에서 아직 안 쓴 가장 큰 번호 + 1"을 미리 채워 둠(수량은 그대로, 번호만 고치면 됨)
+    const usedNums = Object.keys(I.used(I.kind)).map(Number);
+    rows.push({ n: (usedNums.length ? Math.max.apply(null, usedNums) : 0) + 1, q: g.un });
+  }
+  _asEdit = { ctx: _asCtx, batchId: I.batchId, invoice: I.invoice, barcode: l.barcode, name: l.name, sku: l.sku, total: g.total, kind: I.kind, rows: rows, un: g.un, saving: false };
+  const label = I.kind === 'pallet' ? 'Pallet' : 'Box';
+  document.getElementById('asSkuTitle').textContent = label + ' Re-assign';
+  document.getElementById('asSkuBc').textContent = l.barcode || l.sku || '—';
+  document.getElementById('asSkuName').textContent = l.name || l.sku || '';
+  document.getElementById('asSkuWarn').innerHTML = g.un > 0
+    ? `<div class="as-warn">⚠ <b>${g.un.toLocaleString()} pcs</b> of this item have no ${label.toLowerCase()} number yet (e.g. finished with Manager Force Confirm) — enter the real number below.</div>`
+    : `<div class="as-warn">⚠ You are editing a saved record directly — saving updates the Google Sheet immediately.</div>`;
+  document.getElementById('asSkuTotalLine').innerHTML = `Recorded total <b style="color:var(--text)">${g.total.toLocaleString()}</b> pcs — split them across ${label.toLowerCase()} numbers`;
+  renderAsRows_();
+  asUpdateSum_();
+  document.getElementById('assignSkuModal').classList.add('open');
+}
+function renderAsRows_(){
+  const e = _asEdit; if(!e) return;
+  const label = e.kind === 'pallet' ? 'Pallet' : 'Box';
+  document.getElementById('asSkuRows').innerHTML = e.rows.map((r, i) => `
+    <div class="as-row">
+      <span class="as-rl">${label}</span>
+      <input class="n" type="text" inputmode="numeric" pattern="[0-9]*" value="${r.n || ''}" oninput="asRowNum(${i},this.value)" aria-label="${label} number">
+      <input class="q" type="text" inputmode="numeric" pattern="[0-9]*" value="${r.q}" oninput="asRowQty(${i},this.value)" aria-label="Quantity">
+      <button type="button" class="x" onclick="asRowDel(${i})" aria-label="Remove">✕</button>
+    </div>`).join('');
+}
+function asUpdateSum_(){
+  const e = _asEdit; if(!e) return;
+  const sum = e.rows.reduce((a, r) => a + (Number(r.q) || 0), 0);
+  const diff = e.total - sum;
+  const nums = e.rows.filter(r => r.q > 0).map(r => r.n);
+  const dup = new Set(nums).size !== nums.length;
+  const badNum = e.rows.some(r => r.q > 0 && (!r.n || r.n < 1));
+  const el = document.getElementById('asSkuSum');
+  let ok = false;
+  if(diff !== 0){
+    el.className = 'as-sum bad';
+    el.innerHTML = `<span>⚠ ${Math.abs(diff).toLocaleString()} pcs ${diff > 0 ? 'short' : 'over'}</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+  } else if(dup){
+    el.className = 'as-sum bad';
+    el.innerHTML = `<span>⚠ Same number used twice — merge them into one row</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+  } else if(badNum){
+    el.className = 'as-sum bad';
+    el.innerHTML = `<span>⚠ Enter a number (1 or more) for every row</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+  } else {
+    el.className = 'as-sum ok';
+    el.innerHTML = `<span>✓ Matches the recorded total</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+    ok = true;
+  }
+  const btn = document.getElementById('asSaveBtn');
+  if(btn && !e.saving) btn.disabled = !ok;
+}
+// 입력 중에는 행 입력칸을 절대 다시 그리지 않음(다시 그리면 키보드/포커스가 풀림) — 합계만 갱신
+function asRowNum(i, v){ const e = _asEdit; if(!e || !e.rows[i]) return; e.rows[i].n = parseInt(String(v).replace(/\D/g, ''), 10) || 0; asUpdateSum_(); }
+function asRowQty(i, v){ const e = _asEdit; if(!e || !e.rows[i]) return; e.rows[i].q = parseInt(String(v).replace(/\D/g, ''), 10) || 0; asUpdateSum_(); }
+function asRowAdd(){
+  const e = _asEdit; if(!e) return;
+  const sum = e.rows.reduce((a, r) => a + (Number(r.q) || 0), 0);
+  const mx = e.rows.reduce((a, r) => Math.max(a, r.n || 0), 0);
+  e.rows.push({ n: mx + 1, q: Math.max(0, e.total - sum) });
+  renderAsRows_(); asUpdateSum_();
+}
+function asRowDel(i){
+  const e = _asEdit; if(!e || e.rows.length <= 1) return;
+  e.rows.splice(i, 1);
+  renderAsRows_(); asUpdateSum_();
+}
+function asSkuClose(){
+  document.getElementById('assignSkuModal').classList.remove('open');
+  _asEdit = null;
+}
+async function asSave(){
+  const e = _asEdit; if(!e || e.saving) return;
+  const sum = e.rows.reduce((a, r) => a + (Number(r.q) || 0), 0);
+  if(sum !== e.total){ alert('The total must match the recorded quantity'); return; }
+  e.saving = true;
+  const btn = document.getElementById('asSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  let res;
+  try{
+    res = await gasCallWithRetry('reassignPackScanBoxes', {
+      batchId: e.batchId, invoice: e.invoice, barcode: e.barcode, round: 2, kind: e.kind,
+      rows: e.rows.filter(r => r.q > 0).map(r => ({ n: r.n, q: r.q })),
+    });
+  } catch(err){ res = { ok: false, error: String(err && err.message || err) }; }
+  e.saving = false;
+  btn.textContent = '✓ Save';
+  if(!res || !res.ok){
+    const er = res && res.error;
+    const msg = er === 'total_mismatch' ? 'The recorded quantity changed on the server (someone scanned in the meantime). Close this window and open it again.'
+      : er === 'duplicate_number' ? 'The same number is used twice — merge them into one row.'
+      : ('Save failed: ' + (er || 'network error'));
+    alert(msg);
+    asUpdateSum_();
+    return;
+  }
+  asSkuClose();
+  const I = _asInfo_(e.ctx);
+  if(I.invoice === e.invoice) await I.refresh();
+  renderAssignModal_();
+  toast(res.unchanged ? 'No change — already assigned this way' : 'Saved — reflected in the Google Sheet', 'success');
+}
+// 안쪽 "Move Whole Box/Pallet"(기존 일괄 이동)로 연결 — 메인 화면에서는 버튼을 뺐고 여기서만 접근
+function asOpenMove(){
+  const ctx = _asCtx; if(!ctx) return;
+  document.getElementById('assignModal').classList.remove('open');
+  openMoveBoxModal(ctx);
 }
 
 function populatePsvWorkerSelect(){
@@ -9043,7 +9439,7 @@ async function onPsvInvoiceChange(){
   const sel = document.getElementById('psvInvoiceSelect');
   const invoice = sel.value;
   const panel = document.getElementById('psvScanPanel');
-  if(!invoice){ panel.classList.remove('active'); _psvInvoice = null; _psvState = null; return; }
+  if(!invoice){ panel.classList.remove('active'); _psvInvoice = null; _psvState = null; renderPsvUsed_(); return; }
   _psvInvoice = invoice;
   _psvForceVerified = false;
   // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
@@ -9061,7 +9457,6 @@ async function onPsvInvoiceChange(){
     if(bf) bf.style.display = isTk ? 'none' : 'flex';
     if(bcb) bcb.style.display = isTk ? 'none' : 'flex';
     document.getElementById('psvPalletField').style.display = isTk ? 'flex' : 'none';
-    document.getElementById('psvPalletCompleteBtn').style.display = isTk ? 'flex' : 'none';
   }
   panel.classList.add('active');
   document.getElementById('psvMsg').style.display = 'none';
@@ -9072,6 +9467,7 @@ async function onPsvInvoiceChange(){
   document.getElementById('psvCompleteBtn').textContent = '🟣 Confirm Final Verification (2nd)';
   document.getElementById('psvLines').innerHTML = '<div class="empty-log">Loading...</div>';
   await refreshPsvState();
+  psvResumeNumbers_();
   const ord = _standaloneOrders.find(o => o.invoice === invoice);
   if(ord && ord.packVerified){
     _psvForceVerified = !(_psvState && _psvState.complete);
@@ -9200,6 +9596,7 @@ function renderPsvBody(){
     </div>` : '';
 
   document.getElementById('psvLines').innerHTML = linesHtml + historyHtml;
+  renderPsvUsed_();
 }
 
 // ★ 2026-09-01 신규 — submitPvScan과 동일한 이유·동일한 구조(직렬 큐 + 즉시 피드백).
@@ -9213,7 +9610,8 @@ function submitPsvScan(){
   if(!currentPsvWorker()){ alert('Please select a worker first'); input.focus(); return; }
   input.value = '';
   flashScannedIntoInput(input, barcode);
-  _psvScanQueue.push(barcode);
+  // ★ 2026-10-08 — 스캔한 "그 순간"의 박스/팔렛 번호를 같이 저장(대기 중에 번호를 바꿔도 이 스캔은 원래 번호로 기록)
+  _psvScanQueue.push({ barcode: barcode, box: _psvCurrentBox, pallet: _psvCurrentPallet, kind: _psvKind_() });
   processPsvScanQueue();
 }
 async function processPsvScanQueue(){
@@ -9221,8 +9619,8 @@ async function processPsvScanQueue(){
   _psvScanBusy = true;
   try{
     while(_psvScanQueue.length){
-      const barcode = _psvScanQueue.shift();
-      await doPsvScanOne(barcode);
+      const job = _psvScanQueue.shift();
+      await doPsvScanOne(job.barcode, job);
     }
   } finally {
     _psvScanBusy = false;
@@ -9230,12 +9628,13 @@ async function processPsvScanQueue(){
     if(input) input.focus();
   }
 }
-async function doPsvScanOne(barcode){
+async function doPsvScanOne(barcode, job){
+  job = job || { box: _psvCurrentBox, pallet: _psvCurrentPallet, kind: _psvKind_() };
   const worker = currentPsvWorker();
   if(!worker){ alert('Please select a worker first'); return; }
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함).
-  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2, box: _psvCurrentBox, pallet: _psvCurrentPallet });
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2, box: job.box, pallet: job.pallet });
   if(!res.ok){
     showPsvMsg('Error: ' + (res.error || 'Unknown error'), 'bad');
     return;
@@ -9252,7 +9651,7 @@ async function doPsvScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed'),
+      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed') + ` · ${job.kind === 'pallet' ? 'Pallet ' + job.pallet : 'Box ' + job.box}`,
       qty: `${packed}/${required}`,
       action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
@@ -9453,7 +9852,7 @@ async function onPvInvoiceChange(){
   const sel = document.getElementById('pvInvoiceSelect');
   const invoice = sel.value;
   const panel = document.getElementById('pvScanPanel');
-  if(!invoice){ panel.classList.remove('active'); _pvInvoice = null; _pvState = null; return; }
+  if(!invoice){ panel.classList.remove('active'); _pvInvoice = null; _pvState = null; renderPvUsed_(); return; }
   _pvInvoice = invoice;
   _pvForceVerified = false;
   // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
@@ -9470,7 +9869,6 @@ async function onPvInvoiceChange(){
     if(bf) bf.style.display = isTk ? 'none' : 'flex';
     if(bcb) bcb.style.display = isTk ? 'none' : 'flex';
     document.getElementById('pvPalletField').style.display = isTk ? 'flex' : 'none';
-    document.getElementById('pvPalletCompleteBtn').style.display = isTk ? 'flex' : 'none';
   }
   panel.classList.add('active');
   document.getElementById('pvMsg').style.display = 'none';
@@ -9481,6 +9879,7 @@ async function onPvInvoiceChange(){
   document.getElementById('pvCompleteBtn').textContent = '🟣 Confirm Final Verification (2nd)';
   document.getElementById('pvLines').innerHTML = '<div class="empty-log">Loading...</div>';
   await refreshPvState();
+  pvResumeNumbers_();
   // ★ 2026-08-24 신규 — 이미 검증완료된(정상 스캔이든 관리자 강제확정이든) 오더를
   //   다시 선택했을 때도, 처음 볼 때와 똑같이 "완료됨" 상태가 바로 보이게 함.
   if(state.packVerifiedInvoices.has(invoice)){
@@ -9605,6 +10004,7 @@ function renderPvBody(){
     </div>` : '';
 
   document.getElementById('pvLines').innerHTML = linesHtml + historyHtml;
+  renderPvUsed_();
 }
 
 // ★ 2026-09-01 신규 — 스캔 즉시 처리(직렬 큐) + 순간 피드백.
@@ -9682,7 +10082,8 @@ function submitPvScan(){
   if(!currentPvWorker()){ alert('Please select a worker first'); input.focus(); return; }
   input.value = '';
   flashScannedIntoInput(input, barcode); // 서버 응답과 무관하게 즉시 표시
-  _pvScanQueue.push(barcode);
+  // ★ 2026-10-08 — 스캔한 "그 순간"의 박스/팔렛 번호를 같이 저장(대기 중에 번호를 바꿔도 이 스캔은 원래 번호로 기록)
+  _pvScanQueue.push({ barcode: barcode, box: _pvCurrentBox, pallet: _pvCurrentPallet, kind: _pvKind_() });
   processPvScanQueue();
 }
 async function processPvScanQueue(){
@@ -9690,8 +10091,8 @@ async function processPvScanQueue(){
   _pvScanBusy = true;
   try{
     while(_pvScanQueue.length){
-      const barcode = _pvScanQueue.shift();
-      await doPvScanOne(barcode);
+      const job = _pvScanQueue.shift();
+      await doPvScanOne(job.barcode, job);
     }
   } finally {
     _pvScanBusy = false;
@@ -9699,7 +10100,8 @@ async function processPvScanQueue(){
     if(input) input.focus();
   }
 }
-async function doPvScanOne(barcode){
+async function doPvScanOne(barcode, job){
+  job = job || { box: _pvCurrentBox, pallet: _pvCurrentPallet, kind: _pvKind_() };
   const input = document.getElementById('pvScanInput');
   const worker = currentPvWorker();
   if(!worker){ alert('Please select a worker first'); return; }
@@ -9709,7 +10111,7 @@ async function doPvScanOne(barcode){
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함). "TypeError: Failed to fetch"로
   //   스캔이 먹통되던 사고의 핵심 수정.
-  const res = await gasCallWithRetry('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode, box: _pvCurrentBox, pallet: _pvCurrentPallet });
+  const res = await gasCallWithRetry('logPackScan', { batchId: state.batchId, invoice: _pvInvoice, worker, barcode, box: job.box, pallet: job.pallet });
   if(!res.ok){
     flashPv('bad'); beepPv(false);
     showPvMsg('Error: ' + (res.error || 'Unknown error'), 'bad');
@@ -9729,7 +10131,7 @@ async function doPvScanOne(barcode){
       kind: 'ok',
       icon: complete ? '✅' : '✓',
       title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed'),
+      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed') + ` · ${job.kind === 'pallet' ? 'Pallet ' + job.pallet : 'Box ' + job.box}`,
       qty: `${packed}/${required}`,
       action: { label: '⚠ Report Issue', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
@@ -10003,6 +10405,7 @@ function getActualMaxBoxOrPallet_(st, isPallet){
   let max = 1;
   (st && st.lines ? st.lines : []).forEach(l => {
     const consider = v => { const n = parseInt(v, 10); if(!isNaN(n) && n > max) max = n; };
+    if(Array.isArray(l.assign)){ l.assign.forEach(a => consider(isPallet ? a.pallet : a.box)); return; } // ★ 2026-10-08 전체 기록 우선
     if(l.boxBreakdown && l.boxBreakdown.length > 1){
       l.boxBreakdown.forEach(bd => consider(isPallet ? bd.pallet : bd.box));
     } else {
@@ -10196,7 +10599,8 @@ function printPvSlip(format, forceFlat){
   const packItems = [];
   lines.filter(l => l.effectiveReq > 0).forEach(l => {
     const k = normBarcode(l.barcode);
-    const hist = historyByBarcode[k] || [];
+    // ★ 2026-10-08 — history는 서버가 최근 40건만 주므로, 전체 기록(line.assign)이 있으면 그걸 우선 사용(스캔 40건 넘는 큰 오더에서도 슬립 박스 구분이 빠지지 않게).
+    const hist = Array.isArray(l.assign) ? l.assign.map(a => ({ box: a.box, pallet: a.pallet, qty: a.qty })) : (historyByBarcode[k] || []);
     if(hist.length){
       const byBoxPallet = {};
       hist.forEach(h => {
@@ -10401,7 +10805,8 @@ async function printPsvSlip(format, forceFlat){
   const packItems = [];
   lines.filter(l => l.effectiveReq > 0).forEach(l => {
     const k = normBarcode(l.barcode);
-    const hist = historyByBarcode[k] || [];
+    // ★ 2026-10-08 — history는 서버가 최근 40건만 주므로, 전체 기록(line.assign)이 있으면 그걸 우선 사용(스캔 40건 넘는 큰 오더에서도 슬립 박스 구분이 빠지지 않게).
+    const hist = Array.isArray(l.assign) ? l.assign.map(a => ({ box: a.box, pallet: a.pallet, qty: a.qty })) : (historyByBarcode[k] || []);
     if(hist.length){
       const byBoxPallet = {};
       hist.forEach(h => {
