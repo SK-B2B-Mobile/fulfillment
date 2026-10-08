@@ -2211,6 +2211,104 @@ function moveBoxOrPallet(data) {
   }
 }
 
+// ★ 2026-10-08 신규(현장 요청) — 스캔 검수를 다 끝낸 뒤에도 "이 상품이 몇 번 박스/팔렛에 몇 개씩
+//   들어갔는지"를 한 번에 다시 나눠 저장하는 기능(박스/팔렛 배정 수정 — 주문 전체 화면용).
+//   입력: { batchId, invoice, barcode, round, kind:'box'|'pallet', rows:[{n:번호, q:수량}, ...] }
+//   규칙: rows 수량 합계 = 이 바코드의 현재 기록 총수량(다르면 total_mismatch로 거절 — 누가 그 사이
+//   스캔했거나 화면이 오래된 경우의 안전장치). 기존 기록은 undone 처리하고 새 배정대로 기록을 다시 씀
+//   (원래 작업자/SKU 유지, 수량 합계는 절대 안 변함 → 진행률·슬립 수량에 영향 없음).
+function reassignPackScanBoxes(data) {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(10000);
+  try {
+    if (!data.batchId || !data.invoice || !data.barcode) return { ok: false, error: '필요한 값이 없습니다' };
+    const kind = data.kind === 'pallet' ? 'pallet' : 'box';
+    const round = Number(data.round) || 2;
+    const inRows = Array.isArray(data.rows) ? data.rows : [];
+    const want = {};
+    let wantSum = 0;
+    for (let i = 0; i < inRows.length; i++) {
+      const n = parseInt(inRows[i] && inRows[i].n, 10);
+      const q = Number(inRows[i] && inRows[i].q);
+      if (!n || n < 1 || !isFinite(q) || q < 0 || Math.floor(q) !== q) return { ok: false, error: 'invalid_rows' };
+      if (q === 0) continue;
+      if (want[n] !== undefined) return { ok: false, error: 'duplicate_number' };
+      want[n] = q;
+      wantSum += q;
+    }
+    if (wantSum <= 0) return { ok: false, error: 'invalid_rows' };
+
+    const normBc = normBarcode_(String(data.barcode || ''));
+    const pl = packscanSheetSafe_();
+    const plLast = pl.getLastRow();
+    if (plLast < 2) return { ok: false, error: '스캔 기록이 없습니다' };
+    const rows = pl.getRange(2, 1, plLast - 1, 13).getValues();
+
+    const matched = [];
+    let total = 0;
+    rows.forEach((r, i) => {
+      if (String(r[0]) !== String(data.batchId)) return;
+      if (String(r[6]) !== String(data.invoice)) return;
+      if ((Number(r[10]) || 2) !== round) return;
+      if (r[7] !== 'pass' || r[8] === 'undone') return;
+      if (normBarcode_(r[4]) !== normBc) return;
+      const q = Number(r[9]) || 0;
+      if (q <= 0) return;
+      matched.push({ rowNum: i + 2, r: r, q: q });
+      total += q;
+    });
+    if (!matched.length) return { ok: false, error: '해당 상품의 스캔 기록을 찾지 못했습니다' };
+    if (total !== wantSum) return { ok: false, error: 'total_mismatch', total: total };
+
+    // 이미 같은 배정이면(번호가 빈 몫도 없음) 아무것도 안 바꾸고 성공 처리 — 기록 낭비 방지
+    const cur = {};
+    let hasBlank = false;
+    matched.forEach(m => {
+      const n = parseInt(kind === 'pallet' ? m.r[12] : m.r[11], 10);
+      if (!n || n < 1) { hasBlank = true; return; }
+      cur[n] = (cur[n] || 0) + m.q;
+    });
+    const curKeys = Object.keys(cur), wantKeys = Object.keys(want);
+    if (!hasBlank && curKeys.length === wantKeys.length && wantKeys.every(k => cur[k] === want[k])) {
+      return { ok: true, unchanged: true };
+    }
+
+    // 반대쪽 값(박스 모드면 팔렛, 팔렛 모드면 박스)은 기존 값을 그대로 유지(없으면 '1')
+    let other = '';
+    for (let i = 0; i < matched.length && !other; i++) {
+      other = String(kind === 'pallet' ? (matched[i].r[11] || '') : (matched[i].r[12] || ''));
+    }
+    if (!other) other = '1';
+    const first = matched[0].r;
+    const worker = first[3] || data.worker || '';
+    const sku = first[5];
+    const bcOrig = String(first[4]);
+
+    const now = batchNow_();
+    const newRows = Object.keys(want).map(k => Number(k)).sort((a, b) => a - b).map(n => [
+      data.batchId, Utilities.getUuid(), now, worker, bcOrig, sku,
+      data.invoice, 'pass', 'active', want[n], round,
+      kind === 'pallet' ? other : String(n),
+      kind === 'pallet' ? String(n) : other,
+    ]);
+
+    // 새 기록을 먼저 쓰고 → 기존 기록을 undone 처리(중간에 실패해도 수량이 모자라지 않도록 순서 고정)
+    const startRow = pl.getLastRow() + 1;
+    ensureSheetRoom_(pl, startRow + newRows.length - 1);
+    pl.getRange(startRow, 5, newRows.length, 2).setNumberFormat('@');
+    pl.getRange(startRow, 1, newRows.length, 13).setValues(newRows);
+    matched.forEach(m => pl.getRange(m.rowNum, 9, 1, 1).setValue('undone'));
+
+    invalidatePackScanCache_(data.batchId);
+    bumpVersion_();
+    return { ok: true, written: newRows.length, replaced: matched.length };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function forceCompletePackScan(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
@@ -2331,6 +2429,9 @@ function getPackScanState(batchId, invoice, round) {
     //   나뉜 쪽)만 보이고 Box 1 몫이 안 보이는 문제가 있었음. 바코드별로
     //   박스마다 수량을 따로 집계해서, 여러 박스에 걸쳐 있으면 전부 보여줌.
     const boxBreakdownByBarcode = {};
+    // ★ 2026-10-08 신규 — 스캔 후 "박스/팔렛 배정 수정"용. 바코드별로 (박스,팔렛)마다 실제 기록 수량을
+    //   전부(번호가 비어있는 미배정 몫 포함) 집계. history는 최근 40건만 내려가므로 이걸로 대체.
+    const assignByBarcode = {};
     const history = [];
     getPackScanRowsCached_(batchId).forEach(r => {
       if (String(r[6]) !== String(invoice)) return;
@@ -2341,6 +2442,12 @@ function getPackScanState(batchId, invoice, round) {
       if (r[7] !== 'pass') return;
       const k = normBarcode_(r[4]);
       packedByBarcode[k] = (packedByBarcode[k] || 0) + entry.qty;
+      if (entry.qty > 0) {
+        if (!assignByBarcode[k]) assignByBarcode[k] = {};
+        const ak = entry.box + '|' + entry.pallet;
+        if (!assignByBarcode[k][ak]) assignByBarcode[k][ak] = { box: entry.box, pallet: entry.pallet, qty: 0 };
+        assignByBarcode[k][ak].qty += entry.qty;
+      }
       // 마지막으로 기록된 박스/팔렛 값 — 분할 없이 한 박스에만 있는 보통의
       // 경우, 화면 상단의 "Box N" 표시 및 다음 스캔 기본값 등에 그대로 사용.
       if (entry.box || entry.pallet) boxPalletByBarcode[k] = { box: entry.box, pallet: entry.pallet };
@@ -2368,6 +2475,8 @@ function getPackScanState(batchId, invoice, round) {
         box: bp.box, pallet: bp.pallet,
         // ★ 2026-09-08 신규 — 박스가 2개 이상으로 나뉜 경우만 채워짐(보통은 빈 배열).
         boxBreakdown: breakdownList.length > 1 ? breakdownList : [],
+        // ★ 2026-10-08 신규 — 이 바코드의 실제 기록 전체(박스/팔렛별 수량, 번호 없는 몫 포함).
+        assign: Object.values(assignByBarcode[k] || {}),
         // ★ 2026-09-14 신규 — 서로 다른 SKU 2개 이상이 같은 바코드로 묶인
         //   경우만 채워짐(보통은 빈 배열). 각 SKU의 원본 바코드 값을 그대로
         //   담아서, 정말 데이터에 같은 바코드로 들어있는지 화면에서 확인 가능.
