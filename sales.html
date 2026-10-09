@@ -115,6 +115,70 @@ a{color:inherit;}
 
 .ship-expand{display:none; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-bottom:10px;}
 .ship-expand.show{display:block;}
+/* ── Shipped list (compact table) ── */
+.shp-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;}
+.shp-title{font-family:var(--mono); font-size:12px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:#C4B0FF;}
+.shp-title b{font-size:15px; margin-left:4px; color:var(--text);}
+.shp-chips{display:flex; gap:5px;}
+.shp-chip{font-family:var(--mono); font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; border:1px solid var(--border2); background:var(--surface2); color:var(--text-dim); cursor:pointer;}
+.shp-chip b{color:var(--text); margin-left:3px;}
+.shp-chip:hover{border-color:#8B5CF6;}
+.shp-chip.on{background:#171433; border-color:#8B5CF6; color:#C4B0FF;}
+.shp-chip.tk.on{color:var(--amber); border-color:var(--amber); background:rgba(245,158,11,0.10);}
+.shp-chip.pu.on{color:var(--green); border-color:var(--green); background:rgba(16,185,129,0.10);}
+.shp-search{margin-left:auto; position:relative; display:flex; align-items:center;}
+.shp-search input{width:300px; background:var(--surface2); border:1px solid var(--border2); border-radius:8px; color:var(--text); font-size:12px; padding:6px 64px 6px 10px; outline:none;}
+.shp-search input:focus{border-color:#8B5CF6;}
+.shp-count{position:absolute; right:8px; font-family:var(--mono); font-size:10.5px; color:var(--text-dim); pointer-events:none;}
+.shp-close{background:transparent; border:1px solid var(--border2); color:var(--text-dim); border-radius:7px; width:26px; height:26px; cursor:pointer; font-size:12px;}
+.shp-close:hover{color:var(--text); border-color:#8B5CF6;}
+.shp-colhead,.shp-row,.shp-kid{display:grid; grid-template-columns:56px 230px 62px minmax(0,1fr) 130px; column-gap:10px; align-items:center;}
+.shp-colhead{font-family:var(--mono); font-size:10px; letter-spacing:0.05em; text-transform:uppercase; color:var(--text-dim); padding:5px 10px; border-bottom:1px solid var(--border);}
+.shp-body{max-height:560px; overflow-y:auto; overscroll-behavior:contain; border-bottom:1px solid var(--border);}
+.shp-day{position:sticky; top:0; z-index:1; background:var(--surface); font-family:var(--mono); font-size:10.5px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:#C4B0FF; padding:6px 10px 4px; border-bottom:1px solid var(--border);}
+.shp-day i{font-style:normal; color:var(--text-dim); margin-left:6px;}
+.shp-row{padding:5px 10px; font-size:12px; border-bottom:1px solid rgba(255,255,255,0.04);}
+.shp-row:hover{background:rgba(139,92,246,0.08);}
+.shp-time{font-family:var(--mono); color:#C4B0FF; font-weight:700;}
+.shp-row .inv,.shp-kid .inv{font-family:var(--mono); font-weight:700; cursor:pointer;}
+.shp-row .inv:hover,.shp-kid .inv:hover{text-decoration:underline; color:var(--blue);}
+.shp-cust{color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.shp-by{color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.shp-via{font-style:normal; color:var(--text-dim); font-size:11px; margin-left:6px;}
+.shp-row .mtag{font-family:var(--mono); font-size:10.5px; font-weight:800;}
+.shp-row .mtag.tk{color:var(--amber);} .shp-row .mtag.ups{color:#C4B0FF;} .shp-row .mtag.pu{color:var(--green);}
+.shp-kidtog{font-family:var(--mono); font-size:10.5px; font-weight:700; color:#C4B0FF; background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.4); border-radius:6px; padding:0 6px; margin-left:6px; cursor:pointer;}
+.shp-kidtog.on{background:rgba(139,92,246,0.28);}
+.shp-kid{padding:2px 10px 2px 10px; font-size:11.5px; background:rgba(139,92,246,0.05);}
+.shp-kid .shp-cust{color:var(--text-dim);}
+@media (max-width:760px){
+  .shp-colhead{display:none;}
+  .shp-row,.shp-kid{grid-template-columns:48px minmax(0,1fr) 54px; row-gap:1px;}
+  .shp-row .shp-cust{grid-column:2 / 4; grid-row:2;} .shp-row .shp-by{grid-column:2 / 4; grid-row:3; font-size:11px;}
+  .shp-search{margin-left:0; width:100%;} .shp-search input{width:100%;}
+  .shp-kid .shp-cust{grid-column:2 / 4;}
+}
+.pg-bar{display:flex; align-items:center; gap:12px; margin-top:8px; flex-wrap:wrap;}
+.pg-left{display:flex; align-items:center; gap:4px;}
+.pg-lab{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; margin-right:4px;}
+.pg-size,.pg-btn{font-family:var(--mono); font-size:11.5px; font-weight:700; min-width:28px; height:26px; padding:0 8px; border-radius:7px; border:1px solid var(--border2); background:var(--surface2); color:var(--text-dim); cursor:pointer;}
+.pg-size:hover,.pg-btn:hover:not(:disabled){border-color:#8B5CF6; color:var(--text);}
+.pg-size.on,.pg-btn.on{background:#171433; border-color:#8B5CF6; color:#C4B0FF;}
+.pg-btn:disabled{opacity:.35; cursor:default;}
+.pg-mid{display:flex; align-items:center; gap:4px; margin:0 auto;}
+.pg-dots{color:var(--text-dim); font-size:12px; padding:0 2px;}
+.pg-right{font-family:var(--mono); font-size:11px; color:var(--text-dim); min-width:90px; text-align:right;}
+@media (max-width:760px){ .pg-mid{margin:0;} .pg-right{margin-left:auto;} }
+.shp-colhead.day,.shp-row.day{grid-template-columns:150px 62px minmax(0,1fr) 260px;}
+.shp-row.day.bad{background:rgba(239,68,68,0.07);}
+.shp-row.day.bad:hover{background:rgba(239,68,68,0.13);}
+.shp-st{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px;}
+.st-ship{color:#C4B0FF; font-weight:700;} .st-bad{color:#FF8A8A; font-weight:700;} .st-ok{color:var(--green);} .st-dim{color:var(--text-dim);}
+.shp-title.day{color:var(--text);} .shp-title.od{color:#FF8A8A;}
+.shp-title i{font-style:normal; font-weight:600; color:var(--text-dim); margin-left:6px; text-transform:none; letter-spacing:0;}
+.shp-day.open{color:var(--amber);}
+.shp-chip.other.on{color:var(--text); border-color:var(--text-dim);}
+@media (max-width:760px){ .shp-row.day{grid-template-columns:minmax(0,1fr) 54px;} .shp-row.day .shp-cust{grid-column:1 / 3; grid-row:2;} .shp-row.day .shp-st{grid-column:1 / 3; grid-row:3;} }
 .ship-expand-cols{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
 .ship-expand-col h4{font-family:var(--mono); font-size:10.5px; letter-spacing:0.05em; margin-bottom:8px;}
 .ship-expand-col.tk h4{color:var(--amber);}
@@ -1800,8 +1864,111 @@ function renderShipRow(jobs){
 
 function toggleShipCard(idx){
   if (SHIP_OPEN_IDX === idx){ SHIP_OPEN_IDX = null; document.getElementById('shipExpand').classList.remove('show'); document.querySelectorAll('.ship-card').forEach(c=>c.classList.remove('open')); return; }
-  SHIP_OPEN_IDX = idx;
+  SHIP_OPEN_IDX = idx; SHP_PAGE.page = 1; DAY_FILTER = { m: 'all', q: '' }; SHP_FILTER = { m: 'all', q: '' };
   renderShipExpand(idx);
+}
+
+let SHP_FILTER = { m: 'all', q: '' };
+let SHP_PAGE = { size: (function(){ try { const v = parseInt(localStorage.getItem('sk_ship_pagesize'), 10); return (v === 10 || v === 20 || v === 30) ? v : 20; } catch(e){ return 20; } })(), page: 1 };
+function pagerHtml_(total){
+  const size = SHP_PAGE.size, pages = Math.max(1, Math.ceil(total / size));
+  if (SHP_PAGE.page > pages) SHP_PAGE.page = pages; if (SHP_PAGE.page < 1) SHP_PAGE.page = 1;
+  const cur = SHP_PAGE.page;
+  const from = total ? (cur - 1) * size + 1 : 0, to = Math.min(total, cur * size);
+  const nums = []; for (let i = 1; i <= pages; i++){ if (i === 1 || i === pages || Math.abs(i - cur) <= 1) nums.push(i); else if (nums[nums.length - 1] !== '…') nums.push('…'); }
+  const btn = (lab, pg, dis, on) => `<button type="button" class="pg-btn${on ? ' on' : ''}" ${dis ? 'disabled' : 'onclick="shpGo_(' + pg + ')"'}>${lab}</button>`;
+  const sizes = [10, 20, 30].map(n => `<button type="button" class="pg-size${n === size ? ' on' : ''}" onclick="shpSize_(${n})">${n}</button>`).join('');
+  return `<div class="pg-bar"><div class="pg-left"><span class="pg-lab">Per page</span>${sizes}</div>`
+    + `<div class="pg-mid">${btn('‹', cur - 1, cur <= 1)}${nums.map(n => n === '…' ? '<span class="pg-dots">…</span>' : btn(n, n, false, n === cur)).join('')}${btn('›', cur + 1, cur >= pages)}</div>`
+    + `<div class="pg-right">${total ? from + '–' + to + ' of ' + total : '0'}</div></div>`;
+}
+function shpRefresh_(toTop){
+  if (document.getElementById('shpBody')){ renderShippedBody_(toTop); }
+  else if (document.getElementById('dayBody')){ renderDayBody_(toTop); }
+  else if (SHIP_OPEN_IDX !== null){ renderShipExpand(SHIP_OPEN_IDX, true); }
+}
+function shpGo_(pg){ SHP_PAGE.page = pg; shpRefresh_(true); }
+function shpSize_(n){ SHP_PAGE.size = n; SHP_PAGE.page = 1; try { localStorage.setItem('sk_ship_pagesize', String(n)); } catch(e){} shpRefresh_(true); }
+let SHP_KIDS_OPEN = {};
+function shpSetMethod_(m){ SHP_FILTER.m = m; SHP_PAGE.page = 1; if (SHIP_OPEN_IDX !== null) renderShipExpand(SHIP_OPEN_IDX, true); }
+function shpSetQuery_(v){ SHP_FILTER.q = String(v || ''); SHP_PAGE.page = 1; renderShippedBody_(); }
+function shpToggleKids_(inv){ SHP_KIDS_OPEN[inv] = !SHP_KIDS_OPEN[inv]; renderShippedBody_(); }
+function renderShippedBody_(toTop){
+  const body = document.getElementById('shpBody'); if (!body) return;
+  const d = (SHIP_DAY_DATA || []).filter(x => x.shippedBar)[0]; if (!d) return;
+  const q = SHP_FILTER.q.trim().toLowerCase();
+  const inList = {}; d.list.forEach(o => { inList[o.invoice] = true; });
+  const kids = {}; d.list.forEach(o => { if (o.linkedTo && inList[o.linkedTo]) (kids[o.linkedTo] = kids[o.linkedTo] || []).push(o); });
+  const isKid = o => !!(o.linkedTo && inList[o.linkedTo]);
+  const hay = o => (o.invoice + ' ' + o.customer + ' ' + (o.by || '')).toLowerCase();
+  const methodOk = o => SHP_FILTER.m === 'all' || o.bucket === SHP_FILTER.m;
+  // 대표 행 기준으로 보여줌. 묶인 오더가 검색에 걸리면 그 대표도 같이 보여줌
+  const heads = d.list.filter(o => !isKid(o)).filter(o => {
+    const ks = kids[o.invoice] || [];
+    if (!methodOk(o)) return false;
+    if (!q) return true;
+    return hay(o).indexOf(q) >= 0 || ks.some(k => hay(k).indexOf(q) >= 0);
+  });
+  const dayTotal = {}; heads.forEach(o => { dayTotal[o.day] = (dayTotal[o.day] || 0) + 1 + (kids[o.invoice] || []).length; });
+  const pagerEl = document.getElementById('shpPager');
+  if (pagerEl) pagerEl.innerHTML = pagerHtml_(heads.length);
+  const pageNow = heads.slice((SHP_PAGE.page - 1) * SHP_PAGE.size, SHP_PAGE.page * SHP_PAGE.size);   // pagerHtml_ 이 페이지 범위를 보정한 뒤의 값
+  const days = []; pageNow.forEach(o => { if (days.indexOf(o.day) < 0) days.push(o.day); });
+  const yest = (function(){ const t = new Date(); t.setDate(t.getDate()-1); return ymdLocal_(t); })();
+  const lab = ymd => !ymd ? 'Earlier' : (ymd === d.todayStr ? 'Today' : ymd === yest ? 'Yesterday' : (parseInt(ymd.slice(5,7),10)+'/'+parseInt(ymd.slice(8,10),10)));
+  const inv = o => `<span class="inv" onclick="event.stopPropagation(); jumpToInvoice('${o.invoice}')">${_escH_(o.invoice)}</span>`;
+  let shown = 0;
+  const html = days.map(dy => {
+    const rows = pageNow.filter(o => o.day === dy);
+    const n = dayTotal[dy] || 0;
+    shown += rows.reduce((t,o) => t + 1 + (kids[o.invoice] || []).length, 0);
+    return `<div class="shp-day">${lab(dy)} <i>${n}</i></div>` + rows.map(o => {
+      const ks = kids[o.invoice] || [];
+      const open = !!SHP_KIDS_OPEN[o.invoice] || (q && ks.some(k => hay(k).indexOf(q) >= 0));
+      const via = (o.linkedTo && !inList[o.linkedTo]) ? ` <em class="shp-via">🔗 via ${_escH_(o.linkedTo)}</em>` : '';
+      const tog = ks.length ? ` <button type="button" class="shp-kidtog${open ? ' on' : ''}" onclick="shpToggleKids_('${o.invoice}')" title="Orders shipped together with this one">🔗 +${ks.length} ${open ? '▴' : '▾'}</button>` : '';
+      const kidRows = open ? ks.map(k => `<div class="shp-kid"><span></span><span>└ ${inv(k)}</span><span></span><span class="shp-cust">${_escH_(k.customer)}</span><span></span></div>`).join('') : '';
+      return `<div class="shp-row"><span class="shp-time">${_escH_((o.at||'').slice(11,16))}</span><span>${inv(o)}${tog}</span><span><b class="mtag ${o.bucket}">${o.bucket.toUpperCase()}</b></span><span class="shp-cust" title="${_escH_(o.customer)}">${_escH_(o.customer)}${via}</span><span class="shp-by">${_escH_(o.by || '')}</span></div>${kidRows}`;
+    }).join('');
+  }).join('');
+  body.innerHTML = html || `<div class="ship-empty-col">${d.list.length ? 'No matching orders' : 'Nothing shipped yet'}</div>`;
+  const cnt = document.getElementById('shpCount');
+  if (cnt) cnt.textContent = (q || SHP_FILTER.m !== 'all') ? (heads.reduce((t,o) => t + 1 + (kids[o.invoice] || []).length, 0) + ' of ' + d.list.length) : '';
+  if (toTop) body.scrollTop = 0;
+}
+
+let DAY_FILTER = { m: 'all', q: '' };
+function dayFilterSet_(m){ DAY_FILTER.m = m; SHP_PAGE.page = 1; if (SHIP_OPEN_IDX !== null) renderShipExpand(SHIP_OPEN_IDX, true); }
+function dayQuerySet_(v){ DAY_FILTER.q = String(v || ''); SHP_PAGE.page = 1; renderDayBody_(true); }
+function renderDayBody_(toTop){
+  const body = document.getElementById('dayBody'); if (!body) return;
+  const d = SHIP_DAY_DATA[SHIP_OPEN_IDX]; if (!d || d.shippedBar) return;
+  const q = DAY_FILTER.q.trim().toLowerCase();
+  const all = [].concat(d.orders.tk, d.orders.ups, d.orders.pu, d.orders.other);
+  const isMissing = o => !o.shipped && (o.dims === false || (d.overdue && o.reason === 'dims'));
+  const mOk = o => DAY_FILTER.m === 'all' || (DAY_FILTER.m === 'missing' ? isMissing(o) : o.bucket === DAY_FILTER.m);
+  const rows = all.filter(mOk).filter(o => !q || (o.invoice + ' ' + o.customer).toLowerCase().indexOf(q) >= 0)
+    .sort((a, b) => (a.shipped ? 1 : 0) - (b.shipped ? 1 : 0) || (isMissing(b) ? 1 : 0) - (isMissing(a) ? 1 : 0));
+  const pagerEl = document.getElementById('dayPager'); if (pagerEl) pagerEl.innerHTML = pagerHtml_(rows.length);
+  const pageRows = rows.slice((SHP_PAGE.page - 1) * SHP_PAGE.size, SHP_PAGE.page * SHP_PAGE.size);
+  const openTotal = rows.filter(o => !o.shipped).length, shipTotal = rows.length - openTotal;
+  const inv = o => `<span class="inv" onclick="event.stopPropagation(); jumpToInvoice('${o.invoice}')">${_escH_(o.invoice)}</span>`;
+  const status = o => {
+    if (o.shipped) return `<span class="st-ship">✓ Shipped${o.shippedAt ? ' ' + _escH_(o.shippedAt.slice(5,16)) : ''}${o.shippedBy ? ' · ' + _escH_(o.shippedBy) : ''}</span>`;
+    if (d.overdue) return `<span class="st-bad">${o.days} day${o.days > 1 ? 's' : ''} overdue — ${o.reason === 'dims' ? 'no dims' : 'not shipped'}</span>`;
+    if (o.dims === false) return '<span class="st-bad">⚠ Missing dimensions</span>';
+    if (o.dims === true) return '<span class="st-ok">Dimensions saved</span>';
+    return '<span class="st-dim">—</span>';
+  };
+  let html = '', lastGrp = '';
+  pageRows.forEach(o => {
+    const grp = o.shipped ? 'Shipped' : 'Open';
+    if (grp !== lastGrp){ html += `<div class="shp-day${o.shipped ? '' : ' open'}">${grp} <i>${o.shipped ? shipTotal : openTotal}</i></div>`; lastGrp = grp; }
+    html += `<div class="shp-row day${isMissing(o) ? ' bad' : ''}"><span>${inv(o)}</span><span><b class="mtag ${o.bucket}">${o.bucket.toUpperCase()}</b></span><span class="shp-cust" title="${_escH_(o.customer)}">${_escH_(o.customer)}</span><span class="shp-st">${status(o)}</span></div>`;
+  });
+  body.innerHTML = html || `<div class="ship-empty-col">${all.length ? 'No matching orders' : 'No orders'}</div>`;
+  const c = document.getElementById('dayCount'); if (c) c.textContent = (q || DAY_FILTER.m !== 'all') ? (rows.length + ' of ' + all.length) : '';
+  if (toTop) body.scrollTop = 0;
 }
 
 function renderShipExpand(idx, silent){
@@ -1814,55 +1981,55 @@ function renderShipExpand(idx, silent){
   const invLinkOf = o => `<span class="inv" onclick="event.stopPropagation(); jumpToInvoice('${o.invoice}')">${_escH_(o.invoice)}</span>`;
   const cust = o => `<div class="cust">${_escH_(o.customer)}</div>`;
 
-  // ── ✓ Shipped 바: 날짜별(최신순) 묶음 + 시각·담당자
+  // ── ✓ Shipped 바: 컴팩트 표(한 줄 = 한 오더) + 검색 + 방식 필터 + 스크롤. 90건이어도 화면을 덮지 않음
   if (d.shippedBar){
-    const days = []; d.list.forEach(o => { if (days.indexOf(o.day) < 0) days.push(o.day); });
-    const yest = (function(){ const t = new Date(); t.setDate(t.getDate()-1); return ymdLocal_(t); })();
-    const lab = ymd => !ymd ? 'Earlier' : (ymd === d.todayStr ? 'Today' : ymd === yest ? 'Yesterday' : (parseInt(ymd.slice(5,7),10)+'/'+parseInt(ymd.slice(8,10),10)));
-    // ★ 묶인(LINKED) 오더는 대표(PRIMARY) 카드 아래에 붙여서 표시 — 대표가 보이면 묶인 오더도 항상 같이 보임
-    const inList = {}; d.list.forEach(o => { inList[o.invoice] = true; });
-    const kids = {}; d.list.forEach(o => { if (o.linkedTo && inList[o.linkedTo]) (kids[o.linkedTo] = kids[o.linkedTo] || []).push(o); });
-    const body = days.map(dy => {
-      const rows = d.list.filter(o => o.day === dy);
-      const heads = rows.filter(o => !(o.linkedTo && inList[o.linkedTo])); // 대표(또는 단독) 카드
-      const kidsOf = o => kids[o.invoice] || [];
-      const total = heads.reduce((n,o) => n + 1 + kidsOf(o).length, 0);
-      return `<div class="ship-sec-title s">${lab(dy)} · ${total}</div>` + heads.map(o => {
-        const ks = kidsOf(o);
-        const via = (o.linkedTo && !inList[o.linkedTo]) ? `<span class="mtag" style="color:var(--text-dim)">🔗 via ${_escH_(o.linkedTo)}</span>` : '';
-        const kidHtml = ks.map(k => `<div class="ship-kid">└ ${invLinkOf(k)} <span class="kcust">${_escH_(k.customer)}</span></div>`).join('');
-        return `<div class="ship-order-item done"><div>${invLinkOf(o)}<span class="mtag ${o.bucket}">${o.bucket.toUpperCase()}</span>${ks.length ? `<span class="mtag" style="color:#C4B0FF">🔗 +${ks.length}</span>` : ''}${via}</div>${cust(o)}<div class="shipped-line">✓ ${_escH_((o.at||'').slice(11,16))}${o.by ? ' · ' + _escH_(o.by) : ''}</div>${kidHtml}</div>`;
-      }).join('');
-    }).join('');
-    panel.innerHTML = body || '<div class="ship-empty-col">Nothing shipped yet</div>';
-    panel.innerHTML += '<div class="ship-note">Orders leave this list when they are archived (TK: 7 business days after shipping · PU / UPS / PU &amp; TK: 3 business days). Archived orders can still be found in Order Detail Lookup.</div>';
+    const prevBody = panel.querySelector('.shp-body');
+    const prevScroll = prevBody ? prevBody.scrollTop : 0;
+    const prevQ = document.getElementById('shpQ');
+    const hadFocus = prevQ && document.activeElement === prevQ;
+    const c = { all: d.list.length, tk: 0, ups: 0, pu: 0 };
+    d.list.forEach(o => { if (c[o.bucket] !== undefined) c[o.bucket]++; });
+    const chip = (k, lab) => `<button type="button" class="shp-chip ${k}${SHP_FILTER.m === k ? ' on' : ''}" onclick="shpSetMethod_('${k}')">${lab} <b>${c[k]}</b></button>`;
+    panel.innerHTML = `<div class="shp-head">
+        <div class="shp-title">✓ Shipped <b>${d.list.length}</b></div>
+        <div class="shp-chips">${chip('all','All')}${chip('tk','TK')}${chip('ups','UPS')}${chip('pu','PU')}</div>
+        <div class="shp-search"><input id="shpQ" type="text" placeholder="Search invoice, customer or shipper…" value="${_escH_(SHP_FILTER.q)}" oninput="shpSetQuery_(this.value)" autocomplete="off"><span class="shp-count" id="shpCount"></span></div>
+        <button type="button" class="shp-close" title="Close" onclick="toggleShipCard(${idx})">✕</button>
+      </div>
+      <div class="shp-colhead"><span>Time</span><span>Invoice</span><span>Method</span><span>Customer</span><span>Shipped by</span></div>
+      <div class="shp-body" id="shpBody"></div>
+      <div id="shpPager"></div>
+      <div class="ship-note">Orders leave this list when they are archived (TK: 7 business days after shipping · PU / UPS / PU &amp; TK: 3 business days). Archived orders can still be found in Order Detail Lookup.</div>`;
     panel.classList.add('show');
+    renderShippedBody_();
+    const nb = document.getElementById('shpBody'); if (nb && prevScroll) nb.scrollTop = prevScroll;
+    if (hadFocus){ const q = document.getElementById('shpQ'); if (q){ q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch(e){} } }
     return;
   }
 
-  function col(list, cls, label){
-    // 미출고 먼저, 출고 완료(✓ SHIPPED)는 같은 열 맨 아래
-    const sorted = list.slice().sort((a,b) => (a.shipped?1:0) - (b.shipped?1:0));
-    if (!sorted.length) return `<div class="ship-expand-col ${cls}"><h4>${label} (0)</h4><div class="ship-empty-col">No orders</div></div>`;
-    const items = sorted.map(o => {
-      const invLink = invLinkOf(o);
-      if (o.shipped){
-        return `<div class="ship-order-item done"><div>${invLink}</div>${cust(o)}<div class="shipped-line">✓ SHIPPED${o.shippedAt ? ' ' + _escH_(o.shippedAt.slice(5,16)) : ''}${o.shippedBy ? ' · ' + _escH_(o.shippedBy) : ''}</div></div>`;
-      }
-      if (d.overdue){
-        const txt = o.reason === 'dims' ? 'no dims' : 'not shipped';
-        return `<div class="ship-order-item missing"><div>${invLink}</div>${cust(o)}<div class="days-late">${o.days} day${o.days>1?'s':''} overdue — ${txt}</div></div>`;
-      }
-      if (o.dims === null) return `<div class="ship-order-item"><div>${invLink}</div>${cust(o)}</div>`;
-      if (o.dims === false) return `<div class="ship-order-item missing"><div>${invLink}</div>${cust(o)}<div class="dims-flag">⚠ Missing dimensions</div></div>`;
-      return `<div class="ship-order-item"><div>${invLink}</div>${cust(o)}<div class="dims-ok">Dimensions saved</div></div>`;
-    }).join('');
-    const openN = list.filter(o=>!o.shipped).length;
-    return `<div class="ship-expand-col ${cls}"><h4>${label} (${openN}${list.length!==openN ? ' open · ' + (list.length-openN) + ' shipped' : ''})</h4>${items}</div>`;
-  }
-  panel.innerHTML = `<div class="ship-expand-cols">${col(d.orders.tk,'tk','TK')}${col(d.orders.ups,'ups','UPS')}${col(d.orders.pu,'pu','PU')}</div>`
+  // ── Overdue / Today / Next Workday / 2nd Workday: Shipped와 같은 컴팩트 표 + 검색 + 방식 필터 + 페이지 바
+  const prevBody = panel.querySelector('.shp-body');
+  const prevScroll = prevBody ? prevBody.scrollTop : 0;
+  const prevQ = document.getElementById('dayQ');
+  const hadFocus = prevQ && document.activeElement === prevQ;
+  const allItems = [].concat(d.orders.tk, d.orders.ups, d.orders.pu, d.orders.other);
+  const cnt = { all: allItems.length, tk: d.orders.tk.length, ups: d.orders.ups.length, pu: d.orders.pu.length, other: d.orders.other.length,
+                missing: allItems.filter(o => !o.shipped && (o.dims === false || (d.overdue && o.reason === 'dims'))).length };
+  const dchip = (k, lab) => `<button type="button" class="shp-chip ${k}${DAY_FILTER.m === k ? ' on' : ''}" onclick="dayFilterSet_('${k}')">${lab} <b>${cnt[k]}</b></button>`;
+  panel.innerHTML = `<div class="shp-head">
+      <div class="shp-title ${d.overdue ? 'od' : 'day'}">${_escH_(d.label)} <i>${_escH_(d.sub || '')}</i></div>
+      <div class="shp-chips">${dchip('all','All')}${dchip('tk','TK')}${dchip('ups','UPS')}${dchip('pu','PU')}${cnt.other ? dchip('other','Other') : ''}${cnt.missing ? dchip('missing','⚠ Missing') : ''}</div>
+      <div class="shp-search"><input id="dayQ" type="text" placeholder="Search invoice or customer…" value="${_escH_(DAY_FILTER.q)}" oninput="dayQuerySet_(this.value)" autocomplete="off"><span class="shp-count" id="dayCount"></span></div>
+      <button type="button" class="shp-close" title="Close" onclick="toggleShipCard(${idx})">✕</button>
+    </div>
+    <div class="shp-colhead day"><span>Invoice</span><span>Method</span><span>Customer</span><span>Status</span></div>
+    <div class="shp-body" id="dayBody"></div>
+    <div id="dayPager"></div>`
     + (d.overdue ? '<div class="ship-note">Shipped orders leave Overdue automatically and move to the ✓ Shipped list.</div>' : '');
   panel.classList.add('show');
+  renderDayBody_();
+  const nb = document.getElementById('dayBody'); if (nb && prevScroll) nb.scrollTop = prevScroll;
+  if (hadFocus){ const q = document.getElementById('dayQ'); if (q){ q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch(e){} } }
 }
 
 function onSheetSearch(){ SHEET_PAGE = 1; renderSheet(); }
