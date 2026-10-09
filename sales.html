@@ -613,6 +613,16 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .boxqty-btn:disabled{opacity:0.4; cursor:not-allowed;}
 .boxqty-val{font-family:var(--mono); font-weight:800; font-size:22px; min-width:44px; text-align:center;}
 .boxqty-meta{font-family:var(--mono); font-size:10.5px; color:var(--text-dim); margin-top:10px;}
+.putk-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.putk-field .lbl{font-size:10.5px; color:var(--text-dim); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; font-weight:700;}
+.putk-ctl{display:flex; align-items:center; gap:8px;}
+.putk-input{width:78px; text-align:center; background:var(--surface); border:1.5px solid var(--border); border-radius:8px; padding:8px 6px; color:var(--text); font-family:var(--mono); font-weight:800; font-size:20px; outline:none; height:40px;}
+.putk-input:focus{border-color:var(--purple);}
+.putk-actions{align-items:center; margin-top:14px;}
+.putk-actions .dims-save-btn{flex:0 0 150px; padding:11px;}
+.putk-state{font-size:12px; font-weight:700;}
+.putk-warn{color:var(--amber);} .putk-ok{color:var(--green);} .putk-dim{color:var(--text-dim);}
+@media (max-width:520px){ .putk-grid{grid-template-columns:1fr;} .putk-actions .dims-save-btn{flex:1;} }
 
 .dim-row{display:grid; grid-template-columns:36px 1fr 1fr 1fr 90px 32px; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--border);}
 .dim-row.box-only{grid-template-columns:36px 160px 32px;}
@@ -1484,6 +1494,7 @@ function applySheetOverviewResult(res){
   // ★ 2026-10-05 — 미러 캐시와 같은 객체를 공유하지 않도록 복사(override가 캐시 원본을 덮어쓰지 않게) + Moved 보호값 적용
   SHEET_JOBS = (res.jobs || []).map(j => Object.assign({}, j));
   _applyMovedOverrides_(SHEET_JOBS, Date.now());
+  _applyPuTkOverrides_(SHEET_JOBS, Date.now());
   _applyShippedOvToArr_(SHEET_JOBS, Date.now()); // ★ 2026-10-07 — 방금 누른/받은 출고 상태 보호값
   saveCachedSheetOverview_(SHEET_JOBS); // ★ 2026-08-19 신규 — 다음 실패 대비 저장
   // ★ 2026-08-07 수정(매니저 지적) — 예전엔 데이터를 새로 받을 때마다 무조건
@@ -1839,6 +1850,9 @@ function dimsBadge(o){
   const needs = (o.method==='TRUCKING'||o.method==='TK'||o.method==='UPS');
   // ★ 2026-08-04 신규 — PU는 디멘션이 원래 필요 없는데 기존엔 대시(—)만 떠서
   //   "아직 안 넣은 건지, 원래 필요 없는 건지" 구분이 애매했음. 명확하게 N/A로 표시.
+  if (String(o.method||'').trim().toUpperCase() === 'PU & TK') {   // ★ 2026-10-08 — PU&TK: 박스/팔레트 입력 여부
+    return puTkEntered_(o) ? '<span class="badge pass" title="'+puTkSummary_(o)+'">✓ Saved ('+(Number(o.puTkBoxQty)||0)+'B · '+(Number(o.puTkPalletQty)||0)+'P)</span>' : '<span class="badge pending">Not Entered</span>';
+  }
   if (!needs) return '<span class="badge na">N/A</span>';
   const n = o.dimsCount || 0;
   // ★ 2026-08-06 — 다른(대표) 인보이스에 디멘션이 포함된 오더는 그 번호를 같이 보여줌
@@ -2072,6 +2086,7 @@ function applyTodayResult(res){
   TODAY_JOBS = (res.jobs || []).map(j => Object.assign({}, j));
   // ★ 2026-09-03 신규 — 방금 확인된 결제상태 우선 적용(위 설명 참고)
   const now = Date.now();
+  _applyPuTkOverrides_(TODAY_JOBS, now); // ★ 2026-10-08 — 방금 저장한 PU&TK 박스/팔레트 우선 적용
   Object.keys(_recentPaymentOverrides).forEach(inv => {
     const ov = _recentPaymentOverrides[inv];
     if (ov.until < now) { delete _recentPaymentOverrides[inv]; return; }
@@ -2273,6 +2288,7 @@ function renderToday(){
       const payMini = j.paymentPaid ? '<span class="pay-mini paid" data-pay-badge="1">CONFIRMED</span>' : '<span class="pay-mini unpaid" data-pay-badge="1">UNCONFIRMED</span>';
       methodBadge = `<span class="method-cell-wrap">${methodBadge}${payMini}</span>`;
     }
+    const isPuTkJ = (String(j.method||'').trim().toUpperCase() === 'PU & TK'); // ★ 2026-10-08 — PU&TK도 박스/팔레트 입력 → DIMS 칸에 표시
     const needsDimsJ = (j.method==='TRUCKING'||j.method==='TK'||j.method==='UPS');
     // ★ 2026-10-02 신규(현장 피드백) — PRIMARY(대표) 오더도 자식이 묶여 있으면
     //   dimsBadge()와 동일한 방식으로 링크 정보를 보여줌(리스트 통일성).
@@ -2284,7 +2300,7 @@ function renderToday(){
     //   상세 팝업까지 같이 열리지 않음.
     const linkedNJ = j.dimsLinkedCount || 0;
     const linkedInnerJ = linkedNJ>0 ? ' <span class="badge-link-part badge-link-clickable" title="클릭하면 묶인 오더 전체 보기" onclick="openLinkedGroupPopover(event, \'today\', \''+j.invoice+'\')">· 🔗 +'+linkedNJ+'</span>' : '';
-    const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims'+linkedInnerJ+'</span>' : '<span class="plain-tag pending">Not Entered'+linkedInnerJ+'</span>')) : '<span class="plain-tag na">N/A</span>';
+    const dimsBadgeJ = isPuTkJ ? (puTkEntered_(j) ? '<span class="plain-tag pass" title="'+puTkSummary_(j)+'">✓ Dims</span>' : '<span class="plain-tag pending">Not Entered</span>') : needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims'+linkedInnerJ+'</span>' : '<span class="plain-tag pending">Not Entered'+linkedInnerJ+'</span>')) : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" data-invoice="${j.invoice}" onclick="jumpToInvoice('${j.invoice}')" title="${(insp.indexOf('ISSUES')>=0 || insp.indexOf('🔗')>=0) ? 'Click for issue details' : ''}">
       <span class="today-inv" title="Inspected ${j.inspEnd||'-'}">${j.invoice||''}</span>
       ${repLineHtml_(j) ? `<span class="today-cust has-rep" title="${(j.remarks||'').replace(/"/g,'&quot;')}"><span class="cn">${j.remarks||''}</span>${repLineHtml_(j)}</span>` : `<span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>`}
@@ -3244,73 +3260,150 @@ function renderDimsSection(order){
 }
 
 // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 전용 간편 입력.
-// 전체 박스 수량만 +/- 스테퍼로 입력·저장(setPuTkBoxQty, Code.gs). TK/UPS의
-// 묶음(linked)·후보 추천 등 복잡한 Dims 기능과는 완전히 분리된 가벼운 UI.
+// ★ 2026-10-08 개편(사용자 요청) — 박스 수량 하나만 +/-로 "즉시 저장"하던 방식을, Boxes / Pallets 두 칸 +
+//   Save 버튼 방식으로 변경. 입력 중엔 저장되지 않고(임시 입력값), Save를 눌러야 서버에 저장됨.
+//   저장하면 바깥 목록(2번 탭 DIMS / 1번 탭 Dimensions)에도 "✓ Dims"로 바로 표시됨.
+const _putkDraft = {};   // { invoice: { box: '3', pal: '1' } }  저장 전 임시 입력값(문자열)
+const _putkSaving = {};  // { invoice: true } 저장 요청 진행 중
+let _recentPuTkOverrides = {}; // { invoice: { box, pal, until } } 방금 저장한 값 우선 적용(낡은 목록 갱신이 덮어쓰지 못하게)
+function _putkSaved_(order){ return { box: Math.max(0, Math.round(Number(order && order.puTkBoxQty) || 0)), pal: Math.max(0, Math.round(Number(order && order.puTkPalletQty) || 0)) }; }
+function _putkCur_(order){
+  const sv = _putkSaved_(order), d = _putkDraft[order.invoice];
+  const num = (v, fb) => { if (v === undefined) return fb; const n = Math.round(Number(v)); return (isFinite(n) && n >= 0) ? n : fb; };
+  return d ? { box: num(d.box, sv.box), pal: num(d.pal, sv.pal), boxRaw: (d.box === undefined ? String(sv.box) : d.box), palRaw: (d.pal === undefined ? String(sv.pal) : d.pal) } : { box: sv.box, pal: sv.pal, boxRaw: String(sv.box), palRaw: String(sv.pal) };
+}
+function _putkDirty_(order){
+  if (!order || !_putkDraft[order.invoice]) return false;
+  const sv = _putkSaved_(order), c = _putkCur_(order);
+  return c.box !== sv.box || c.pal !== sv.pal;
+}
+function _putkInvalid_(order){
+  const d = _putkDraft[order.invoice]; if (!d) return false;
+  const bad = v => { if (v === undefined) return false; const t = String(v).trim(); if (t === '') return true; const n = Number(t); return !isFinite(n) || n < 0 || Math.round(n) !== n || n > 9999; };
+  return bad(d.box) || bad(d.pal);
+}
+function _putkStateHtml_(order){
+  const sv = _putkSaved_(order), entered = sv.box > 0 || sv.pal > 0;
+  if (_putkInvalid_(order)) return '<span class="putk-warn">Enter whole numbers (0 or more)</span>';
+  if (_putkDirty_(order)) return '<span class="putk-warn">Unsaved changes</span>';
+  return entered ? '<span class="putk-ok">✓ Saved</span>' : '<span class="putk-dim">Not entered yet</span>';
+}
 function renderBoxQtySection(order){
-  const qty = Number(order.puTkBoxQty || 0);
+  const c = _putkCur_(order);
+  const inv = order.invoice;
+  const saving = !!_putkSaving[inv];
+  const dirty = _putkDirty_(order), invalid = _putkInvalid_(order);
   const meta = order.puTkBoxQtyBy
     ? `Entered by ${order.puTkBoxQtyBy}${order.puTkBoxQtyAt ? ' · ' + order.puTkBoxQtyAt : ''}`
     : '';
+  const fld = (key, label, val, raw) => `<div class="putk-field">
+      <div class="lbl">${label}</div>
+      <div class="putk-ctl">
+        <button class="boxqty-btn" type="button" data-putk-minus="${key}" onclick="putkStep('${inv}','${key}',-1)" ${(saving||val<=0)?'disabled':''}>−</button>
+        <input class="putk-input" id="putk-${key}" type="text" inputmode="numeric" autocomplete="off" value="${String(raw).replace(/"/g,'&quot;')}" ${saving?'disabled':''}
+          oninput="putkType('${inv}','${key}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();putkSave('${inv}');}" onfocus="this.select()">
+        <button class="boxqty-btn" type="button" onclick="putkStep('${inv}','${key}',1)" ${saving?'disabled':''}>+</button>
+      </div>
+    </div>`;
   return `<div class="section-title-row"><span class="section-title">Shipping Dimensions</span></div>
     <div class="dims-panel" id="boxqty-panel">
-      <div style="display:flex; align-items:center; gap:14px;">
-        <button class="boxqty-btn" onclick="adjustPuTkBoxQty('${order.invoice}', -1)" ${qty<=0?'disabled':''}>−</button>
-        <span class="boxqty-val" id="boxqty-val">${qty}</span>
-        <button class="boxqty-btn" onclick="adjustPuTkBoxQty('${order.invoice}', 1)">+</button>
-        <span style="font-size:13px; color:var(--text-dim,#888);">Box(es)</span>
+      <div class="putk-grid">
+        ${fld('box', 'Boxes', c.box, c.boxRaw)}
+        ${fld('pal', 'Pallets', c.pal, c.palRaw)}
       </div>
-      ${meta ? `<div class="boxqty-meta">${meta}</div>` : ''}
+      <div class="dims-save-row putk-actions">
+        <button class="dims-save-btn" id="putk-save" type="button" onclick="putkSave('${inv}')" ${(saving||!dirty||invalid)?'disabled':''}>${saving ? 'Saving…' : 'Save'}</button>
+        <span class="putk-state" id="putk-state">${_putkStateHtml_(order)}</span>
+      </div>
+      ${meta ? `<div class="boxqty-meta" id="putk-meta">${meta}</div>` : ''}
     </div>`;
 }
-
-// 서버에 바로 반영(선택→Save 방식이 아니라 +/- 누를 때마다 즉시 저장 — 숫자
-// 하나짜리라 복잡한 편집모드 없이도 실수 위험이 낮음. 실패 시 화면을 되돌림).
-// ★ 2026-10-04 개편 — 빠르게 여러 번 누르는 경우(+ + +)를 안전하게: 화면은 누를 때마다 즉시 바뀌고, 서버 요청은
-//   누른 순서대로 하나씩 보냄(도착 순서가 뒤바뀌어 마지막 값이 틀어지는 사고 방지). 서버 응답으로 화면을
-//   되돌리는 건 "더 기다리는 요청이 없을 때"만 — 아니면 연속 클릭 중에 숫자가 깜빡이며 뒤로 갔다 앞으로 감.
-const _qtyState = {}; // { invoice: { pending, confirmed } }
-async function adjustPuTkBoxQty(invoice, delta){
+function _putkRepaint_(invoice){
   if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return;
-  const cur = Number(CURRENT_ORDER.puTkBoxQty || 0);
-  const next = Math.max(0, cur + delta);
-  if (next === cur) return;
-  let st = _qtyState[invoice];
-  if (!st) st = _qtyState[invoice] = { pending: 0, confirmed: cur };
-  st.pending++;
-  const repaint = () => {
-    if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){
-      const panel = document.getElementById('boxqty-panel');
-      if (panel) panel.outerHTML = renderBoxQtySection(CURRENT_ORDER);
-    }
-  };
-  CURRENT_ORDER.puTkBoxQty = next; // 낙관적 업데이트
-  repaint();
-
+  const panel = document.getElementById('boxqty-panel');
+  if (!panel) return;
+  // 패널을 다시 그리되, 입력 중이던 칸의 포커스·커서 위치는 유지
+  const ae = document.activeElement, aid = ae && ae.id, pos = ae && ae.selectionStart;
+  const tmp = document.createElement('div'); tmp.innerHTML = renderBoxQtySection(CURRENT_ORDER);
+  const np = tmp.querySelector('#boxqty-panel'); if (np) panel.replaceWith(np);
+  if (aid && /^putk-(box|pal)$/.test(aid)){ const el = document.getElementById(aid); if (el && !el.disabled){ el.focus(); try { el.setSelectionRange(pos, pos); } catch(e){} } }
+}
+function _putkUpdateState_(invoice){
+  // 입력 중에는 패널을 다시 그리지 않고(커서 튐 방지) Save 버튼/안내 문구/− 버튼만 갱신
+  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return;
+  const btn = document.getElementById('putk-save'), st = document.getElementById('putk-state');
+  const dirty = _putkDirty_(CURRENT_ORDER), invalid = _putkInvalid_(CURRENT_ORDER), saving = !!_putkSaving[invoice];
+  if (btn){ btn.disabled = saving || !dirty || invalid; btn.textContent = saving ? 'Saving…' : 'Save'; }
+  if (st) st.innerHTML = _putkStateHtml_(CURRENT_ORDER);
+  const c = _putkCur_(CURRENT_ORDER);
+  ['box','pal'].forEach(k => { const m = document.querySelector('[data-putk-minus="' + k + '"]'); if (m) m.disabled = saving || c[k] <= 0; });
+}
+function putkType(invoice, key, raw){
+  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice || _putkSaving[invoice]) return;
+  const d = _putkDraft[invoice] || (_putkDraft[invoice] = {});
+  const sv = _putkSaved_(CURRENT_ORDER);
+  if (d.box === undefined) d.box = String(sv.box);
+  if (d.pal === undefined) d.pal = String(sv.pal);
+  d[key] = String(raw).replace(/[^\d]/g, '').slice(0, 4);   // 숫자만, 최대 4자리
+  const el = document.getElementById('putk-' + key); if (el && el.value !== d[key]) el.value = d[key];
+  _putkUpdateState_(invoice);
+}
+function putkStep(invoice, key, delta){
+  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice || _putkSaving[invoice]) return;
+  const c = _putkCur_(CURRENT_ORDER);
+  const next = Math.min(9999, Math.max(0, c[key] + delta));
+  const d = _putkDraft[invoice] || (_putkDraft[invoice] = {});
+  const sv = _putkSaved_(CURRENT_ORDER);
+  if (d.box === undefined) d.box = String(c.box);
+  if (d.pal === undefined) d.pal = String(c.pal);
+  d[key] = String(next);
+  _putkRepaint_(invoice);
+}
+async function putkSave(invoice){
+  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice || _putkSaving[invoice]) return;
+  if (!_putkDirty_(CURRENT_ORDER) || _putkInvalid_(CURRENT_ORDER)) return;
+  const c = _putkCur_(CURRENT_ORDER);
+  _putkSaving[invoice] = true; _putkRepaint_(invoice);
   let res;
   try {
-    res = await _serial_(invoice, () => gasPostSmart_('setPuTkBoxQty', { invoice: invoice, qty: next, by: (authGetName() || 'Sales (Order Detail Lookup)') }));
+    res = await _serial_(invoice, () => gasPostSmart_('setPuTkBoxQty', { invoice: invoice, qty: c.box, pallets: c.pal, by: (authGetName() || 'Sales (Order Detail Lookup)') }));
   } catch (e) {
     res = { ok:false, error: String(e && e.message || e) };
   }
-  st.pending--;
-  const last = (st.pending === 0);
+  delete _putkSaving[invoice];
   if (!res || !res.ok){
-    // 마지막으로 서버가 확인한 값으로 복구
-    if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) CURRENT_ORDER.puTkBoxQty = st.confirmed;
-    repaint();
-    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
-  } else {
-    st.confirmed = res.qty;
-    if (last && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){
-      CURRENT_ORDER.puTkBoxQty = res.qty;
-      CURRENT_ORDER.puTkBoxQtyAt = res.qtyAt;
-      CURRENT_ORDER.puTkBoxQtyBy = res.qtyBy;
-      repaint();
-    }
-    if (last) _syncInvoiceMirror_(invoice);
+    _putkRepaint_(invoice);   // 입력값(임시)은 그대로 두어 다시 시도할 수 있게
+    alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nYour numbers are still on screen — please try again.');
+    return;
   }
-  if (last) delete _qtyState[invoice];
+  const box = (res.qty !== undefined) ? Number(res.qty) : c.box;
+  const pal = (res.pallets !== undefined) ? Number(res.pallets) : c.pal;
+  delete _putkDraft[invoice];
+  _applyPuTkToJobs_(invoice, box, pal);
+  _recentPuTkOverrides[invoice] = { box: box, pal: pal, until: Date.now() + 120000 };
+  if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){
+    CURRENT_ORDER.puTkBoxQty = box; CURRENT_ORDER.puTkPalletQty = pal;
+    CURRENT_ORDER.puTkBoxQtyAt = res.qtyAt; CURRENT_ORDER.puTkBoxQtyBy = res.qtyBy;
+    _putkRepaint_(invoice);
+  }
+  try { renderToday(); } catch(e){}
+  try { renderSheet(); } catch(e){}
+  _syncInvoiceMirror_(invoice);
 }
+function _applyPuTkToJobs_(invoice, box, pal){
+  [TODAY_JOBS, SHEET_JOBS].forEach(arr => (arr || []).forEach(j => { if (j.invoice === invoice){ j.puTkBoxQty = box; j.puTkPalletQty = pal; } }));
+}
+function _applyPuTkOverrides_(arr, now){
+  Object.keys(_recentPuTkOverrides).forEach(inv => {
+    const ov = _recentPuTkOverrides[inv];
+    if (ov.until < now) { delete _recentPuTkOverrides[inv]; return; }
+    const j = (arr || []).find(x => x.invoice === inv);
+    if (j){ j.puTkBoxQty = ov.box; j.puTkPalletQty = ov.pal; }
+  });
+}
+// PU & TK의 "치수 입력됨" 기준: 박스 또는 팔레트가 1 이상
+function puTkEntered_(o){ return (Number(o && o.puTkBoxQty) || 0) > 0 || (Number(o && o.puTkPalletQty) || 0) > 0; }
+function puTkSummary_(o){ const b = Number(o && o.puTkBoxQty) || 0, p = Number(o && o.puTkPalletQty) || 0; return b + ' Box' + (b===1?'':'es') + ' · ' + p + ' Pallet' + (p===1?'':'s'); }
 
 /* ★ 2026-08-06 신규 — 디멘션 합산
  * [배경] 같은 고객사가 하루에 오더를 나눠서 내는 경우(원 오더 + 추가 오더)가
@@ -4175,6 +4268,8 @@ function renderDetail(res){
 // ★ 2026-08-05 신규 — 상세 카드 닫기. 검색창도 같이 비워서, 위쪽 "Completed
 // Today" 목록만 다시 깔끔하게 보이는 상태로 되돌림.
 function closeDetailCard(){
+  if (CURRENT_ORDER && typeof _putkDirty_ === 'function' && _putkDirty_(CURRENT_ORDER) && !confirm('You have unsaved Box / Pallet numbers.\nClose without saving?')) return;
+  if (CURRENT_ORDER && CURRENT_ORDER.invoice) delete _putkDraft[CURRENT_ORDER.invoice];
   // ★ 2026-08-06 — 팝업만 닫음. 검색어와 목록 위치는 그대로 두어서,
   //   여러 건을 연속으로 처리할 때 매번 다시 찾지 않아도 되게 함.
   _stopInvoiceDetailSub(); // ★ 세션A 신규 — 모달을 닫으면 실시간 구독도 반드시 해제(누수 방지)
