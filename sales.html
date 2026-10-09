@@ -768,6 +768,27 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   .today-row .plain-tag{font-size:11.5px;}
   .d-full{display:none;} .d-short{display:inline;} .mv-x{display:none;}
 }
+
+/* ★ 2026-10-08 신규 — Sales Rep 필터(담당 영업사원별 보기). 3개 탭 공통 */
+.rep-slot{display:flex; align-items:center; gap:8px; margin-left:auto; flex-shrink:0;}
+.rep-sel{background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:0 28px 0 12px; font-size:13px; font-weight:700; font-family:inherit; height:38px; width:270px; max-width:100%; cursor:pointer; text-overflow:ellipsis;}
+.rep-sel:hover,.rep-sel:focus{border-color:#8B5CF6; outline:none;}
+.rep-slot.on .rep-sel{background:#171433; border:1.5px solid #8B5CF6; color:#C4B0FF;}
+.rep-slot.on .rep-clear{border-color:#8B5CF6; color:#C4B0FF;}
+.rep-sum{display:inline-flex; align-items:center;}
+.rep-sum .rc-tc{font-style:normal; font-size:11px; font-weight:800; color:#1b1200; background:#F59E0B; border-radius:999px; padding:3px 9px; white-space:nowrap;}
+.rep-clear{background:var(--surface); border:1px solid var(--border); color:var(--text-dim); border-radius:10px; width:38px; height:38px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit;}
+.rep-clear:hover{color:var(--text); border-color:#8B5CF6;}
+.search-line{display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+.search-line .search-row{margin-bottom:0; flex:1; max-width:520px;}
+.lookup-top .search-box{max-width:620px;}
+.ship2-top .search-box{max-width:620px;}
+.ship2-top{align-items:center;}
+@media (max-width:900px){ .rep-slot{margin-left:0; width:100%;} .rep-sel{flex:1; width:auto;} .search-line{flex-wrap:wrap;} .search-line .search-row{max-width:none; width:100%;} .lookup-top .search-box,.ship2-top .search-box{max-width:none;} .ship2-top{flex-wrap:wrap;} }
+.rep-line{font-size:11px; font-weight:700; color:#A78BFA; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:inherit;}
+.rep-line.none{color:var(--text-dim2,#5C6580); font-weight:600;}
+.today-cust.has-rep, .cell-body.has-rep{display:flex; flex-direction:column; justify-content:center; line-height:1.25; min-width:0;}
+.today-cust.has-rep .cn, .cell-body.has-rep .cn{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -858,9 +879,12 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
          진행률을 한눈에 파악할 수 있게 하기 위함. -->
     <div class="progress-board" id="progressBoard"></div>
 
-    <div class="search-row">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-      <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="onSheetSearch()">
+    <div class="search-line">
+      <div class="search-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="onSheetSearch()">
+      </div>
+      <div class="rep-slot" data-rep-slot style="display:none;"><select class="rep-sel" onchange="setRepFilterTo_(this.value)" aria-label="Sales Rep" title="Filter all 3 tabs by Sales Rep (top dashboards stay warehouse-wide)"></select><span class="rep-sum"></span><button type="button" class="rep-clear" style="display:none;" onclick="setRepFilterTo_('')" title="Show all reps">✕</button></div>
     </div>
 
     <div class="table-wrap">
@@ -910,6 +934,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear" style="display:none;">✕</button>
       </div>
       <button class="search-btn" onclick="doSearch()">Search</button>
+      <div class="rep-slot" data-rep-slot style="display:none;"><select class="rep-sel" onchange="setRepFilterTo_(this.value)" aria-label="Sales Rep" title="Filter all 3 tabs by Sales Rep (top dashboards stay warehouse-wide)"></select><span class="rep-sum"></span><button type="button" class="rep-clear" style="display:none;" onclick="setRepFilterTo_('')" title="Show all reps">✕</button></div>
     </div>
     <div class="search-status" id="search-status"></div>
     <div class="item-results" id="item-results" style="display:none;"></div>
@@ -973,6 +998,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
           <input id="ship2-search-input" placeholder="Search invoice or customer..." oninput="onShipSearchInput()">
           <button class="search-clear" id="ship2-search-clear" onclick="clearShipSearch()" title="Clear" style="display:none;">✕</button>
         </div>
+        <div class="rep-slot" data-rep-slot style="display:none;"><select class="rep-sel" onchange="setRepFilterTo_(this.value)" aria-label="Sales Rep" title="Filter all 3 tabs by Sales Rep (top dashboards stay warehouse-wide)"></select><span class="rep-sum"></span><button type="button" class="rep-clear" style="display:none;" onclick="setRepFilterTo_('')" title="Show all reps">✕</button></div>
       </div>
       <div style="display:flex; align-items:center; gap:10px;">
         <select id="ship2-page-size" onchange="onShipPageSizeChange()" class="today-page-size-select">
@@ -1837,7 +1863,7 @@ function dimsBadge(o){
 
 function renderSheet(){
   const q = (document.getElementById('sheet-search-input').value||'').trim().toUpperCase();
-  const filtered = SHEET_JOBS.filter(o => !q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q));
+  const filtered = SHEET_JOBS.filter(o => jobMatchesRep_(o) && (!q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks||'').toUpperCase().includes(q) || String(o.salesRep||'').toUpperCase().includes(q)));
 
   // ★ 2026-08-31 재수정(매니저 확정) — index.html(메인 대시보드)과 완전히 같은
   //   기준으로 통일: 1순위 등록 최신순(Created At), 2순위 배송방법
@@ -1896,7 +1922,7 @@ function renderSheet(){
       const custName = (o.remarks||'').replace(/'/g,'&#39;');
       return `<tr>
         <td class="cell-inv">${o.invoice}</td>
-        <td class="cell-body"><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span></td>
+        <td class="cell-body"><span class="cust-name" onclick="showNamePopover(event, '${custName}')" title="Click for full name">${o.remarks||''}</span>${repLineHtml_(o) ? '<div>' + repLineHtml_(o) + '</div>' : ''}</td>
         <td class="cell-mono-dim">${o.shipDate||'-'}</td>
         <td class="badge-cell">${pickingBadge(o)}</td>
         <td><span class="badge method ${methodClass(o.method)}">${fmtMethodLabel(o.method)}</span></td>
@@ -1911,6 +1937,7 @@ function renderSheet(){
   document.getElementById('pager-summary').textContent =
     filtered.length ? `${start+1}–${Math.min(start+SHEET_PAGE_SIZE, filtered.length)} of ${filtered.length}` : '0 of 0';
   renderPager(totalPages);
+  renderRepBar_();
 }
 
 function renderPager(totalPages){
@@ -2208,11 +2235,13 @@ function onTodayPageSizeChange(){
 function gotoTodayPage(p){ TODAY_PAGE = p; renderToday(); }
 
 function renderToday(){
+  renderRepBar_();
   const jobs = filteredJobs();  // ★ 2026-08-06 — 검색어가 있으면 걸러진 목록을 보여줌
   const cnt = document.getElementById('today-count');
-  if (cnt) cnt.textContent = SEARCH_Q ? (jobs.length + ' / ' + TODAY_JOBS.length + ' orders') : (TODAY_JOBS.length + ' orders');
+  const _repBase = REP_FILTER ? TODAY_JOBS.filter(jobMatchesRep_).length : TODAY_JOBS.length;
+  if (cnt) cnt.textContent = (SEARCH_Q || REP_FILTER) ? (jobs.length + ' / ' + TODAY_JOBS.length + ' orders') : (TODAY_JOBS.length + ' orders');
   if (!jobs.length){
-    document.getElementById('today-list').innerHTML = '<div class="today-empty">' + (SEARCH_Q ? 'No orders match your search.' : 'No orders completed yet today.') + '</div>';
+    document.getElementById('today-list').innerHTML = '<div class="today-empty">' + ((SEARCH_Q || REP_FILTER) ? 'No orders match your search / Sales Rep filter.' : 'No orders completed yet today.') + '</div>';
     document.getElementById('today-pager').style.display = 'none';
     return;
   }
@@ -2258,7 +2287,7 @@ function renderToday(){
     const dimsBadgeJ = needsDimsJ ? (j.dimsLinkedTo ? '<span class="plain-tag pass">🔗 '+j.dimsLinkedTo+'</span>' : (j.dimsCount>0 ? '<span class="plain-tag pass">✓ Dims'+linkedInnerJ+'</span>' : '<span class="plain-tag pending">Not Entered'+linkedInnerJ+'</span>')) : '<span class="plain-tag na">N/A</span>';
     return `<div class="today-row" data-invoice="${j.invoice}" onclick="jumpToInvoice('${j.invoice}')" title="${(insp.indexOf('ISSUES')>=0 || insp.indexOf('🔗')>=0) ? 'Click for issue details' : ''}">
       <span class="today-inv" title="Inspected ${j.inspEnd||'-'}">${j.invoice||''}</span>
-      <span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
+      ${repLineHtml_(j) ? `<span class="today-cust has-rep" title="${(j.remarks||'').replace(/"/g,'&quot;')}"><span class="cn">${j.remarks||''}</span>${repLineHtml_(j)}</span>` : `<span class="today-cust" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>`}
       <span class="today-time">Ship <span class="d-full">${j.shipDate||'-'}</span><span class="d-short">${(function(m){return m ? (m[1]+'/'+m[2]) : (j.shipDate||'-');})(String(j.shipDate||'').match(/^\d{4}-(\d{2})-(\d{2})/))}</span></span>
       ${methodBadge}
       ${badge}
@@ -2282,7 +2311,7 @@ function renderToday(){
    계산해서 내려준 j.shipped/j.shippedAt/j.shippedBy를 그대로 쓰면 됨 —
    클라이언트에서 그룹을 다시 계산할 필요 없음(resolveShipInfo 패턴, Code.gs 참고). */
 function shippableJobs_(){
-  return TODAY_JOBS.filter(j => (j.method==='TK' || j.method==='TRUCKING') && (j.dimsCount > 0 || j.dimsLinkedTo));
+  return TODAY_JOBS.filter(j => (j.method==='TK' || j.method==='TRUCKING') && (j.dimsCount > 0 || j.dimsLinkedTo) && jobMatchesRep_(j));
 }
 
 // ★ 2026-10-02 신규(피드백 반영) — 리스트 전용 검색/페이지네이션 상태.
@@ -2362,7 +2391,7 @@ function renderShipping(){
   if (countEl) countEl.textContent = q ? (matched.length + ' / ' + jobs.length + ' invoices') : (jobs.length + ' invoices');
 
   if (!jobs.length){
-    listEl.innerHTML = '<div class="ship2-empty">No TK pallets with dimensions yet.</div>';
+    listEl.innerHTML = '<div class="ship2-empty">' + (REP_FILTER ? 'No TK pallets match this Sales Rep (only orders with dimensions entered appear here).' : 'No TK pallets with dimensions yet.') + '</div>';
     if (pagerEl) pagerEl.style.display = 'none';
     return;
   }
@@ -2533,7 +2562,7 @@ function renderShipping(){
 
     return secHtml + `<div class="ship2-row ${j.shipped?'shipped':''}">
       <span class="ship2-inv">${j.invoice||''}</span>
-      <span class="cell-body" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>
+      ${repLineHtml_(j) ? `<span class="cell-body has-rep" title="${(j.remarks||'').replace(/"/g,'&quot;')}"><span class="cn">${j.remarks||''}</span>${repLineHtml_(j)}</span>` : `<span class="cell-body" title="${(j.remarks||'').replace(/"/g,'&quot;')}">${j.remarks||''}</span>`}
       <span class="cell-mono-dim">${j.shipDate||'-'}</span>
       ${dimsHtml}
       <span class="ship2-age${overdue?' overdue':''}">${ageTxt}</span>
@@ -3023,11 +3052,112 @@ function jumpToInvoice(inv){
  *     그래도 없으면 바코드·SKU로 "그 상품이 든 오더"를 찾아줌 */
 let SEARCH_Q = '';
 
+
+/* ═══════════════════════════════════════════════════════════
+   ★ 2026-10-08 신규 — Sales Rep 필터.
+   영업시트의 "Sales"(담당자) 열 값이 서버에서 job.salesRep("Nagyeong, Hyein"처럼 쉼표로 구분)으로
+   내려옴. 3개 탭(Sales Sheet Preview / Order Detail Lookup / Shipping Status)이 모두 같은 서버
+   목록을 쓰므로, 필터 하나로 3곳을 동시에 걸러냄. 선택값은 이 브라우저에만 기억(localStorage).
+   ═══════════════════════════════════════════════════════════ */
+let REP_FILTER = '';   // '' = 전체 · '__none__' = 담당자 미지정 · 그 외 = 담당자 이름(소문자)
+try { REP_FILTER = localStorage.getItem('sk_sales_rep_filter') || ''; } catch(e){}
+function repsOf_(j){
+  const s = String((j && j.salesRep) || '').trim();
+  if (!s) return [];
+  const seen = {};
+  return s.split(/[,;\n]+/).map(x => x.trim()).filter(x => { if (!x) return false; const k = x.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
+}
+function jobMatchesRep_(j){
+  if (!REP_FILTER) return true;
+  const r = repsOf_(j);
+  if (REP_FILTER === '__none__') return r.length === 0;
+  return r.some(x => x.toLowerCase() === REP_FILTER);
+}
+function repLineHtml_(j){
+  const r = repsOf_(j);
+  if (!r.length) return (typeof SALES_REP_ENABLED_ !== 'undefined' && SALES_REP_ENABLED_) ? '<span class="rep-line none">👤 Unassigned</span>' : '';
+  return '<span class="rep-line" title="Sales Rep">👤 ' + _escH_(r.join(', ')) + '</span>';
+}
+let SALES_REP_ENABLED_ = false; // 서버가 salesRep 필드를 한 건이라도 내려주면 true
+function renderRepBar_(){
+  const slots = document.querySelectorAll('[data-rep-slot]'); if (!slots.length) return;
+  const all = [].concat(SHEET_JOBS || [], TODAY_JOBS || []);
+  SALES_REP_ENABLED_ = all.some(j => Object.prototype.hasOwnProperty.call(j, 'salesRep'));
+  if (!SALES_REP_ENABLED_){ slots.forEach(el => { el.style.display = 'none'; }); return; }
+  const _before = REP_FILTER; autoPickRepOnce_();
+  if (REP_FILTER !== _before){ setTimeout(function(){ renderSheet(); renderToday(); renderShipping(); }, 0); }
+  const reps = {};      // key → {name, open, tc}
+  let noneOpen = 0, noneTc = 0;
+  const bump = (j, field) => {
+    const r = repsOf_(j);
+    if (!r.length){ if (field === 'open') noneOpen++; else noneTc++; return; }
+    r.forEach(n => { const k = n.toLowerCase(); const o = reps[k] || (reps[k] = { name: n, open: 0, tc: 0 }); o[field]++; });
+  };
+  // 출고가 전부 끝난 담당자도 목록에서 사라지지 않게(0 open) — 모든 오더의 담당자를 먼저 등록
+  [].concat(SHEET_JOBS || [], TODAY_JOBS || []).forEach(j => repsOf_(j).forEach(n => { const k = n.toLowerCase(); if (!reps[k]) reps[k] = { name: n, open: 0, tc: 0 }; }));
+  (SHEET_JOBS || []).forEach(j => { if (!j.shipped) bump(j, 'open'); });
+  // "to confirm" = 검수까지 끝났는데 영업이 아직 컨펌(Sales Confirm)을 안 한 오더 (대표 오더 기준, 묶인 오더는 대표 1건으로 셈)
+  (TODAY_JOBS || []).forEach(j => { if (!j.shipped && !j.salesConfirmed && !j.dimsLinkedTo) bump(j, 'tc'); });
+  // 저장된 선택값이 목록에 없으면(퇴사·이름 변경 등) 전체로 되돌림
+  if (REP_FILTER && REP_FILTER !== '__none__' && !reps[REP_FILTER]) {
+    // 데이터가 아직 부분적으로만 로드됐을 수 있으니 값 자체는 유지하되, 칩은 임시로 하나 만들어 보여줌
+    reps[REP_FILTER] = { name: REP_FILTER.replace(/\b\w/g, c => c.toUpperCase()), open: 0, tc: 0 };
+  }
+  const list = Object.keys(reps).map(k => Object.assign({ key: k }, reps[k]))
+    .sort((a, b) => (b.tc - a.tc) || (b.open - a.open) || a.name.localeCompare(b.name));
+  const totOpen = (SHEET_JOBS || []).filter(j => !j.shipped).length;
+  const totTc = (TODAY_JOBS || []).filter(j => !j.shipped && !j.salesConfirmed && !j.dimsLinkedTo).length;
+  const opt = (key, label, open, tc) => '<option value="' + key + '"' + (REP_FILTER === key ? ' selected' : '') + '>' +
+    _escH_(label) + '  ·  ' + open + ' open' + (tc > 0 ? '  ·  ⏳ ' + tc : '') + '</option>';
+  const optsHtml =
+    opt('', '👤 Sales Rep: All', totOpen, totTc) +
+    list.map(r => opt(r.key, '👤 ' + r.name, r.open, r.tc)).join('') +
+    ((noneOpen + noneTc) > 0 ? opt('__none__', '👤 Unassigned', noneOpen, noneTc) : '');
+  const cur = REP_FILTER === '' ? null : (REP_FILTER === '__none__' ? { open: noneOpen, tc: noneTc } : reps[REP_FILTER]);
+  const sumHtml = (cur && cur.tc > 0) ? '<i class="rc-tc" title="Inspected orders waiting for Sales Confirm">⏳ ' + cur.tc + ' to confirm</i>' : '';
+  slots.forEach(el => {
+    const sel = el.querySelector('.rep-sel');
+    if (document.activeElement !== sel) sel.innerHTML = optsHtml;   // 목록을 연 채로 자동갱신돼도 닫히지 않게
+    el.querySelector('.rep-sum').innerHTML = sumHtml;
+    el.querySelector('.rep-clear').style.display = REP_FILTER ? '' : 'none';
+    el.classList.toggle('on', !!REP_FILTER);
+    el.style.display = 'flex';
+  });
+}
+function setRepFilterTo_(key){ REP_FILTER = key || ''; setRepFilter_(REP_FILTER, true); }
+function setRepFilter_(key, direct){
+  if (!direct) REP_FILTER = (REP_FILTER === key) ? '' : key;
+  try { localStorage.setItem('sk_sales_rep_filter', REP_FILTER); } catch(e){}
+  SHEET_PAGE = 1; TODAY_PAGE = 1; SHIP_PAGE = 1;
+  renderRepBar_();
+  renderSheet(); renderToday(); renderShipping();
+  // 선택한 담당자 이름으로 검색 결과 문구도 갱신
+  try { const st = document.getElementById('search-status'); if (st && !SEARCH_Q) st.textContent = ''; } catch(e){}
+}
+// 처음 접속했을 때(저장된 선택이 없을 때) 로그인 이름의 첫 단어가 담당자 이름과 정확히 하나만 일치하면 자동 선택
+function autoPickRepOnce_(){
+  try {
+    if (localStorage.getItem('sk_sales_rep_filter') !== null) return;
+    if (typeof authGetName !== 'function') return;
+    const me = String(authGetName() || '').trim().toLowerCase().split(/\s+/)[0];
+    if (!me) return;
+    const all = [].concat(SHEET_JOBS || [], TODAY_JOBS || []);
+    const names = {}; all.forEach(j => repsOf_(j).forEach(n => { names[n.toLowerCase()] = 1; }));
+    // 로그인 이름("Samuel" 또는 "Samuel Han")이 담당자 한 명과만 맞을 때만 자동 선택(여러 명과 맞으면 선택 안 함)
+    const meFull = String(authGetName() || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const hits = Object.keys(names).filter(n => n === meFull || n === me || n.split(' ')[0] === me);
+    if (hits.length === 1) { REP_FILTER = hits[0]; localStorage.setItem('sk_sales_rep_filter', hits[0]); }
+    else localStorage.setItem('sk_sales_rep_filter', '');
+  } catch(e){}
+}
+
 function filteredJobs(){
-  if (!SEARCH_Q) return TODAY_JOBS;
-  return TODAY_JOBS.filter(j =>
+  const base = REP_FILTER ? TODAY_JOBS.filter(jobMatchesRep_) : TODAY_JOBS;
+  if (!SEARCH_Q) return base;
+  return base.filter(j =>
     String(j.invoice||'').toUpperCase().includes(SEARCH_Q) ||
-    String(j.remarks||'').toUpperCase().includes(SEARCH_Q));
+    String(j.remarks||'').toUpperCase().includes(SEARCH_Q) ||
+    String(j.salesRep||'').toUpperCase().includes(SEARCH_Q));
 }
 
 function onSearchInput(){
@@ -3987,6 +4117,7 @@ function renderDetail(res){
       <div>
         <div class="detail-inv">${res.invoice}</div>
         <div class="detail-cust">${res.customer||''}</div>
+        ${(function(){ const jj = (SHEET_JOBS||[]).concat(TODAY_JOBS||[]).find(x => x.invoice === res.invoice) || res; const l = repLineHtml_(jj); return l ? '<div style="margin-top:3px;">' + l.replace('rep-line','rep-line" style="font-size:12.5px') + '</div>' : ''; })()}
         <div class="detail-meta">
           <div class="meta-item"><div class="k">Ship Date</div><div class="v">${res.shipDate||'-'}</div></div>
           <div class="meta-item"><div class="k">Picking</div><div class="v">${res.pickStart||'-'}</div></div>
