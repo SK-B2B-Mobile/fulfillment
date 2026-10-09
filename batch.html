@@ -9254,6 +9254,16 @@ function renderAssignModal_(){
   document.getElementById('asList').innerHTML = (listHtml || '<div class="as-none">Nothing has been scanned for this order yet.</div>') +
     (hidden > 0 && listHtml ? `<div class="as-hidden-note">${hidden} SKU(s) not scanned yet are not shown.</div>` : '');
 }
+function openAssignSkuFor(ctx, bc){
+  const I = _asInfo_(ctx);
+  if(!I.invoice || !I.st){ alert('Please select an order first'); return; }
+  if(!(I.st.lines || []).every(l => Array.isArray(l.assign))){
+    alert('The server needs to be updated for this feature.\n(Deploy the latest BatchPicking.gs and Code.gs first, then refresh this page.)');
+    return;
+  }
+  _asCtx = ctx;
+  openAssignSku(bc);
+}
 function openAssignSku(bc){
   if(!_asCtx) return;
   const I = _asInfo_(_asCtx);
@@ -9267,7 +9277,7 @@ function openAssignSku(bc){
     const usedNums = Object.keys(I.used(I.kind)).map(Number);
     rows.push({ n: (usedNums.length ? Math.max.apply(null, usedNums) : 0) + 1, q: g.un });
   }
-  _asEdit = { ctx: _asCtx, batchId: I.batchId, invoice: I.invoice, barcode: l.barcode, name: l.name, sku: l.sku, total: g.total, kind: I.kind, rows: rows, un: g.un, saving: false };
+  _asEdit = { ctx: _asCtx, batchId: I.batchId, invoice: I.invoice, barcode: l.barcode, name: l.name, sku: l.sku, total: g.total, maxQty: Math.max(Number(l.effectiveReq) || 0, g.total), kind: I.kind, rows: rows, un: g.un, saving: false };
   const label = I.kind === 'pallet' ? 'Pallet' : 'Box';
   document.getElementById('asSkuTitle').textContent = label + ' Re-assign';
   document.getElementById('asSkuBc').textContent = l.barcode || l.sku || '—';
@@ -9275,7 +9285,7 @@ function openAssignSku(bc){
   document.getElementById('asSkuWarn').innerHTML = g.un > 0
     ? `<div class="as-warn">⚠ <b>${g.un.toLocaleString()} pcs</b> of this item have no ${label.toLowerCase()} number yet (e.g. finished with Manager Force Confirm) — enter the real number below.</div>`
     : `<div class="as-warn">⚠ You are editing a saved record directly — saving updates the Google Sheet immediately.</div>`;
-  document.getElementById('asSkuTotalLine').innerHTML = `Recorded total <b style="color:var(--text)">${g.total.toLocaleString()}</b> pcs — split them across ${label.toLowerCase()} numbers`;
+  document.getElementById('asSkuTotalLine').innerHTML = `Recorded <b style="color:var(--text)">${g.total.toLocaleString()}</b> pcs (required ${(Number(l.effectiveReq) || 0).toLocaleString()}) — you can change the ${label.toLowerCase()} numbers <b style="color:var(--text)">and the quantities</b>`;
   renderAsRows_();
   asUpdateSum_();
   document.getElementById('assignSkuModal').classList.add('open');
@@ -9300,18 +9310,26 @@ function asUpdateSum_(){
   const badNum = e.rows.some(r => r.q > 0 && (!r.n || r.n < 1));
   const el = document.getElementById('asSkuSum');
   let ok = false;
-  if(diff !== 0){
+  const tot = e.total.toLocaleString(), sm = sum.toLocaleString();
+  if(sum <= 0){
     el.className = 'as-sum bad';
-    el.innerHTML = `<span>⚠ ${Math.abs(diff).toLocaleString()} pcs ${diff > 0 ? 'short' : 'over'}</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+    el.innerHTML = `<span>⚠ Enter a quantity of 1 or more</span><span style="font-family:var(--mono)">${sm} / ${tot}</span>`;
+  } else if(sum > e.maxQty){
+    el.className = 'as-sum bad';
+    el.innerHTML = `<span>⚠ More than the required ${e.maxQty.toLocaleString()} pcs</span><span style="font-family:var(--mono)">${sm} / ${e.maxQty.toLocaleString()}</span>`;
   } else if(dup){
     el.className = 'as-sum bad';
-    el.innerHTML = `<span>⚠ Same number used twice — merge them into one row</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+    el.innerHTML = `<span>⚠ Same number used twice — merge them into one row</span><span style="font-family:var(--mono)">${sm} / ${tot}</span>`;
   } else if(badNum){
     el.className = 'as-sum bad';
-    el.innerHTML = `<span>⚠ Enter a number (1 or more) for every row</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+    el.innerHTML = `<span>⚠ Enter a number (1 or more) for every row</span><span style="font-family:var(--mono)">${sm} / ${tot}</span>`;
+  } else if(diff !== 0){
+    el.className = 'as-sum ok';
+    el.innerHTML = `<span>✓ Quantity will change: ${tot} → ${sm} pcs</span><span style="font-family:var(--mono)">${sm} / ${e.maxQty.toLocaleString()}</span>`;
+    ok = true;
   } else {
     el.className = 'as-sum ok';
-    el.innerHTML = `<span>✓ Matches the recorded total</span><span style="font-family:var(--mono)">${sum.toLocaleString()} / ${e.total.toLocaleString()}</span>`;
+    el.innerHTML = `<span>✓ Matches the recorded total</span><span style="font-family:var(--mono)">${sm} / ${tot}</span>`;
     ok = true;
   }
   const btn = document.getElementById('asSaveBtn');
@@ -9339,7 +9357,8 @@ function asSkuClose(){
 async function asSave(){
   const e = _asEdit; if(!e || e.saving) return;
   const sum = e.rows.reduce((a, r) => a + (Number(r.q) || 0), 0);
-  if(sum !== e.total){ alert('The total must match the recorded quantity'); return; }
+  if(sum <= 0 || sum > e.maxQty){ alert('Quantity must be between 1 and ' + e.maxQty); return; }
+  if(sum !== e.total && !confirm(`Change the recorded quantity from ${e.total} to ${sum} pcs?\n\nThis edits the saved scan record directly.`)) return;
   e.saving = true;
   const btn = document.getElementById('asSaveBtn');
   btn.disabled = true; btn.textContent = 'Saving...';
@@ -9348,6 +9367,7 @@ async function asSave(){
     res = await gasCallWithRetry('reassignPackScanBoxes', {
       batchId: e.batchId, invoice: e.invoice, barcode: e.barcode, round: 2, kind: e.kind,
       rows: e.rows.filter(r => r.q > 0).map(r => ({ n: r.n, q: r.q })),
+      expectedTotal: e.total, maxQty: e.maxQty, worker: (typeof currentPsvWorker === 'function' ? currentPsvWorker() : ''),
     });
   } catch(err){ res = { ok: false, error: String(err && err.message || err) }; }
   e.saving = false;
@@ -9355,6 +9375,7 @@ async function asSave(){
   if(!res || !res.ok){
     const er = res && res.error;
     const msg = er === 'total_mismatch' ? 'The recorded quantity changed on the server (someone scanned in the meantime). Close this window and open it again.'
+      : er === 'over_required' ? 'The quantity is more than the required amount.'
       : er === 'duplicate_number' ? 'The same number is used twice — merge them into one row.'
       : ('Save failed: ' + (er || 'network error'));
     alert(msg);
@@ -9365,7 +9386,7 @@ async function asSave(){
   const I = _asInfo_(e.ctx);
   if(I.invoice === e.invoice) await I.refresh();
   renderAssignModal_();
-  toast(res.unchanged ? 'No change — already assigned this way' : 'Saved — reflected in the Google Sheet', 'success');
+  toast(res.unchanged ? 'No change — already assigned this way' : (res.qtyChanged ? 'Quantity updated — reflected in the Google Sheet' : 'Saved — reflected in the Google Sheet'), 'success');
 }
 // 안쪽 "Move Whole Box/Pallet"(기존 일괄 이동)로 연결 — 메인 화면에서는 버튼을 뺐고 여기서만 접근
 function asOpenMove(){
@@ -9574,8 +9595,8 @@ function renderPsvBody(){
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · Barcode ${l.barcode}${l.issueQty > 0 ? ` · Issue deducted ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="Edit/re-split just this ${isTk ? 'pallet' : 'box'} portion">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty} pcs ✎</span>`).join('')
-            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPsv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="Edit this item's ${isTk ? 'pallet' : 'box'} number">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="openAssignSkuFor('psv','${l.barcode}')" title="Edit/re-split just this ${isTk ? 'pallet' : 'box'} portion">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty} pcs ✎</span>`).join('')
+            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="openAssignSkuFor('psv','${l.barcode}')" title="Edit this item's ${isTk ? 'pallet' : 'box'} number">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
         }</div>
       </div>
       <div class="pv-line-actions">
@@ -9982,8 +10003,8 @@ function renderPvBody(){
         <div class="pv-line-name">${l.name || l.sku}</div>
         <div class="pv-line-meta">${l.sku} · Barcode ${l.barcode}${l.issueQty > 0 ? ` · Issue deducted ${l.issueQty}` : ''}${
           l.boxBreakdown && l.boxBreakdown.length > 1
-            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${bd.box}','${bd.pallet||''}',${bd.qty})" title="Edit/re-split just this ${isTk ? 'pallet' : 'box'} portion">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty} pcs ✎</span>`).join('')
-            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="editScannedBoxPv('${l.barcode}','${(l.name||'').replace(/'/g,"\\\\'")}','${l.box}','${l.pallet||''}',${l.packed})" title="Edit this item's ${isTk ? 'pallet' : 'box'} number">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
+            ? ' · ' + l.boxBreakdown.map(bd => `<span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px; margin-right:3px;" onclick="openAssignSkuFor('pv','${l.barcode}')" title="Edit/re-split just this ${isTk ? 'pallet' : 'box'} portion">${isTk ? 'Pallet ' + bd.pallet : 'Box ' + bd.box}: ${bd.qty} pcs ✎</span>`).join('')
+            : ((isTk ? l.pallet : l.box) ? ` · <span style="text-decoration:underline dotted; cursor:pointer; color:#fff; font-weight:700; background:rgba(139,92,246,0.25); padding:1px 6px; border-radius:4px;" onclick="openAssignSkuFor('pv','${l.barcode}')" title="Edit this item's ${isTk ? 'pallet' : 'box'} number">${isTk ? 'Pallet ' + l.pallet : 'Box ' + l.box} ✎</span>` : '')
         }</div>
       </div>
       <div class="pv-line-actions">
