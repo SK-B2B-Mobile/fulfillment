@@ -942,7 +942,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
   <div class="tabs">
     <button class="tab-btn active" onclick="showScreen('sheet')">Sales Sheet Preview</button>
     <button class="tab-btn" onclick="showScreen('lookup')">Order Detail Lookup</button>
-    <button class="tab-btn" onclick="showScreen('shipping')">Shipping Status</button>
+    <button class="tab-btn" onclick="showScreen('shipping')">TK Shipping Status</button>
   </div>
   <div style="display:flex; align-items:center; gap:18px;">
     <div class="tb-clock"><div class="time" id="clockTime">--:--:-- --</div><div class="date" id="clockDate">----- -- --</div></div>
@@ -1037,7 +1037,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
         </span>
         <span class="ops-prog"><i id="opsShipBar"></i></span>
       </div>
-      <span class="ops-scope" id="opsScope" title="This tab covers UPS, PU and PU&TK orders. TK orders are handled in the Shipping Status tab.">UPS · PU · PU&amp;TK</span>
+      <span class="ops-scope" id="opsScope" title="This tab covers UPS, PU and PU&TK orders. TK orders are handled in the TK Shipping Status tab.">UPS · PU · PU&amp;TK</span>
     </div>
 
     <div class="lookup-top">
@@ -4335,7 +4335,7 @@ function shippedCellHtml_(j){
     return `<span class="ship-cell" title="Shipped ${_escH_(t)}${j.shippedBy ? ' by ' + _escH_(j.shippedBy) : ''}"><span class="plain-tag shipped">✓ Shipped</span>${short ? '<span class="ship-cell-time">' + short + by + '</span>' : ''}</span>`;
   }
   if (j.dimsLinkedTo) return `<span class="ship-cell"><span class="plain-tag noship">↳ with ${_escH_(j.dimsLinkedTo)}</span><span class="ship-cell-time dim">ships together</span></span>`;
-  if (isTk) return '<span class="ship-cell" title="TK shipping is tracked in the Shipping Status tab"><span class="plain-tag noship">TK · see</span><span class="ship-cell-time dim">Shipping Status</span></span>';
+  if (isTk) return '<span class="ship-cell" title="TK shipping is tracked in the TK Shipping Status tab"><span class="plain-tag noship">TK · see</span><span class="ship-cell-time dim">TK Shipping Status</span></span>';
   if (!j.movedToPacking) return '<span class="ship-cell"><span class="plain-tag noship">Not shipped</span><span class="ship-cell-time dim">needs Packing move</span></span>';
   if (!j.paymentPaid) return '<span class="ship-cell"><span class="plain-tag locked">🔒 Not shipped</span><span class="ship-cell-time lock">needs Sales Confirm</span></span>';
   return '<span class="ship-cell"><span class="plain-tag ready">● Ready to ship</span><span class="ship-cell-time ready">Sales confirmed</span></span>';
