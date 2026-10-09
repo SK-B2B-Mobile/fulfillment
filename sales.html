@@ -780,12 +780,34 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 }
 
 /* ★ 2026-10-08 신규 — Sales Rep 필터(담당 영업사원별 보기). 3개 탭 공통 */
+/* ★ 2026-10-08 신규 — Order Detail Lookup 상단 "남은 컨펌" 바 (기존 제목/안내문구와 거의 같은 높이) */
+.ops-bar{display:flex; align-items:center; gap:10px; margin-bottom:5px; height:35px;}
+.ops-seg{flex:1; min-width:0; display:flex; align-items:center; gap:9px; height:35px; padding:0 14px 0 12px; border-radius:10px; white-space:nowrap; border:1.5px solid var(--amber); background:linear-gradient(90deg, rgba(245,158,11,.20), rgba(245,158,11,.06)); box-shadow:inset 4px 0 0 var(--amber);}
+#opsShip{border-color:#A78BFA; background:linear-gradient(90deg, rgba(167,139,250,.22), rgba(167,139,250,.06)); box-shadow:inset 4px 0 0 #A78BFA;}
+.ops-seg.done{border-color:var(--green); background:linear-gradient(90deg, rgba(16,217,126,.20), rgba(16,217,126,.06)); box-shadow:inset 4px 0 0 var(--green);}
+.ops-lbl{font-family:var(--mono); font-size:12px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:#fff;}
+.ops-n{font-family:var(--mono); font-size:24px; font-weight:800; line-height:1; min-width:26px; text-align:right; color:#FBBF24; transition:transform .25s, color .25s;}
+#opsShip .ops-n{color:#C4B0FF;}
+.ops-n.tick{transform:scale(1.35);}
+.ops-u{font-size:13.5px; font-weight:800; color:#fff;}
+.ops-prog{flex:1; min-width:40px; height:8px; border-radius:99px; background:rgba(255,255,255,.12); overflow:hidden; position:relative; display:block;}
+.ops-prog i{position:absolute; left:0; top:0; bottom:0; width:0; background:var(--green); border-radius:99px; transition:width .35s;}
+#opsShipBar{background:#A78BFA;}
+.ops-sub{font-family:var(--mono); font-size:12px; font-weight:700; color:#D5DAEA;}
+.ops-seg.done .ops-n{color:var(--green);}
+.ops-scope{font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--text-dim); border:1px dashed var(--border2); border-radius:99px; padding:4px 10px; white-space:nowrap;}
+.ops-seg{overflow:hidden;}
+.ops-sub{overflow:hidden; text-overflow:ellipsis; min-width:0; flex:0 1 auto;}
+.ops-lbl,.ops-u,.ops-n{flex:0 0 auto;}
+@media (max-width:1280px){ .ops-prog{display:none;} .ops-sub{margin-left:auto;} }
+@media (max-width:900px){ .ops-bar{flex-wrap:wrap; height:auto;} .ops-seg{flex:1 1 100%; width:100%;} .ops-scope{display:none;} .ops-sub{font-size:11px;} }
 .rep-slot{display:flex; align-items:center; gap:8px; margin-left:auto; flex-shrink:0;}
 .rep-sel{background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:0 28px 0 12px; font-size:13px; font-weight:700; font-family:inherit; height:38px; width:270px; max-width:100%; cursor:pointer; text-overflow:ellipsis;}
 .rep-sel:hover,.rep-sel:focus{border-color:#8B5CF6; outline:none;}
 .rep-slot.on .rep-sel{background:#171433; border:1.5px solid #8B5CF6; color:#C4B0FF;}
 .rep-slot.on .rep-clear{border-color:#8B5CF6; color:#C4B0FF;}
 .rep-sum{display:inline-flex; align-items:center;}
+.rep-sum .rc-tc.ok{background:var(--green); color:#04210f;}
 .rep-sum .rc-tc{font-style:normal; font-size:11px; font-weight:800; color:#1b1200; background:#F59E0B; border-radius:999px; padding:3px 9px; white-space:nowrap;}
 .rep-clear{background:var(--surface); border:1px solid var(--border); color:var(--text-dim); border-radius:10px; width:38px; height:38px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit;}
 .rep-clear:hover{color:var(--text); border-color:#8B5CF6;}
@@ -932,9 +954,22 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 
   <!-- ===================== Screen 2 ===================== -->
   <div class="screen" id="screen-lookup">
-    <div class="section-head">
-      <h2>Order Fulfillment Detail</h2>
-      <p>Search by invoice, or click an order from the list below. Anyone can view; the Edit button next to Shipping Dimensions is open for Packing to fill in — no login needed.</p>
+    <!-- ★ 2026-10-08 신규(사용자 요청) — 제목/안내문구 자리를 "남은 컨펌" 바로 대체. 입력(Sales Confirm / Shipped)할 때마다 숫자가 즉시 줄어듦.
+         대상은 이 탭에서 영업·출고가 입력하는 UPS · PU · PU&TK 뿐(TK는 Shipping Status 탭). -->
+    <div class="ops-bar" id="opsBar" aria-label="Remaining confirmations">
+      <div class="ops-seg" id="opsSales">
+        <span class="ops-lbl">Sales Confirm</span>
+        <b class="ops-n" id="opsSalesN">–</b><span class="ops-u" id="opsSalesU">to confirm</span>
+        <span class="ops-prog"><i id="opsSalesBar"></i></span>
+        <span class="ops-sub" id="opsSalesSub"></span>
+      </div>
+      <div class="ops-seg" id="opsShip">
+        <span class="ops-lbl">Ship Out</span>
+        <b class="ops-n" id="opsShipN">–</b><span class="ops-u" id="opsShipU">ready to ship</span>
+        <span class="ops-prog"><i id="opsShipBar"></i></span>
+        <span class="ops-sub" id="opsShipSub"></span>
+      </div>
+      <span class="ops-scope" id="opsScope" title="This tab covers UPS, PU and PU&TK orders. TK orders are handled in the Shipping Status tab.">UPS · PU · PU&amp;TK</span>
     </div>
 
     <div class="lookup-top">
@@ -2249,8 +2284,45 @@ function onTodayPageSizeChange(){
 }
 function gotoTodayPage(p){ TODAY_PAGE = p; renderToday(); }
 
+/* ★ 2026-10-08 신규(사용자 요청) — Order Detail Lookup 상단 "남은 컨펌" 바.
+ *  대상: 이 탭에서 영업·출고가 직접 입력하는 UPS · PU · PU&TK (TK는 Shipping Status 탭이라 제외, 대표에 묶인 오더는 대표와 함께 나가므로 제외).
+ *  Sales Confirm: 남은 건 = 지금 컨펌할 수 있는(패킹존 이동 완료) 미컨펌 오더 (컨펌 완료 N / 전체, 이동 전이라 잠긴 건은 별도 표시)
+ *  Ship Out    : 지금 출고 가능(= Sales 컨펌 + 패킹존 이동 완료, 미출고) 건수 (출고 완료 N / 전체)
+ *  Sales Rep 필터를 걸어두면 그 담당자 기준 숫자로 바뀜(영업 직원은 "내가 컨펌할 남은 건"을 바로 확인).
+ *  renderToday()가 다시 그려질 때마다 같이 갱신되므로, 컨펌/출고를 입력하는 순간 숫자가 바로 줄어듦. */
+const _opsPrev = {};
+function renderOpsBar_(){
+  const bar = document.getElementById('opsBar'); if (!bar) return;
+  const scope = (TODAY_JOBS || []).filter(j => _isNonTkMethod_(j.method) && !j.dimsLinkedTo && jobMatchesRep_(j));
+  const total = scope.length;
+  const shipped = scope.filter(j => j.shipped).length;
+  const confirmed = scope.filter(j => j.shipped || j.paymentPaid).length;
+  // Sales Confirm은 "패킹존 이동 완료" 후에만 누를 수 있으므로(그 전엔 🔒), 남은 건 = 지금 컨펌 가능한데 아직 안 한 오더.
+  // 아직 이동 전이라 누를 수 없는 건은 따로 "not moved yet"으로 보여줌.
+  const salesLeft = scope.filter(j => !j.shipped && !j.paymentPaid && j.movedToPacking).length;
+  const notMoved = scope.filter(j => !j.shipped && !j.paymentPaid && !j.movedToPacking).length;
+  const ready = scope.filter(j => !j.shipped && j.paymentPaid && j.movedToPacking).length;
+  const set = (id, v) => { const el = document.getElementById(id); if (!el) return; const t = String(v); if (el.textContent !== t){ el.textContent = t; if (id.endsWith('N') && _opsPrev[id] !== undefined){ el.classList.add('tick'); setTimeout(() => el.classList.remove('tick'), 260); } _opsPrev[id] = t; } };
+  set('opsSalesN', salesLeft); set('opsShipN', ready);
+  const pct = n => total ? Math.round(n * 100 / total) : 0;
+  document.getElementById('opsSalesBar').style.width = pct(confirmed) + '%';
+  document.getElementById('opsShipBar').style.width = pct(shipped) + '%';
+  document.getElementById('opsSalesSub').textContent = confirmed + ' / ' + total + ' done' + (notMoved ? ' · 🔒 ' + notMoved + ' waiting for Packing' : '');
+  document.getElementById('opsShipSub').textContent = shipped + ' / ' + total + ' shipped';
+  document.getElementById('opsSalesU').textContent = salesLeft === 0 && total > 0 ? '✓ all confirmed' : 'to confirm';
+  document.getElementById('opsShipU').textContent = ready === 0 && total > 0 ? (shipped === total ? '✓ all shipped' : 'ready to ship') : 'ready to ship';
+  document.getElementById('opsSales').classList.toggle('done', total > 0 && salesLeft === 0);
+  document.getElementById('opsShip').classList.toggle('done', total > 0 && shipped === total);
+  const waiting = scope.filter(j => !j.shipped && !(j.paymentPaid && j.movedToPacking)).length;
+  document.getElementById('opsShip').title = ready + ' ready to ship now · ' + waiting + ' still waiting for Sales Confirm or Packing move · ' + shipped + ' shipped';
+  document.getElementById('opsSales').title = salesLeft + ' orders ready for Sales Confirm now · ' + notMoved + ' not moved to Packing yet (locked) · ' + confirmed + ' of ' + total + ' confirmed';
+  const sc = document.getElementById('opsScope');
+  if (sc) sc.textContent = (REP_FILTER && REP_FILTER !== '' ? (REP_FILTER === '__none__' ? 'Unassigned' : REP_FILTER.replace(/\b\w/g, c => c.toUpperCase())) + ' · ' : '') + 'UPS · PU · PU&TK';
+}
+
 function renderToday(){
   renderRepBar_();
+  renderOpsBar_();   // ★ 2026-10-08 — 남은 컨펌 바(컨펌/출고 입력 때마다 다시 그려지며 숫자 갱신)
   const jobs = filteredJobs();  // ★ 2026-08-06 — 검색어가 있으면 걸러진 목록을 보여줌
   const cnt = document.getElementById('today-count');
   const _repBase = REP_FILTER ? TODAY_JOBS.filter(jobMatchesRep_).length : TODAY_JOBS.length;
@@ -3122,8 +3194,8 @@ function renderRepBar_(){
   };
   // 출고가 전부 끝난 담당자도 목록에서 사라지지 않게(0 open) — 모든 오더의 담당자를 먼저 등록
   [].concat(SHEET_JOBS || [], TODAY_JOBS || []).forEach(j => repsOf_(j).forEach(n => { const k = n.toLowerCase(); if (!reps[k]) reps[k] = { name: n, open: 0, tc: 0 }; }));
-  (SHEET_JOBS || []).forEach(j => { if (!j.shipped) bump(j, 'open'); });
-  // "to confirm" = 검수까지 끝났는데 영업이 아직 컨펌(Sales Confirm)을 안 한 오더 (대표 오더 기준, 묶인 오더는 대표 1건으로 셈)
+  (SHEET_JOBS || []).forEach(j => bump(j, 'open'));   // 'open' 필드 = 그 담당자의 전체 오더 수(출고 완료 포함, 아직 보관 안 된 것 전부)
+  // "to confirm" = 지금 영업이 컨펌할 수 있는데 아직 안 한 오더 (needsSalesConfirm_ 참고)
   (TODAY_JOBS || []).forEach(j => { if (needsSalesConfirm_(j)) bump(j, 'tc'); });
   // 저장된 선택값이 목록에 없으면(퇴사·이름 변경 등) 전체로 되돌림
   if (REP_FILTER && REP_FILTER !== '__none__' && !reps[REP_FILTER]) {
@@ -3132,16 +3204,18 @@ function renderRepBar_(){
   }
   const list = Object.keys(reps).map(k => Object.assign({ key: k }, reps[k]))
     .sort((a, b) => (b.tc - a.tc) || (b.open - a.open) || a.name.localeCompare(b.name));
-  const totOpen = (SHEET_JOBS || []).filter(j => !j.shipped).length;
+  const totOpen = (SHEET_JOBS || []).length;
   const totTc = (TODAY_JOBS || []).filter(needsSalesConfirm_).length;
   const opt = (key, label, open, tc) => '<option value="' + key + '"' + (REP_FILTER === key ? ' selected' : '') + '>' +
-    _escH_(label) + '  ·  ' + open + ' open' + (tc > 0 ? '  ·  ⏳ ' + tc : '') + '</option>';
+    _escH_(label) + '  ·  ' + open + ' orders' + (tc > 0 ? '  ·  ⏳ ' + tc : '') + '</option>';
   const optsHtml =
     opt('', '👤 Sales Rep: All', totOpen, totTc) +
     list.map(r => opt(r.key, '👤 ' + r.name, r.open, r.tc)).join('') +
     ((noneOpen + noneTc) > 0 ? opt('__none__', '👤 Unassigned', noneOpen, noneTc) : '');
   const cur = REP_FILTER === '' ? null : (REP_FILTER === '__none__' ? { open: noneOpen, tc: noneTc } : reps[REP_FILTER]);
-  const sumHtml = (cur && cur.tc > 0) ? '<i class="rc-tc" title="Inspected orders waiting for Sales Confirm">⏳ ' + cur.tc + ' to confirm</i>' : '';
+  const sumHtml = !cur ? '' : (cur.tc > 0
+    ? '<i class="rc-tc" title="Orders you can Sales-Confirm right now (TK: dimensions entered · PU/UPS/PU&TK: moved to Packing)">⏳ ' + cur.tc + ' to confirm</i>'
+    : (cur.open > 0 ? '<i class="rc-tc ok" title="Nothing left to confirm right now">✓ All confirmed</i>' : ''));
   slots.forEach(el => {
     const sel = el.querySelector('.rep-sel');
     if (document.activeElement !== sel) sel.innerHTML = optsHtml;   // 목록을 연 채로 자동갱신돼도 닫히지 않게
