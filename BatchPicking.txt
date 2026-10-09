@@ -2258,7 +2258,20 @@ function reassignPackScanBoxes(data) {
       total += q;
     });
     if (!matched.length) return { ok: false, error: '해당 상품의 스캔 기록을 찾지 못했습니다' };
-    if (total !== wantSum) return { ok: false, error: 'total_mismatch', total: total };
+    // ★ 2026-10-09 신규(현장 요청) — 수량 수정 허용. 클라이언트가 expectedTotal(화면에서 본 합계)을 보내면
+    //   그 사이 다른 스캔으로 바뀌었는지만 확인하고, 새 합계가 1 이상·필요수량(maxQty) 이하이면 수량 변경을 허용.
+    //   (expectedTotal 없이 오는 구버전 화면은 예전처럼 합계가 같아야만 저장)
+    let qtyChanged = false;
+    if (data.expectedTotal !== undefined && data.expectedTotal !== null) {
+      if (total !== Number(data.expectedTotal)) return { ok: false, error: 'total_mismatch', total: total };
+      if (wantSum !== total) {
+        const maxQty = Number(data.maxQty) || total;
+        if (wantSum > Math.max(maxQty, total)) return { ok: false, error: 'over_required', max: maxQty };
+        qtyChanged = true;
+      }
+    } else if (total !== wantSum) {
+      return { ok: false, error: 'total_mismatch', total: total };
+    }
 
     // 이미 같은 배정이면(번호가 빈 몫도 없음) 아무것도 안 바꾸고 성공 처리 — 기록 낭비 방지
     const cur = {};
@@ -2301,7 +2314,7 @@ function reassignPackScanBoxes(data) {
 
     invalidatePackScanCache_(data.batchId);
     bumpVersion_();
-    return { ok: true, written: newRows.length, replaced: matched.length };
+    return { ok: true, written: newRows.length, replaced: matched.length, qtyChanged: qtyChanged, oldTotal: total, newTotal: wantSum };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
