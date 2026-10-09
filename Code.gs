@@ -1285,7 +1285,7 @@ function updatePaymentStatus(data) {
  * 완전히 별개의 가벼운 컬럼 3개로 처리 — PU & TK는 Shipping Status(TK) 탭으로
  * 넘어가지 않으므로 그 탭이 쓰는 dimsMap/묶음 기능과 엮을 필요가 없음). */
 function _scanPuTkBoxQtyCols_(sh, headersOpt) {
-  const r = { iQty: 0, iAt: 0, iBy: 0 };
+  const r = { iQty: 0, iAt: 0, iBy: 0, iPal: 0 }; // ★ 2026-10-08 — iPal: 팔레트 수량 열(PuTkPalletQty)
   // ★ 2026-10-04 — 호출부가 이미 헤더 행을 읽어둔 경우 그대로 재사용(시트 호출 절약)
   let headers = headersOpt;
   if (!headers) {
@@ -1300,6 +1300,7 @@ function _scanPuTkBoxQtyCols_(sh, headersOpt) {
     if (v === 'putkboxqty' && !r.iQty) r.iQty = i + 1;
     else if (v === 'putkboxqtyat' && !r.iAt) r.iAt = i + 1;
     else if (v === 'putkboxqtyby' && !r.iBy) r.iBy = i + 1;
+    else if (v === 'putkpalletqty' && !r.iPal) r.iPal = i + 1;
   });
   return r;
 }
@@ -1310,6 +1311,7 @@ function ensurePuTkBoxQtyCol_(sh) {
   if (!cols.iQty) add.push('PuTkBoxQty');
   if (!cols.iAt) add.push('PuTkBoxQtyAt');
   if (!cols.iBy) add.push('PuTkBoxQtyBy');
+  if (!cols.iPal) add.push('PuTkPalletQty'); // ★ 2026-10-08
   if (add.length) {
     // ★ 2026-10-02 긴급 수정 — ensureSalesConfirmCol_과 동일한 이유로, 컬럼을
     //   새로 만드는 순간에만 짧게 락을 걸고 재확인(double-check)해서 중복 컬럼
@@ -1322,6 +1324,7 @@ function ensurePuTkBoxQtyCol_(sh) {
       if (!cols.iQty) add2.push('PuTkBoxQty');
       if (!cols.iAt) add2.push('PuTkBoxQtyAt');
       if (!cols.iBy) add2.push('PuTkBoxQtyBy');
+      if (!cols.iPal) add2.push('PuTkPalletQty'); // ★ 2026-10-08
       if (add2.length) {
         const curLastCol = sh.getLastColumn();
         sh.insertColumnsAfter(curLastCol, add2.length);
@@ -1332,6 +1335,7 @@ function ensurePuTkBoxQtyCol_(sh) {
           if (name === 'PuTkBoxQty') cols.iQty = nextCol;
           else if (name === 'PuTkBoxQtyAt') cols.iAt = nextCol;
           else if (name === 'PuTkBoxQtyBy') cols.iBy = nextCol;
+          else if (name === 'PuTkPalletQty') cols.iPal = nextCol;
           nextCol++;
         });
       }
@@ -1347,7 +1351,10 @@ function ensurePuTkBoxQtyCol_(sh) {
   return cols;
 }
 
-/* 입력: { invoice, qty(정수, 0 이상), by } */
+/* 입력: { invoice, qty(정수, 0 이상), pallets(정수, 0 이상 — 생략하면 기존 팔레트 값 유지), by }
+ * ★ 2026-10-08 개편(사용자 요청) — 박스 수량에 더해 팔레트 수량도 저장(열: PuTkPalletQty). 화면은 Boxes/Pallets 두 칸 + Save 버튼.
+ *   팔레트 열을 못 만드는 경우(시트 셀 한도 등)에는 아무것도 저장하지 않고 안내 오류를 돌려줌(박스만 저장되는 어중간한 상태 방지).
+ *   팔레트가 0이거나 생략된 경우엔 열이 없어도 박스는 정상 저장. */
 function setPuTkBoxQty(data) {
   // ★ 2026-10-04 경량화 — 헤더 1번 + 행 1번, 3개 컬럼 한 번에 쓰기, bumpVersionLite_, 낡은 상세
   //   미러는 무효화만(재계산은 클라이언트가 이어서 보내는 syncInvoiceMirror). 값/검증/응답 형식 그대로.
@@ -1361,6 +1368,14 @@ function setPuTkBoxQty(data) {
     if (!invoice) return { ok: false, error: 'invoice required' };
     if (!isFinite(qty) || qty < 0) return { ok: false, error: 'qty는 0 이상의 숫자여야 합니다' };
     qty = Math.round(qty);
+    // ★ 2026-10-08 — 팔레트 수량(선택). 생략(undefined/null/'')이면 기존 값 유지.
+    const palletsProvided = !(data && (data.pallets === undefined || data.pallets === null || data.pallets === ''));
+    let pallets = palletsProvided ? Number(data.pallets) : 0;
+    if (palletsProvided) {
+      if (!isFinite(pallets) || pallets < 0) return { ok: false, error: 'pallets는 0 이상의 숫자여야 합니다' };
+      pallets = Math.round(pallets);
+    }
+    if (qty > 9999 || pallets > 9999) return { ok: false, error: '수량이 너무 큽니다 (최대 9999)' };
 
     const sh = SHEET_();
     mark('open');
@@ -1368,13 +1383,14 @@ function setPuTkBoxQty(data) {
     let ctx = _readJobRowFast_(sh, invoice);
     if (ctx.error) return { ok: false, error: ctx.error };
     let cols = _scanPuTkBoxQtyCols_(sh, ctx.headers);
-    if (!cols.iQty || !cols.iAt || !cols.iBy) {
+    if (!cols.iQty || !cols.iAt || !cols.iBy || (palletsProvided && pallets > 0 && !cols.iPal)) {
       cols = ensurePuTkBoxQtyCol_(sh); // 드문 경우: 락 보호 컬럼 추가 후 다시 읽기
       ctx = _readJobRowFast_(sh, invoice);
       if (ctx.error) return { ok: false, error: ctx.error };
       cols = _scanPuTkBoxQtyCols_(sh, ctx.headers);
     }
     if (!cols.iQty) return { ok: false, error: 'PuTkBoxQty column unavailable (server setup) — please contact the administrator' };
+    if (palletsProvided && pallets > 0 && !cols.iPal) return { ok: false, error: 'Pallet quantity is not available yet (the sheet could not add the Pallets column) — nothing was saved. Please contact the administrator.' };
     mark('row');
 
     const iTruck = ctx.hm[norm('Trucking')];
@@ -1389,11 +1405,13 @@ function setPuTkBoxQty(data) {
     let atRaw = '';
     try {
       atRaw = nowLocal_();
-      _writeRowCells_(sh, ctx.row, [
+      const cells = [
         { col: cols.iQty, value: qty },
         { col: cols.iAt, value: atRaw, text: true }, // 텍스트 서식 고정(날짜 문자열 자동 변환 방지)
         { col: cols.iBy, value: by }
-      ]);
+      ];
+      if (palletsProvided && cols.iPal) cells.push({ col: cols.iPal, value: pallets }); // ★ 2026-10-08
+      _writeRowCells_(sh, ctx.row, cells);
       mark('write');
     } finally {
       lock.releaseLock();
@@ -1402,11 +1420,17 @@ function setPuTkBoxQty(data) {
     bumpVersionLite_();
     try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort */ }
     mark('total');
-    return { ok: true, invoice: invoice, qty: qty, qtyAt: fmtShortTs_(atRaw), qtyBy: by, timing: tm };
+    // 응답의 pallets: 이번에 저장했으면 그 값, 생략했으면 시트에 있던 기존 값(화면이 정확히 표시하도록)
+    const palOut = palletsProvided ? pallets : (cols.iPal ? (Math.max(0, Math.round(Number(ctx.rowVals[cols.iPal - 1]) || 0))) : 0);
+    return { ok: true, invoice: invoice, qty: qty, pallets: palOut, qtyAt: fmtShortTs_(atRaw), qtyBy: by, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
 }
+
+// ★ 2026-10-08 — 목록(getSalesOverview / getSalesTodayList)에 PU & TK의 박스·팔레트 수량을 얹기 위한 도우미.
+function _isPuTkMethod_(v) { return String(v == null ? '' : v).trim().toUpperCase() === 'PU & TK'; }
+function _puTkNum_(vals, i) { return vals ? Math.max(0, Math.round(Number(vals[i][0]) || 0)) : 0; }
 
 function headerMap_() {
   const sh = SHEET_();
@@ -3105,6 +3129,99 @@ function normalizeSalesShipMethod_(raw) {
   return 'Other';
 }
 
+/* =====================================================================
+ * ★★★ 2026-10-08 신규 — Sales Rep(영업 담당자) 조회 ★★★
+ *
+ * [왜] 영업팀이 "내 인보이스만 골라서 Sales Confirm" 하고 싶어 함(영업 직원 요청).
+ *      담당자 이름은 영업 구글시트의 "Sales" 열에 있지만 웹에는 안 내려오고 있었음.
+ * [방식] Jobs 시트에 열을 추가하지 않음(구글 시트 셀 한도 여유가 적음). 대신 영업시트의
+ *      "Invoice#" + "Sales" 두 열만 읽어 {인보이스: "담당자"} 맵을 만들고(5분 캐시),
+ *      목록(getSalesOverview / getSalesTodayList)을 만들 때 얹어서 내려줌.
+ *      → 영업이 시트에서 담당자를 바꾸면 최대 5분 뒤 웹에 자동 반영, 과거 인보이스도 자동으로 채워짐.
+ * [안전] 읽기 실패/열 없음이면 null → 목록에 salesRep 필드를 아예 안 붙임
+ *      (sales.html은 필드가 없으면 Sales Rep 선택칸을 숨김 = 기존과 동일하게 동작).
+ *      Pull Sales Sheet를 실행하면 이 캐시도 같이 비워 최신값을 바로 반영.
+ * ===================================================================== */
+const SALES_REP_CACHE_KEY_ = 'salesRepMap_v1';
+const SALES_REP_CACHE_TTL_ = 300; // 5분
+
+function normalizeSalesRep_(raw) {
+  // "Nagyeong, Hyein" / "Nagyeong;Hyein" / 줄바꿈 → "Nagyeong, Hyein" (공백 정리, 대소문자 무시 중복 제거)
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  const seen = {}, out = [];
+  s.split(/[,;\r\n\/]+/).forEach(function (p) {
+    const n = String(p || '').replace(/\s+/g, ' ').trim();
+    if (!n) return;
+    const k = n.toLowerCase();
+    if (seen[k]) return;
+    seen[k] = 1; out.push(n);
+  });
+  return out.join(', ');
+}
+
+// 반환: { 'IN00482551': 'Samuel Han', ... } 또는 null(읽을 수 없음 → 기능 숨김)
+function getSalesRepMap_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    if (cache.get(SALES_REP_CACHE_KEY_ + '_none')) return null;
+    const cachedRaw = _cacheGetChunked_(cache, SALES_REP_CACHE_KEY_);
+    if (cachedRaw) { try { return JSON.parse(cachedRaw); } catch (e) { /* 새로 조회 */ } }
+
+    const ss = SpreadsheetApp.openById(SALES_SHEET_ID);
+    const sheet = ss.getSheetByName(SALES_SHEET_NAME) || ss.getSheets()[0];
+    if (!sheet) { cache.put(SALES_REP_CACHE_KEY_ + '_none', '1', 120); return null; }
+    const lastRow = sheet.getLastRow(), lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) { cache.put(SALES_REP_CACHE_KEY_ + '_none', '1', 120); return null; }
+
+    // 헤더 행 찾기(pullFromSalesSheet와 같은 방식: 앞 5행 안에서 Invoice 열이 있는 행)
+    const top = sheet.getRange(1, 1, Math.min(5, lastRow), lastCol).getValues();
+    const norm = function (v) { return String(v || '').toLowerCase().replace(/\s+/g, '').replace(/[?]/g, ''); };
+    let hRow = -1, colInv = -1, colRep = -1;
+    for (let r = 0; r < top.length && hRow < 0; r++) {
+      for (let c = 0; c < top[r].length; c++) {
+        const h = norm(top[r][c]);
+        if (h === 'invoice#' || h === 'invoice') { hRow = r; colInv = c; break; }
+      }
+    }
+    if (hRow < 0) { cache.put(SALES_REP_CACHE_KEY_ + '_none', '1', 120); return null; }
+    const repNames = ['sales', 'salesrep', 'salesperson', 'salesrepresentative', 'rep'];
+    for (let c = 0; c < top[hRow].length; c++) {
+      if (repNames.indexOf(norm(top[hRow][c])) >= 0) { colRep = c; break; }
+    }
+    if (colRep < 0) { cache.put(SALES_REP_CACHE_KEY_ + '_none', '1', 120); return null; }
+
+    const n = lastRow - (hRow + 1);
+    if (n < 1) { cache.put(SALES_REP_CACHE_KEY_, JSON.stringify({}), SALES_REP_CACHE_TTL_); return {}; }
+    // 필요한 두 열만 읽음(전체 시트를 읽지 않아 빠름)
+    const invVals = sheet.getRange(hRow + 2, colInv + 1, n, 1).getDisplayValues();
+    const repVals = sheet.getRange(hRow + 2, colRep + 1, n, 1).getDisplayValues();
+    const map = {};
+    for (let i = 0; i < n; i++) {
+      const inv = String(invVals[i][0] || '').trim().toUpperCase();
+      if (!inv || inv.length < 3) continue;
+      const rep = normalizeSalesRep_(repVals[i][0]);
+      // 같은 인보이스가 여러 줄이면 값이 있는 쪽을 우선(빈 줄이 기존 값을 덮지 않게)
+      if (rep || !(inv in map)) map[inv] = rep;
+    }
+    try { _cachePutChunked_(cache, SALES_REP_CACHE_KEY_, JSON.stringify(map), SALES_REP_CACHE_TTL_); } catch (e) { /* 캐시 실패해도 정상 진행 */ }
+    return map;
+  } catch (e) {
+    try { Logger.log('getSalesRepMap_ failed: ' + String(e)); } catch (e2) {}
+    return null;
+  }
+}
+function clearSalesRepCache_() {
+  try {
+    const c = CacheService.getScriptCache();
+    c.remove(SALES_REP_CACHE_KEY_ + '_meta');
+    c.remove(SALES_REP_CACHE_KEY_ + '_none');
+  } catch (e) {}
+}
+function salesRepOf_(repMap, invoice) {
+  return repMap ? (repMap[String(invoice || '').trim().toUpperCase()] || '') : undefined;
+}
+
 function pullFromSalesSheet(dateFrom, dateTo) {
   try {
     const today = new Date();
@@ -3139,6 +3256,7 @@ function pullFromSalesSheet(dateFrom, dateTo) {
     }
 
     Logger.log('Date range: ' + fromStr + ' ~ ' + toStr + ' (' + (diffDays + 1) + ' days)');
+    clearSalesRepCache_(); // ★ 2026-10-08 — Pull 때 담당자 캐시도 같이 갱신
 
     const ss = SpreadsheetApp.openById(SALES_SHEET_ID);
     const sheet = ss.getSheetByName(SALES_SHEET_NAME) || ss.getSheets()[0];
@@ -3196,6 +3314,7 @@ function pullFromSalesSheet(dateFrom, dateTo) {
     const colAmount      = findCol(['INVOICE AMOUNT', 'InvoiceAmount', 'Amount']);
     const colPrint       = findCol(['Print?', 'Print', 'Printed']);
     const colIssue       = findCol(['Issue?', 'Issue']);
+    const colSalesRep    = findCol(['Sales', 'Sales Rep', 'Salesperson', 'Sales Person']); // ★ 2026-10-08
 
     if (colInvoice === -1) {
       return { ok: false, error: 'Invoice column not found', invoices: [] };
@@ -3354,6 +3473,7 @@ function pullFromSalesSheet(dateFrom, dateTo) {
         skuCount:  skuCount,
         totalQty:  totalQty,
         fromCms:   !!cmsMatch,
+        salesRep:  (colSalesRep >= 0) ? normalizeSalesRep_(row[colSalesRep]) : '', // ★ 2026-10-08
         row:       i + 1
       });
       stats.added++;
@@ -5669,6 +5789,10 @@ function getSalesTodayList_impl_() {
     const inspEndVals = _jobsCol_(sh, iInspEnd, lastRow - 1);
     const archVals    = iArch ? _jobsCol_(sh, iArch, lastRow - 1) : null; // ★ 2026-08-06 신규
     const payVals     = iPayStatus ? _jobsCol_(sh, iPayStatus, lastRow - 1) : null; // ★ 2026-09-02 신규
+    // ★ 2026-10-08 신규 — PU & TK 박스/팔레트 수량(목록의 DIMS 칸 표시용). 열이 없으면 0으로 취급.
+    const iPuTkQty_ = getFreshColIndex_(sh, 'PuTkBoxQty'), iPuTkPal_ = getFreshColIndex_(sh, 'PuTkPalletQty');
+    const puTkQtyVals = iPuTkQty_ ? _jobsCol_(sh, iPuTkQty_, lastRow - 1) : null;
+    const puTkPalVals = iPuTkPal_ ? _jobsCol_(sh, iPuTkPal_, lastRow - 1) : null;
     _prof_('td_cols');
 
     const movedMap = buildMovedToPackingMap_();
@@ -5683,6 +5807,7 @@ function getSalesTodayList_impl_() {
     _prof_('td_bol');
     const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
     _prof_('td_conf');
+    const repMap_ = getSalesRepMap_(); // ★ 2026-10-08 신규 — Sales Rep(null이면 필드 생략)
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
     //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦.
@@ -5784,6 +5909,10 @@ function getSalesTodayList_impl_() {
         // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인을 목록에도 표시. 값이
         //   없으면(옛날 오더·미입력) 안전하게 false(미납)로 취급.
         paymentPaid: payVals ? (String(payVals[i][0] || '').trim().toLowerCase() === 'paid') : false,
+        salesRep: salesRepOf_(repMap_, invoice), // ★ 2026-10-08 신규 — 영업 담당자(영업시트 "Sales" 열)
+        // ★ 2026-10-08 신규 — PU & TK만(그 외 방식은 필드 생략): 박스·팔레트 수량
+        puTkBoxQty: _isPuTkMethod_(truckVals ? truckVals[i][0] : '') ? _puTkNum_(puTkQtyVals, i) : undefined,
+        puTkPalletQty: _isPuTkMethod_(truckVals ? truckVals[i][0] : '') ? _puTkNum_(puTkPalVals, i) : undefined,
       });
     }
     jobs.sort((a, b) => String(b.inspEnd).localeCompare(String(a.inspEnd)));
@@ -5860,6 +5989,10 @@ function getSalesOverview_impl_() {
     const startISOVals = iStartISO ? _jobsCol_(sh, iStartISO, n) : null;
     const endISOVals   = iEndISO   ? _jobsCol_(sh, iEndISO,   n) : null; // ★ 2026-08-05 신규
     const statusVals   = iStatus   ? _jobsCol_(sh, iStatus,   n) : null; // ★ 2026-08-06 신규
+    // ★ 2026-10-08 신규 — PU & TK 박스/팔레트 수량(1번 탭 Dimensions 칸 표시용)
+    const iPuTkQty_ = getFreshColIndex_(sh, 'PuTkBoxQty'), iPuTkPal_ = getFreshColIndex_(sh, 'PuTkPalletQty');
+    const puTkQtyVals = iPuTkQty_ ? _jobsCol_(sh, iPuTkQty_, n) : null;
+    const puTkPalVals = iPuTkPal_ ? _jobsCol_(sh, iPuTkPal_, n) : null;
     _prof_('ov_cols');
 
     const movedMap = buildMovedToPackingMap_();
@@ -5872,6 +6005,7 @@ function getSalesOverview_impl_() {
     _prof_('ov_bol');
     const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
     _prof_('ov_conf');
+    const repMap_ = getSalesRepMap_(); // ★ 2026-10-08 신규 — Sales Rep(null이면 필드 생략)
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
     //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦
@@ -5980,6 +6114,9 @@ function getSalesOverview_impl_() {
         salesConfirmWasUndone: !!(confirmMap[dimsLinkedTo_ || invoice] || {}).wasUndone,
         salesConfirmUndoneAt: (confirmMap[dimsLinkedTo_ || invoice] || {}).undoneAt || '',
         salesConfirmUndoneBy: (confirmMap[dimsLinkedTo_ || invoice] || {}).undoneBy || '',
+        salesRep: salesRepOf_(repMap_, invoice), // ★ 2026-10-08 신규 — 영업 담당자(영업시트 "Sales" 열)
+        puTkBoxQty: _isPuTkMethod_(truckVals ? truckVals[i][0] : '') ? _puTkNum_(puTkQtyVals, i) : undefined,   // ★ 2026-10-08 — PU & TK만
+        puTkPalletQty: _isPuTkMethod_(truckVals ? truckVals[i][0] : '') ? _puTkNum_(puTkPalVals, i) : undefined,
         createdAt: createdAt
       });
     }
