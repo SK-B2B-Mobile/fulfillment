@@ -6137,6 +6137,8 @@ function getSalesInvoiceDetail(invoice) {
     const iPuTkAt = getFreshColIndex_(sh, 'PuTkBoxQtyAt');
     const iPuTkBy = getFreshColIndex_(sh, 'PuTkBoxQtyBy');
     const puTkBoxQty = iPuTkQty ? Number(jobRow[iPuTkQty - 1] || 0) : 0;
+    const iPuTkPal = getFreshColIndex_(sh, 'PuTkPalletQty'); // ★ 2026-10-08 — 팔레트 수량
+    const puTkPalletQty = iPuTkPal ? Math.max(0, Math.round(Number(jobRow[iPuTkPal - 1]) || 0)) : 0;
     // ★ 2026-10-02 긴급 수정 — fmtShortTs_(Code.gs)로 짧은 "MM/dd h:mm a" 형식
     //   통일(길게 찍히는 Date.toString() 버그 수정, fmtShortTs_ 주석 참고).
     const puTkBoxQtyAt = iPuTkAt ? fmtShortTs_(jobRow[iPuTkAt - 1]) : '';
@@ -6376,6 +6378,7 @@ function getSalesInvoiceDetail(invoice) {
       paymentUpdatedBy: paymentUpdatedBy,
       // ★ 2026-10-03 신규 — 'PU & TK' 전용 박스 수량
       puTkBoxQty: puTkBoxQty,
+      puTkPalletQty: puTkPalletQty, // ★ 2026-10-08
       shipped: shippedFlag,        // ★ 2026-10-07 — 출고 완료 여부(PU/UPS/PU & TK 팝업의 Shipped 칸)
       shippedAt: shippedAtOut,
       shippedBy: shippedByOut,
