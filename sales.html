@@ -1958,7 +1958,7 @@ function renderDayBody_(toTop){
     if (d.overdue) return `<span class="st-bad">${o.days} day${o.days > 1 ? 's' : ''} overdue — ${o.reason === 'dims' ? 'no dims' : 'not shipped'}</span>`;
     if (o.dims === false) return '<span class="st-bad">⚠ Missing dimensions</span>';
     if (o.dims === true) return '<span class="st-ok">Dimensions saved</span>';
-    return '<span class="st-dim">—</span>';
+    return '<span class="st-dim">N/A</span>';
   };
   let html = '', lastGrp = '';
   pageRows.forEach(o => {
