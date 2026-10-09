@@ -3077,6 +3077,17 @@ let SEARCH_Q = '';
    ═══════════════════════════════════════════════════════════ */
 let REP_FILTER = '';   // '' = 전체 · '__none__' = 담당자 미지정 · 그 외 = 담당자 이름(소문자)
 try { REP_FILTER = localStorage.getItem('sk_sales_rep_filter') || ''; } catch(e){}
+// "지금 영업이 컨펌해야 하는 오더" 판정 — 컨펌 방식이 배송방법마다 다름:
+//   TK: Shipping Status 탭의 Sales Confirm(salesConfirmed) — 디멘션이 입력된 뒤부터 누를 수 있음
+//   PU · UPS · PU&TK: 상세 팝업의 Sales Confirm(= paymentPaid) — 패킹존 이동 완료 후부터 누를 수 있음
+//   대표에 묶여 같이 나가는 오더(dimsLinkedTo)와 이미 출고된 오더는 제외.
+function needsSalesConfirm_(j){
+  if (!j || j.shipped || j.dimsLinkedTo) return false;
+  const m = String(j.method || '').trim().toUpperCase();
+  if (m === 'TK' || m === 'TRUCKING') return !j.salesConfirmed && (Number(j.dimsCount) || 0) > 0;
+  if (m === 'PU' || m === 'UPS' || m === 'PU & TK') return !j.paymentPaid && !!j.movedToPacking;
+  return false;
+}
 function repsOf_(j){
   const s = String((j && j.salesRep) || '').trim();
   if (!s) return [];
@@ -3113,7 +3124,7 @@ function renderRepBar_(){
   [].concat(SHEET_JOBS || [], TODAY_JOBS || []).forEach(j => repsOf_(j).forEach(n => { const k = n.toLowerCase(); if (!reps[k]) reps[k] = { name: n, open: 0, tc: 0 }; }));
   (SHEET_JOBS || []).forEach(j => { if (!j.shipped) bump(j, 'open'); });
   // "to confirm" = 검수까지 끝났는데 영업이 아직 컨펌(Sales Confirm)을 안 한 오더 (대표 오더 기준, 묶인 오더는 대표 1건으로 셈)
-  (TODAY_JOBS || []).forEach(j => { if (!j.shipped && !j.salesConfirmed && !j.dimsLinkedTo) bump(j, 'tc'); });
+  (TODAY_JOBS || []).forEach(j => { if (needsSalesConfirm_(j)) bump(j, 'tc'); });
   // 저장된 선택값이 목록에 없으면(퇴사·이름 변경 등) 전체로 되돌림
   if (REP_FILTER && REP_FILTER !== '__none__' && !reps[REP_FILTER]) {
     // 데이터가 아직 부분적으로만 로드됐을 수 있으니 값 자체는 유지하되, 칩은 임시로 하나 만들어 보여줌
@@ -3122,7 +3133,7 @@ function renderRepBar_(){
   const list = Object.keys(reps).map(k => Object.assign({ key: k }, reps[k]))
     .sort((a, b) => (b.tc - a.tc) || (b.open - a.open) || a.name.localeCompare(b.name));
   const totOpen = (SHEET_JOBS || []).filter(j => !j.shipped).length;
-  const totTc = (TODAY_JOBS || []).filter(j => !j.shipped && !j.salesConfirmed && !j.dimsLinkedTo).length;
+  const totTc = (TODAY_JOBS || []).filter(needsSalesConfirm_).length;
   const opt = (key, label, open, tc) => '<option value="' + key + '"' + (REP_FILTER === key ? ' selected' : '') + '>' +
     _escH_(label) + '  ·  ' + open + ' open' + (tc > 0 ? '  ·  ⏳ ' + tc : '') + '</option>';
   const optsHtml =
