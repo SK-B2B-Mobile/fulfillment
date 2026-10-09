@@ -439,6 +439,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 /* ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭). BOL#과 동일한
    .ship2-status-cell 안에 나란히 배치. */
 .confirm-chip{font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--green); white-space:nowrap;}
+.confirm-check-btn.blocked{opacity:.75; cursor:not-allowed; color:var(--text-dim); border-style:dashed;}
 .confirm-check-btn{font-family:var(--sans); font-size:10.5px; font-weight:700; color:var(--text-dim); background:var(--surface2); border:1px solid var(--border2); border-radius:6px; padding:4px 9px; cursor:pointer; white-space:nowrap;}
 .confirm-undo-btn{font-family:var(--sans); font-size:10.5px; font-weight:700; color:var(--text-dim); background:none; border:none; cursor:pointer; padding:0; text-decoration:underline; white-space:nowrap;}
 .confirm-with-undo{display:flex; align-items:center; gap:8px;}
@@ -863,6 +864,9 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .ops-seg.done{border-color:rgba(16,217,126,0.4); background:var(--green-bg);}
 .ops-seg.done .ops-prog i{background:var(--green);}
 .rc-split{text-decoration:none; font-weight:600; opacity:.85; margin-left:2px;}
+.plain-tag.hold{background:rgba(255,138,60,0.16); color:#FF9F5A; border:1px solid rgba(255,138,60,0.55); border-radius:5px; padding:0 5px; font-weight:800;}
+.ship-cell-time.hold{color:#FF9F5A;}
+.ops-seg.hold .ops-sub{color:#FF9F5A;}
 .ops-scope{margin-left:auto; font-family:var(--mono); font-size:10.5px; font-weight:700; color:var(--text-dim); border:1px dashed var(--border2); border-radius:99px; padding:4px 10px; white-space:nowrap;}
 @media (max-width:900px){ .ops-bar{flex-wrap:wrap; height:auto; gap:6px;} .ops-seg{flex:1 1 100%; width:auto;} .ops-scope{display:none;} }
 .rep-slot{display:flex; align-items:center; gap:8px; margin-left:auto; flex-shrink:0;}
@@ -2470,23 +2474,26 @@ function renderOpsBar_(){
   const confirmed = scope.filter(j => j.shipped || j.paymentPaid).length;
   // Sales Confirm은 "패킹존 이동 완료" 후에만 누를 수 있으므로(그 전엔 🔒), 남은 건 = 지금 컨펌 가능한데 아직 안 한 오더.
   // 아직 이동 전이라 누를 수 없는 건은 따로 "not moved yet"으로 보여줌.
-  const salesLeft = scope.filter(j => !j.shipped && !j.paymentPaid && j.movedToPacking).length;
-  const notMoved = scope.filter(j => !j.shipped && !j.paymentPaid && !j.movedToPacking).length;
-  const ready = scope.filter(j => !j.shipped && j.paymentPaid && j.movedToPacking).length;
+  const salesLeft = scope.filter(j => !j.shipped && !j.paymentPaid && confirmReady_(j)).length;
+  const notMoved = scope.filter(j => !j.shipped && !j.paymentPaid && !confirmReady_(j)).length;   // 앞 단계(패킹 이동·2차 검증·디멘션)가 아직 안 끝나 컨펌 대기 불가
+  const ready = scope.filter(j => !j.shipped && j.paymentPaid && j.movedToPacking && confirmReady_(j)).length;
+  const hold = scope.filter(j => !j.shipped && j.paymentPaid && !confirmReady_(j)).length;   // 컨펌은 됐는데 앞 단계가 미완료
   const set = (id, v) => { const el = document.getElementById(id); if (!el) return; const t = String(v); if (el.textContent !== t){ el.textContent = t; if (id.endsWith('N') && _opsPrev[id] !== undefined){ el.classList.add('tick'); setTimeout(() => el.classList.remove('tick'), 260); } _opsPrev[id] = t; } };
   set('opsSalesN', salesLeft); set('opsShipN', ready);
   const pct = n => total ? Math.round(n * 100 / total) : 0;
   document.getElementById('opsSalesBar').style.width = pct(confirmed) + '%';
   document.getElementById('opsShipBar').style.width = pct(shipped) + '%';
-  document.getElementById('opsSalesSub').textContent = confirmed + ' / ' + total + ' done' + (notMoved ? ' · 🔒 ' + notMoved + ' waiting for Packing' : '');
-  document.getElementById('opsShipSub').textContent = shipped + ' / ' + total + ' shipped';
+  document.getElementById('opsSalesSub').textContent = confirmed + ' / ' + total + ' done' + (notMoved ? ' · 🔒 ' + notMoved + ' not ready' : '');
+  document.getElementById('opsShipSub').textContent = shipped + ' / ' + total + ' shipped' + (hold ? ' · ⚠ ' + hold + ' on hold' : '');
   document.getElementById('opsSalesU').textContent = salesLeft === 0 && total > 0 ? '✓ all confirmed' : 'to confirm';
   document.getElementById('opsShipU').textContent = ready === 0 && total > 0 ? (shipped === total ? '✓ all shipped' : 'ready to ship') : 'ready to ship';
   document.getElementById('opsSales').classList.toggle('done', total > 0 && salesLeft === 0);
   document.getElementById('opsShip').classList.toggle('done', total > 0 && shipped === total);
-  const waiting = scope.filter(j => !j.shipped && !(j.paymentPaid && j.movedToPacking)).length;
-  document.getElementById('opsShip').title = ready + ' ready to ship now · ' + waiting + ' still waiting for Sales Confirm or Packing move · ' + shipped + ' shipped';
-  document.getElementById('opsSales').title = salesLeft + ' orders ready for Sales Confirm now · ' + notMoved + ' not moved to Packing yet (locked) · ' + confirmed + ' of ' + total + ' confirmed';
+  document.getElementById('opsShip').classList.toggle('hold', hold > 0);
+  const waiting = scope.filter(j => !j.shipped && !(j.paymentPaid && j.movedToPacking)).length;   // (2차 검증 대기는 hold로 따로 셈)
+  document.getElementById('opsShip').title = ready + ' ready to ship now · ' + hold + ' on hold (confirmed before a previous step was complete) · ' + waiting + ' still waiting for Sales Confirm or Packing move · ' + shipped + ' shipped';
+  const _reasons = {}; scope.filter(j => !j.shipped && !j.paymentPaid && !confirmReady_(j)).forEach(j => { const r = confirmBlockReason_(j); _reasons[r] = (_reasons[r] || 0) + 1; });
+  document.getElementById('opsSales').title = salesLeft + ' orders ready for Sales Confirm now · ' + notMoved + ' not ready yet' + (notMoved ? ' (' + Object.keys(_reasons).map(k => _reasons[k] + ' need ' + k).join(', ') + ')' : '') + ' · ' + confirmed + ' of ' + total + ' confirmed';
   const sc = document.getElementById('opsScope');
   if (sc) sc.textContent = (REP_FILTER && REP_FILTER !== '' ? (REP_FILTER === '__none__' ? 'Unassigned' : REP_FILTER.replace(/\b\w/g, c => c.toUpperCase())) + ' · ' : '') + 'UPS · PU · PU&TK';
 }
@@ -2792,9 +2799,13 @@ function renderShipping(){
       confirmHtml = `<span class="confirm-locked-note" title="Confirm on primary invoice ${j.dimsLinkedTo}">Pending on primary</span>`;
     } else if (j.salesConfirmWasUndone){
       const tip = `Previously confirmed by ${j.salesConfirmedBy || '-'} — undone by ${j.salesConfirmUndoneBy || '-'}${j.salesConfirmUndoneAt ? ' · ' + j.salesConfirmUndoneAt : ''}`;
-      confirmHtml = `<button class="confirm-check-btn undone" onclick="toggleSalesConfirm('${j.invoice}', true)" title="${tip.replace(/"/g,'&quot;')}">⚠ Sales Confirm</button>`;
+      confirmHtml = confirmGateReason_(j)
+        ? `<button class="confirm-check-btn blocked" disabled title="Sales Confirm comes after: Packing move → 2nd verification → dimensions. Missing now: ${_escH_(confirmGateReason_(j))}">🔒 ${_escH_(confirmGateReason_(j))}</button>`
+        : `<button class="confirm-check-btn undone" onclick="toggleSalesConfirm('${j.invoice}', true)" title="${tip.replace(/"/g,'&quot;')}">⚠ Sales Confirm</button>`;
     } else {
-      confirmHtml = `<button class="confirm-check-btn" onclick="toggleSalesConfirm('${j.invoice}', true)">☐ Sales Confirm</button>`;
+      confirmHtml = confirmGateReason_(j)
+        ? `<button class="confirm-check-btn blocked" disabled title="Sales Confirm comes after: Packing move → 2nd verification → dimensions. Missing now: ${_escH_(confirmGateReason_(j))}">🔒 ${_escH_(confirmGateReason_(j))}</button>`
+        : `<button class="confirm-check-btn" onclick="toggleSalesConfirm('${j.invoice}', true)">☐ Sales Confirm</button>`;
     }
 
     // ★ 2026-10-02 신규(시뮬레이션에서 확정) — BOL# 입력. Shipped 체크와는
@@ -2913,12 +2924,16 @@ function _shipJobsFor_(invoice){
 // 팝업(Order Detail Lookup)의 [📦 Mark Shipped] / [Undo]
 function toggleShippedDetail(invoice, nextShipped){ return toggleShipped(invoice, nextShipped, true); }
 async function toggleShipped(invoice, nextShipped, fromPopup){
+  const targets = _shipJobsFor_(invoice);
+  // ★ 2026-10-09 — 2차 검증이 끝나지 않은 오더를 출고 처리하려 하면 경고(막지는 않음)
+  const _unver = nextShipped ? targets.filter(needs2ndVerify_) : [];
   const msg = nextShipped
-    ? `Mark ${invoice} as SHIPPED?`
+    ? (_unver.length
+        ? `⚠ 2nd verification is NOT complete for ${_unver.map(x => x.invoice).slice(0, 3).join(', ')}${_unver.length > 3 ? ' …' : ''}.\nOrders must pass the 2nd verification at Packing before they ship.\n\nMark ${invoice} as SHIPPED anyway?`
+        : `Mark ${invoice} as SHIPPED?`)
     : `Undo — mark ${invoice} as NOT shipped?`;
   if (!confirm(msg)) return;
   if (_shipInflight[invoice]) return;
-  const targets = _shipJobsFor_(invoice);
   const popup = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
   if (!targets.length && !popup) return;
   _shipInflight[invoice] = true;
@@ -3086,6 +3101,8 @@ async function toggleSalesConfirm(invoice, nextConfirmed){
   if (_confirmInflight[invoice]) return;
   const job = TODAY_JOBS.find(j => j.invoice === invoice);
   if (!job) return;
+  // ★ 2026-10-09 — 작업 순서: 패킹 이동 → 2차 검증 → 디멘션 → Sales Confirm. 앞 단계가 안 끝났으면 컨펌 불가.
+  if (nextConfirmed){ const _gr = confirmGateReason_(job); if (_gr){ alert('Sales Confirm is not available yet for ' + invoice + '.\n\nMissing: ' + _gr + '\nOrder of work: Packing move → 2nd verification → dimensions → Sales Confirm.'); return; } }
   _confirmInflight[invoice] = true;
   _markLocalOp_(invoice, 'conf');
   const by = authGetName() || 'Sales';
@@ -3327,8 +3344,8 @@ try { REP_FILTER = localStorage.getItem('sk_sales_rep_filter') || ''; } catch(e)
 function needsSalesConfirm_(j){
   if (!j || j.shipped || j.dimsLinkedTo) return false;
   const m = String(j.method || '').trim().toUpperCase();
-  if (m === 'TK' || m === 'TRUCKING') return !j.salesConfirmed && (Number(j.dimsCount) || 0) > 0;
-  if (m === 'PU' || m === 'UPS' || m === 'PU & TK') return !j.paymentPaid && !!j.movedToPacking;
+  if (m === 'TK' || m === 'TRUCKING') return !j.salesConfirmed && confirmReady_(j);   // ★ 2026-10-09 — TK도 디멘션 + 2차 검증이 끝난 뒤에만
+  if (m === 'PU' || m === 'UPS' || m === 'PU & TK') return !j.paymentPaid && confirmReady_(j);   // ★ 2026-10-09 — 패킹 이동 + 2차 검증 + 디멘션까지 끝난 뒤에만 "지금 컨펌할 것"으로 셈
   return false;
 }
 function repsOf_(j){
@@ -3386,7 +3403,7 @@ function renderRepBar_(){
   const cur = REP_FILTER === '' ? null : (REP_FILTER === '__none__' ? { open: noneOpen, tc: noneTc } : reps[REP_FILTER]);
   const _tkTc_ = !cur ? 0 : (TODAY_JOBS || []).filter(j => jobMatchesRep_(j) && needsSalesConfirm_(j) && !_isNonTkMethod_(j.method)).length;
   const sumHtml = !cur ? '' : (cur.tc > 0
-    ? '<i class="rc-tc" title="Orders you can Sales-Confirm right now (TK: dimensions entered · PU/UPS/PU&TK: moved to Packing)">⏳ ' + cur.tc + ' to confirm' + (_tkTc_ > 0 && _tkTc_ < cur.tc ? ' <u class="rc-split">(' + (cur.tc - _tkTc_) + ' + ' + _tkTc_ + ' TK)</u>' : (_tkTc_ > 0 ? ' <u class="rc-split">(TK)</u>' : '')) + '</i>'
+    ? '<i class="rc-tc" title="Orders you can Sales-Confirm right now (TK: dimensions entered · PU/UPS/PU&TK: Packing move + 2nd verification + dimensions done)">⏳ ' + cur.tc + ' to confirm' + (_tkTc_ > 0 && _tkTc_ < cur.tc ? ' <u class="rc-split">(' + (cur.tc - _tkTc_) + ' + ' + _tkTc_ + ' TK)</u>' : (_tkTc_ > 0 ? ' <u class="rc-split">(TK)</u>' : '')) + '</i>'
     : (cur.open > 0 ? '<i class="rc-tc ok" title="Nothing left to confirm right now">✓ All confirmed</i>' : ''));
   slots.forEach(el => {
     const sel = el.querySelector('.rep-sel');
@@ -4257,6 +4274,11 @@ function paymentMetaInner_(res){
       <div class="v"><span class="pay-locked">🔒 Available after Moved to Packing</span></div>`;
   }
   const isPaid = !!res.paymentPaid;
+  const _gate = (!isPaid && !res.shipped) ? confirmGateReason_(gateJobFor_(res)) : '';
+  if (_gate){
+    return `<div class="k">Sales Confirm</div>
+      <div class="v"><span class="pay-locked" title="Order of work: Packing move → 2nd verification → dimensions → Sales Confirm">🔒 Available after: ${_escH_(_gate)}</span></div>`;
+  }
   if (res.shipped){
     return `<div class="k">Sales Confirm</div>
       <div class="v"><span class="pay-badge paid" id="paymentBadge">✓ CONFIRMED</span> <span class="pay-locked" title="Undo the shipment first to change Sales Confirm">🔒 Locked — shipped</span></div>`;
@@ -4321,6 +4343,41 @@ function _applyShipOvToDetail_(res){
     }
   } catch(e){}
 }
+// ★ 2026-10-09 — 작업 순서(현장 확정): 1차 분류·검수 → 핑크(Pending Move) → 출고쪽이 가져가면 파랑(Moved to Packing) → 2차 검증(✓ 2nd Verification Complete)
+//   → 작업자 디멘션 입력(UPS·TK는 치수, PU&TK는 박스/팔레트, PU는 없음) → 영업 Sales Confirm → (TK) BOL#·금액 → 출고일에 Mark Shipped.
+//   아래 함수들은 이 순서를 화면에 반영(표시·경고 전용 — 버튼을 서버에서 막지는 않음).
+//   packStage 값이 아예 없으면(옛 서버 응답) 판단하지 않음 → 경고 없이 기존처럼 동작(안전).
+function needs2ndVerify_(j){
+  if (!j || j.shipped) return false;
+  if (j.packStage === undefined || j.packStage === null || j.packStage === '') return false;
+  return String(j.packStage) !== 'verified';
+}
+// 비상 스위치: false로 바꾸면 Sales Confirm 선행 단계 잠금을 끔(표시만 남김). 평소엔 true.
+const ENFORCE_CONFIRM_PREREQ_ = true;
+function dimsReadyForConfirm_(j){
+  const m = String((j && j.method) || '').trim().toUpperCase();
+  if (m === 'TK' || m === 'TRUCKING') return ((Number(j.dimsCount) || 0) > 0) || !!j.dimsLinkedTo;
+  if (m === 'UPS') return ((Number(j.dimsCount) || 0) > 0) || !!j.dimsLinkedTo;
+  if (m === 'PU & TK') return puTkEntered_(j);
+  return true;   // PU: 디멘션 없음
+}
+// 영업이 지금 Sales Confirm 해도 되는 상태인가(= 앞 단계가 모두 끝났나)
+function confirmReady_(j){ return !!(j && j.movedToPacking) && !needs2ndVerify_(j) && dimsReadyForConfirm_(j); }
+// 아직 못 누르는 이유(짧은 문구). 비어 있으면 준비 완료.
+// 실제 버튼 잠금/차단에 쓰는 이유(비상 스위치가 꺼져 있으면 항상 빈 값)
+function confirmGateReason_(j){ return (ENFORCE_CONFIRM_PREREQ_ && j) ? confirmBlockReason_(j) : ''; }
+// 팝업(상세) 응답과 목록 행 중 더 완전한 쪽을 골라 판단(목록에 있으면 목록 값 우선)
+function gateJobFor_(res){
+  if (!res) return null;
+  const lj = (TODAY_JOBS || []).find(j => j.invoice === res.invoice) || (SHEET_JOBS || []).find(j => j.invoice === res.invoice);
+  return lj ? Object.assign({}, res, lj) : res;
+}
+function confirmBlockReason_(j){
+  if (!j.movedToPacking) return 'Packing move';
+  if (needs2ndVerify_(j)) return '2nd verification';
+  if (!dimsReadyForConfirm_(j)) return (String(j.method || '').trim().toUpperCase() === 'PU & TK') ? 'Box / pallet qty' : 'Dimensions';
+  return '';
+}
 function shippedCellHtml_(j){
   // ★ 2026-10-08 — 목록 맨 오른쪽 "Shipped" 칸. 출고팀이 팝업에서 누른 결과를 목록에서도 바로 보이게 함.
   //   상태: ✓ Shipped(시각·담당) / Ready to ship(출고 가능) / 🔒 Sales Confirm 대기 / Not moved / via 대표 / N/A
@@ -4336,8 +4393,13 @@ function shippedCellHtml_(j){
   }
   if (j.dimsLinkedTo) return `<span class="ship-cell"><span class="plain-tag noship">↳ with ${_escH_(j.dimsLinkedTo)}</span><span class="ship-cell-time dim">ships together</span></span>`;
   if (isTk) return '<span class="ship-cell" title="TK shipping is tracked in the TK Shipping Status tab"><span class="plain-tag noship">TK · see</span><span class="ship-cell-time dim">TK Shipping Status</span></span>';
+  const _why = confirmBlockReason_(j);
   if (!j.movedToPacking) return '<span class="ship-cell"><span class="plain-tag noship">Not shipped</span><span class="ship-cell-time dim">needs Packing move</span></span>';
-  if (!j.paymentPaid) return '<span class="ship-cell"><span class="plain-tag locked">🔒 Not shipped</span><span class="ship-cell-time lock">needs Sales Confirm</span></span>';
+  if (!j.paymentPaid){
+    if (_why) return '<span class="ship-cell" title="Sales Confirm comes after: Packing move → 2nd verification → dimensions."><span class="plain-tag noship">Not shipped</span><span class="ship-cell-time dim">needs ' + _escH_(_why) + '</span></span>';
+    return '<span class="ship-cell"><span class="plain-tag locked">🔒 Not shipped</span><span class="ship-cell-time lock">needs Sales Confirm</span></span>';
+  }
+  if (_why) return '<span class="ship-cell" title="Sales confirmed, but a step before it is not complete (' + _escH_(_why) + '). Do not ship until it is done."><span class="plain-tag hold">⚠ On hold</span><span class="ship-cell-time hold">' + _escH_(_why) + ' pending</span></span>';
   return '<span class="ship-cell"><span class="plain-tag ready">● Ready to ship</span><span class="ship-cell-time ready">Sales confirmed</span></span>';
 }
 
@@ -4729,6 +4791,9 @@ async function savePaymentStatus(invoice){
   // 안 보내는 사고가 있었음 → 지금도 Save를 누르면 무조건 서버로 보냄(서버는 같은 값을 그대로 다시 씀).
 
   const nextLabel = willBePaid ? 'CONFIRMED' : 'NOT CONFIRMED';
+  const _lj = (TODAY_JOBS || []).find(j => j.invoice === invoice) || (SHEET_JOBS || []).find(j => j.invoice === invoice);
+  const _why = (willBePaid && _lj) ? confirmGateReason_(_lj) : '';
+  if (_why){ alert('Sales Confirm is not available yet for ' + invoice + '.\n\nMissing: ' + _why + '\nOrder of work: Packing move → 2nd verification → dimensions → Sales Confirm.'); return; }
   const warn = `Change Sales Confirm to "${nextLabel}"?\n\nThis is shown directly to release/shipping staff. Please confirm carefully before changing.`;
   if (!confirm(warn)) return;
 
