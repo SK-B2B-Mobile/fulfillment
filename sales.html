@@ -3065,18 +3065,29 @@ function _serial_(key, fn){
 const _movedHealAt = {};
 function _reconcileMovedWithList_(res){
   try {
-    if (!res || !res.invoice || res.movedToPacking) return;
+    if (!res || !res.invoice) return;
     const lj = (TODAY_JOBS||[]).find(j => j.invoice === res.invoice) || (SHEET_JOBS||[]).find(j => j.invoice === res.invoice);
-    if (!lj || !lj.movedToPacking) return;
-    res.movedToPacking = true;
-    if ((_STAGE_RANK[res.packStage||'none']||0) < (_STAGE_RANK[lj.packStage||'taken']||2)) res.packStage = lj.packStage && lj.packStage !== 'none' ? lj.packStage : 'taken';
+    if (!lj) return;
     const now = Date.now();
-    if (!_movedHealAt[res.invoice] || now - _movedHealAt[res.invoice] > 30000) { _movedHealAt[res.invoice] = now; _syncInvoiceMirror_(res.invoice); }
+    if (!res.movedToPacking && lj.movedToPacking){
+      res.movedToPacking = true;
+      if ((_STAGE_RANK[res.packStage||'none']||0) < (_STAGE_RANK[lj.packStage||'taken']||2)) res.packStage = lj.packStage && lj.packStage !== 'none' ? lj.packStage : 'taken';
+    }
+    // ★ 2026-10-09 — 반대 방향(팝업=이동완료인데 목록=No) 또는 출고일이 서로 다르면 낡은 미러로 보고 서버에서 다시 계산해 미러를 바로잡음(오더·30초당 1회)
+    const sdL = String(lj.shipDate||'').slice(0,10), sdR = String(res.shipDate||'').slice(0,10);
+    const stale = (!!lj.movedToPacking !== !!res.movedToPacking) || ((lj.packStage||'none') !== (res.packStage||'none')) || (sdL && sdR && sdL !== sdR);
+    if (stale && (!_movedHealAt[res.invoice] || now - _movedHealAt[res.invoice] > 30000)){
+      _movedHealAt[res.invoice] = now;
+      _syncInvoiceMirror_(res.invoice, true);
+    }
   } catch(e){}
 }
-function _syncInvoiceMirror_(invoice){
+function _syncInvoiceMirror_(invoice, thenRefresh){
   gasPost('syncInvoiceMirror', { invoice: invoice }).then(r => {
     if (!r || !r.ok) return gasPost('syncInvoiceMirror', { invoice: invoice });
+  }).then(() => {
+    // 다시 계산된 값을 열려 있는 팝업에도 바로 반영(실시간 구독이 없는 폴백 모드 대비)
+    try { if (thenRefresh && CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) _refreshDetailSilently_(invoice); } catch(e){}
   }).catch(() => {});
 }
 // 상세 팝업이 실시간 구독(Firestore) 없이 열려 있는 경우(폴백 모드)에만, 저장 후 조용히 최신 상세로 갱신
@@ -4433,7 +4444,12 @@ function renderDetail(res){
   }
 
   let statusHtml, itemsSectionHtml='';
-  const movedHtml = packStageBadgeHtml(res, 'status-small');
+  // ★ 2026-10-09 버그 수정 — 상세 팝업은 "미러"(쓰기 시점에만 갱신)에서 오고 목록은 시트에서 1분마다 새로 계산됨.
+  //   시트를 직접 고친 오더(출고일 변경 등)는 미러가 낡아서 팝업은 "이동 완료(Undo 버튼)"인데 목록·Sales Confirm 잠금은
+  //   "No(Packing move 필요)"로 서로 달랐고, 그 결과 "Mark as Moved to Packing" 버튼이 어디에도 없었음.
+  //   이제 팝업의 이동 상태·버튼도 Sales Confirm 잠금과 같은 기준(목록 우선, gateJobFor_)으로 판단.
+  const _effM = gateJobFor_(res) || res;
+  const movedHtml = packStageBadgeHtml(_effM, 'status-small');
   // ★ 2026-08-06 신규 — 총량피킹 배치에 아예 안 속한(hasBatchRecord=false) 오더는
   //   TV 현황판이 관리할 방법이 없어서 "Moved to Packing"이 영원히 No로 고정됨.
   //   출고 작업자가 직접 표시할 수 있는 버튼을 추가 — 실수 방지를 위해 클릭 시
@@ -4446,7 +4462,7 @@ function renderDetail(res){
   //   처리된다"는 안내만 아래에 작게 덧붙임(누르는 것 자체는 언제나 허용 —
   //   확인 팝업이 실수를 막아줌).
   let manualMoveHtml = '';
-  if (res.movedToPacking){
+  if (_effM.movedToPacking){
     manualMoveHtml = `<button class="manual-moved-undo" onclick="markManualMoved('${res.invoice}', false)">Undo (clicked by mistake)</button>`;
   } else {
     manualMoveHtml = `<button class="manual-moved-btn" onclick="markManualMoved('${res.invoice}', true)">📦 Mark as Moved to Packing</button>`;
