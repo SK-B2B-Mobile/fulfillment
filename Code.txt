@@ -804,6 +804,7 @@ function doPost(e) {
   if (op === 'saveDimensions') return json_(saveDimensions(data));
   // ★ 2026-08-06 신규 — 단독 오더(총량피킹 배치 없음)의 패킹존 이동 수동 표시
   if (op === 'setManualPackingMoved') return json_(setManualPackingMoved(data));
+  if (op === 'setVerifySkip') return json_(setVerifySkip(data)); // ★ 2026-10-09 신규 — 2차 검증 통과(작업장 즉시 처리, 감사 기록 남김)
   // ★ 2026-08-31 신규 — Order Detail Lookup에서 검수완료 오더의 배송방법 수정
   if (op === 'updateOrderMethod') return json_(updateOrderMethod(data));
   // ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용)
@@ -1908,21 +1909,29 @@ function setManualPackingMoved(data) {
     if (!cols.f) return { ok: false, error: 'PackingMovedManual column unavailable (server setup) — please contact the administrator' };
     mark('row');
 
+    let skipNow = false;
     const lock = LockService.getDocumentLock();
     lock.waitLock(15000);
     mark('lock');
     try {
-      _writeRowCells_(sh, ctx.row, [
+      // ★ 2026-10-09 — 이동 표시를 되돌리면 "2차 검증 통과" 기록도 같이 지움(이동이 전제이므로). 컬럼이 없으면 건너뜀.
+      const _sk = _verifySkipCols_(ctx.headers);
+      const _wr = [
         { col: cols.f, value: moved ? nowLocal_() : '' },
         { col: cols.b, value: moved ? by : '' }
-      ]);
+      ];
+      if (!moved && _sk.f && _sk.b && _sk.r) {
+        _wr.push({ col: _sk.f, value: '', text: true }, { col: _sk.b, value: '' }, { col: _sk.r, value: '' });
+      }
+      skipNow = moved && !!(_sk.f && ctx.rowVals[_sk.f - 1]);
+      _writeRowCells_(sh, ctx.row, _wr);
       mark('write');
     } finally {
       lock.releaseLock();
     }
 
     bumpVersionLite_(); // 값만 바뀌는 쓰기 — 목록 캐시만 즉시 무효화
-    const st = _packStateForInvoice_(invoice, moved);
+    const st = _packStateForInvoice_(invoice, moved, skipNow);
     // ★ 상세 미러는 "무효화 후 전체 재계산(9~18초, 서버 부하 큼)" 대신 기존 문서의 해당 필드만 바로 고쳐 씀(~0.5초).
     //   실패하면 예전처럼 무효화(다음 조회 때 새로 계산)로 대체.
     let mirrorPatched = false;
@@ -1938,7 +1947,137 @@ function setManualPackingMoved(data) {
 /* ★ 2026-10-05 신규 — 인보이스 1건의 "패킹존 이동 상태"를 buildMovedToPackingMap_/buildPackStageMap_와
  * 똑같은 규칙으로 계산(BatchCustomers의 K/L/M 컬럼 + Jobs 수동 표시). 디멘션 저장에 의한 승격은
  * 화면(목록/상세)이 dimsCount로 따로 합침. 반환: { mp: 이동완료 여부, stage: none|moved|taken|verified } */
-function _packStateForInvoice_(invoice, manualOn) {
+/* =====================================================================
+ * ★ 2026-10-09 신규(현장 요청) — "2차 검증 통과"(Skip 2nd verification)
+ * 단독 오더인데 작업자가 인보이스(PDF)를 올리지 않아 2차 검수 화면에 오더가 없는 경우처럼,
+ * 2차 검증을 실제로 할 수 없을 때 작업장에서 바로 다음 단계(디멘션 → Sales Confirm)로 넘길 수 있게 함.
+ * 안전장치: 패킹존 이동(Moved to Packing)이 먼저 되어 있어야 하고, 사유를 반드시 적어야 하며,
+ * 누가/언제/왜를 Jobs 시트(VerifySkipped / VerifySkippedBy / VerifySkipReason)에 남김.
+ * 화면에는 일반 검증 완료와 구분되는 "⚠ Verification skipped" 로 표시. 되돌리기(skip:false) 가능.
+ * 입력: { invoice, skip: true|false, by, reason }
+ * ===================================================================== */
+function ensureVerifySkipCol_(sh) {
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return;
+  const headers = _hdrRow_(sh, lastCol);
+  const has = function (n) { return headers.some(function (h) { return String(h).trim().toLowerCase() === n; }); };
+  const add = [];
+  if (!has('verifyskipped')) add.push('VerifySkipped');
+  if (!has('verifyskippedby')) add.push('VerifySkippedBy');
+  if (!has('verifyskipreason')) add.push('VerifySkipReason');
+  if (add.length) {
+    const curLastCol = sh.getLastColumn();
+    sh.insertColumnsAfter(curLastCol, add.length);
+    sh.getRange(1, curLastCol + 1, 1, add.length).setValues([add]);
+    __HDR_CACHE = null;
+  }
+}
+function _verifySkipCols_(headers) {
+  let f = 0, b = 0, r = 0;
+  (headers || []).forEach(function (h, i) {
+    const v = String(h).trim().toLowerCase();
+    if (v === 'verifyskipped' && !f) f = i + 1;
+    else if (v === 'verifyskippedby' && !b) b = i + 1;
+    else if (v === 'verifyskipreason' && !r) r = i + 1;
+  });
+  return { f: f, b: b, r: r };
+}
+// {invoice: {at, by}} — 2차 검증 통과 처리된 오더(컬럼이 아직 없으면 빈 객체). 한 번의 실행 안에서는 한 번만 읽음.
+let __SKIP_MEMO = null;
+function buildVerifySkipMap_() {
+  if (__SKIP_MEMO) return __SKIP_MEMO;
+  const map = {};
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    const iF = hdr[norm('VerifySkipped')];
+    const iB = hdr[norm('VerifySkippedBy')];
+    const lastRow = sh.getLastRow();
+    if (iInv && iF && lastRow >= 2) {
+      const invVals = _jobsCol_(sh, iInv, lastRow - 1);
+      const fVals = _jobsCol_(sh, iF, lastRow - 1);
+      const bVals = iB ? _jobsCol_(sh, iB, lastRow - 1) : null;
+      for (let i = 0; i < invVals.length; i++) {
+        const inv = String(invVals[i][0] || '').trim();
+        if (!inv || !fVals[i][0]) continue;
+        map[inv] = { at: String(fVals[i][0]), by: bVals ? String(bVals[i][0] || '') : '' };
+      }
+    }
+  } catch (e) { /* best-effort — 실패하면 "통과 없음"으로 취급(안전한 쪽) */ }
+  __SKIP_MEMO = map;
+  return map;
+}
+function setVerifySkip(data) {
+  try {
+    __SKIP_MEMO = null;
+    const invoice = String((data && data.invoice) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    const skip = !!(data && data.skip);
+    const by = String((data && data.by) || '').trim();
+    const reason = String((data && data.reason) || '').trim().replace(/\s+/g, ' ').slice(0, 200);
+    if (skip && !by) return { ok: false, error: 'name required' };
+    if (skip && reason.length < 3) return { ok: false, error: 'reason required' };
+
+    const sh = SHEET_();
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    let cols = _verifySkipCols_(ctx.headers);
+
+    let iManual = 0;
+    ctx.headers.forEach(function (h, i) { if (!iManual && String(h).trim().toLowerCase() === 'packingmovedmanual') iManual = i + 1; });
+    const manualOn = !!(iManual && ctx.rowVals[iManual - 1]);
+    const alreadySkipped = !!(cols.f && ctx.rowVals[cols.f - 1]);
+    if (skip) {
+      const st0 = _packStateForInvoice_(invoice, manualOn, false);
+      if (!st0.mp) return { ok: false, error: 'Mark as Moved to Packing first' };
+      if (st0.stage === 'verified' && !alreadySkipped) {
+        return { ok: true, unchanged: true, skip: false, movedToPacking: true, packStage: 'verified' }; // 이미 정상 검증됨 — 통과 처리 불필요(컬럼도 만들지 않음)
+      }
+    } else if (!alreadySkipped) {
+      const st1 = _packStateForInvoice_(invoice, manualOn, false);
+      return { ok: true, unchanged: true, skip: false, movedToPacking: st1.mp, packStage: st1.stage }; // 되돌릴 통과 기록이 없음
+    }
+
+    // 실제로 써야 할 때만 컬럼을 만듦(시트가 용량 한계에 가까우므로 불필요한 컬럼 추가 방지)
+    if (!cols.f || !cols.b || !cols.r) {
+      const lk0 = LockService.getDocumentLock();
+      lk0.waitLock(15000);
+      try { ensureVerifySkipCol_(sh); }
+      catch (eCol) {
+        return { ok: false, error: 'Could not add the record columns (the spreadsheet may be at its size limit). Ask the administrator to add these 3 headers at the end of the Jobs sheet: VerifySkipped, VerifySkippedBy, VerifySkipReason' };
+      }
+      finally { lk0.releaseLock(); }
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+      cols = _verifySkipCols_(ctx.headers);
+    }
+    if (!cols.f || !cols.b || !cols.r) return { ok: false, error: 'VerifySkip columns unavailable (server setup)' };
+
+    const skippedAt = skip ? nowLocal_() : '';
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    try {
+      _writeRowCells_(sh, ctx.row, [
+        { col: cols.f, value: skippedAt, text: true },
+        { col: cols.b, value: skip ? by : '', text: true },     // 글자 그대로 저장(=, + 로 시작해도 수식으로 해석되지 않게)
+        { col: cols.r, value: skip ? reason : '', text: true }
+      ]);
+    } finally {
+      lock.releaseLock();
+    }
+    __SKIP_MEMO = null;
+    bumpVersionLite_();
+    const st = _packStateForInvoice_(invoice, manualOn, skip);
+    try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eInv) { /* best-effort */ }
+    return { ok: true, skip: skip, movedToPacking: st.mp, packStage: st.stage, skippedAt: skippedAt, skippedBy: skip ? by : '', skippedReason: skip ? reason : '' };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+function _packStateForInvoice_(invoice, manualOn, skipOn) {
   let mp = false, stage = 'none';
   try {
     const bc = bcustSheetSafe_();
@@ -1956,6 +2095,7 @@ function _packStateForInvoice_(invoice, manualOn) {
     mp = true;
     if (stage !== 'verified') stage = 'taken';
   }
+  if (skipOn) { mp = true; stage = 'verified'; } // ★ 2026-10-09 — 2차 검증 통과 처리됨
   return { mp: mp, stage: stage };
 }
 
@@ -5398,6 +5538,12 @@ function buildPackStageMap_() {
     }
   } catch (e) { /* best-effort */ }
 
+  // ★ 2026-10-09 — 2차 검증 통과(Skip) 처리된 오더는 'verified'로 취급
+  try {
+    const _skm = buildVerifySkipMap_();
+    Object.keys(_skm).forEach(function (inv) { map[inv] = 'verified'; });
+  } catch (e) { /* best-effort */ }
+
   return map;
 }
 
@@ -5800,6 +5946,7 @@ function getSalesTodayList_impl_() {
     const dimsMap = buildDimsExistsMap_();
     _prof_('td_dims');
     const packStageMap = buildPackStageMap_(); // ★ 2026-08-24 신규 — 4단계 패킹 상태(none/moved/taken/verified)
+    const verifySkipMap = buildVerifySkipMap_(); // ★ 2026-10-09 — 2차 검증 통과 처리 정보(누가/언제)
     _prof_('td_pack');
     const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
     _prof_('td_shipped');
@@ -5908,6 +6055,8 @@ function getSalesTodayList_impl_() {
         })(),
         // ★ 2026-09-02 신규(매니저 요청) — PU 결제확인을 목록에도 표시. 값이
         //   없으면(옛날 오더·미입력) 안전하게 false(미납)로 취급.
+        verifySkipBy: (verifySkipMap[invoice] ? (verifySkipMap[invoice].by || 'unknown') : undefined), // ★ 2026-10-09 — 2차 검증 통과 처리한 사람(없으면 필드 생략)
+        verifySkipAt: (verifySkipMap[invoice] ? verifySkipMap[invoice].at : undefined),
         paymentPaid: payVals ? (String(payVals[i][0] || '').trim().toLowerCase() === 'paid') : false,
         salesRep: salesRepOf_(repMap_, invoice), // ★ 2026-10-08 신규 — 영업 담당자(영업시트 "Sales" 열)
         // ★ 2026-10-08 신규 — PU & TK만(그 외 방식은 필드 생략): 박스·팔레트 수량
@@ -6595,4 +6744,130 @@ function diagnoseOrphanedRow() {
   Logger.log('메모가 있는 칸: ' + JSON.stringify(nonEmptyNotes));
   Logger.log('흰색이 아닌 배경색이 있는 칸: ' + JSON.stringify(nonWhiteBgs));
   Logger.log('시트 getLastRow(): ' + sh.getLastRow() + ' / getMaxRows(): ' + sh.getMaxRows());
+}
+
+
+/* ===================== 일회성 일괄 보관 (★ 2026-10-08 신규 — 규칙 정착 전 쌓인 오래된 오더 정리) =====================
+ * 배경: 웹 규칙(디멘션·Sales Confirm)이 정착되기 전부터 쌓인 오더가 1번 탭에 311건 남아 있음.
+ *       "Ship Date가 2026-09-30 '이전'인 오더"를 이번 한 번만 화면에서 내림(= archived=TRUE, 기존 자동보관과 같은 방식).
+ *       ※ 행을 지우지 않음. 데이터는 시트에 그대로 남고(매출 통계도 그대로), 웹 목록에서만 사라짐 → 언제든 되돌릴 수 있음.
+ *
+ * 사용 순서 (Apps Script 편집기에서 직접 실행 — 웹에서는 호출되지 않음):
+ *   1) previewBulkArchive  ▶ 실행 → 실행 로그에서 "대상 N건"과 분류(검수상태/방식/날짜)를 확인  (아무것도 바뀌지 않음)
+ *   2) 숫자가 맞으면 runBulkArchive ▶ 실행 (실제 적용)
+ *   3) 잘못됐으면 undoBulkArchive ▶ 실행 (이번에 보관한 것만 정확히 원복. 원래부터 보관돼 있던 건 손대지 않음)
+ * 기준일을 바꾸려면 아래 BULK_ARCHIVE_BEFORE 값만 수정. "이전" = 그 날짜는 포함하지 않음(9/29까지 보관, 9/30은 유지).
+ * ====================================================================================================== */
+const BULK_ARCHIVE_BEFORE = '2026-09-30';
+const BULK_ARCHIVE_MAX = 800; // 안전장치: 한 번에 이 개수를 넘으면 중단(기준일을 잘못 넣은 실수 방지)
+
+function previewBulkArchive() { return bulkArchiveBefore_(BULK_ARCHIVE_BEFORE, true); }
+function runBulkArchive()     { return bulkArchiveBefore_(BULK_ARCHIVE_BEFORE, false); }
+
+function _bulkShipYmd_(v, tz) {
+  if (v === null || v === undefined || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  return '';
+}
+
+function bulkArchiveBefore_(cutoff, dryRun) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(cutoff))) { Logger.log('기준일 형식 오류: ' + cutoff); return { ok: false, error: 'bad cutoff' }; }
+  const tag = ' [bulk<' + cutoff + ']';
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')], iShip = hdr[norm('Ship Date')], iArch = hdr[norm('archived')], iArchAt = hdr[norm('archivedAt')];
+    const iTruck = hdr[norm('Trucking')], iInsp = hdr[norm('Inspection')];
+    if (!iInv || !iShip || !iArch) { Logger.log('필수 열(Invoice / Ship Date / archived)을 찾지 못함'); return { ok: false, error: 'missing columns' }; }
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) { Logger.log('Jobs 시트에 데이터 없음'); return { ok: true, count: 0 }; }
+    const n = lastRow - 1;
+    const tz = Session.getScriptTimeZone();
+    const col = c => sh.getRange(2, c, n, 1).getValues();
+    const inv = col(iInv), ship = col(iShip), arch = col(iArch);
+    const archAt = iArchAt ? col(iArchAt) : null;
+    const truck = iTruck ? col(iTruck) : null, insp = iInsp ? col(iInsp) : null;
+
+    const targets = [];       // 0-based index
+    const bySt = {}, byMethod = {}, oldest = { v: '' }, newest = { v: '' };
+    let unparsed = 0, alreadyArchived = 0, noInvoice = 0, keptOnOrAfter = 0;
+    for (let i = 0; i < n; i++) {
+      if (!String(inv[i][0] || '').trim()) { noInvoice++; continue; }
+      const a = String(arch[i][0] || '').trim().toLowerCase();
+      if (a === 'true' || a === '1' || a === 'y' || a === 'yes') { alreadyArchived++; continue; }
+      const ymd = _bulkShipYmd_(ship[i][0], tz);
+      if (!ymd) { unparsed++; continue; }              // 출고일이 없거나 읽을 수 없으면 건드리지 않음
+      if (ymd >= cutoff) { keptOnOrAfter++; continue; }
+      targets.push(i);
+      const iv = String(insp ? insp[i][0] : '').trim();
+      const st = !iv ? '(검수 전)' : (iv.indexOf('ISSUES') >= 0 ? 'ISSUES' : (iv.indexOf('PASS') >= 0 ? 'PASS' : iv));
+      bySt[st] = (bySt[st] || 0) + 1;
+      const mt = String(truck ? truck[i][0] : '').trim().toUpperCase() || '(없음)';
+      byMethod[mt] = (byMethod[mt] || 0) + 1;
+      if (!oldest.v || ymd < oldest.v) oldest.v = ymd;
+      if (!newest.v || ymd > newest.v) newest.v = ymd;
+    }
+
+    Logger.log('=== ' + (dryRun ? '미리보기(아무것도 바뀌지 않음)' : '일괄 보관 실행') + ' · 기준: Ship Date < ' + cutoff + ' ===');
+    Logger.log('전체 행: ' + n + ' / 이미 보관됨: ' + alreadyArchived + ' / 기준일 이후(유지): ' + keptOnOrAfter + ' / 출고일 없음·읽기 실패(유지): ' + unparsed);
+    Logger.log('▶ 이번 대상: ' + targets.length + '건  (가장 오래된 출고일 ' + (oldest.v || '-') + ' ~ 가장 최근 ' + (newest.v || '-') + ')');
+    Logger.log('검수 상태별: ' + JSON.stringify(bySt));
+    Logger.log('방식별: ' + JSON.stringify(byMethod));
+    Logger.log('예시(앞 15건): ' + targets.slice(0, 15).map(i => String(inv[i][0]).trim() + ' (' + _bulkShipYmd_(ship[i][0], tz) + ')').join(', '));
+
+    if (dryRun) { Logger.log('→ 숫자가 맞으면 runBulkArchive 를 실행하세요.'); return { ok: true, dryRun: true, count: targets.length, byInspection: bySt, byMethod: byMethod }; }
+    if (!targets.length) { Logger.log('대상 없음 — 변경 없이 종료'); return { ok: true, count: 0 }; }
+    if (targets.length > BULK_ARCHIVE_MAX) { Logger.log('⛔ 대상이 ' + targets.length + '건으로 안전 한도(' + BULK_ARCHIVE_MAX + ')를 넘어 중단했습니다. 기준일을 확인하세요.'); return { ok: false, error: 'over safety cap', count: targets.length }; }
+
+    const now = nowLocal_() + tag;
+    targets.forEach(i => { arch[i][0] = 'TRUE'; if (archAt) archAt[i][0] = now; });
+    sh.getRange(2, iArch, n, 1).setValues(arch);
+    if (archAt) sh.getRange(2, iArchAt, n, 1).setValues(archAt);
+    bumpVersion_();
+    SpreadsheetApp.flush();
+    Logger.log('✅ ' + targets.length + '건을 웹 목록에서 내렸습니다(행은 그대로). 되돌리려면 undoBulkArchive 실행. 웹은 새로고침(Ctrl+Shift+R)하세요.');
+    return { ok: true, count: targets.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function undoBulkArchive() {
+  const tag = ' [bulk<' + BULK_ARCHIVE_BEFORE + ']';
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  try {
+    const sh = SHEET_();
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iArch = hdr[norm('archived')], iArchAt = hdr[norm('archivedAt')];
+    if (!iArch || !iArchAt) { Logger.log('archived / archivedAt 열을 찾지 못함'); return { ok: false, error: 'missing columns' }; }
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, restored: 0 };
+    const n = lastRow - 1;
+    const arch = sh.getRange(2, iArch, n, 1).getValues();
+    const archAt = sh.getRange(2, iArchAt, n, 1).getValues();
+    let restored = 0;
+    for (let i = 0; i < n; i++) {
+      if (String(archAt[i][0] || '').indexOf(tag) >= 0) { arch[i][0] = ''; archAt[i][0] = ''; restored++; }
+    }
+    if (restored) {
+      sh.getRange(2, iArch, n, 1).setValues(arch);
+      sh.getRange(2, iArchAt, n, 1).setValues(archAt);
+      bumpVersion_();
+      SpreadsheetApp.flush();
+    }
+    Logger.log('↩ 일괄 보관 되돌림: ' + restored + '건 (이번 일괄 보관으로 내린 것만)');
+    return { ok: true, restored: restored };
+  } finally {
+    lock.releaseLock();
+  }
 }
