@@ -6264,15 +6264,26 @@ function getSalesInvoiceDetail(invoice) {
     //   true가 될 수 없으므로, Jobs 시트의 수동 표시(PackingMovedManual)를
     //   OR로 합침.
     let manualMovedAt = '', manualMovedBy = '';
+    let verifySkipAt = '', verifySkipBy = '', verifySkipReason = ''; // ★ 2026-10-09
     try {
       const hmManual = headerMapCached_();
       const iManualFlag = hmManual[normalizeHeaderName_('PackingMovedManual')];
       const iManualBy = hmManual[normalizeHeaderName_('PackingMovedManualBy')];
       if (iManualFlag) {
         const v = jobRow[iManualFlag - 1];
-        if (v) { movedToPacking = true; manualMovedAt = String(v); packStage = 'taken'; } // ★ 2026-08-24: 수동표시도 taken으로 취급(총량피킹 배치가 없는 단독오더라 검증스캔 대상 자체가 아님)
+        if (v) { movedToPacking = true; manualMovedAt = String(v); if (packStage !== 'verified') packStage = 'taken'; } // ★ 2026-10-09: 이미 검증완료(verified)인 건 되돌리지 않음 // ★ 2026-08-24: 수동표시도 taken으로 취급(총량피킹 배치가 없는 단독오더라 검증스캔 대상 자체가 아님)
       }
       if (iManualBy) manualMovedBy = String(jobRow[iManualBy - 1] || '');
+      // ★ 2026-10-09 신규 — 2차 검증 통과(Skip) 기록: 있으면 verified로 취급하고 누가/언제/왜를 함께 내려줌
+      const iSkF = hmManual[normalizeHeaderName_('VerifySkipped')];
+      const iSkB = hmManual[normalizeHeaderName_('VerifySkippedBy')];
+      const iSkR = hmManual[normalizeHeaderName_('VerifySkipReason')];
+      if (iSkF && jobRow[iSkF - 1]) {
+        verifySkipAt = String(jobRow[iSkF - 1]);
+        verifySkipBy = iSkB ? String(jobRow[iSkB - 1] || '') : '';
+        verifySkipReason = iSkR ? String(jobRow[iSkR - 1] || '') : '';
+        movedToPacking = true; packStage = 'verified';
+      }
     } catch (e) { /* best-effort */ }
 
     // 3) IssueLog에서 이 인보이스의 활성 이슈 상세 (SKU/상품명/바코드/사유/수량)
@@ -6367,7 +6378,7 @@ function getSalesInvoiceDetail(invoice) {
     // ★ 2026-08-06 신규(매니저 요청) — "디멘션이 저장됐는데 Moved는 No"인
     //   앞뒤 안 맞는 상태를 원천 차단. 디멘션(치수/무게)이 하나라도 저장돼
     //   있다면, 물리적으로 이미 패킹존에서 측정된 것이므로 이동완료로 간주.
-    if (dimsResult.dims.length > 0) { movedToPacking = true; packStage = 'taken'; }
+    if (dimsResult.dims.length > 0) { movedToPacking = true; if (packStage !== 'verified') packStage = 'taken'; } // ★ 2026-10-09: 더 진행된 단계는 되돌리지 않음
 
     const _result = {
       ok: true,
@@ -6385,6 +6396,7 @@ function getSalesInvoiceDetail(invoice) {
       hasBatchRecord: hasBatchRecord, // ★ 2026-08-06 신규 — false면 단독 오더(수동 버튼 노출 대상)
       manualMovedAt: manualMovedAt,
       manualMovedBy: manualMovedBy,
+      verifySkipAt: verifySkipAt, verifySkipBy: verifySkipBy, verifySkipReason: verifySkipReason, // ★ 2026-10-09
       // ★ 2026-09-02 신규 — PU 결제확인(Order Detail Lookup 전용 표시·수정)
       paymentPaid: paymentPaid,
       paymentUpdatedAt: paymentUpdatedAt,
