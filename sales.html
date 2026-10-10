@@ -596,6 +596,14 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .manual-moved-btn:hover{background:var(--purple); color:#fff;}
 .manual-moved-undo{background:none; border:none; color:var(--text-dim); font-family:var(--sans); font-size:10.5px; cursor:pointer; text-decoration:underline; padding:2px 0;}
 .manual-moved-undo:hover{color:var(--red);}
+/* ★ 2026-10-09 — 2차 검증 통과(Skip) */
+.manual-skip-btn{background:var(--amber-bg, rgba(245,158,11,0.12)); border:1px solid var(--amber, #F59E0B); color:var(--amber, #F59E0B); font-family:var(--sans); font-size:11.5px; font-weight:700; padding:6px 12px; border-radius:8px; cursor:pointer; white-space:nowrap; margin-top:8px;}
+.manual-skip-btn:hover{background:var(--amber, #F59E0B); color:#1a1200;}
+.skip-note{font-size:11px; color:var(--amber, #F59E0B); margin-top:8px; max-width:420px; line-height:1.45;}
+.skip-note b{font-weight:800;}
+.skip-note .why{color:var(--text-dim); display:block; margin-top:2px; word-break:break-word;}
+.status-small.moved-skip,.badge.moved-skip,.plain-tag.moved-skip{background:rgba(245,158,11,0.14); color:var(--amber, #F59E0B); border:1px solid rgba(245,158,11,0.6); font-weight:800;}
+.plain-tag.moved-skip{padding:1px 6px; border-radius:5px;}
 .detail-close-btn:hover{background:var(--red-bg); color:var(--red); border-color:var(--red);}
 .detail-meta{display:flex; gap:14px 22px; margin-top:12px; flex-wrap:wrap;}
 /* ★ 2026-10-07 — 필드 제목(Ship Date, Shipping Method…)을 더 크고 밝고 굵게(현장 요청), 값은 14.5px */
@@ -1466,6 +1474,7 @@ function fmtMethodLabel(m){ return String(m||'-').replace(' & ', '&'); }
 // 불리언으로 안전하게 대체(하위호환).
 function packStageBadgeHtml(o, cls){
   const stage = o.packStage || (o.movedToPacking ? 'taken' : 'none');
+  if (stage === 'verified' && o.verifySkipAt) return `<span class="${cls} moved-skip" title="2nd verification was skipped${o.verifySkipBy ? ' by ' + _escH_(o.verifySkipBy) : ''}">⚠ Verification Skipped</span>`; // ★ 2026-10-09
   if (stage === 'verified') return `<span class="${cls} moved-final">✓ 2nd Verification Complete</span>`;
   if (stage === 'taken') return `<span class="${cls} moved-yes">✓ Moved to Packing</span>`; // ★ 기존 문구/색 그대로 — 파랑의 의미는 안 바뀜
   if (stage === 'moved') return `<span class="${cls} moved-no">Pending Move</span>`;
@@ -2227,7 +2236,12 @@ function _movedExpected_(job, ov){
   if (dims && (_STAGE_RANK[st] || 0) < _STAGE_RANK.taken) st = 'taken';
   return { mp: !!ov.mp || dims, stage: st };
 }
-function _applyMovedOv_(job, ov){ const e = _movedExpected_(job, ov); job.movedToPacking = e.mp; job.packStage = e.stage; }
+function _applyMovedOv_(job, ov){
+  const e = _movedExpected_(job, ov); job.movedToPacking = e.mp; job.packStage = e.stage;
+  // ★ 2026-10-09 — 2차 검증 통과(Skip) 표시는 단계가 verified일 때만 의미가 있음(아니면 지움)
+  if (e.stage !== 'verified'){ job.verifySkipAt = undefined; job.verifySkipBy = undefined; job.verifySkipReason = undefined; }
+  else if (ov.skipAt !== undefined){ job.verifySkipAt = ov.skipAt || undefined; job.verifySkipBy = ov.skipAt ? (ov.skipBy || '') : undefined; job.verifySkipReason = ov.skipAt ? (ov.skipReason || '') : undefined; }
+}
 function _applyMovedOverrides_(arr, now){
   Object.keys(_recentMovedOverrides).forEach(inv => {
     const ov = _recentMovedOverrides[inv];
@@ -2235,7 +2249,7 @@ function _applyMovedOverrides_(arr, now){
     const job = arr.find(j => j.invoice === inv);
     if (!job) return;
     const e = _movedExpected_(job, ov);
-    const matches = (!!job.movedToPacking === e.mp) && ((job.packStage || 'none') === e.stage);
+    const matches = (!!job.movedToPacking === e.mp) && ((job.packStage || 'none') === e.stage) && (ov.skipAt === undefined || e.stage !== 'verified' || (!!job.verifySkipAt === !!ov.skipAt));
     if (_ovSettled_(ov, matches, now)) { delete _recentMovedOverrides[inv]; return; }
     if (!matches) _applyMovedOv_(job, ov);
   });
@@ -2389,7 +2403,7 @@ function _registerRemotePatch_(p, now){
       wasUndone: !!f.wasUndone, undoneAt: f.undoneAt || '', undoneBy: f.undoneBy || '', until: until };
     else if (p.kind === 'method') _recentMethodOverrides[inv] = { method: f.method, until: until };
     else if (p.kind === 'pay') _recentPaymentOverrides[inv] = { paid: !!f.paid, until: until };
-    else if (p.kind === 'moved') { _recentMovedOverrides[inv] = { mp: !!f.mp, stage: f.stage || 'none', until: until }; _patchNeedsOverview = true; }
+    else if (p.kind === 'moved') { _recentMovedOverrides[inv] = { mp: !!f.mp, stage: f.stage || 'none', skipAt: (f.skipAt === undefined ? undefined : String(f.skipAt || '')), skipBy: f.skipBy || '', skipReason: f.skipReason || '', until: until }; _patchNeedsOverview = true; }
   });
   return true;
 }
@@ -4468,6 +4482,16 @@ function renderDetail(res){
     manualMoveHtml = `<button class="manual-moved-btn" onclick="markManualMoved('${res.invoice}', true)">📦 Mark as Moved to Packing</button>`;
     if (res.hasBatchRecord) manualMoveHtml += `<div class="moved-hint">Batch-picked order — usually handled automatically on the TV board</div>`;
   }
+  // ★ 2026-10-09 신규(현장 요청) — 2차 검증 통과(Skip). 2차 검증 화면에 오더가 없는 경우(인보이스 미업로드 등) 작업장에서 바로 다음 단계로.
+  //   이동 완료 + 아직 검증 전 + 미출고일 때만 버튼. 이미 통과 처리된 오더는 누가/왜를 보여주고 되돌리기만 제공.
+  if (_effM.movedToPacking && !res.shipped && _effM.packStage !== undefined && _effM.packStage !== null && _effM.packStage !== ''){
+    if (_effM.packStage === 'verified' && _effM.verifySkipAt){
+      manualMoveHtml += `<div class="skip-note">⚠ <b>2nd verification skipped</b> by ${_escH_(_effM.verifySkipBy || 'unknown')}${_effM.verifySkipReason ? `<span class="why">Reason: ${_escH_(_effM.verifySkipReason)}</span>` : ''}</div>
+        <button class="manual-moved-undo" onclick="skipVerify('${_escH_(res.invoice)}', false)">Undo skip</button>`;
+    } else if (_effM.packStage !== 'verified'){
+      manualMoveHtml += `<button class="manual-skip-btn" onclick="skipVerify('${_escH_(res.invoice)}', true)" title="Use only when this order cannot be verified (e.g. the invoice was never uploaded). Your name and the reason are recorded.">⏭ Skip 2nd verification</button>`;
+    }
+  }
   const needsDimsRes = (res.method==='TRUCKING'||res.method==='TK'||res.method==='UPS');
   const dimsSavedHtml = needsDimsRes
     ? `<span class="status-small ${res.dimsCount>0?'moved-yes':'moved-no'}">${res.dimsCount>0?'✓ Dimensions Saved ('+res.dimsCount+')':'Dimensions Not Entered'}</span>`
@@ -4622,7 +4646,7 @@ const _movedInflight = {};
 async function markManualMoved(invoice, moved){
   const msg = moved
     ? `"${invoice}" Mark this order as moved to the packing zone?\n\nOnly do this if the shipping team actually moved it.`
-    : `"${invoice}" Undo the packing-zone move for this order?\n\nUse this only if it was clicked by mistake.`;
+    : `"${invoice}" Undo the packing-zone move for this order?\n\nUse this only if it was clicked by mistake.` + (((CURRENT_ORDER && CURRENT_ORDER.invoice === invoice && CURRENT_ORDER.verifySkipAt) || (TODAY_JOBS.find(j => j.invoice === invoice) || {}).verifySkipAt) ? '\n\nThis also removes the "2nd verification skipped" record.' : '');
   if (!confirm(msg)) return;
   if (_movedInflight[invoice]) return;
   _movedInflight[invoice] = true;
@@ -4693,6 +4717,73 @@ async function markManualMoved(invoice, moved){
     if (prevOv) _recentMovedOverrides[invoice] = prevOv; else delete _recentMovedOverrides[invoice];
     rerender();
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nPlease try again.');
+  }
+}
+
+// ★ 2026-10-09 신규(현장 요청) — 2차 검증 통과(Skip). 사유 필수 + 확인 창 + 이름 기록. 되돌리기 가능.
+const _skipInflight = {};
+async function skipVerify(invoice, skip){
+  if (_skipInflight[invoice]) return;
+  const by = (authGetName() || 'Packing (Sales page)');
+  let reason = '';
+  if (skip){
+    const r = prompt(`${invoice}\nWhy is the 2nd verification being skipped?\n(e.g. invoice was never uploaded)\n\nThis is recorded under your name (${by}).`, '');
+    if (r === null) return;
+    reason = String(r).trim().replace(/\s+/g, ' ');
+    if (reason.length < 3){ alert('Please enter a reason (at least 3 characters).'); return; }
+    if (!confirm(`Skip the 2nd verification for ${invoice}?\n\nReason: ${reason}\nRecorded by: ${by}\n\nThe order will move on to the next step (dimensions → Sales Confirm).`)) return;
+  } else {
+    if (!confirm(`Undo the skipped 2nd verification for ${invoice}?\n\nThe order goes back to "waiting for 2nd verification".`)) return;
+  }
+  _skipInflight[invoice] = true;
+  _markLocalOp_(invoice, 'moved');
+  const cur = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
+  const tJob = TODAY_JOBS.find(j => j.invoice === invoice);
+  const sJob = SHEET_JOBS.find(j => j.invoice === invoice);
+  const objs = [cur, tJob, sJob].filter(Boolean);
+  const snaps = objs.map(o => ({ o: o, mp: o.movedToPacking, st: o.packStage, at: o.verifySkipAt, by: o.verifySkipBy, why: o.verifySkipReason }));
+  const prevOv = _recentMovedOverrides[invoice];
+  const rerender = () => {
+    const c = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
+    if (c) renderDetail(c);
+    renderToday();
+    if (typeof renderShipping === 'function') renderShipping();
+    renderProgressBoard(SHEET_JOBS); renderShipRow(SHEET_JOBS); renderSheet();
+  };
+  const nowS = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  if (skip){
+    // 낙관적 반영 — 누르는 즉시 화면이 바뀌고, 저장은 뒤에서. 실패하면 정확히 되돌림.
+    const ov = { mp: true, stage: 'verified', skipAt: nowS, skipBy: by, skipReason: reason, until: Date.now() + 120000 };
+    _recentMovedOverrides[invoice] = ov;
+    objs.forEach(o => _applyMovedOv_(o, ov));
+    rerender();
+  } else {
+    const b = document.querySelector('.manual-moved-undo'); if (b){ b.disabled = true; b.textContent = 'Saving…'; }
+  }
+  let res;
+  try {
+    res = await _serial_(invoice, () => gasPostSmart_('setVerifySkip', { invoice: invoice, skip: !!skip, by: by, reason: reason }));
+  } catch (e) { res = { ok:false, error: String(e && e.message || e) }; }
+  delete _skipInflight[invoice];
+  if (res && res.ok){
+    const srvKnown = (typeof res.movedToPacking === 'boolean');
+    const stg = srvKnown ? (res.packStage || 'none') : (skip ? 'verified' : 'taken');
+    const isSk = srvKnown ? (stg === 'verified' && !!res.skip) : !!skip;
+    const ov = { mp: srvKnown ? !!res.movedToPacking : true, stage: stg, skipAt: isSk ? (res.skippedAt || nowS) : '', skipBy: isSk ? (res.skippedBy || by) : '', skipReason: isSk ? (res.skippedReason || reason) : '', until: Date.now() + 420000 };
+    _recentMovedOverrides[invoice] = ov;
+    const cur2 = (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice) ? CURRENT_ORDER : null;
+    [cur2, TODAY_JOBS.find(j => j.invoice === invoice), SHEET_JOBS.find(j => j.invoice === invoice)].filter(Boolean).forEach(o => _applyMovedOv_(o, ov));
+    rerender();
+    _publishPatch_(invoice, 'moved');
+    _syncInvoiceMirror_(invoice);             // 서버는 낡은 상세 미러를 무효화만 함 → 새로 계산해서 채움
+    if (!_invDetailUnsub) _refreshDetailSilently_(invoice);
+    if (res.unchanged) alert('This order is already verified normally — no skip needed.');
+  } else {
+    snaps.forEach(sn => { sn.o.movedToPacking = sn.mp; sn.o.packStage = sn.st; sn.o.verifySkipAt = sn.at; sn.o.verifySkipBy = sn.by; sn.o.verifySkipReason = sn.why; });
+    if (prevOv) _recentMovedOverrides[invoice] = prevOv; else delete _recentMovedOverrides[invoice];
+    rerender();
+    const er = res && res.error;
+    alert('Save failed: ' + (er === 'Mark as Moved to Packing first' ? 'Mark this order as moved to packing first.' : (er || 'Unknown error')) + '\nPlease try again.');
   }
 }
 
