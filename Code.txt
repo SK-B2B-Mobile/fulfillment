@@ -768,6 +768,7 @@ function doPost(e) {
   // ★ 2026-07-14 신규 — "패킹완료·슬롯비우기" 버튼
   if (op === 'clearSlot')      return json_(clearSlot(data));
   if (op === 'setPackingMoved') return json_(setPackingMoved(data)); // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용)
+  if (op === 'logSlipPrint') return json_(logSlipPrint(data)); // ★ 2026-10-15 신규: 패킹슬립 최종 출력 시각 기록
   // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 스캔 기록/취소
   if (op === 'logPackScan')   return json_(logPackScan(data));
   // ★ 2026-09-08 신규 — 이미 스캔완료된 상품의 박스/팔렛 번호 사후 수정
