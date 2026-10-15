@@ -7384,3 +7384,42 @@ function fixPageRange_(raw) {
   if (m) return parseInt(m[2], 10) + '-' + parseInt(m[3], 10);
   return str;
 }
+
+
+// ★ 2026-10-15 신규(현장 요청) — 패킹슬립 "최종 출력 시각" 기록.
+//   박스 분실 시 CCTV 확인용. 인보이스당 1행만 유지하고 출력할 때마다 같은 행을 덮어써서
+//   항상 "마지막(최종) 출력 시각"만 남김. 서버 시간 기준(작업자 PC 시계와 무관).
+//   Pack Verify 총량/단독 슬립 출력에서만 호출됨. 실패해도 인쇄에는 영향 없음(클라이언트가 무시).
+function logSlipPrint(data) {
+  const invoice = String((data && data.invoice) || '').trim();
+  if (!invoice) return { ok: false, error: 'invoice required' };
+  const type = (data.type === 'standalone') ? 'Standalone' : 'Total';
+  const batchId = String(data.batchId || '');
+  const worker = String(data.worker || '').replace(/^[=+\-@]/, "'$&").slice(0, 60);
+  const lock = LockService.getDocumentLock();
+  try { lock.waitLock(8000); } catch (e) { return { ok: false, error: 'busy' }; }
+  try {
+    const sh = ensureBatchSheet_('SlipPrintLog', ['Invoice', 'Type', 'BatchId', 'LastPrintedAt', 'PrintedBy', 'PrintCount']);
+    const now = batchNow_();
+    const last = sh.getLastRow();
+    let row = 0, count = 0;
+    if (last >= 2) {
+      const inv = sh.getRange(2, 1, last - 1, 1).getDisplayValues();
+      for (let i = inv.length - 1; i >= 0; i--) {
+        if (String(inv[i][0]).trim() === invoice) { row = i + 2; break; }
+      }
+      if (row) count = Number(sh.getRange(row, 6).getValue()) || 0;
+    }
+    count += 1;
+    if (!row) { row = last + 1; ensureSheetRoom_(sh, row); }
+    const rng = sh.getRange(row, 1, 1, 6);
+    rng.setNumberFormat('@');
+    rng.setValues([[invoice, type, batchId, now, worker, String(count)]]);
+    sh.getRange(row, 6).setNumberFormat('0').setValue(count);
+    return { ok: true, printedAt: now, count: count };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  } finally {
+    try { lock.releaseLock(); } catch (e2) {}
+  }
+}
