@@ -10563,6 +10563,13 @@ function flashPrintFeedback(btn){
   }, 900);
 }
 
+// ★ 2026-10-15 신규 — 패킹슬립 최종 출력 시각을 서버(SlipPrintLog 시트)에 기록. 인쇄를 막지 않도록 응답을 기다리지 않고, 실패는 조용히 무시.
+function logSlipPrint_(type, invoice, batchId, worker){
+  try{
+    gasCallWithRetry('logSlipPrint', { type, invoice, batchId: batchId || '', worker: worker || '' }, 2).catch(()=>{});
+  }catch(e){}
+}
+
 function printPvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _pvInvoice;
@@ -10769,6 +10776,7 @@ function printPvSlip(format, forceFlat){
   if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
+  logSlipPrint_('total', invoice, state.batchId, worker);
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
 
@@ -10965,6 +10973,7 @@ async function printPsvSlip(format, forceFlat){
   if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
+  logSlipPrint_('standalone', invoice, STANDALONE_BATCH_ID, worker);
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
 
