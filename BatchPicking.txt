@@ -2799,7 +2799,22 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
     issueQty += iss.qty;
     issues.push({ type: iss.reason || 'ETC', barcode: iss.barcode || '', qty: iss.qty });
   });
-  const effectiveTotal = Math.max(0, totalQty - issueQty);
+  // ★ 2026-10-16 버그 수정(현장 발견: IN00485048) — 예전엔 "총수량 − 이슈 합계"로 한 번에 계산해서,
+  //   이슈 수량이 비정상적으로 크면(예: 2027.02) 전체 필요수량이 0이 되어 정상 스캔분까지 "미완료"로
+  //   판정 → Inspection이 시트에 안 써졌음. 이제 상품(바코드)별로 "필요 − 이슈"를 0 밑으로 안 내려가게
+  //   계산한 뒤 합산하므로, 한 상품의 이슈가 다른 상품의 필요수량을 깎지 못함.
+  let effectiveTotal = Math.max(0, totalQty - issueQty);
+  try {
+    const _lines = getInvoiceBatchItemsCached_(batchId, invoice);
+    if (_lines && _lines.length) {
+      const reqByK = {}, issByK = {};
+      _lines.forEach(l => { const k = normBarcode_(l.barcode); reqByK[k] = (reqByK[k] || 0) + (Number(l.reqQty) || 0); });
+      invoiceIssues2.forEach(iss => { const k = normBarcode_(iss.barcode); issByK[k] = (issByK[k] || 0) + (Number(iss.qty) || 0); });
+      let tot = 0;
+      Object.keys(reqByK).forEach(k => { tot += Math.max(0, reqByK[k] - (issByK[k] || 0)); });
+      effectiveTotal = tot;
+    }
+  } catch (eEff) { /* 실패하면 예전 계산식 유지 */ }
 
   // 3) 실제 스캔 통과 수량 합계 (undone 제외, pass만) — 초과분도 그대로 인정
   //    (batch.html 슬롯 완료 판정과 동일한 기준: q.doneRaw 합산과 동일 개념)
@@ -2856,8 +2871,10 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
     scanned += Math.max(0, scannedByKey[key]); // SKU별로 0 밑으로 안 내려가게 고정한 뒤 합산
   });
 
-  const isComplete = effectiveTotal > 0 && scanned >= effectiveTotal;
-  const isIssueOnly = issueQty > 0 && !isComplete && effectiveTotal === 0; // 전량이 이슈로 빠진 경우도 "검수 끝(이슈)"로 취급
+  // ★ 2026-10-16 — 전량이 이슈로 빠진 경우(effectiveTotal=0)는 "검수 끝(이슈)"로 취급한다고 주석만 있고
+  //   실제로는 어디에도 반영이 안 됐음 → 이제 완료로 판정해서 ISSUES로 기록.
+  const isIssueOnly = issueQty > 0 && effectiveTotal === 0;
+  const isComplete = (effectiveTotal > 0 && scanned >= effectiveTotal) || isIssueOnly;
 
   // 4) Jobs 시트에서 이 인보이스가 이미 어떤 값인지 확인 → 다를 때만 씀 (불필요한 반복 저장 방지)
   const jobsSS = ss_();
@@ -3029,6 +3046,29 @@ function logIssue(data) {
     if (!data.invoice) return { ok: false, error: 'invoice required' };
     const qty = Number(data.qty) || 0;
     if (qty <= 0) return { ok: false, error: 'qty must be > 0' };
+    // ★ 2026-10-16 신규(현장 사고: IN00485048) — 작업자가 수량칸에 유통기한(2027.02)을 입력해서
+    //   이슈 수량이 2027.02개로 등록되고, 그 때문에 필요수량이 0으로 계산되어 검수 완료가
+    //   시트에 기록되지 않았음. 수량은 반드시 정수이고, 그 상품(바코드)의 남은 필요수량을
+    //   넘을 수 없도록 서버에서 막음(화면이 달라도 항상 적용되는 마지막 방어선).
+    if (Math.floor(qty) !== qty) return { ok: false, error: 'qty must be a whole number (정수만 입력 가능)' };
+    try {
+      const _bcKey = normBarcode_(data.barcode || '');
+      if (_bcKey) {
+        let _req = 0, _found = false;
+        getInvoiceBatchItemsCached_(data.batchId, data.invoice).forEach(l => {
+          if (normBarcode_(l.barcode) === _bcKey) { _req += Number(l.reqQty) || 0; _found = true; }
+        });
+        if (_found) {
+          let _already = 0;
+          getInvoiceIssueQtyCached_(data.batchId, data.invoice).forEach(iss => {
+            if (normBarcode_(iss.barcode) === _bcKey) _already += Number(iss.qty) || 0;
+          });
+          if (qty + _already > _req) {
+            return { ok: false, error: 'qty exceeds remaining required qty (필요수량 ' + _req + ', 이미 이슈 ' + _already + ' → 최대 ' + Math.max(0, _req - _already) + '개)' };
+          }
+        }
+      }
+    } catch (eCap) { /* 상한 확인이 실패해도 정수 검사는 이미 통과 — 등록은 계속 */ }
     const il = issuelogSheet_();
     // ★ 2026-08-21 긴급 신규 — 이중 등록 방지 안전장치.
     //   실제 현장에서 같은 이슈(바코드·사유·수량·작업자 전부 동일)가 몇 초 안에
