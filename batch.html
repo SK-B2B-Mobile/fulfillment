@@ -8507,6 +8507,7 @@ async function submitSsIssue(){
   const reason = document.getElementById('ssIssueReason').value;
   const qty = Number(document.getElementById('ssIssueQty').value) || 0;
   if(qty <= 0){ alert('수량을 1 이상 입력하세요'); return; }
+  if(!Number.isInteger(qty)){ alert('수량은 정수만 입력할 수 있습니다 (유통기한을 수량칸에 넣지 않았는지 확인하세요)'); return; }
   const note = document.getElementById('ssIssueNote').value.trim();
   const ord = _standaloneOrders.find(o => o.invoice === _ssInvoice);
   const btn = document.getElementById('ssIssueSubmitBtn');
@@ -8582,6 +8583,7 @@ async function submitPsvIssue(){
   const reason = document.getElementById('psvIssueReason').value;
   const qty = Number(document.getElementById('psvIssueQty').value) || 0;
   if(qty <= 0){ alert('Enter a quantity of 1 or more'); return; }
+  if(!Number.isInteger(qty)){ alert('Quantity must be a whole number (did you type an expiry date in the quantity field?)'); return; }
   const note = document.getElementById('psvIssueNote').value.trim();
   const ord = _standaloneOrders.find(o => o.invoice === _psvInvoice);
   const btn = document.getElementById('psvIssueSubmitBtn');
@@ -8656,6 +8658,7 @@ async function submitPvIssue(){
   const reason = document.getElementById('pvIssueReason').value;
   const qty = Number(document.getElementById('pvIssueQty').value) || 0;
   if(qty <= 0){ alert('Enter a quantity of 1 or more'); return; }
+  if(!Number.isInteger(qty)){ alert('Quantity must be a whole number (did you type an expiry date in the quantity field?)'); return; }
   const note = document.getElementById('pvIssueNote').value.trim();
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === _pvInvoice);
   const btn = document.getElementById('pvIssueSubmitBtn');
