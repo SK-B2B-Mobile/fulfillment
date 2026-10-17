@@ -2258,6 +2258,23 @@ function reassignPackScanBoxes(data) {
       total += q;
     });
     if (!matched.length) return { ok: false, error: '해당 상품의 스캔 기록을 찾지 못했습니다' };
+    // ★ 2026-10-16 버그 수정(현장 발견: IN00485418) — 저장 요청이 실제로는 서버에서 성공했는데
+    //   응답이 모바일 네트워크에서 유실/지연되면, 클라이언트가 자동 재시도하면서 "화면에서 본 합계(expectedTotal)"가
+    //   이미 바뀌어 있어 total_mismatch로 3번 연속 실패 표시가 떴음(실제로는 첫 시도에서 저장 완료).
+    //   그래서 "현재 저장된 배정이 지금 요청한 배정과 이미 완전히 같으면" 합계 검사보다 먼저 성공으로 처리함(재시도 안전).
+    const cur = {};
+    let hasBlank = false;
+    matched.forEach(m => {
+      const n = parseInt(kind === 'pallet' ? m.r[12] : m.r[11], 10);
+      if (!n || n < 1) { hasBlank = true; return; }
+      cur[n] = (cur[n] || 0) + m.q;
+    });
+    const curKeys = Object.keys(cur), wantKeys = Object.keys(want);
+    if (!hasBlank && curKeys.length === wantKeys.length && wantKeys.every(k => cur[k] === want[k])) {
+      const applied = data.expectedTotal !== undefined && data.expectedTotal !== null && total !== Number(data.expectedTotal);
+      return { ok: true, unchanged: true, alreadyApplied: applied };
+    }
+
     // ★ 2026-10-09 신규(현장 요청) — 수량 수정 허용. 클라이언트가 expectedTotal(화면에서 본 합계)을 보내면
     //   그 사이 다른 스캔으로 바뀌었는지만 확인하고, 새 합계가 1 이상·필요수량(maxQty) 이하이면 수량 변경을 허용.
     //   (expectedTotal 없이 오는 구버전 화면은 예전처럼 합계가 같아야만 저장)
@@ -2271,19 +2288,6 @@ function reassignPackScanBoxes(data) {
       }
     } else if (total !== wantSum) {
       return { ok: false, error: 'total_mismatch', total: total };
-    }
-
-    // 이미 같은 배정이면(번호가 빈 몫도 없음) 아무것도 안 바꾸고 성공 처리 — 기록 낭비 방지
-    const cur = {};
-    let hasBlank = false;
-    matched.forEach(m => {
-      const n = parseInt(kind === 'pallet' ? m.r[12] : m.r[11], 10);
-      if (!n || n < 1) { hasBlank = true; return; }
-      cur[n] = (cur[n] || 0) + m.q;
-    });
-    const curKeys = Object.keys(cur), wantKeys = Object.keys(want);
-    if (!hasBlank && curKeys.length === wantKeys.length && wantKeys.every(k => cur[k] === want[k])) {
-      return { ok: true, unchanged: true };
     }
 
     // 반대쪽 값(박스 모드면 팔렛, 팔렛 모드면 박스)은 기존 값을 그대로 유지(없으면 '1')
