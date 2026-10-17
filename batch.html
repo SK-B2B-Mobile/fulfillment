@@ -9381,7 +9381,9 @@ async function asSave(){
       : er === 'over_required' ? 'The quantity is more than the required amount.'
       : er === 'duplicate_number' ? 'The same number is used twice — merge them into one row.'
       : ('Save failed: ' + (er || 'network error'));
-    alert(msg);
+    // ★ 2026-10-16 — 실패로 보여도 서버에는 저장됐을 수 있음(응답 유실). 화면을 서버 최신 상태로 새로고침해서 실제 결과를 바로 보여줌.
+    try{ const I0 = _asInfo_(e.ctx); if(I0 && I0.invoice === e.invoice) await I0.refresh(); }catch(_){}
+    alert(msg + '\n\n(The screen was refreshed — if the boxes already show your numbers, the save went through.)');
     asUpdateSum_();
     return;
   }
@@ -9389,7 +9391,7 @@ async function asSave(){
   const I = _asInfo_(e.ctx);
   if(I.invoice === e.invoice) await I.refresh();
   renderAssignModal_();
-  toast(res.unchanged ? 'No change — already assigned this way' : (res.qtyChanged ? 'Quantity updated — reflected in the Google Sheet' : 'Saved — reflected in the Google Sheet'), 'success');
+  toast((res.unchanged && !res.alreadyApplied) ? 'No change — already assigned this way' : (res.qtyChanged ? 'Quantity updated — reflected in the Google Sheet' : 'Saved — reflected in the Google Sheet'), 'success');
 }
 // 안쪽 "Move Whole Box/Pallet"(기존 일괄 이동)로 연결 — 메인 화면에서는 버튼을 뺐고 여기서만 접근
 function asOpenMove(){
@@ -9788,7 +9790,14 @@ async function forcePsvComplete(){
   const forceBtn = document.getElementById('psvForceBtn');
   if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = 'Processing...'; }
   // ★ 2026-09-01 신규 — forcePvComplete와 동일한 이유(화면·슬립 불일치 해결).
-  await gasCallWithRetry('forceCompletePackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, round: 2 });
+  const fillRes = await gasCallWithRetry('forceCompletePackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, round: 2 });
+  if(!fillRes || !fillRes.ok){
+    // ★ 2026-10-16 버그 수정 — 예전엔 이 결과를 무시하고 그대로 "확정"해서, 수량이 안 채워진 채(예: 50/350) Verified가 되는 사고가 있었음.
+    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
+    alert('Could not record the remaining quantity, so the order was NOT confirmed: ' + ((fillRes && fillRes.error) || 'network error') + '\n\nPlease check the connection and try again.');
+    await refreshPsvState();
+    return;
+  }
   const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
   if(res.ok){
     showPsvMsg('⚠ Manager force confirm — all remaining quantity recorded as confirmed', 'ok');
@@ -10330,7 +10339,13 @@ async function forcePvComplete(){
   // ★ 2026-09-01 신규 — 강제확정 전에 남은 수량을 실제로 PackScanLog에 채워서,
   //   화면(목록·진행률)과 패킹슬립이 항상 일치하게 함(예전엔 슬립만 100%로
   //   찍히고 화면은 계속 0으로 남아 서로 안 맞았음).
-  await gasCallWithRetry('forceCompletePackScan', { batchId: state.batchId, invoice: _pvInvoice, worker });
+  const fillRes = await gasCallWithRetry('forceCompletePackScan', { batchId: state.batchId, invoice: _pvInvoice, worker });
+  if(!fillRes || !fillRes.ok){
+    if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
+    alert('Could not record the remaining quantity, so the order was NOT confirmed: ' + ((fillRes && fillRes.error) || 'network error') + '\n\nPlease check the connection and try again.');
+    await refreshPvState();
+    return;
+  }
   const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
   if(res.ok){
     showPvMsg('⚠ Manager force confirm — all remaining quantity recorded as confirmed', 'ok');
