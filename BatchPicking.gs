@@ -957,6 +957,52 @@ function nextBatchSeqForDate_(datePart) {
   ids.forEach(r => { if (String(r[0]).indexOf(prefix) === 0) count++; });
   return count + 1; // 오늘 이미 만들어진 배치(예전 방식 포함) 다음 순번
 }
+// ★ 2026-10-19 신규(현장 요청) — "삭제된 배치" 표시(tombstone). 삭제된 배치를 모든 기기(TV·작업자 폰)가
+//   실시간으로 알아채고 화면에서 정리하게 하기 위한 장치. ScriptProperties에 {배치ID: 삭제시각ms}로
+//   최근 14일/최대 60건만 보관(오래되면 자동 정리). 조회는 60초 캐시 + 삭제·생성 시 즉시 무효화.
+const DELETED_BATCH_PROP_ = 'deletedBatchIds_v1';
+const DELETED_BATCH_CACHE_ = 'delBatches_v1';
+function _deletedBatchMap_() {
+  try {
+    const cache = CacheService.getScriptCache();
+    const c = cache.get(DELETED_BATCH_CACHE_);
+    if (c !== null) return JSON.parse(c);
+    const raw = PropertiesService.getScriptProperties().getProperty(DELETED_BATCH_PROP_);
+    const m = raw ? JSON.parse(raw) : {};
+    cache.put(DELETED_BATCH_CACHE_, JSON.stringify(m), 60);
+    return m;
+  } catch (e) { return {}; }
+}
+function isBatchDeleted_(batchId) {
+  if (!batchId) return false;
+  return !!_deletedBatchMap_()[String(batchId)];
+}
+function _writeDeletedBatchMap_(m) {
+  PropertiesService.getScriptProperties().setProperty(DELETED_BATCH_PROP_, JSON.stringify(m));
+  try { CacheService.getScriptCache().remove(DELETED_BATCH_CACHE_); } catch (e) {}
+}
+function _markBatchDeleted_(batchId) {
+  const raw = PropertiesService.getScriptProperties().getProperty(DELETED_BATCH_PROP_);
+  let m = {};
+  try { m = raw ? JSON.parse(raw) : {}; } catch (e) { m = {}; }
+  const now = Date.now();
+  m[String(batchId)] = now;
+  Object.keys(m).forEach(k => { if (now - Number(m[k]) > 14 * 24 * 3600 * 1000) delete m[k]; });
+  const keys = Object.keys(m).sort((a, b) => m[b] - m[a]);
+  keys.slice(60).forEach(k => delete m[k]);
+  _writeDeletedBatchMap_(m);
+}
+function _unmarkBatchDeleted_(batchId) {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(DELETED_BATCH_PROP_);
+    if (!raw) return;
+    const m = JSON.parse(raw);
+    if (m[String(batchId)] === undefined) return;
+    delete m[String(batchId)];
+    _writeDeletedBatchMap_(m);
+  } catch (e) { /* 무시 */ }
+}
+
 function generateBatchId_() {
   const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
   const timePart = Utilities.formatDate(new Date(), batchTz_(), 'HHmm'); // ★ 2026-08-24 신규(매니저 요청) — "몇 시에 만든 배치인지"까지 한눈에 보이도록 시:분(HHmm) 추가
@@ -987,6 +1033,7 @@ function createBatch(data) {
   try {
     const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
     const batchId = generateBatchId_();
+    _unmarkBatchDeleted_(batchId); // ★ 2026-10-19 — 삭제된 배치와 같은 번호로 새로 만들어진 경우 삭제 표시 해제
 
     const sumItems = Array.isArray(data.sumItems) ? data.sumItems : [];
     const customers = Array.isArray(data.customers) ? data.customers : [];
@@ -1800,6 +1847,7 @@ function logPackScan(data) {
   let packScanDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장(정상 채움 'pass' 케이스만 해당)
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
+    if (isBatchDeleted_(data.batchId)) return { ok: false, error: 'batch_deleted' }; // ★ 2026-10-19 — 삭제된 배치에는 기록 불가(고아 기록 방지)
     if (!data.invoice) return { ok: false, error: 'invoice required' };
     const barcode = String(data.barcode || '').trim();
     if (!barcode) return { ok: false, error: 'barcode required' };
@@ -2940,6 +2988,7 @@ function logScan(data) {
   let scanDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
+    if (isBatchDeleted_(data.batchId)) return { ok: false, error: 'batch_deleted' }; // ★ 2026-10-19 — 삭제된 배치에는 기록 불가(고아 기록 방지)
     const scanId = Utilities.getUuid();
     const sl = scanlogSheet_();
     // ★ 2026-08-05 긴급 수정 — appendRow로 그냥 쓰면 순수 숫자 바코드(0으로
@@ -3047,6 +3096,7 @@ function logIssue(data) {
   let issueDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
     if (!data.batchId) return { ok: false, error: 'batchId required' };
+    if (isBatchDeleted_(data.batchId)) return { ok: false, error: 'batch_deleted' }; // ★ 2026-10-19 — 삭제된 배치에는 기록 불가(고아 기록 방지)
     if (!data.invoice) return { ok: false, error: 'invoice required' };
     const qty = Number(data.qty) || 0;
     if (qty <= 0) return { ok: false, error: 'qty must be > 0' };
@@ -3536,6 +3586,21 @@ function undoScan(data) {
  * 전부 제거하고, 이 배치가 활성 배치로 지정돼 있었다면 그것도 같이 해제함.
  * 입력: { batchId } */
 function deleteBatchIfEmpty(data) {
+  const res = _deleteBatchIfEmptyCore_(data);
+  // ★ 2026-10-19 신규 — 락이 풀린 뒤(외부 호출을 락 안에서 하지 않는 기존 원칙), 모든 화면이 1분 동기화를 기다리지 않고
+  //   즉시 "삭제됨"을 알아채도록 Firestore 미러를 바로 갱신(best-effort — 실패해도 삭제 결과엔 영향 없음).
+  if (res && res.ok && res.deleted) { try { _publishBatchDeletedMirror_(String(data.batchId)); } catch (e) { Logger.log('삭제 미러 반영 실패: ' + String(e)); } }
+  return res;
+}
+function _publishBatchDeletedMirror_(batchId) {
+  const writes = [];
+  _collectMirrorWrite_(writes, 'board_openBatches', getOpenBatches() || { ok: false });
+  ['slotProgress_', 'batch_', 'scanState_', 'unfulfilledAlerts_'].forEach(p => {
+    _collectMirrorWrite_(writes, p + batchId, { ok: false, deleted: true, batchId: batchId });
+  });
+  _firestoreBatchWrite_(writes);
+}
+function _deleteBatchIfEmptyCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
@@ -3591,6 +3656,8 @@ function deleteBatchIfEmpty(data) {
       }
     } catch (e) { /* 무시 */ }
 
+    _markBatchDeleted_(batchId); // ★ 2026-10-19 — 모든 기기가 알아챌 수 있게 삭제 표시
+    try { CacheService.getScriptCache().remove('openBatches_v1_meta'); } catch (eC) {}
     bumpVersion_();
     Logger.log('✅ deleteBatchIfEmpty: ' + batchId + ' 완전 삭제됨 (행 ' + totalRemoved + '개 제거)');
     return { ok: true, deleted: true, rowsRemoved: totalRemoved };
@@ -4736,6 +4803,13 @@ function getBatchHistoryList(data) {
 }
 
 function getOpenBatches() {
+  const r = getOpenBatchesCore_();
+  // ★ 2026-10-19 신규 — 삭제된 배치 번호 목록을 같이 내려줌(캐시된 결과에도 항상 최신값을 덧붙임).
+  //   board.html·batch.html이 "내가 보던 배치가 삭제됐는지" 판단하는 유일한 근거.
+  try { if (r && r.ok) r.deletedBatchIds = Object.keys(_deletedBatchMap_()); } catch (e) {}
+  return r;
+}
+function getOpenBatchesCore_() {
   try {
     // ★ 2026-08-19 신규(긴급) — getSlotProgress와 동일한 이유. "다른 배치"
     //   드롭다운·초기 배치 감지 등에서 자주 불리는데 시트 여러 개를 훑는
