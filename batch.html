@@ -2582,6 +2582,7 @@ function _waitForBatchMirrorInit(tries){
     //   별도 문서를 새로 만들지 않음 — 불필요한 중복 계산/중복 쓰기 방지).
     window._subscribeMirror('board_openBatches', (p) => {
       _openBatchesMirrorCache = p;
+      try{ noteDeletedFromOpenList_(p); }catch(e){}
       if(p && p.ok && typeof renderOpenBatchesPanel === 'function') renderOpenBatchesPanel(p.batches || []);
     });
     console.log('✅ Firestore 미러 구독 시작 (batch.html) — checkOpenBatches 실시간 보강');
@@ -2632,6 +2633,39 @@ document.addEventListener('DOMContentLoaded', () => {
 // GAS 연동 헬퍼 — CORS 프리플라이트를 피하려고 FormData(op,data)로 전송
 // (기존 Code.gs doPost의 e.parameter.data 파싱 방식과 그대로 맞춰짐)
 // ═══════════════════════════════════════════════════════════
+/* ★ 2026-10-19 신규(현장 요청) — 삭제된 배치 실시간 연동.
+ *  작업자 기기는 각자 독립적으로 배치를 고르지만(기존 원칙 유지), 내가 작업 중인 배치가 매니저에 의해 삭제되면
+ *  이 기기도 즉시 알아채고 스캔을 막은 뒤 배치 선택 화면으로 돌려보낸다(삭제된 배치에 고아 기록이 쌓이는 것 방지).
+ *  신호 3가지: ① mirror/board_openBatches의 deletedBatchIds ② 120초 주기 getOpenBatches ③ 서버가 스캔/이슈 저장을
+ *  'batch_deleted'로 거절하거나 getBatch가 'batch not found'를 돌려줄 때. */
+const _deletedBatchIdsSeen = new Set();
+let _batchDeletedHandling = false;
+function handleBatchDeleted_(id){
+  id = String(id || '');
+  if(!id || id === 'STANDALONE_ORDERS') return;
+  _deletedBatchIdsSeen.add(id);
+  if(String(state && state.batchId || '') !== id) return; // 내가 작업 중인 배치가 아니면 무시(독립 동작 유지)
+  if(_batchDeletedHandling) return;
+  _batchDeletedHandling = true;
+  try{ clearBatchCache(); }catch(e){}
+  try{ resetBatchFormForNewBatch(); }catch(e){ console.error('resetBatchFormForNewBatch failed', e); }
+  try{ gotoView('v-batch'); }catch(e){}
+  try{ checkOpenBatches(); }catch(e){}
+  setTimeout(() => {
+    alert('Batch ' + id + ' was deleted by a manager.\nIt can no longer be worked on, and nothing more will be saved to it.\nPlease pick another batch with "Switch batch" or create a new one.\n\n이 배치(' + id + ')는 삭제되었습니다. 더 이상 작업할 수 없습니다. 다른 배치를 선택하거나 새로 만들어 주세요.');
+    _batchDeletedHandling = false;
+  }, 50);
+}
+function noteDeletedFromOpenList_(res){
+  if(!res || !res.ok || !Array.isArray(res.deletedBatchIds)) return;
+  res.deletedBatchIds.forEach(id => _deletedBatchIdsSeen.add(String(id)));
+  if(state && state.batchId && _deletedBatchIdsSeen.has(String(state.batchId))) handleBatchDeleted_(state.batchId);
+}
+function noteDeletedFromRes_(res, batchId){
+  if(!res || res.ok) return;
+  const er = String(res.error || '');
+  if(er === 'batch_deleted' || /batch not found/i.test(er)) handleBatchDeleted_(batchId || (state && state.batchId));
+}
 async function gasCall(op, data){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정 (데모 모드)' };
   try{
@@ -2639,7 +2673,9 @@ async function gasCall(op, data){
     fd.append('op', op);
     fd.append('data', JSON.stringify(data || {}));
     const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd });
-    return await res.json();
+    const out = await res.json();
+    if(out && !out.ok && out.error === 'batch_deleted') noteDeletedFromRes_(out, data && data.batchId);
+    return out;
   }catch(e){
     console.error('gasCall failed:', op, e);
     return { ok:false, error:String(e) };
@@ -2661,6 +2697,7 @@ async function gasCallWithRetry(op, data, maxAttempts){
   for(let i = 0; i < maxAttempts; i++){
     const res = await gasCall(op, data);
     if(res && res.ok) return res;
+    if(res && res.error === 'batch_deleted') return res; // ★ 2026-10-19 — 삭제된 배치는 재시도해도 소용없음
     lastErr = (res && res.error) || '알 수 없는 오류';
     if(i < maxAttempts - 1) await new Promise(r => setTimeout(r, 700 * (i + 1))); // 점점 늘려가며 재시도
   }
@@ -3392,6 +3429,7 @@ async function checkOpenBatches(){
   try{
     const res = await gasQuery('getOpenBatches', {});
     if(!res.ok) return;
+    try{ noteDeletedFromOpenList_(res); }catch(e){}
     renderOpenBatchesPanel(res.batches || []);
   }catch(e){
     console.error('checkOpenBatches failed:', e);
@@ -5510,7 +5548,7 @@ async function refreshBatchStructure(silent){
   }
   try{
     const res = await gasQuery('getBatch', { batchId: state.batchId });
-    if(!res.ok || !res.batch) return false;
+    if(!res.ok || !res.batch){ noteDeletedFromRes_(res, state.batchId); return false; } // ★ 2026-10-19 — 'batch not found'면 삭제된 배치
     return await applyBatchStructureResult_(res, state.batchId, silent, /*fromMirror*/ false);
   }catch(e){
     console.error('refreshBatchStructure failed:', e);
