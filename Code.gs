@@ -2491,6 +2491,11 @@ function deleteJob_(invoice) {
       break;
     }
   }
+  // ★ 2026-10-19 버그 수정(삭제 직후 새로고침하면 삭제한 인보이스가 다시 보였다가 30초쯤 뒤 사라지던 현상) —
+  //   upsertJob/setArchived_ 등 다른 쓰기는 끝에 bumpVersion_()을 불러 listJobs 8초 캐시·메모해 둔 Jobs 블록·버전을
+  //   즉시 무효화하는데, 이 함수만 빠져 있었음. 그래서 삭제 직후의 listJobs/미러가 삭제 전 데이터를 그대로 돌려줬음.
+  try { SpreadsheetApp.flush(); } catch (eFl) {}
+  try { bumpVersion_(); } catch (eBv) {}
 }
 
 function utcToLocalISO_(isoStr) {
