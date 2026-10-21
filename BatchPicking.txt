@@ -3227,7 +3227,15 @@ function logIssue(data) {
   // ★ 2026-09-03 긴급 성능수정 — logScan과 동일한 이유. syncInspectionFromPicking_은
   //   여러 시트를 통째로 다시 읽는 무거운 함수라, 락 안에서 실행하면 이슈 등록
   //   1건마다 다른 모든 저장 작업이 그 뒤에서 기다려야 함. 락 해제 후로 옮김.
-  if (needsSync) {
+  // ★ 2026-10-21 신규(현장 요청 — "Report Issue 저장이 너무 오래 걸림") — data.defer가 true면 무거운 후처리
+  //   (Jobs 검수상태 동기화 · 상세 미러 · Firestore 이슈문서)를 이 응답에서 빼고 곧바로 응답함.
+  //   IssueLog·ADJ 보정기록·캐시 무효화·버전 증가는 위에서 이미 끝났으므로 데이터는 그대로 저장돼 있음.
+  //   빠진 후처리는 화면이 응답을 받은 직후 issueAfterSync(아래)를 따로 불러서 처리함.
+  //   defer가 없는 호출(board.html·sk-worker·옛 화면)은 예전과 100% 동일하게 이 안에서 전부 처리.
+  const _deferSync = (data.defer === true || String(data.defer) === 'true');
+  if (needsSync && _deferSync && result && result.ok) {
+    result.deferred = true;
+  } else if (needsSync) {
     // ★ 2026-09-11 버그 수정(현장 발견) — force=true로 바꿈. 예전엔 "값(개수
     //   문구)이 이전과 같으면 저장 생략"하는 최적화 때문에, 이슈를 새로
     //   등록해도 우연히 전체 이슈 개수가 그대로면(예: 다른 이슈가 취소되면서
@@ -3249,6 +3257,54 @@ function logIssue(data) {
     }
   }
   return result;
+}
+
+/* ===================== issueAfterSync (★ 2026-10-21 신규) =====================
+ * logIssue(defer:true)가 응답에서 뺀 후처리를 따로 수행. 화면(batch.html)이 logIssue 응답을 받은 직후,
+ * 작업자를 기다리게 하지 않고 백그라운드로 호출함.
+ *   1) Jobs 시트 검수 상태/이슈 노트 동기화(syncInspectionFromPicking_, force)
+ *   2) 상세조회 캐시·Firestore 미러(syncSalesInvoiceDetailMirror_)
+ *   3) Firestore 이슈 문서(writeIssueLogDoc_)
+ * 모두 best-effort — 실패해도 IssueLog(진짜 데이터)에는 영향 없고, 같은 인보이스의 다음 스캔/검수 이벤트에서
+ * 1)이 다시 계산되므로 스스로 바로잡힘. 여러 번 호출돼도 결과가 같은(멱등) 작업뿐이라 안전함.
+ * 입력: { batchId, invoice, issueId, worker } / 출력: { ok:true }
+ * ================================================================================ */
+function issueAfterSync(data) {
+  try {
+    data = data || {};
+    if (!data.batchId || !data.invoice) return { ok: false, error: 'batchId, invoice required' };
+    if (isBatchDeleted_(data.batchId)) return { ok: true, skipped: 'batch_deleted' };
+    // 서버 시트의 실제 이슈 기록으로 Firestore 문서를 만듦(화면이 보낸 값은 믿지 않음). 최근 300행만 확인.
+    let doc = null;
+    try {
+      if (data.issueId) {
+        const il = issuelogSheet_();
+        const last = il.getLastRow();
+        if (last >= 2) {
+          const from = Math.max(2, last - 299);
+          const rows = il.getRange(from, 1, last - from + 1, 13).getValues();
+          for (let i = rows.length - 1; i >= 0; i--) {
+            const r = rows[i];
+            if (String(r[1]) !== String(data.issueId)) continue;
+            if (String(r[0]) !== String(data.batchId) || String(r[7]) !== String(data.invoice)) break;
+            doc = {
+              batchId: r[0], issueId: String(r[1]), timestamp: fmtSheetTs_(r[2]), worker: String(r[3] || ''),
+              barcode: String(r[4] || ''), sku: String(r[5] || ''), name: String(r[6] || ''),
+              invoice: String(r[7]), customer: String(r[8] || ''), reason: String(r[9] || 'ETC'),
+              qty: Number(r[10]) || 0, note: String(r[11] || ''), status: String(r[12] || 'active'),
+            };
+            break;
+          }
+        }
+      }
+    } catch (eDoc) { /* 문서 준비 실패 — 아래 1)·2)만 진행 */ }
+    try { syncInspectionFromPicking_(data.batchId, data.invoice, data.worker || '', true); } catch (e1) { /* 무시 */ }
+    try { syncSalesInvoiceDetailMirror_(data.invoice); } catch (e2) { /* 무시 */ }
+    if (doc) { try { writeIssueLogDoc_(doc); } catch (e3) { /* 무시 — best-effort */ } }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
 }
 
 /* ===================== getInvoiceIssues (★ 2026-09-01 신규) =====================
