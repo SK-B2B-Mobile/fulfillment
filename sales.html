@@ -604,6 +604,7 @@ td.new-col{/* ★ 2026-08-10 — 배경 제거 */}
 .skip-note .why{color:var(--text-dim); display:block; margin-top:2px; word-break:break-word;}
 .status-small.moved-skip,.badge.moved-skip,.plain-tag.moved-skip{background:rgba(245,158,11,0.14); color:var(--amber, #F59E0B); border:1px solid rgba(245,158,11,0.6); font-weight:800;}
 .plain-tag.moved-skip{padding:1px 6px; border-radius:5px;}
+.skip-mark{margin-left:4px; font-size:0.9em; color:var(--amber, #F59E0B); opacity:.95;} /* ★ 2026-10-23 — 강제 통과 표시(문구는 정상 완료와 동일) */
 .detail-close-btn:hover{background:var(--red-bg); color:var(--red); border-color:var(--red);}
 .detail-meta{display:flex; gap:14px 22px; margin-top:12px; flex-wrap:wrap;}
 /* ★ 2026-10-07 — 필드 제목(Ship Date, Shipping Method…)을 더 크고 밝고 굵게(현장 요청), 값은 14.5px */
@@ -1474,7 +1475,8 @@ function fmtMethodLabel(m){ return String(m||'-').replace(' & ', '&'); }
 // 불리언으로 안전하게 대체(하위호환).
 function packStageBadgeHtml(o, cls){
   const stage = o.packStage || (o.movedToPacking ? 'taken' : 'none');
-  if (stage === 'verified' && o.verifySkipAt) return `<span class="${cls} moved-skip" title="2nd verification was skipped${o.verifySkipBy ? ' by ' + _escH_(o.verifySkipBy) : ''}">⚠ Verification Skipped</span>`; // ★ 2026-10-09
+  // ★ 2026-10-23 — 문구/색은 정상 검증과 동일하게 통일("✓ 2nd Verification Complete"), 강제 통과(Skip)는 작은 ⏭ 표시로만 구분. 누가/왜는 상세 팝업에 그대로.
+  if (stage === 'verified' && o.verifySkipAt) return `<span class="${cls} moved-final" title="2nd verification was skipped${o.verifySkipBy ? ' by ' + _escH_(o.verifySkipBy) : ''}${o.verifySkipReason ? ' — ' + _escH_(o.verifySkipReason) : ''}">✓ 2nd Verification Complete<span class="skip-mark" aria-label="skipped">⏭</span></span>`;
   if (stage === 'verified') return `<span class="${cls} moved-final">✓ 2nd Verification Complete</span>`;
   if (stage === 'taken') return `<span class="${cls} moved-yes">✓ Moved to Packing</span>`; // ★ 기존 문구/색 그대로 — 파랑의 의미는 안 바뀜
   if (stage === 'moved') return `<span class="${cls} moved-no">Pending Move</span>`;
