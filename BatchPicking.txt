@@ -1565,7 +1565,10 @@ function setPackingMoved(data) {
           syncArgs = [batchId, invoice, data.worker || '', 1];
         }
       } else { // 'verified' — ★ 2026-08-24 신규: 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
-        if (!bc.getRange(row, 12).getValue()) {
+        // ★ 2026-10-23 긴급 수정 — 단독 오더는 sales.html에서 디멘션 저장/수동 표시로 "Moved to Packing"이 된 경우 L(파랑)이 비어 있어
+        //   여기서 영원히 거절되던 문제(스캔 100% 완료인데 2nd Verification Complete가 안 뜸). 화면과 같은 기준(수동 표시 또는 디멘션)이면 통과.
+        //   L이 이미 있는 일반 경로는 추가 조회 없이 예전과 완전히 동일.
+        if (!bc.getRange(row, 12).getValue() && !_movedBySalesSignals_(invoice)) {
           return { ok: false, error: '먼저 패킹존 이동(파랑) 표시부터 완료해주세요' };
         }
         if (!data.force) {
