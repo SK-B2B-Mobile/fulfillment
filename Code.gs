@@ -1409,11 +1409,11 @@ function setPuTkBoxQty(data) {
     try {
       atRaw = nowLocal_();
       const cells = [
-        { col: cols.iQty, value: qty },
+        { col: cols.iQty, value: qty, int: true },
         { col: cols.iAt, value: atRaw, text: true }, // 텍스트 서식 고정(날짜 문자열 자동 변환 방지)
         { col: cols.iBy, value: by }
       ];
-      if (palletsProvided && cols.iPal) cells.push({ col: cols.iPal, value: pallets }); // ★ 2026-10-08
+      if (palletsProvided && cols.iPal) cells.push({ col: cols.iPal, value: pallets, int: true }); // ★ 2026-10-08
       _writeRowCells_(sh, ctx.row, cells);
       mark('write');
     } finally {
@@ -1424,7 +1424,7 @@ function setPuTkBoxQty(data) {
     try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort */ }
     mark('total');
     // 응답의 pallets: 이번에 저장했으면 그 값, 생략했으면 시트에 있던 기존 값(화면이 정확히 표시하도록)
-    const palOut = palletsProvided ? pallets : (cols.iPal ? (Math.max(0, Math.round(Number(ctx.rowVals[cols.iPal - 1]) || 0))) : 0);
+    const palOut = palletsProvided ? pallets : (cols.iPal ? _puTkScalar_(ctx.rowVals[cols.iPal - 1]) : 0);
     return { ok: true, invoice: invoice, qty: qty, pallets: palOut, qtyAt: fmtShortTs_(atRaw), qtyBy: by, timing: tm };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1433,7 +1433,20 @@ function setPuTkBoxQty(data) {
 
 // ★ 2026-10-08 — 목록(getSalesOverview / getSalesTodayList)에 PU & TK의 박스·팔레트 수량을 얹기 위한 도우미.
 function _isPuTkMethod_(v) { return String(v == null ? '' : v).trim().toUpperCase() === 'PU & TK'; }
-function _puTkNum_(vals, i) { return vals ? Math.max(0, Math.round(Number(vals[i][0]) || 0)) : 0; }
+// ★ 2026-10-23 긴급 수정 — 박스/팔레트 칸이 날짜 서식(예: 40 → 2/8/1900)으로 저장된 행은 getValues()가
+//   Date를 돌려줘서 Number(Date)가 음수가 되고 0으로 잘려, 목록 DIMS가 "Not Entered"로 보였음.
+//   Date면 시트 일련번호(1899-12-30 기준 일수)로 되돌려 읽음. 숫자/문자열은 기존과 동일.
+function _puTkScalar_(v) {
+  try {
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
+      const ymd = Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd').split('-');
+      const days = Math.round((Date.UTC(+ymd[0], +ymd[1] - 1, +ymd[2]) - Date.UTC(1899, 11, 30)) / 86400000);
+      return Math.max(0, days);
+    }
+  } catch (e) { /* 아래 기본 처리 */ }
+  return Math.max(0, Math.round(Number(v) || 0));
+}
+function _puTkNum_(vals, i) { return vals ? _puTkScalar_(vals[i][0]) : 0; }
 
 function headerMap_() {
   const sh = SHEET_();
@@ -2097,8 +2110,33 @@ function _packStateForInvoice_(invoice, manualOn, skipOn) {
     mp = true;
     if (stage !== 'verified') stage = 'taken';
   }
+  // ★ 2026-10-23 긴급 수정 — sales.html 목록/상세는 "디멘션이 저장된 오더"를 Moved to Packing(taken)으로 표시하는데
+  //   (getSalesOverview의 packStage), 이 함수는 BatchCustomers/수동표시만 봐서 같은 오더를 "이동 안 됨"으로 판정했음.
+  //   그래서 화면엔 Moved인데 ⏭ Skip 2nd verification이 "Mark as Moved to Packing first"로 거절되던 불일치. 화면과 동일 기준으로 통일.
+  if (!mp && _invoiceHasDims_(invoice)) {
+    mp = true;
+    if (stage === 'none' || stage === 'moved') stage = 'taken';
+  }
   if (skipOn) { mp = true; stage = 'verified'; } // ★ 2026-10-09 — 2차 검증 통과 처리됨
   return { mp: mp, stage: stage };
+}
+
+// ★ 2026-10-23 — 디멘션이 저장된 오더인지(대표/연결 오더 포함). 화면(getSalesOverview)과 같은 buildDimsExistsMap_ 기준. 실패하면 false(안전).
+function _invoiceHasDims_(invoice) {
+  try { const d = buildDimsExistsMap_()[String(invoice || '').trim()]; return !!(d && d.count > 0); } catch (e) { return false; }
+}
+// ★ 2026-10-23 — 단독 오더의 "패킹존 이동"이 BatchCustomers(L)가 아니라 영업 화면 쪽 신호(수동 표시 또는 디멘션 저장)로만 기록된 경우를 인정.
+function _movedBySalesSignals_(invoice) {
+  try {
+    const sh = SHEET_();
+    const ctx = _readJobRowFast_(sh, invoice);
+    if (ctx && !ctx.error) {
+      let iManual = 0;
+      ctx.headers.forEach(function (h, i) { if (!iManual && String(h).trim().toLowerCase() === 'packingmovedmanual') iManual = i + 1; });
+      if (iManual && ctx.rowVals[iManual - 1]) return true;
+    }
+  } catch (e) { /* 아래 디멘션 확인으로 */ }
+  return _invoiceHasDims_(invoice);
 }
 
 /* ★ 2026-08-06 긴급 신규 — 일회성 복구 함수. 자동보관 규칙이 "검수 다음날
@@ -5270,9 +5308,11 @@ function _writeRowCells_(sh, row, entries) {
   const minC = Math.min.apply(null, cols), maxC = Math.max.apply(null, cols);
   const textRanges = list.filter(function (e) { return e.text; }).map(function (e) { return _colLetterA1_(e.col) + row; });
   const numRanges = list.filter(function (e) { return e.num; }).map(function (e) { return _colLetterA1_(e.col) + row; }); // ★ 숫자 서식 강제(날짜 서식 상속 방지)
+  const intRanges = list.filter(function (e) { return e.int; }).map(function (e) { return _colLetterA1_(e.col) + row; }); // ★ 2026-10-23 정수 서식 '0'(박스/팔레트)
   if ((maxC - minC + 1) === list.length) {
     if (textRanges.length) sh.getRangeList(textRanges).setNumberFormat('@');
     if (numRanges.length) sh.getRangeList(numRanges).setNumberFormat('0.00');
+    if (intRanges.length) sh.getRangeList(intRanges).setNumberFormat('0');
     const arr = new Array(list.length);
     list.forEach(function (e) { arr[e.col - minC] = e.value; });
     sh.getRange(row, minC, 1, list.length).setValues([arr]);
@@ -5281,6 +5321,7 @@ function _writeRowCells_(sh, row, entries) {
       const r = sh.getRange(row, e.col);
       if (e.text) r.setNumberFormat('@');
       if (e.num) r.setNumberFormat('0.00');
+      if (e.int) r.setNumberFormat('0');
       r.setValue(e.value);
     });
   }
