@@ -9765,7 +9765,8 @@ async function doPsvScanOne(barcode, job){
     showPsvMsg({
       kind:'bad', icon:'⚠',
       title: res.name || res.sku || barcode,
-      sub: `Barcode ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan'}`,
+      sub: `Barcode ${barcode} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan — already complete'}${boxSub ? ' · Already packed in: ' + boxSub : ''}`,
+      qty: res.note === 'excluded' ? '' : `${Number(res.packed) || 0}/${Number(res.required) || 0}`, // ★ 2026-10-23 — 중복 스캔해도 수량은 "완료/필요" 그대로(박스 내 수량과 혼동 방지)
       action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
@@ -10250,7 +10251,8 @@ async function doPvScanOne(barcode, job){
     showPvMsg({
       kind:'bad', icon:'⚠',
       title: res.name || res.sku || barcode,
-      sub: `Barcode ${barcode}${boxSub ? ' · ' + boxSub : ''} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan'}`,
+      sub: `Barcode ${barcode} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan — already complete'}${boxSub ? ' · Already packed in: ' + boxSub : ''}`,
+      qty: res.note === 'excluded' ? '' : `${Number(res.packed) || 0}/${Number(res.required) || 0}`, // ★ 2026-10-23 — 중복 스캔해도 수량은 "완료/필요" 그대로(박스 내 수량과 혼동 방지)
       action: { label: '⚠ Report Issue', onClick: () => openPvIssueModal(res.sku || '', barcode, res.name || '') },
     });
   }
