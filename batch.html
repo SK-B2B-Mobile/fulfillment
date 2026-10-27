@@ -2666,19 +2666,26 @@ function noteDeletedFromRes_(res, batchId){
   const er = String(res.error || '');
   if(er === 'batch_deleted' || /batch not found/i.test(er)) handleBatchDeleted_(batchId || (state && state.batchId));
 }
+// ★ 2026-10-27 안정화 — POST에도 시간 제한(25초)을 둠. 예전엔 서버가 응답을 안 주면 영원히 기다릴 수 있었음
+//   (실행 기록에 369초짜리 Timed Out 실행이 확인됨). 시간이 지나면 끊고 호출부(재시도)가 같은 reqId로 다시 시도.
 async function gasCall(op, data){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정 (데모 모드)' };
+  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  let timer = null;
   try{
     const fd = new FormData();
     fd.append('op', op);
     fd.append('data', JSON.stringify(data || {}));
-    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd });
+    if(ctrl) timer = setTimeout(() => ctrl.abort(), 25000);
+    const res = await fetch(CONFIG.GAS_URL, ctrl ? { method:'POST', body: fd, signal: ctrl.signal } : { method:'POST', body: fd });
     const out = await res.json();
     if(out && !out.ok && out.error === 'batch_deleted') noteDeletedFromRes_(out, data && data.batchId);
     return out;
   }catch(e){
     console.error('gasCall failed:', op, e);
-    return { ok:false, error:String(e) };
+    return { ok:false, error: (e && e.name === 'AbortError') ? '서버 응답 지연(25초)' : String(e) };
+  }finally{
+    if(timer) clearTimeout(timer);
   }
 }
 // ★ 2026-08-04 긴급 신규 — 심각한 사고 발견: 작업자가 분명히 스캔했는데
@@ -2691,15 +2698,22 @@ async function gasCall(op, data){
 //   되돌아갔음. 이제 실패하면 최대 3번까지 자동으로 다시 시도하고,
 //   그래도 다 실패하면 절대 조용히 넘어가지 않고 호출부에서 눈에 띄게
 //   경고하도록 결과를 그대로 반환함(showScanSaveFailure 등에서 사용).
+// ★ 2026-10-27 안정화 — 스캔 저장(logScan/logPackScan)은 시도마다 "같은 요청 번호(reqId)"를 보냄. 서버가 이미 저장했는데
+//   응답만 못 받은 경우, 재시도가 중복 기록(Step 03: 수량 이중 집계 / 04·P: "Duplicate scan" 오표시)을 만들지 않고
+//   서버가 처음 결과를 그대로 돌려줌. 재시도 간격도 서버가 바쁠 때 몰리지 않게 늘리고 무작위 지연을 섞음.
+const _IDEMPOTENT_OPS_ = { logScan:1, logPackScan:1 };
 async function gasCallWithRetry(op, data, maxAttempts){
   maxAttempts = maxAttempts || 3;
   let lastErr = null;
+  if(_IDEMPOTENT_OPS_[op] && data && !data.reqId){
+    try{ data.reqId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2, 12)); }catch(e){ data.reqId = Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
+  }
   for(let i = 0; i < maxAttempts; i++){
     const res = await gasCall(op, data);
     if(res && res.ok) return res;
     if(res && res.error === 'batch_deleted') return res; // ★ 2026-10-19 — 삭제된 배치는 재시도해도 소용없음
     lastErr = (res && res.error) || '알 수 없는 오류';
-    if(i < maxAttempts - 1) await new Promise(r => setTimeout(r, 700 * (i + 1))); // 점점 늘려가며 재시도
+    if(i < maxAttempts - 1) await new Promise(r => setTimeout(r, 1200 * (i + 1) + Math.floor(Math.random() * 900))); // 점점 늘려가며 재시도(+무작위 지연으로 동시 재시도 폭주 방지)
   }
   return { ok:false, error: lastErr + ` (${maxAttempts}번 재시도 실패)` };
 }
@@ -2760,6 +2774,11 @@ async function gasQuery(op, params, timeoutMs){
   }catch(e){
     // ★ 2026-08-19 신규 — fetch가 CORS 등으로 실패하면 JSONP로 한 번 더 시도
     console.warn('gasQuery fetch 실패, JSONP로 재시도:', op, e);
+    // ★ 2026-10-27 안정화 — 시간 초과(AbortError)는 서버가 바쁘다는 뜻. 같은 요청을 JSONP로 한 번 더 보내면 서버 부하만
+    //   두 배가 되므로(이전 서버 코드에서는 이 대체 요청이 항상 실패하기까지 했음) 시간 초과일 땐 대체 요청을 보내지 않음.
+    if(e && e.name === 'AbortError'){
+      return { ok:false, error: '응답이 ' + Math.round(limit/1000) + '초 안에 오지 않았습니다 (서버 혼잡 — 잠시 후 자동 재시도)' };
+    }
     try{
       return await jsonpGet(`${CONFIG.GAS_URL}?${qs}`, limit);
     }catch(e2){
@@ -5472,7 +5491,7 @@ function startScanPolling(){
   //   줌 — sales.html이 느려지는 진짜 원인이 이 폴링들의 누적이었음(실행
   //   기록으로 확인됨). 15초면 작업자가 여전히 "거의 실시간"으로 느끼면서도
   //   서버 부담은 거의 절반으로 줄어듦.
-  __scanPollTimer = setInterval(pollScanAndPickers, 25000+jitter); // ★ 2026-09-03 재수정 — 15초→25초(최종 완화)
+  __scanPollTimer = setInterval(() => { if(!document.hidden) pollScanAndPickers(); }, 25000+jitter); // ★ 2026-10-27 — 숨겨진 탭은 폴링 안 함(복귀 시 즉시 갱신됨) // ★ 2026-09-03 재수정 — 15초→25초(최종 완화)
   pollScanAndPickers(); // 첫 진입 시 대기 없이 바로 한 번 조회
 }
 let __activePickersTimer = null;
@@ -5504,12 +5523,14 @@ document.addEventListener('visibilitychange', () => {
   //   스냅샷을 계속 보여주는 문제가 실제로 있었음(8/14 확인). 화면 복귀 시에도
   //   같이 갱신되도록 추가. state.batchId 유무와 무관하게 항상 최신화되어야 함.
   checkOpenBatches();
+  // ★ 2026-10-27 — 숨겨진 동안 멈춘 작업자 상태 신호/조회도 복귀 즉시 한 번씩 재개
+  try{ pingScanWorkerHeartbeat(); pingWorkerPresenceAll(); pollActiveScanWorkers(); pollActiveWorkersGlobal(); }catch(e){}
 });
 
 // ★ 2026-08-14 신규 — 위와 같은 이유로, 화면을 계속 켜놓고 있는 경우에도
 //   "완료된 배치" 목록이 스스로 낡지 않도록 60초마다 자체 갱신.
 // ★ 2026-09-03 신규(매니저 확정) — 60초→90초로 완화(전체 서버 부담 경감)
-setInterval(() => { if(GAS_READY) checkOpenBatches(); }, 120000); // ★ 2026-09-03 재수정 — 90초→120초
+setInterval(() => { if(GAS_READY && !document.hidden) checkOpenBatches(); }, 120000); // ★ 2026-09-03 재수정 — 90초→120초
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-07-09 신규 — "고객사·상품 배정 구조" 자체도 주기적으로 재동기화
@@ -5653,7 +5674,7 @@ function startStructurePolling(){
   // ★ 2026-09-23 유지 — Firestore 미러가 살아있으면 이 폴링은 대부분 "이미 최신"
   //   상태를 다시 확인하는 셈이 되어 체감상 거의 항상 조용히 지나가지만, 미러 연결이
   //   끊기거나 실패하는 경우의 안전망으로 그대로 남겨둠(자동 폴백 원칙 — sales_v2.html과 동일).
-  __structPollTimer = setInterval(() => refreshBatchStructure(true), 90000+jitter); // ★ 2026-09-03 재수정 — 60초→90초
+  __structPollTimer = setInterval(() => { if(!document.hidden) refreshBatchStructure(true); }, 90000+jitter); // ★ 2026-09-03 재수정 — 60초→90초
 }
 
 
@@ -11299,8 +11320,8 @@ async function pollActiveScanWorkers(){
 //   전체를 느리게 만드는 게 실제로 확인됨(sales.html 지연의 진짜 원인).
 //   활성 판정 임계값(120초)에 비하면 여전히 3번 이상 여유가 있어서 "활성" 표시
 //   정확도에는 실질적 영향이 없음.
-setInterval(pingScanWorkerHeartbeat, 60000); // ★ 2026-09-03 재수정 — 45초→60초
-setInterval(pollActiveScanWorkers, 50000); // ★ 2026-09-03 재수정 — 35초→50초
+setInterval(() => { if(!document.hidden) pingScanWorkerHeartbeat(); }, 60000); // ★ 2026-09-03 재수정 — 45초→60초
+setInterval(() => { if(!document.hidden) pollActiveScanWorkers(); }, 50000); // ★ 2026-09-03 재수정 — 35초→50초
 
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-09-01 신규 — Workers 탭 실시간 근무 상태(전역, 배치 무관)
@@ -11349,8 +11370,8 @@ async function pollActiveWorkersGlobal(){
 // ★ 2026-09-03 신규(매니저 확정) — pollActiveScanWorkers와 동일한 이유로
 //   30초→45초 / 20초→35초로 완화. Workers 탭 Active/Off 표시는 실시간성이
 //   덜 중요한 화면이라 이 정도 여유는 체감상 거의 차이 없음.
-setInterval(pingWorkerPresenceAll, 60000); // ★ 2026-09-03 재수정 — 45초→60초
-setInterval(pollActiveWorkersGlobal, 50000); // ★ 2026-09-03 재수정 — 35초→50초
+setInterval(() => { if(!document.hidden) pingWorkerPresenceAll(); }, 60000); // ★ 2026-09-03 재수정 — 45초→60초
+setInterval(() => { if(!document.hidden) pollActiveWorkersGlobal(); }, 50000); // ★ 2026-09-03 재수정 — 35초→50초
 
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
 function isWorkerBusyElsewhere(name){
