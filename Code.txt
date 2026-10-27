@@ -331,9 +331,48 @@ function whoAmI_(data) {
 }
 
 /* ================= HTTP Entrypoints ================ */
+/* ★ 2026-10-27 안정화 — 요청 진입점 보호막(doGet/doPost 공통).
+ *  1) 처리되지 않은 예외(예: LockService "Lock timeout")가 나면 Apps Script가 JSON이 아닌 HTML 오류 페이지를 돌려주고,
+ *     브라우저는 그걸 "TypeError: Failed to fetch"로만 보여줘서 원인 구분도, 올바른 재시도도 못 했음.
+ *     이제 항상 JSON({ok:false,error:'server_busy'|메시지})으로 응답.
+ *  2) JSONP 콜백 이름을 전역(__cb__)에 두어 json_()가 실제로 읽을 수 있게 함. 예전엔 doGet 안의 지역 변수라
+ *     json_()가 못 봐서 JSONP 응답이 항상 일반 JSON으로 나가 대체 요청이 늘 실패했음.
+ *  3) 5초 넘게 걸린 요청은 어떤 op가 느렸는지 스크립트 속성(reqSlowLog, 최근 40건)에 기록 — showReqSlowLog() 실행으로 확인. */
+var __cb__ = '';
+function _errJson_(err) {
+  const msg = String(err && err.message || err);
+  const busy = /lock|too many|timed out|timeout|simultaneous|Service invoked/i.test(msg);
+  return { ok: false, error: busy ? 'server_busy' : msg, detail: busy ? msg.slice(0, 160) : undefined };
+}
+function _noteSlowReq_(kind, op, ms) {
+  try {
+    if (ms < 5000) return;
+    const pr = PropertiesService.getScriptProperties();
+    const arr = String(pr.getProperty('reqSlowLog') || '').split('\n').filter(Boolean);
+    arr.push(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd HH:mm:ss') + ' ' + kind + ' ' + op + ' ' + Math.round(ms / 100) / 10 + 's');
+    pr.setProperty('reqSlowLog', arr.slice(-40).join('\n'));
+  } catch (e) { /* 기록 실패는 무시 */ }
+}
+function showReqSlowLog() {
+  const v = String(PropertiesService.getScriptProperties().getProperty('reqSlowLog') || '(5초 넘게 걸린 요청 기록 없음)');
+  Logger.log(v);
+  return v;
+}
 function doGet(e) {
+  const t0 = Date.now();
   const op = (e && e.parameter && e.parameter.op || '').toString();
-  var __cb__ = (e.parameter || {}).callback || '';
+  __cb__ = String(((e && e.parameter) || {}).callback || '');
+  try {
+    return doGet_core_(e);
+  } catch (err) {
+    return json_(_errJson_(err));
+  } finally {
+    _noteSlowReq_('GET', op, Date.now() - t0);
+  }
+}
+function doGet_core_(e) {
+  const op = (e && e.parameter && e.parameter.op || '').toString();
+  __cb__ = (e.parameter || {}).callback || '';
 
   if (op === 'ping') {
     return ContentService
@@ -613,7 +652,34 @@ function doGet(e) {
   return json_({ ok: false, error: 'unknown op' });
 }
 
+// 스캔 저장의 재시도 안전장치 — 같은 reqId로 다시 오면 처음 결과를 그대로 돌려줌(5분). reqId 없는 옛 클라이언트는 예전과 동일.
+function _withReqId_(data, fn) {
+  const id = data && data.reqId ? String(data.reqId).slice(0, 64) : '';
+  if (!id) return fn(data);
+  const cache = CacheService.getScriptCache();
+  const key = 'rq_' + id;
+  try {
+    const c = cache.get(key);
+    if (c) { const r = JSON.parse(c); r.replayed = true; return r; }
+  } catch (e) { /* 캐시 문제 시 그냥 처리 */ }
+  const res = fn(data);
+  try { if (res && res.ok) cache.put(key, JSON.stringify(res), 300); } catch (e) { /* 무시 */ }
+  return res;
+}
 function doPost(e) {
+  const t0 = Date.now();
+  let op0 = '';
+  try { op0 = String((e && e.parameter && e.parameter.op) || ''); } catch (e0) {}
+  __cb__ = '';
+  try {
+    return doPost_core_(e);
+  } catch (err) {
+    return json_(_errJson_(err));
+  } finally {
+    _noteSlowReq_('POST', op0, Date.now() - t0);
+  }
+}
+function doPost_core_(e) {
   const ct = (e && e.postData && e.postData.type) || '';
   let op = '', data = {};
 
@@ -759,7 +825,7 @@ function doPost(e) {
   // ★★★ 총량피킹 (신규 추가) ★★★
   if (op === 'createBatch')    return json_(createBatch(data));
   if (op === 'assignSlots')    return json_(assignSlots(data));
-  if (op === 'logScan')        return json_(logScan(data));
+  if (op === 'logScan')        return json_(_withReqId_(data, logScan));
   if (op === 'undoScan')       return json_(undoScan(data));
   if (op === 'completeBatch')  return json_(completeBatch(data));
   // ★ 2026-09-03 신규 — 스캔 기록이 전혀 없는 배치만 안전하게 완전삭제
@@ -770,7 +836,7 @@ function doPost(e) {
   if (op === 'setPackingMoved') return json_(setPackingMoved(data)); // ★ 2026-07-23 신규: 패킹존 이동 체크(순수 표시용)
   if (op === 'logSlipPrint') return json_(logSlipPrint(data)); // ★ 2026-10-15 신규: 패킹슬립 최종 출력 시각 기록
   // ★ 2026-08-24 신규 — 오출고 방지: 패킹 검증 스캔 기록/취소
-  if (op === 'logPackScan')   return json_(logPackScan(data));
+  if (op === 'logPackScan')   return json_(_withReqId_(data, logPackScan));
   // ★ 2026-09-08 신규 — 이미 스캔완료된 상품의 박스/팔렛 번호 사후 수정
   if (op === 'updatePackScanBoxPallet') return json_(updatePackScanBoxPallet(data));
   // ★ 2026-09-08 신규 — 한 SKU 수량을 여러 박스로 나눠 담은 경우 지원
