@@ -6238,7 +6238,13 @@ async function startPickTimer(worker, pageRange, force){
   setPickBanner('running', worker, _label);
   document.getElementById('pickTimerStat').textContent = '';
   if(GAS_READY){
-    const res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
+    // ★ 2026-10-28 — 서버가 몰려 바쁠 때(server_busy = 아직 처리 전)는 최대 4번까지 자동 재시도. 그 외 오류(already_picking 등)는 그대로 처리.
+    await flushPickEndPending(); // 이전에 못 보낸 '종료'가 남아 있으면 먼저 보냄(그래야 '이미 피킹 중' 오류가 안 남)
+    let res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
+    for(let _i = 1; _i < 4 && res && !res.ok && res.error === 'server_busy'; _i++){
+      await new Promise(r => setTimeout(r, 1200 * _i + Math.floor(Math.random() * 800)));
+      res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
+    }
     // ★ 2026-07-22 신규: 화면단 체크를 통과했어도, 정말 거의 동시에 다른 기기가
     //   먼저 시작해버린 경합 상황은 서버가 최종적으로 걸러줌 — 그 경우 되돌림.
     if(!res.ok){
@@ -6314,6 +6320,40 @@ async function startPickTimer(worker, pageRange, force){
   }
   pollActivePickers(); // 다른 기기 드롭다운에도 최대한 빨리 반영되도록 즉시 한 번 더
 }
+// ★ 2026-10-28 — 피킹 '종료' 전송 보증 장치(위 btnPickEnd 설명 참고)
+const PICK_END_PENDING_KEY = 'sk_pick_end_pending_v1';
+function pickEndPendingLoad_(){ try{ const a = JSON.parse(localStorage.getItem(PICK_END_PENDING_KEY) || '[]'); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
+function pickEndPendingSave_(a){ try{ localStorage.setItem(PICK_END_PENDING_KEY, JSON.stringify(a)); }catch(e){} }
+function pickEndPendingAdd_(item){ const a = pickEndPendingLoad_().filter(x => !(x.batchId === item.batchId && x.worker === item.worker)); a.push(item); pickEndPendingSave_(a); }
+function pickEndPendingRemove_(item){ pickEndPendingSave_(pickEndPendingLoad_().filter(x => !(x.batchId === item.batchId && x.worker === item.worker && x.endedAtMs === item.endedAtMs))); }
+function pickEndPendingHas_(batchId, worker){ return pickEndPendingLoad_().some(x => x.batchId === batchId && x.worker === worker); }
+async function sendPickEnd_(item){
+  let last = '';
+  for(let i = 0; i < 5; i++){
+    const res = await gasCall('logPickTiming', { batchId: item.batchId, worker: item.worker, action:'end', endedAtMs: item.endedAtMs });
+    if(res && res.ok) return res;
+    last = (res && res.error) || '';
+    // 서버에 열린 세션이 없음 = 이미 종료 저장됨(앞선 시도가 성공했거나 시작 기록이 없음) → 성공으로 취급
+    if(last === 'no open pick timing found' || last === 'batch_deleted') return { ok:true, already:true };
+    await new Promise(r => setTimeout(r, 1200 * (i + 1) + Math.floor(Math.random() * 900)));
+  }
+  return { ok:false, error: last };
+}
+let _pickEndFlushing = false;
+async function flushPickEndPending(){
+  if(_pickEndFlushing || !GAS_READY) return;
+  const list = pickEndPendingLoad_();
+  if(!list.length) return;
+  _pickEndFlushing = true;
+  try{
+    for(const item of list){
+      const res = await sendPickEnd_(item);
+      if(res && res.ok){ pickEndPendingRemove_(item); try{ pollActivePickers(); }catch(e){} }
+    }
+  } finally { _pickEndFlushing = false; }
+}
+setInterval(() => { try{ flushPickEndPending(); }catch(e){} }, 15000);
+setTimeout(() => { try{ flushPickEndPending(); }catch(e){} }, 3000);
 document.getElementById('btnPickEnd').onclick = async () => {
   const worker = document.getElementById('pickWorkerSelect').value;
   const mins = Math.round((Date.now() - (state.pickTimerStart||Date.now())) / 60000);
@@ -6330,12 +6370,22 @@ document.getElementById('btnPickEnd').onclick = async () => {
   document.getElementById('pickTimerStat').textContent = '';
   let realMins = mins;
   if(GAS_READY){
-    const endRes = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'end' });
-    // ★ 2026-08-07 — 서버가 저장된 시작시각으로 계산한 값을 우선 사용.
-    //   다른 기기에서 시작한 세션을 여기서 종료하는 경우, 이 기기의 타이머는
-    //   실제 시작시각을 모르므로 서버 값이 정확함.
-    if(endRes && endRes.ok && typeof endRes.durationMinutes === 'number') realMins = endRes.durationMinutes;
-    else if(endRes && !endRes.ok) toast('⚠ Could not save the end time: ' + (endRes.error||''), 'error');
+    // ★ 2026-10-28 근본 수정(현장: "End Picking 이 저장 안 되고 다시 피킹 중으로 튕김") —
+    //   예전엔 종료 요청을 딱 1번만 보내고, 서버가 바빠 실패하면 화면만 '종료'로 바꾼 채 서버 기록은 열린 채로 남았음.
+    //   그러면 다음 폴링이 서버의 '열린 세션'을 보고 화면을 다시 '피킹 중'으로 되돌렸음(= 튕김).
+    //   이제: ①누른 즉시 이 기기에 '보낼 종료'를 저장(새로고침/꺼져도 유지) ②최대 5번 자동 재시도 ③그래도 안 되면 15초마다 계속 재전송
+    //   ④서버엔 '누른 실제 시각'을 같이 보내 늦게 도착해도 시간이 정확 ⑤전송 전까지는 화면이 '피킹 중'으로 되돌아가지 않게 막음.
+    const _item = { batchId: state.batchId, worker, endedAtMs: Date.now() };
+    pickEndPendingAdd_(_item);
+    try{ delete state.activePickers[worker]; }catch(e){}
+    updatePickWorkerDot();
+    const endRes = await sendPickEnd_(_item);
+    if(endRes && endRes.ok){
+      pickEndPendingRemove_(_item);
+      if(typeof endRes.durationMinutes === 'number') realMins = endRes.durationMinutes;
+    } else {
+      toast('Saving the end time… will retry automatically (you can keep working)', 'success');
+    }
   }
   document.getElementById('pickStateSub').textContent = '';
   setPickBanner('done', worker, _erange ? ('Pages ' + _erange + ' · ' + _ecnt + (_ecnt === 1 ? ' sheet' : ' sheets')) : '', realMins + ' min');
@@ -11278,6 +11328,8 @@ async function pollActivePickers(){
     const res = await gasQuery('getActivePickers', { batchId: state.batchId });
     if(!res.ok) return;
     state.activePickers = res.active || {};
+    // ★ 2026-10-28 — 이 기기에서 '종료'를 눌렀지만 아직 서버에 못 보낸 작업자는 활성 목록에서 빼서, 화면이 '피킹 중'으로 되돌아가지(튕기지) 않게 함
+    try{ pickEndPendingLoad_().forEach(x => { if(x.batchId === state.batchId) delete state.activePickers[x.worker]; }); }catch(e){}
     state.lastPageRange = res.lastPageRange || {}; // ★ 2026-08-19 신규 — 작업자별 이전 담당페이지
     if(!state.pickTimerRunning) populateWorkerSelect(); // 내가 지금 피킹 중이면 내 드롭다운은 안 건드림
   }catch(e){
