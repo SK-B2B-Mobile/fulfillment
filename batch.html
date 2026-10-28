@@ -7227,7 +7227,7 @@ function logScan(entry){
       batchId: state.batchId, worker: entry.worker, barcode: entry.barcode,
       sku: entry.sku, slot: entry.slot, customer: entry.customer,
       invoice: entry.invoice, result: entry.status, qty: entry.qty || 1,
-    }, 3).then(res => {
+    }, 6).then(res => {
       if(res.ok){
         entry.scanId = res.scanId;
         // ★ 2026-07-09: 저장 성공 직후 곧바로 한 번 더 동기화 (5초 폴링을 기다리지 않고
