@@ -2528,6 +2528,30 @@ document.addEventListener('DOMContentLoaded', function(){
       }catch(e){ console.warn('[fastScan2] 예외(무시):', e); }
     };
 
+    // ★ 2026-10-29 v20 신규(스캔 저장·조회 Firestore 이전 1단계) — packState/{batchId}__{invoice}__r{round} 실시간 구독.
+    //   서버(Apps Script ScanStore.gs)가 스캔·취소·박스 수정 때마다 이 문서를 고쳐 쓰고, 화면은 읽기만 함(쓰기는 Firestore 규칙상 불가).
+    //   stateJson 은 getPackScanState 응답과 같은 모양이라 기존 렌더링 함수를 그대로 씀. 서버가 시트 방식이면 이 구독은 아예 시작되지 않음.
+    window._subscribePackState = function(docId, onUpdate){
+      const ref = doc(db, 'packState', docId);
+      return onSnapshot(ref, (snap) => {
+        if(!snap.exists()){ onUpdate({ gone: true }); return; }
+        try{
+          const d = snap.data();
+          onUpdate({ rev: Number(d.rev) || 0, state: JSON.parse(d.stateJson || 'null'), batchId: d.batchId, invoice: d.invoice, round: Number(d.round) || 2 });
+        }catch(e){ console.error('[packState] 파싱 실패 (' + docId + '):', e); }
+      }, (err) => {
+        console.warn('[packState] onSnapshot 에러 (' + docId + ') — 서버 조회로 계속 동작:', err);
+        if(window._onPackStateSubError) try{ window._onPackStateSubError(docId); }catch(e){}
+      });
+    };
+
+    // ★ v20 — 서버 저장 방식 표시(storeMeta/config). 원복하면 이 문서가 바뀌고, 보고만 있는 기기도 즉시 예전 방식으로 돌아감.
+    window._subscribeStoreMeta = function(onUpdate){
+      return onSnapshot(doc(db, 'storeMeta', 'config'), (snap) => { if(snap.exists()) onUpdate(snap.data()); }, (err) => {
+        console.warn('[storeMeta] 구독 실패(Firestore 규칙 확인 필요) — 서버 응답으로 계속 판단:', err);
+      });
+    };
+
     console.log('✅ Firestore 미러 연결 준비 완료 (batch.html)');
   } catch(e) {
     console.error('❌ Firestore 초기화 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다:', e);
@@ -2701,7 +2725,7 @@ async function gasCall(op, data){
 // ★ 2026-10-27 안정화 — 스캔 저장(logScan/logPackScan)은 시도마다 "같은 요청 번호(reqId)"를 보냄. 서버가 이미 저장했는데
 //   응답만 못 받은 경우, 재시도가 중복 기록(Step 03: 수량 이중 집계 / 04·P: "Duplicate scan" 오표시)을 만들지 않고
 //   서버가 처음 결과를 그대로 돌려줌. 재시도 간격도 서버가 바쁠 때 몰리지 않게 늘리고 무작위 지연을 섞음.
-const _IDEMPOTENT_OPS_ = { logScan:1, logPackScan:1 };
+const _IDEMPOTENT_OPS_ = { logScan:1, logPackScan:1, undoPackScan:1, updatePackScanBoxPallet:1, splitScannedItemBox:1, moveBoxOrPallet:1, reassignPackScanBoxes:1, forceCompletePackScan:1 }; // ★ v20 — 패킹 수정 기능도 재시도 번호(reqId) 사용(Firestore 방식에서 재시도 중복 방지, 시트 방식에서는 무시됨)
 async function gasCallWithRetry(op, data, maxAttempts){
   maxAttempts = maxAttempts || 3;
   let lastErr = null;
@@ -2710,13 +2734,124 @@ async function gasCallWithRetry(op, data, maxAttempts){
   }
   for(let i = 0; i < maxAttempts; i++){
     const res = await gasCall(op, data);
-    if(res && res.ok) return res;
+    if(res && res.ok){ try{ pkNote_(op, data, res); }catch(e){} return res; }
     if(res && res.error === 'batch_deleted') return res; // ★ 2026-10-19 — 삭제된 배치는 재시도해도 소용없음
     lastErr = (res && res.error) || '알 수 없는 오류';
     if(i < maxAttempts - 1) await new Promise(r => setTimeout(r, 1200 * (i + 1) + Math.floor(Math.random() * 900))); // 점점 늘려가며 재시도(+무작위 지연으로 동시 재시도 폭주 방지)
   }
   return { ok:false, error: lastErr + ` (${maxAttempts}번 재시도 실패)` };
 }
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-10-29 v20 신규 — 패킹 검증 상태(packState) 실시간 구독 + 캐시.
+//   서버 응답에 store:'fs' 가 있을 때만 동작(스위치가 sheet 면 아무 일도 안 일어남 — 예전과 100% 동일).
+//   - 스캔/취소/박스 수정 응답의 rev 를 기억(minRev) → 구독으로 받은 상태가 그 rev 이상이면 서버를 다시 부르지 않고 바로 그림
+//   - 다른 기기가 같은 인보이스를 스캔하면 구독이 즉시 받아서 지금 열린 화면(P / 04 / 단독 P)을 다시 그림
+//   - 오래된 값(rev 가 작음)은 절대 적용하지 않음(2026-09-23 "미러가 최신 화면을 덮어쓰는" 사고 방지)
+// ═══════════════════════════════════════════════════════════
+const _pk = { fsRound: {}, fsSeenAt: {}, slots: {}, cache: {}, minRev: {}, failed: {}, meta: null };
+const _PK_ISSUE_OPS_ = { logIssue:1, undoIssue:1, editIssue:1, addStandaloneOrder:1, removeStandaloneOrder:1, removeStandaloneOrdersBulk:1 };
+let _pkMetaStarted = false;
+function pkStartMeta_(){
+  if(_pkMetaStarted || !window._subscribeStoreMeta) return;
+  _pkMetaStarted = true;
+  try{
+    window._subscribeStoreMeta((m) => {
+      _pk.meta = m || null;
+      // 서버가 시트 방식으로 원복됐으면 구독·캐시를 정리하고 예전 방식(매번 서버 조회)으로
+      if(m && m.P !== 'fs' && _pk.fsRound[2]){ pkDropRound_(2); _pk.fsRound[2] = false; }
+      if(m && m.r04 !== 'fs' && _pk.fsRound[1]){ pkDropRound_(1); _pk.fsRound[1] = false; }
+    });
+  }catch(e){ console.warn('[storeMeta] 구독 실패', e); }
+}
+const _PK_OPS_ = { logPackScan:1, undoPackScan:1, updatePackScanBoxPallet:1, splitScannedItemBox:1, moveBoxOrPallet:1, reassignPackScanBoxes:1, forceCompletePackScan:1, getPackScanState:1 };
+// 서버 ScanStore.gs 의 ssClean_ 과 똑같은 규칙(영문·숫자·-·. 만 그대로, 나머지는 UTF-8 바이트마다 ~XX)
+function pkClean_(s){ return String(s == null ? '' : s).trim().replace(/[^A-Za-z0-9\-.]/gu, ch => { let e; try { e = encodeURIComponent(ch); } catch (x) { e = '%EF%BF%BD'; } if (e === ch) { const h = ch.charCodeAt(0).toString(16).toUpperCase(); e = '%' + (h.length < 2 ? '0' + h : h); } return e.replace(/%/g, '~'); }); }
+function pkKey_(batchId, invoice, round){ return pkClean_(batchId) + '__' + pkClean_(invoice) + '__r' + (Number(round) || 2); }
+function pkSlotOf_(key){
+  const pv = (typeof _pvInvoice !== 'undefined' && _pvInvoice && state && state.batchId) ? pkKey_(state.batchId, _pvInvoice, 2) : null;
+  const ss = (typeof _ssInvoice !== 'undefined' && _ssInvoice) ? pkKey_(STANDALONE_BATCH_ID, _ssInvoice, 1) : null;
+  const psv = (typeof _psvInvoice !== 'undefined' && _psvInvoice) ? pkKey_(STANDALONE_BATCH_ID, _psvInvoice, 2) : null;
+  return { pv: key === pv, ss: key === ss, psv: key === psv };
+}
+function pkDropRound_(round){
+  Object.keys(_pk.slots).forEach(slot => {
+    const s = _pk.slots[slot];
+    if(s && s.round === round){ try{ s.unsub && s.unsub(); }catch(e){} delete _pk.slots[slot]; }
+  });
+  Object.keys(_pk.cache).forEach(k => { if(k.endsWith('__r' + round)) delete _pk.cache[k]; });
+}
+function pkOnLive_(key, msg){
+  if(msg && msg.gone){ delete _pk.cache[key]; return; } // 문서가 지워짐(다시 만들어질 예정) — 다음 조회는 서버로
+  const c = _pk.cache[key];
+  if(c && c.rev >= msg.rev) return; // 같거나 오래된 값 — 무시
+  if(!msg.state || !msg.state.ok) return;
+  const st = Object.assign({}, msg.state, { store:'fs', stateDoc:key, rev:msg.rev });
+  _pk.cache[key] = { rev: msg.rev, state: st };
+  // 지금 열려 있는 화면이 이 인보이스면 바로 다시 그림(다른 기기의 스캔도 즉시 보임)
+  const on = pkSlotOf_(key);
+  try{ if(on.pv && typeof renderPvBody === 'function'){ _pvState = st; renderPvBody(); } }catch(e){ console.warn('[packState] pv render', e); }
+  try{ if(on.ss && typeof renderSsBody === 'function'){ _ssState = st; renderSsBody(); } }catch(e){ console.warn('[packState] ss render', e); }
+  try{ if(on.psv && typeof renderPsvBody === 'function'){ _psvState = st; renderPsvBody(); } }catch(e){ console.warn('[packState] psv render', e); }
+}
+function pkSubscribe_(slot, key, round){
+  if(!window._subscribePackState || _pk.failed[key]) return;
+  const cur = _pk.slots[slot];
+  if(cur && cur.key === key) return;
+  if(cur){ try{ cur.unsub && cur.unsub(); }catch(e){} }
+  let unsub = null;
+  try{ unsub = window._subscribePackState(key, (msg) => pkOnLive_(key, msg)); }catch(e){ console.warn('[packState] 구독 실패', e); }
+  _pk.slots[slot] = { key: key, round: round, unsub: unsub };
+}
+window._onPackStateSubError = function(key){
+  _pk.failed[key] = true;
+  Object.keys(_pk.slots).forEach(slot => { if(_pk.slots[slot] && _pk.slots[slot].key === key) delete _pk.slots[slot]; });
+  delete _pk.cache[key];
+};
+// 서버 응답 기록 — 모든 패킹 관련 op 응답이 여기를 지남(gasCallWithRetry / pkFetchState_)
+function pkNote_(op, data, res){
+  if(res && res.ok && _PK_ISSUE_OPS_[op]){ _pk.cache = {}; return; } // 이슈·주문이 바뀜 — 다음 조회는 반드시 서버에서(새 필요수량 반영)
+  if(!res || !res.ok || !_PK_OPS_[op]) return;
+  const round = Number(data && data.round) || 2;
+  if(res.store === 'fs' && res.stateDoc){
+    pkStartMeta_();
+    // 표시 문서가 "fs 아님"이라고 하면(원복됨) 예전 응답의 재전송(replayed)이 fs 로 되돌리지 못하게 함
+    const metaVal = _pk.meta ? (round === 1 ? _pk.meta.r04 : _pk.meta.P) : null;
+    if(metaVal && metaVal !== 'fs') return;
+    _pk.fsRound[round] = true;
+    _pk.fsSeenAt[round] = Date.now();
+    const r = Number(res.rev) || 0;
+    if(r > (_pk.minRev[res.stateDoc] || 0)) _pk.minRev[res.stateDoc] = r;
+  } else if(op !== 'undoPackScan' && !res.store){
+    if(_pk.fsRound[round]) pkDropRound_(round); // 서버가 시트 방식으로 원복됨 — 구독 정리하고 예전 방식으로
+    _pk.fsRound[round] = false;
+  }
+}
+// refreshPvState / refreshSsState / refreshPsvState 가 쓰는 조회 — 구독 값이 충분히 최신이면 서버를 안 부름
+async function pkFetchState_(slot, batchId, invoice, round){
+  round = Number(round) || 2;
+  const key = pkKey_(batchId, invoice, round);
+  const sub = _pk.slots[slot];
+  // 구독 값은 "최근 10분 안에 서버가 fs 방식으로 응답했을 때"만 믿음 — 그 사이 시트로 원복됐다면 다음 서버 응답이 알려줌
+  if(_pk.fsRound[round] && (Date.now() - (_pk.fsSeenAt[round] || 0)) < 600000 && sub && sub.key === key && !_pk.failed[key]){
+    const need = _pk.minRev[key] || 0;
+    for(let i = 0; i < 15; i++){ // 방금 저장한 결과가 구독으로 들어오길 최대 1.5초 기다림
+      const c = _pk.cache[key];
+      if(c && c.rev >= need) return c.state;
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  const params = { batchId: batchId, invoice: invoice };
+  if(round !== 2 || batchId === STANDALONE_BATCH_ID) params.round = round;
+  const res = await gasQueryWithRetry('getPackScanState', params);
+  pkNote_('getPackScanState', { round: round }, res);
+  if(res && res.ok && res.store === 'fs' && res.stateDoc){
+    const c = _pk.cache[res.stateDoc];
+    if(!c || (Number(res.rev) || 0) >= c.rev) _pk.cache[res.stateDoc] = { rev: Number(res.rev) || 0, state: res };
+    pkSubscribe_(slot, res.stateDoc, round);
+  }
+  return res;
+}
+
 // ★ 2026-08-07 수정(현장 장애) — 조회 요청에 시간 제한이 없어서, 창고 와이파이가
 //   순간적으로 끊기면 응답도 실패도 오지 않고 영원히 기다리는 상태가 됐음.
 //   그 결과 Scan Log의 KPI가 "불러오는 중..."에서 멈춘 채 복구되지 않았음.
@@ -8493,7 +8628,9 @@ async function onSsInvoiceChange(){
 
 async function refreshSsState(){
   if(!_ssInvoice) return;
-  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, round: 1 });
+  const _inv = _ssInvoice;
+  const res = await pkFetchState_('ss', STANDALONE_BATCH_ID, _inv, 1); // ★ v20 — 예전 gasQueryWithRetry('getPackScanState', … round:1) 와 같은 결과(구독 값이 최신이면 서버 생략)
+  if(_inv !== _ssInvoice) return; // 그 사이 다른 인보이스로 바뀜
   if(!res.ok){
     document.getElementById('ssLines').innerHTML = `<div class="empty-log">불러오기 실패: ${res.error||''}</div>`;
     return;
@@ -9652,7 +9789,9 @@ async function onPsvInvoiceChange(){
 
 async function refreshPsvState(){
   if(!_psvInvoice) return;
-  const res = await gasQueryWithRetry('getPackScanState', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2 });
+  const _inv = _psvInvoice;
+  const res = await pkFetchState_('psv', STANDALONE_BATCH_ID, _inv, 2); // ★ v20
+  if(_inv !== _psvInvoice) return;
   if(!res.ok){
     document.getElementById('psvLines').innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`;
     return;
@@ -9892,7 +10031,7 @@ function showPsvMsg(msgOrOpts, kind){
 
 async function undoPsvScanEntry(packScanId){
   if(!confirm('Undo this scan?')) return;
-  const res = await gasCallWithRetry('undoPackScan', { packScanId });
+  const res = await gasCallWithRetry('undoPackScan', { packScanId, batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2 }); // ★ v20 — 위치 정보 추가(시트 방식에서는 무시됨)
   if(res.ok) await refreshPsvState();
   else alert('Undo failed: ' + (res.error || 'Unknown error'));
 }
@@ -10075,7 +10214,9 @@ async function onPvInvoiceChange(){
 
 async function refreshPvState(){
   if(!_pvInvoice) return;
-  const res = await gasQueryWithRetry('getPackScanState', { batchId: state.batchId, invoice: _pvInvoice });
+  const _inv = _pvInvoice;
+  const res = await pkFetchState_('pv', state.batchId, _inv, 2); // ★ v20
+  if(_inv !== _pvInvoice) return;
   if(!res.ok){
     document.getElementById('pvLines').innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`;
     return;
@@ -10435,7 +10576,7 @@ function beepPv(ok){ playScanResultSound(ok); }
 
 async function undoPvScanEntry(packScanId){
   if(!confirm('Undo this scan?')) return;
-  const res = await gasCallWithRetry('undoPackScan', { packScanId });
+  const res = await gasCallWithRetry('undoPackScan', { packScanId, batchId: state.batchId, invoice: _pvInvoice, round: 2 }); // ★ v20
   if(res.ok) await refreshPvState();
   else alert('Undo failed: ' + (res.error || 'Unknown error'));
 }
