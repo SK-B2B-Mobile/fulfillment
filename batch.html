@@ -1679,6 +1679,9 @@ document.addEventListener('DOMContentLoaded', function(){
             </div>
 
             <span id="pickTimerStat" style="font-size:12px; color:var(--text-dim); font-family:var(--mono);"></span>
+            <!-- ★ 2026-10-29 v21 — 같은 페이지 재시작 막기 안내 + 이 배치의 피킹 기록 -->
+            <div id="pickPageWarn" style="display:none; padding:10px 14px; border-radius:9px; background:var(--red-bg, rgba(239,68,68,0.12)); border:1px solid var(--red); color:var(--red); font-size:14px; font-weight:800;"></div>
+            <div id="pickSessionList" style="display:none; border:1px solid var(--border2); border-radius:10px; padding:10px 14px; background:var(--surface2, rgba(255,255,255,0.02));"></div>
           </div>
         </div>
       </div>
@@ -5509,6 +5512,7 @@ async function pollScanAndPickers(){
     if(res.activePickers && res.activePickers.ok){
       state.activePickers = res.activePickers.active || {};
       state.lastPageRange = res.activePickers.lastPageRange || {};
+      try{ setTimeout(() => applyPickSessions_(res.activePickers.sessions), 0); }catch(eS){} // ★ v21
       if(!state.pickTimerRunning) populateWorkerSelect();
     }
   }catch(e){
@@ -6194,6 +6198,7 @@ function pickPageCountOf(from, to){
   return (t - f + 1);
 }
 function updatePickPageCount(){
+  setTimeout(() => { try{ updatePickStartGuard_(); }catch(e){} }, 0); // ★ v21 — 입력이 바뀔 때마다 '이미 끝난 페이지' 확인
   const f = document.getElementById('pickPageFrom').value.trim();
   const t = document.getElementById('pickPageTo').value.trim();
   const el = document.getElementById('pickPageCount');
@@ -6210,6 +6215,88 @@ function updatePickPageCount(){
   const el = document.getElementById(id);
   if (el) el.addEventListener('input', updatePickPageCount);
 });
+
+/* ★ 2026-10-29 v21 — 피킹 기록 + 같은 페이지 다시 시작 막기
+ * state.pickSessions = 서버(getActivePickers)가 주는 이 배치의 피킹 기록 [{worker,pageRange,start,end,mins,open,forced}]
+ * - 이미 끝난(강제종료 제외) 페이지와 겹치면 Start 를 막음(관리자 확인 시 다시 피킹 가능)
+ * - 다른 작업자가 지금 피킹 중인 페이지와 겹쳐도 막음
+ * 서버(logPickTiming)도 같은 검사를 하므로 다른 기기에서 동시에 눌러도 막힘. */
+function pickPagesOfC_(range){
+  const m = String(range || '').match(/^\s*(\d+)\s*(?:-\s*(\d+))?\s*$/);
+  if(!m) return null;
+  const f = parseInt(m[1], 10); let t = m[2] ? parseInt(m[2], 10) : f;
+  if(!f || f < 1) return null; if(!t || t < f) t = f;
+  return { f, t };
+}
+function pickConflictFor_(worker, pageRange){
+  const req = pickPagesOfC_(pageRange);
+  if(!req) return null;
+  const list = state.pickSessions || [];
+  for(const s of list){
+    const pg = pickPagesOfC_(s.pageRange);
+    if(!pg || !(req.f <= pg.t && pg.f <= req.t)) continue;
+    if(!s.open && !s.forced) return { kind:'done', s };
+    if(s.open && s.worker !== worker) return { kind:'busy', s };
+  }
+  return null;
+}
+function pickConflictText_(c){
+  if(!c) return '';
+  if(c.kind === 'done') return `⚠ Pages ${c.s.pageRange} already picked — ${c.s.worker}${c.s.end ? ' · finished ' + c.s.end : ''}. Enter different pages.`;
+  return `⚠ Pages ${c.s.pageRange} are being picked now by ${c.s.worker}${c.s.start ? ' (since ' + c.s.start + ')' : ''}.`;
+}
+function currentPickRange_(){
+  const f = document.getElementById('pickPageFrom').value.trim();
+  const t = document.getElementById('pickPageTo').value.trim();
+  return f ? (t ? f + '-' + t : f) : '';
+}
+function updatePickStartGuard_(){
+  const warn = document.getElementById('pickPageWarn');
+  const btn = document.getElementById('btnPickStart');
+  if(!warn || !btn) return;
+  if(state.pickTimerRunning){ warn.style.display = 'none'; return; }
+  const w = document.getElementById('pickWorkerSelect').value;
+  if(w && state.activePickers && state.activePickers[w]){ warn.style.display = 'none'; return; } // 이 작업자가 피킹 중 — 종료 버튼 상태는 onPickWorkerChange 가 관리
+  const c = pickConflictFor_(w, currentPickRange_());
+  if(c){ warn.textContent = pickConflictText_(c); warn.style.display = 'block'; btn.disabled = true; btn.title = 'Already picked'; }
+  else { warn.style.display = 'none'; btn.disabled = false; btn.title = ''; }
+}
+function renderPickSessions_(){
+  const el = document.getElementById('pickSessionList');
+  if(!el) return;
+  const list = (state.pickSessions || []).slice();
+  if(!list.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  const rows = list.map(s => {
+    const st = s.open ? '<span style="color:var(--green); font-weight:800;">● Picking</span>'
+      : s.forced ? '<span style="color:var(--amber);">⚠ Force-closed</span>'
+      : s.pending ? '<span style="color:var(--amber);">… Saving</span>'
+      : '<span style="color:var(--purple); font-weight:800;">✓ Done</span>';
+    return `<div style="display:flex; gap:12px; align-items:center; padding:5px 0; border-top:1px solid var(--border2); font-family:var(--mono); font-size:13px;">
+      <span style="min-width:110px; font-weight:800; color:var(--text);">${esc(s.worker)}</span>
+      <span style="min-width:80px; color:var(--cyan);">${s.pageRange ? 'p.' + esc(s.pageRange) : '-'}</span>
+      <span style="min-width:110px; color:var(--text-dim);">${esc(s.start || '')} → ${esc(s.end || '…')}</span>
+      <span style="min-width:60px; color:var(--text-dim);">${(s.mins === '' || s.mins == null) ? '' : esc(s.mins) + ' min'}</span>
+      ${st}
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div style="font-size:12px; font-weight:800; color:var(--text-dim); margin-bottom:4px; letter-spacing:0.04em;">PICKING LOG · THIS BATCH</div>${rows}`;
+  el.style.display = 'block';
+}
+function applyPickSessions_(sessions){
+  // 이 기기에서 종료를 눌렀지만 아직 서버에 못 보낸 기록은 '저장 중'으로 유지(목록에서 사라지거나 다시 열리지 않게)
+  let list = Array.isArray(sessions) ? sessions.slice() : [];
+  try{
+    pickEndPendingLoad_().forEach(x => {
+      if(x.batchId !== state.batchId) return;
+      const open = list.find(s => s.open && s.worker === x.worker);
+      if(open){ open.open = false; open.pending = true; open.end = open.end || fmtClock(new Date(x.endedAtMs)).slice(0,5); }
+    });
+  }catch(e){}
+  state.pickSessions = list;
+  renderPickSessions_();
+  updatePickStartGuard_();
+}
 
 /* 상태 배너 — 시작/종료를 눌렀는지 한눈에 보이게. 예전엔 작은 회색 글씨뿐이라
  * 종료가 됐는지 작업자가 확신하지 못한다는 지적이 있었음. */
@@ -6308,7 +6395,7 @@ function onPickWorkerChange(userInitiated){
       const lastPr = (state.lastPageRange || {})[w];
       const pf = document.getElementById('pickPageFrom');
       const pt = document.getElementById('pickPageTo');
-      if (lastPr && lastPr.pageRange){
+      if (lastPr && lastPr.pageRange && !lastPr.ended){ // ★ v21 — 이미 끝낸 페이지는 '이어서 하기'를 묻지 않음(같은 페이지 재피킹 방지)
         const rm = String(lastPr.pageRange).match(/^(\d+)\s*-\s*(\d+)$/);
         const fromV = rm ? rm[1] : lastPr.pageRange;
         const toV = rm ? rm[2] : '';
@@ -6326,6 +6413,7 @@ function onPickWorkerChange(userInitiated){
         updatePickPageCount();
       }
     }
+    updatePickStartGuard_(); // ★ v21 — 이미 끝난 페이지면 Start 막기
   }
 }
 
@@ -6338,14 +6426,29 @@ document.getElementById('btnPickStart').onclick = async () => {
   const pageRange = pageFrom ? (pageTo ? `${pageFrom}-${pageTo}` : pageFrom) : '';
   if(!worker){ toast('Select a worker', 'error'); return; }
   if(!state.batchId){ toast('Start a batch first', 'error'); return; }
+  // ★ v21 — 이미 끝난 페이지 / 다른 사람이 피킹 중인 페이지면 시작하지 않음
+  const _c = pickConflictFor_(worker, pageRange);
+  if(_c){
+    if(_c.kind === 'done' && confirmRepick_(_c)){ await startPickTimer(worker, pageRange, false, true); return; }
+    toast(pickConflictText_(_c), 'error');
+    updatePickStartGuard_();
+    return;
+  }
   await startPickTimer(worker, pageRange, false);
 };
+// 관리자 확인 후 다시 피킹(정말 다시 해야 하는 경우만) — 기록에 '관리자 승인 재피킹'으로 남음
+function confirmRepick_(c){
+  return confirm(`Pages ${c.s.pageRange} were already picked by ${c.s.worker}${c.s.end ? ' (finished ' + c.s.end + ')' : ''}.\n\n` +
+    `Normally you should NOT pick the same pages again.\n` +
+    `Only if a manager confirmed these pages must be picked again, press OK.\n\n` +
+    `[OK] Manager approved — pick again   [Cancel] Enter different pages`);
+}
 
 // ★ 2026-08-03 신규 — 피킹 시작 로직을 함수로 분리 + force 파라미터 추가.
 //   태블릿이 새로고침되는 등으로 "종료" 버튼을 누를 방법이 없어져버린 orphan
 //   세션 때문에 이름 선택도 종료도 다 막히는 교착 상태가 실제로 발생했음.
 //   이제 막히면 "강제 종료 후 새로 시작"을 선택할 수 있는 확인창을 띄움.
-async function startPickTimer(worker, pageRange, force){
+async function startPickTimer(worker, pageRange, force, allowRepick){
   // ★ 2026-07-22 신규: 다른 기기에서 이미 피킹 중인 사람이면 즉시 차단(화면단 1차 확인)
   if(!force && state.activePickers[worker]){
     const ok = confirm(
@@ -6375,10 +6478,10 @@ async function startPickTimer(worker, pageRange, force){
   if(GAS_READY){
     // ★ 2026-10-28 — 서버가 몰려 바쁠 때(server_busy = 아직 처리 전)는 최대 4번까지 자동 재시도. 그 외 오류(already_picking 등)는 그대로 처리.
     await flushPickEndPending(); // 이전에 못 보낸 '종료'가 남아 있으면 먼저 보냄(그래야 '이미 피킹 중' 오류가 안 남)
-    let res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
+    let res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force, allowRepick: !!allowRepick });
     for(let _i = 1; _i < 4 && res && !res.ok && res.error === 'server_busy'; _i++){
       await new Promise(r => setTimeout(r, 1200 * _i + Math.floor(Math.random() * 800)));
-      res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force });
+      res = await gasCall('logPickTiming', { batchId: state.batchId, worker, action:'start', pageRange, force, allowRepick: !!allowRepick });
     }
     // ★ 2026-07-22 신규: 화면단 체크를 통과했어도, 정말 거의 동시에 다른 기기가
     //   먼저 시작해버린 경합 상황은 서버가 최종적으로 걸러줌 — 그 경우 되돌림.
@@ -6391,6 +6494,14 @@ async function startPickTimer(worker, pageRange, force){
       document.getElementById('pickPageTo').disabled = false;
       setPickBanner('off');
       document.getElementById('pickTimerStat').textContent = '';
+      // ★ v21 — 서버가 '이미 끝난 페이지' / '다른 사람이 피킹 중'으로 거절(다른 기기에서 먼저 끝냈거나 시작한 경우)
+      if(res.error === 'pages_already_picked' || res.error === 'pages_in_progress'){
+        const _c2 = { kind: res.error === 'pages_already_picked' ? 'done' : 'busy', s: Object.assign({ open: res.error === 'pages_in_progress' }, res.conflict || {}) };
+        pollActivePickers();
+        if(_c2.kind === 'done' && confirmRepick_(_c2)){ await startPickTimer(worker, pageRange, force, true); return; }
+        toast(pickConflictText_(_c2), 'error');
+        return;
+      }
       if(res.error === 'already_picking' && !force){
         // ★ 2026-08-18 수정 — 예전엔 여기서 무조건 force:false로 재귀 호출해서,
         //   화면단의 state.activePickers에 이 작업자가 없는 경우(예: 전날 세션이
@@ -6409,7 +6520,7 @@ async function startPickTimer(worker, pageRange, force){
           `Force-end and start a new session?`
         );
         if(ok){
-          await startPickTimer(worker, pageRange, true);
+          await startPickTimer(worker, pageRange, true, allowRepick);
         }
         return;
       }
@@ -6504,6 +6615,7 @@ document.getElementById('btnPickEnd').onclick = async () => {
   setPickBanner('done', worker, _erange ? ('Pages ' + _erange + ' · ' + _ecnt + (_ecnt === 1 ? ' sheet' : ' sheets')) : '', mins + ' min');
   document.getElementById('pickTimerStat').textContent = '';
   let realMins = mins;
+  let _endSaved = false;
   if(GAS_READY){
     // ★ 2026-10-28 근본 수정(현장: "End Picking 이 저장 안 되고 다시 피킹 중으로 튕김") —
     //   예전엔 종료 요청을 딱 1번만 보내고, 서버가 바빠 실패하면 화면만 '종료'로 바꾼 채 서버 기록은 열린 채로 남았음.
@@ -6514,17 +6626,30 @@ document.getElementById('btnPickEnd').onclick = async () => {
     pickEndPendingAdd_(_item);
     try{ delete state.activePickers[worker]; }catch(e){}
     updatePickWorkerDot();
+    // ★ v21 — 끝낸 페이지를 바로 기록 목록에 반영(서버 응답 전에도 같은 페이지 재시작이 막히게)
+    try{
+      const _ss = (state.pickSessions || []).slice();
+      const _open = _ss.find(x => x.open && x.worker === worker);
+      if(_open){ _open.open = false; _open.pending = true; _open.end = fmtClock(new Date()).slice(0,5); }
+      else _ss.push({ worker, pageRange: _erange, start: '', end: fmtClock(new Date()).slice(0,5), mins: mins, open: false, forced: false, pending: true });
+      state.pickSessions = _ss; renderPickSessions_(); updatePickStartGuard_();
+    }catch(eL){}
     const endRes = await sendPickEnd_(_item);
     if(endRes && endRes.ok){
       pickEndPendingRemove_(_item);
       if(typeof endRes.durationMinutes === 'number') realMins = endRes.durationMinutes;
+      _endSaved = true;
     } else {
       toast('Saving the end time… will retry automatically (you can keep working)', 'success');
     }
-  }
+  } else { _endSaved = true; }
   document.getElementById('pickStateSub').textContent = '';
   setPickBanner('done', worker, _erange ? ('Pages ' + _erange + ' · ' + _ecnt + (_ecnt === 1 ? ' sheet' : ' sheets')) : '', realMins + ' min');
-  toast(`Picking complete · ${realMins} min`, 'success');
+  // ★ v21 — 저장이 실제로 확인됐을 때만 '저장됨'
+  const _tEl = document.getElementById('pickStateTitle');
+  if(_tEl) _tEl.textContent = _endSaved ? ('✓ Saved · ' + worker + ' finished picking') : ('… Saving · ' + worker + ' finished picking (auto-retry)');
+  toast(_endSaved ? `✓ Saved · Picking complete · ${realMins} min` : 'Picking ended · saving to server…', 'success');
+  updatePickStartGuard_();
 
   // ★ 2026-09-01 삭제(중요 버그 예방) — 피킹 종료 시 w.status를 자동으로 'off'로
   //   되돌리던 코드. 위 피킹 시작 쪽과 같은 이유로 제거함 — 이제 w.status는
@@ -7101,9 +7226,58 @@ function togglePlaced(idx){
     window.__placedSet.add(idx);
     card.classList.add('placed');
     try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
+    // ★ 2026-10-29 v21 — 이 슬롯(고객사 오더)의 모든 상품이 다 분류됐으면 "이 오더 완료" 알림(오더마다 한 번)
+    try{ const _r = _lastScanCtx && _lastScanCtx.results && _lastScanCtx.results[idx]; if(_r) maybeShowOrderDone_(_r.invoice, _r.slot, _r.customer); }catch(eOd){}
   }
   const counterEl = document.getElementById('placedCounter');
   if(counterEl) counterEl.textContent = window.__placedSet.size;
+}
+
+/* ★ 2026-10-29 v21 — 오더(고객사) 하나 분류 완료 알림
+ * 기준: 이 인보이스에 배정된 모든 상품 줄의 분류 수량(done)이 필요수량(need, 이슈 반영 후) 이상.
+ * 같은 배치·같은 오더는 한 번만(다시 스캔해도 반복해서 뜨지 않음). 3.5초 뒤 자동으로 닫히고 다음 스캔은 그대로 가능. */
+const _orderDoneShown = new Set();
+function orderProgressOf_(invoice){
+  let lines = 0, linesDone = 0, need = 0, done = 0;
+  Object.values(state.scanIndex || {}).forEach(primary => {
+    [primary, ...(primary.altVariants||[])].forEach(sku => {
+      (sku.queue || []).forEach(q => {
+        if(String(q.invoice) !== String(invoice)) return;
+        lines++; need += (q.need || 0); done += Math.min(q.done || 0, q.need || 0);
+        if((q.done || 0) >= (q.need || 0)) linesDone++;
+      });
+    });
+  });
+  return { lines, linesDone, need, done, complete: lines > 0 && linesDone === lines };
+}
+function maybeShowOrderDone_(invoice, slot, customer){
+  if(!invoice) return;
+  const key = (state.batchId || '') + '|' + invoice;
+  if(_orderDoneShown.has(key)) return;
+  const p = orderProgressOf_(invoice);
+  if(!p.complete) return;
+  _orderDoneShown.add(key);
+  let ov = document.getElementById('orderDoneOverlay');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'orderDoneOverlay';
+    ov.style.cssText = 'position:fixed; inset:0; z-index:9998; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); padding:16px;';
+    ov.addEventListener('click', () => { ov.style.display = 'none'; try{ scanInput.focus(); }catch(e){} });
+    document.body.appendChild(ov);
+  }
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  ov.innerHTML = `<div style="max-width:560px; width:100%; background:var(--surface, #111827); border:3px solid var(--green); border-radius:18px; padding:28px 26px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+    <div style="font-size:46px; line-height:1;">🎉</div>
+    <div style="margin-top:10px; font-family:var(--mono); font-size:15px; font-weight:800; color:var(--text-dim); letter-spacing:0.08em;">SLOT ${esc(String(slot || '').padStart(2,'0'))}</div>
+    <div style="margin-top:4px; font-size:24px; font-weight:900; color:var(--text);">${esc(customer || '')}</div>
+    <div style="margin-top:14px; font-size:22px; font-weight:900; color:var(--green);">✓ Order sorted — complete</div>
+    <div style="margin-top:8px; font-family:var(--mono); font-size:15px; color:var(--text-dim);">${esc(invoice)} · SKU ${p.linesDone}/${p.lines} · ${p.done}/${p.need} pcs</div>
+    <div style="margin-top:4px; font-size:12px; color:var(--text-dim2);">(required qty after issues · tap to close)</div>
+  </div>`;
+  ov.style.display = 'flex';
+  try{ if(navigator.vibrate) navigator.vibrate([40, 60, 40]); }catch(e){}
+  clearTimeout(window.__orderDoneTimer);
+  window.__orderDoneTimer = setTimeout(() => { ov.style.display = 'none'; try{ scanInput.focus(); }catch(e){} }, 3500);
 }
 
 function toggleIssueForm(idx){
@@ -11473,6 +11647,7 @@ async function pollActivePickers(){
     try{ pickEndPendingLoad_().forEach(x => { if(x.batchId === state.batchId) delete state.activePickers[x.worker]; }); }catch(e){}
     state.lastPageRange = res.lastPageRange || {}; // ★ 2026-08-19 신규 — 작업자별 이전 담당페이지
     if(!state.pickTimerRunning) populateWorkerSelect(); // 내가 지금 피킹 중이면 내 드롭다운은 안 건드림
+    applyPickSessions_(res.sessions); // ★ v21 — 피킹 기록 표시 + 같은 페이지 재시작 막기
   }catch(e){
     console.error('pollActivePickers failed:', e);
   }
