@@ -751,7 +751,10 @@ function pingScanWorker(data) {
   //   20초 뒤 다음 주기에 다시 시도되면 그만 — 그래서 락을 짧게(1초)만
   //   시도하고, 못 잡으면 조용히 포기함(무조건 기다리지 않음). 이러면 이
   //   하트비트가 절대로 중요한 작업의 락 대기시간을 길게 늘리지 않음.
-  const lock = LockService.getDocumentLock();
+  // ★ 2026-10-27 안정화(실측) — 하트비트가 문서 락(DocumentLock)을 매번 쥐면, 기기 20대 × 분당 수 회가 스캔/저장의 락 대기열을 계속 점유하고
+  //   (특히 pingWorkerPresenceBatch 한 번이 297초 멈춘 사례 — 그동안 문서 락이 묶여 스캔 저장이 줄줄이 실패 가능) 스캔과 무관한 이 안내용 신호가
+  //   진짜 작업을 막음. 하트비트는 조용히 건너뛰어도 무해한 안내용이라 문서 락 대신 스크립트 락(스캔/저장 경로와 무관)으로 옮김. 동작/데이터는 동일.
+  const lock = LockService.getScriptLock();
   const gotLock = lock.tryLock(1000);
   if (!gotLock) return { ok: true, skipped: true }; // 락을 못 잡으면 이번 주기는 조용히 건너뜀
   try {
@@ -842,7 +845,8 @@ function pingWorkerPresenceBatch(data) {
   // ★ pingScanWorker와 동일한 이유 — 이 하트비트가 진짜 중요한 작업(스캔/검수
   //   확정 등)의 락 대기시간을 늘리면 안 되므로, 락을 짧게(1초)만 시도하고
   //   못 잡으면 조용히 포기함(다음 30초 주기에 다시 시도되므로 한 번 놓쳐도 무해).
-  const lock = LockService.getDocumentLock();
+  // ★ 2026-10-27 안정화 — pingScanWorker와 동일한 이유로 문서 락 → 스크립트 락(위 pingScanWorker 주석 참고).
+  const lock = LockService.getScriptLock();
   const gotLock = lock.tryLock(1000);
   if (!gotLock) return { ok: true, skipped: true };
   try {
@@ -1495,6 +1499,42 @@ function assignSlots(data) {
  *                 핵심 안전장치) — data.force===true(관리자 강제확정)면 건너뜀.
  * 입력: { batchId, invoice, stage } 또는 { batchId, invoice, moved }
  * ================================================================================ */
+/* ===================== 인보이스 상세 미러 '더러움' 목록 (★ 2026-10-28 신규) =====================
+ * setPackingMoved 처럼 응답 속도가 중요한 쓰기에서, 무거운 인보이스 상세 재계산·Firestore 쓰기를 응답 뒤로 미룸.
+ * _markInvMirrorDirty_ : (DocumentLock 안에서 호출) 인보이스를 목록에 추가 + 상세 캐시 즉시 무효화
+ * _drainInvMirrorDirty_: 1분 주기 동기화(syncSalesMirrors)가 호출 — 한 번에 최대 maxN건 꺼내 기존 빠른 미러(syncSalesInvoiceDetailMirrorFast_)로 처리 */
+const INV_MIRROR_DIRTY_KEY_ = 'invMirrorDirty_v1';
+function _markInvMirrorDirty_(invoice) {
+  try {
+    const inv = String(invoice || '').trim();
+    if (!inv) return;
+    const c = CacheService.getScriptCache();
+    let a = [];
+    try { const raw = c.get(INV_MIRROR_DIRTY_KEY_); a = raw ? JSON.parse(raw) : []; } catch (e) { a = []; }
+    if (!Array.isArray(a)) a = [];
+    if (a.indexOf(inv) < 0) a.push(inv);
+    if (a.length > 200) a = a.slice(-200);
+    c.put(INV_MIRROR_DIRTY_KEY_, JSON.stringify(a), 3600);
+    c.remove('salesInvDetail_v1_' + inv + '_meta');
+  } catch (e) { /* 무시 — 표시 실패해도 저장 자체엔 영향 없음(다음 변경/동기화 때 반영) */ }
+}
+function _drainInvMirrorDirty_(maxN) {
+  let take = [];
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(3000)) return 0;
+  try {
+    const c = CacheService.getScriptCache();
+    let a = [];
+    try { const raw = c.get(INV_MIRROR_DIRTY_KEY_); a = raw ? JSON.parse(raw) : []; } catch (e) { a = []; }
+    if (!Array.isArray(a) || !a.length) return 0;
+    take = a.slice(0, maxN || 3);
+    const rest = a.slice(take.length);
+    if (rest.length) c.put(INV_MIRROR_DIRTY_KEY_, JSON.stringify(rest), 3600); else c.remove(INV_MIRROR_DIRTY_KEY_);
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+  try { syncSalesInvoiceDetailMirrorFast_(take); } catch (e) { Logger.log('_drainInvMirrorDirty_ 실패: ' + String(e && e.message || e)); }
+  return take.length;
+}
+
 function setPackingMoved(data) {
   const lock = LockService.getDocumentLock();
   // ★ 2026-08-18 신규 — 15초→25초로 상향. TV 현황판에서 여러 슬롯을 짧은 시간에
@@ -1503,7 +1543,9 @@ function setPackingMoved(data) {
   //   안에 락을 못 잡고 예외로 실패했음. 클라이언트(board.html)가 "저장 실패
   //   확정" 판정을 내리기까지 기다려주는 시간이 30초(PENDING_PACK_MAX_MS)라,
   //   서버도 그 안에서 최대한 순서를 기다려 실제로 저장에 성공할 기회를 늘림.
-  lock.waitLock(25000);
+  // ★ 2026-10-28 — 25초→15초. board.html 은 20초 안에 응답이 없으면 포기하고 화면을 핑크로 되돌리는데, 서버가 25초까지 기다리면
+  //   화면이 포기한 '뒤에' 서버가 파랑으로 저장하는 어긋남(핑크로 튕겼다가 나중에 파랑)이 생김. 15초 안에 못 잡으면 서버가 먼저 'server_busy' 로 알려 재시도하게 함.
+  lock.waitLock(15000);
   let result;
   let syncArgs = null; // ★ 2026-09-03 — 락 밖에서 처리(logScan과 동일한 이유)
   let mirrorInvoice = null; // ★ 세션A 신규 — 락 밖에서 상세조회 미러 갱신하기 위해 스코프 확장
@@ -1533,42 +1575,33 @@ function setPackingMoved(data) {
       if (String(rows[i][0]) !== String(batchId)) continue;
       if (String(rows[i][1]) !== String(invoice)) continue;
       const row = i + 2;
+      // ★ 2026-10-28 속도 — K:M(이동/가져감/검증 시각)을 1번 읽고 1~2번만 씀. 예전엔 읽기·쓰기 5~6번(셀마다 개별 호출)을 락을 쥔 채 해서 슬롯을 연달아 누르면 줄이 길어졌음.
+      //   저장되는 값·의미는 예전과 동일(핑크=K / 파랑=L / 주황=M, 되돌리면 뒤 단계 초기화).
+      const _klm = bc.getRange(row, 11, 1, 3).getValues()[0];
+      const _K = _klm[0], _L = _klm[1];
+      const _nowS = batchNow_();
+      let _kOut = String(_K || ''), _lOut = String(_L || ''), _mOut = String(_klm[2] || '');
       if (stage === 'none') {
-        bc.getRange(row, 11).setValue('');
-        bc.getRange(row, 12).setValue('');
-        bc.getRange(row, 13).setValue('');
+        bc.getRange(row, 11, 1, 3).setValues([['', '', '']]);
+        _kOut = ''; _lOut = ''; _mOut = '';
       } else if (stage === 'moved') {
         // 핑크: "이동 필요"로 처음 켠 시각을 보존 (파랑/주황에서 되돌아와도 원래 시각 유지)
-        if (!bc.getRange(row, 11).getValue()) bc.getRange(row, 11).setValue(batchNow_());
-        bc.getRange(row, 12).setValue('');
-        bc.getRange(row, 13).setValue('');
+        if (!_K) { bc.getRange(row, 11, 1, 3).setValues([[_nowS, '', '']]); _kOut = _nowS; }
+        else { bc.getRange(row, 12, 1, 2).setValues([['', '']]); }
+        _lOut = ''; _mOut = '';
       } else if (stage === 'taken') {
-        // ★ 파랑 — 기존 그대로. "패킹존으로 물리적으로 가져갔다"는 뜻이며,
-        //   검증 여부와 무관하게 클릭 한 번에 즉시 전환됨(안전장치 없음, 원래 설계 그대로).
-        //   여기로 다시 들어오면(주황에서 되돌아오는 경우 포함) 검증(M)은 초기화 —
-        //   "아직 다시 확인 안 된 상태"로 정직하게 되돌림.
-        if (!bc.getRange(row, 11).getValue()) bc.getRange(row, 11).setValue(batchNow_());
-        bc.getRange(row, 12).setValue(batchNow_());
-        bc.getRange(row, 13).setValue('');
-        // ★ 2026-08-31 신규 — 단독 오더 1차 검수 지원. 총량피킹은 이 시점 이전에
-        //   이미 Scan & Sort(logScan)에서 Jobs.Inspection이 채워지므로 이 동기화가
-        //   필요 없다 — 그런데도 매번 돌리면, TV 현황판에서 배치 막바지에 슬롯
-        //   여러 개가 짧은 시간에 연달아 파랑으로 바뀔 때마다(흔한 상황) 시트를
-        //   여러 번 읽는 이 무거운 함수가 매번 같이 돌아서 불필요한 부하가
-        //   쌓임(구글 앱스스크립트 "동시 요청 한도" 문제를 악화시킬 수 있음).
-        //   그래서 반드시 단독 오더(STANDALONE_BATCH_ID)일 때만 실행되도록 좁힘 —
-        //   총량피킹 호출 경로는 이 줄 자체를 아예 안 타서 예전과 완전히 동일한
-        //   속도를 유지함.
+        // ★ 파랑 — "패킹존으로 물리적으로 가져갔다"는 뜻. 검증 여부와 무관하게 클릭 한 번에 즉시 전환(원래 설계 그대로).
+        //   여기로 다시 들어오면(주황에서 되돌아오는 경우 포함) 검증(M)은 초기화.
+        if (!_K) { bc.getRange(row, 11, 1, 3).setValues([[_nowS, _nowS, '']]); _kOut = _nowS; }
+        else { bc.getRange(row, 12, 1, 2).setValues([[_nowS, '']]); }
+        _lOut = _nowS; _mOut = '';
+        // 단독 오더 1차 검수 동기화(총량피킹은 이미 Scan & Sort 에서 처리되므로 안 탐) — round=1 기록만.
         if (batchId === STANDALONE_BATCH_ID) {
-          // ★ 2026-09-03 신규 — round=1(1차) 스캔 기록만으로 동기화. 04에서
-          //   기록한 것만 반영하고, 2차(Pack Verify) 기록과는 절대 안 섞임.
           syncArgs = [batchId, invoice, data.worker || '', 1];
         }
-      } else { // 'verified' — ★ 2026-08-24 신규: 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
-        // ★ 2026-10-23 긴급 수정 — 단독 오더는 sales.html에서 디멘션 저장/수동 표시로 "Moved to Packing"이 된 경우 L(파랑)이 비어 있어
-        //   여기서 영원히 거절되던 문제(스캔 100% 완료인데 2nd Verification Complete가 안 뜸). 화면과 같은 기준(수동 표시 또는 디멘션)이면 통과.
-        //   L이 이미 있는 일반 경로는 추가 조회 없이 예전과 완전히 동일.
-        if (!bc.getRange(row, 12).getValue() && !_movedBySalesSignals_(invoice)) {
+      } else { // 'verified' — 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
+        // ★ 2026-10-23 — 단독 오더는 sales.html 디멘션 저장/수동 표시로 "Moved to Packing"이 된 경우 L(파랑)이 비어 있을 수 있음 → 같은 기준이면 통과.
+        if (!_L && !_movedBySalesSignals_(invoice)) {
           return { ok: false, error: '먼저 패킹존 이동(파랑) 표시부터 완료해주세요' };
         }
         if (!data.force) {
@@ -1581,31 +1614,18 @@ function setPackingMoved(data) {
             };
           }
         }
-        bc.getRange(row, 13).setValue(batchNow_());
-        // ★ 2026-08-31 긴급 수정(2차) — 단독오더는 04("1차 검수 완료")에서 스캔이
-        //   100% 안 끝난 채로도 완료 표시가 눌릴 수 있음(그땐 강제 조건이 없음 —
-        //   'verified' 단계만 완료를 검증함). 그래서 "04에서는 일부만 스캔 →
-        //   여기 P Pack Verify에서 나머지를 마저 스캔해 최종 확정"하는 흐름이면,
-        //   04 시점의 동기화 시도는 isComplete=false라 아무것도 못 쓰고, 그 뒤로는
-        //   'taken' 단계에만 동기화 호출이 있고 'verified' 단계엔 호출 자체가
-        //   없어서 영원히 Jobs.Inspection이 안 갱신되는 사고로 이어졌음(실제 발견:
-        //   IN00471224 — batch.html에선 [검증완료]인데 sales.html/index.html은
-        //   계속 "Not Inspected"). 여기서도 한 번 더 동기화를 시도해서, 04에서
-        //   놓친 경우를 이 시점에 확실히 잡아줌(이미 04에서 반영됐으면 currentVal
-        //   비교 로직 덕분에 중복 저장 없이 조용히 넘어감).
+        _mOut = batchNow_();
+        bc.getRange(row, 13).setValue(_mOut);
+        // 단독오더: 04에서 놓친 Jobs.Inspection 동기화를 이 시점에 한 번 더(round=2 기록만).
         if (batchId === STANDALONE_BATCH_ID) {
-          // ★ 2026-09-03 신규 — round=2(2차) 스캔 기록만으로 동기화.
           syncArgs = [batchId, invoice, data.worker || '', 2];
         }
       }
       found = true;
-      // ★ 세션C 신규 — 방금 쓴 K/L/M(MovedAt/TakenAt/VerifiedAt) 실제 값을
-      //   그대로 다시 읽어서 Firestore 이중쓰기용 문서를 준비. 추측으로 채우지
-      //   않고 시트에 실제로 남은 값을 그대로 복사(감사기록 정확성 원칙).
-      const klm = bc.getRange(row, 11, 1, 3).getValues()[0];
+      // 방금 쓴 K/L/M 값 그대로 Firestore 이중쓰기용 문서를 준비(감사기록 정확성 — 추측으로 채우지 않음)
       packingDocForFirestore = {
         batchId: batchId, invoice: invoice, stage: stage,
-        movedAt: String(klm[0] || ''), takenAt: String(klm[1] || ''), verifiedAt: String(klm[2] || ''),
+        movedAt: _kOut, takenAt: _lOut, verifiedAt: _mOut,
         updatedBy: data.worker || '', updatedAt: batchNow_(),
       };
       break;
@@ -1613,6 +1633,7 @@ function setPackingMoved(data) {
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
 
     bumpVersion_();
+    _markInvMirrorDirty_(invoice); // ★ 2026-10-28 — 인보이스 상세 미러 재계산은 응답 뒤 1분 주기 동기화가 처리(캐시는 즉시 무효화). 락 안에서 표시만(캐시 1회, 가벼움).
     result = { ok: true, stage: stage, moved: stage !== 'none' };
   } catch (e) {
     result = { ok: false, error: String(e && e.message || e) };
@@ -1630,14 +1651,14 @@ function setPackingMoved(data) {
   //   movedToPacking/packStage 필드가 최대 30초간 예전 값으로 보일 수 있었던
   //   잠복 버그를 여기서 같이 고침. syncInspectionFromPicking_과 마찬가지로
   //   락 밖에서, 원래 저장이 끝난 뒤에 best-effort로 처리.
-  if (mirrorInvoice) {
-    try { syncSalesInvoiceDetailMirror_(mirrorInvoice); } catch (eMirror) { /* 무시 */ }
-  }
+  // ★ 2026-10-28 근본 수정(현장: 31·32번 파랑 → 핑크로 튕김, 20초 초과) — 예전엔 여기서 응답 전에 (a) 인보이스 상세 재계산+Firestore 인증/쓰기,
+  //   (b) 패킹상태 문서 Firestore 인증/쓰기를 직접 했음 → 락 대기와 무관하게 응답이 수 초~20초 이상 걸려 화면이 먼저 포기했음.
+  //   이제 (a)는 위에서 '더러움 표시'만 하고 1분 주기 동기화(syncSalesMirrors)가 처리, (b)는 FirestoreQueue 에 가볍게 한 줄만 남김. 결과·기록은 동일.
   // ★ 세션C 신규 — "①번 이중쓰기" 패턴을 setPackingMoved에도 동일하게 적용.
   //   구글시트(진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도
   //   패킹존 이동 처리 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
-  if (packingDocForFirestore) {
-    try { writePackingStatusDoc_(packingDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+  if (packingDocForFirestore && result && result.ok) {
+    try { queueFirestoreWrite_('packing', packingDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
   return result;
 }
@@ -2931,6 +2952,11 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   const isIssueOnly = issueQty > 0 && effectiveTotal === 0;
   const isComplete = (effectiveTotal > 0 && scanned >= effectiveTotal) || isIssueOnly;
 
+  // ★ 2026-10-28 속도(현장 '스캔 저장 실패 server_busy' 대응) — 아래 4)~끝은 isComplete(또는 이슈 전량)일 때만 무언가를 씀(미완료면 '아무것도 안 씀').
+  //   그런데 예전엔 미완료여도 Jobs 시트 인보이스 열(약 3천 행)을 스캔 1건마다 통째로 읽었음 → 스캔이 몰리면 동시 실행 슬롯·시트 서비스를 크게 잡아먹음.
+  //   미완료면 여기서 바로 종료(결과는 동일, 읽기만 생략).
+  if (!isComplete) return;
+
   // 4) Jobs 시트에서 이 인보이스가 이미 어떤 값인지 확인 → 다를 때만 씀 (불필요한 반복 저장 방지)
   const jobsSS = ss_();
   const jobsSheet = jobsSS.getSheetByName(JOBS_SHEET);
@@ -3001,7 +3027,23 @@ function logScan(data) {
     //   텍스트로 고정한 뒤에 값을 씀 — appendRow 대신 getRange+setValues 사용.
     const newRow = sl.getLastRow() + 1;
     ensureSheetRoom_(sl, newRow); // ★ 2026-08-12 신규 — 시트 행 부족 시 자동으로 미리 늘려둠
-    sl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+    // ★ 2026-10-28 속도 — 락을 쥔 채 스캔마다 setNumberFormat 시트 호출을 하던 것을 줄임: 앞으로 쓸 300행 구간을 한 번에 텍스트로 고정하고
+    //   20분간 그 구간은 다시 안 함(캐시 표식). 표식이 없거나 캐시 오류면 예전처럼 이번 행을 직접 고정(안전 쪽으로 동작).
+    let _fmtDone = false;
+    try {
+      const _blk = Math.floor((newRow - 2) / 300);
+      const _fk = 'slTxtFmt_v1_' + _blk;
+      const _fc = CacheService.getScriptCache();
+      if (_fc.get(_fk)) { _fmtDone = true; }
+      else {
+        const _bs = Math.max(newRow, _blk * 300 + 2);
+        const _bn = Math.max(1, Math.min(300 - (_bs - (_blk * 300 + 2)), sl.getMaxRows() - _bs + 1));
+        sl.getRange(_bs, 5, _bn, 2).setNumberFormat('@'); // E:Barcode, F:SKU
+        _fc.put(_fk, '1', 1200);
+        _fmtDone = true;
+      }
+    } catch (eFmt) { _fmtDone = false; }
+    if (!_fmtDone) sl.getRange(newRow, 5, 1, 2).setNumberFormat('@'); // E:Barcode, F:SKU
     // ★ 세션E 신규 — 시트와 Firestore(아래)에 정확히 동일한 시각/수량을 쓰기 위해
     //   한 번만 계산해서 재사용.
     const nowStr = batchNow_();
@@ -3776,6 +3818,15 @@ function completeBatch(data) {
  * 입력: { batchId, worker, action:'start'|'end', pageRange }
  * ============================================================ */
 function logPickTiming(data) {
+  const r = logPickTimingCore_(data);
+  // ★ 2026-10-28 — 시작/종료가 저장되면 '지금 피킹 중' 목록 캐시(4초)를 즉시 비움(안 비우면 방금 종료한 사람이 몇 초간 다시 '피킹 중'으로 보였음)
+  try { if (r && r.ok && data && data.batchId) CacheService.getScriptCache().remove('activePickers_v1_' + data.batchId + '_meta'); } catch (eC) { /* 무시 */ }
+  if (r && r.ok && data && data.action === 'start') {
+    try { syncBatchJobsStart(data.batchId); } catch (e) { Logger.log('syncBatchJobsStart 실패: ' + e); }
+  }
+  return r;
+}
+function logPickTimingCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
   try {
@@ -3827,7 +3878,7 @@ function logPickTiming(data) {
       //   배치에 속한 모든 오더를 한꺼번에 Started로 만들어, 메인 대시보드·영업
       //   화면이 창고 실제 상황과 같은 값을 보이게 함. 이미 시작/완료된 건과
       //   사람이 직접 배정한 건은 건드리지 않음.
-      try { syncBatchJobsStart(data.batchId); } catch (e) { Logger.log('syncBatchJobsStart 실패: ' + e); }
+      // ★ 2026-10-28 — syncBatchJobsStart(Jobs 시트 갱신)는 락을 쥔 채 실행하면 다른 작업자 요청을 오래 막으므로 락 밖(logPickTiming 래퍼)에서 실행.
       return { ok: true };
     }
     if (data.action === 'end') {
@@ -3838,8 +3889,17 @@ function logPickTiming(data) {
           if (String(rows[i][0]) === String(data.batchId) && String(rows[i][1]) === String(data.worker) && !rows[i][4]) {
             // ★ 2026-08-18 수정 — 근무시간 기준 계산으로 교체(위 force-close와 동일 함수).
             //   평소(당일 종료) 케이스는 근무시간 안에서 끝나므로 예전 계산과 결과가 같음.
-            const endTs = batchNow_();
-            const mins = calcWorkMinutes_(rows[i][3], endTs);
+            let endTs = batchNow_();
+            let mins = calcWorkMinutes_(rows[i][3], endTs);
+            // ★ 2026-10-28 — 서버가 바빠 종료 요청이 재시도로 늦게 도착해도 '작업자가 End 를 누른 실제 시각'으로 기록(endedAtMs, 최근 36시간 이내·미래 아님만 인정)
+            const _em = Number(data.endedAtMs);
+            if (_em && isFinite(_em) && _em <= Date.now() + 5000 && _em >= Date.now() - 36 * 3600 * 1000) {
+              try {
+                const _ts2 = Utilities.formatDate(new Date(_em), batchTz_(), 'yyyy-MM-dd HH:mm:ss');
+                const _m2 = calcWorkMinutes_(rows[i][3], _ts2);
+                if (typeof _m2 === 'number' && _m2 >= 0) { endTs = _ts2; mins = _m2; }
+              } catch (eEm) { /* 실패하면 서버 현재 시각 사용 */ }
+            }
             sh.getRange(i + 2, 5).setValue(endTs);
             sh.getRange(i + 2, 6).setValue(mins);
             return { ok: true, durationMinutes: mins };
@@ -4346,7 +4406,39 @@ function getInvoiceItemStatus(batchId, invoice) {
   }
 }
 
+/* ★ 2026-10-27 안정화(실측 근거) — 스캔/이슈 저장마다 slotProgress·batchAggr 캐시가 즉시 무효화되므로(위 invalidateBatchAggregateCaches_),
+ *   여러 기기가 동시에 물으면 "캐시 미스 → 전부가 동시에 같은 무거운 계산(시트 전체 읽기 5~9초)을 각자 수행"하는 구조였음(thundering herd).
+ *   이제 누군가 이미 계산 중이면(표식 _calc, 최대 25초) 나머지는 시트를 읽지 않고 그 결과가 캐시에 올라올 때까지 짧게 기다렸다가 그 값을 받음.
+ *   값의 신선도는 예전과 동일(결과는 같은 계산의 산출물). 기다리다 시간이 지나거나 계산 주자가 실패하면 예전처럼 직접 계산(안전망). */
 function getSlotProgress(batchId) {
+  if (!batchId) return { ok: false, error: 'batchId required' };
+  let _cache = null, _lk = '', _mine = false;
+  try {
+    _cache = CacheService.getScriptCache();
+    const _key = 'slotProgress_v1_' + batchId;
+    _lk = _key + '_calc';
+    const _fresh = _cacheGetChunked_(_cache, _key);
+    if (_fresh) return JSON.parse(_fresh);
+    if (_cache.get(_lk)) {
+      const tEnd = Date.now() + 12000;
+      while (Date.now() < tEnd) {
+        Utilities.sleep(500);
+        const c2 = _cacheGetChunked_(_cache, _key);
+        if (c2) return JSON.parse(c2);
+        if (!_cache.get(_lk)) break; // 계산 주자가 끝났는데 캐시가 비었음(무효화/실패) → 내가 계산
+      }
+    }
+    _cache.put(_lk, '1', 25);
+    _mine = true;
+  } catch (eSf) { /* 단일비행 보조 실패 → 예전 방식(바로 계산) */ }
+  try {
+    return getSlotProgressCore_(batchId);
+  } finally {
+    if (_mine) { try { _cache.remove(_lk); } catch (eRm) { /* 무시 */ } }
+  }
+}
+
+function getSlotProgressCore_(batchId) {
   try {
     if (!batchId) return { ok: false, error: 'batchId required' };
 
@@ -5388,6 +5480,11 @@ function archiveOldBatches(daysOld) {
     //   미완료 단독 오더는 며칠이 지나도 절대 옮기지 않음. 등록시각(CreatedAt)이 비어있는 옛 건은 완료만 되었으면 대상.
     const soCutoffMs = Date.now() - STANDALONE_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
     const standaloneDoneOld = {}; // invoice -> true
+    // ★ 2026-10-27 신규 — 지금 BatchCustomers 에 "살아있는" 단독 오더 인보이스 집합. PackScanLog 의 단독 오더 기록 중
+    //   BatchCustomers 에서 이미 보관돼 사라진 인보이스(=고아 기록)를 찾는 데만 쓰임(다른 시트 규칙은 그대로).
+    //   집계가 한 번이라도 실패하면 standaloneLiveOk=false → 고아 판정을 아예 하지 않음(전부 고아로 오인하는 사고 방지).
+    const standaloneLive = {};
+    let standaloneLiveOk = false;
     try {
       const bcS = bcustSheetSafe_();
       const bcSLast = bcS.getLastRow();
@@ -5396,6 +5493,7 @@ function archiveOldBatches(daysOld) {
         sRows.forEach(r3 => {
           if (String(r3[0]) !== STANDALONE_BATCH_ID) return;
           const inv3 = String(r3[1] || '').trim();
+          if (inv3) standaloneLive[inv3] = true;
           if (!inv3 || !r3[12]) return; // M열 PackVerified가 아니면 미완료 → 절대 대상 아님
           const cr = r3[13];
           let createdMs = 0;
@@ -5404,11 +5502,12 @@ function archiveOldBatches(daysOld) {
           if (!createdMs || createdMs < soCutoffMs) standaloneDoneOld[inv3] = true;
         });
       }
+      standaloneLiveOk = true; // 여기까지 예외 없이 도달 = BatchCustomers 를 끝까지 정상 집계함(행이 0개여도 정상)
     } catch (eSo) {
       Logger.log('⚠️ 단독 오더 완료 집계 실패 — 이번 실행은 단독 오더를 건드리지 않음: ' + String(eSo && eSo.message || eSo));
     }
     const SO_INV_IDX = {}; // 시트별 인보이스 열 위치(0부터) — 단독 오더 행을 인보이스로 판정하기 위함
-    SO_INV_IDX[BCUST_SHEET] = 1; SO_INV_IDX[BITEMS_SHEET] = 1; SO_INV_IDX[SCANLOG_SHEET] = 8; SO_INV_IDX[ISSUELOG_SHEET] = 7;
+    SO_INV_IDX[BCUST_SHEET] = 1; SO_INV_IDX[BITEMS_SHEET] = 1; SO_INV_IDX[SCANLOG_SHEET] = 8; SO_INV_IDX[ISSUELOG_SHEET] = 7; SO_INV_IDX[PACKSCAN_SHEET] = 6; // ★ 2026-10-27 PackScanLog(Invoice=G열)
 
     // 2) 시트 6개 각각에 대해: 대상 배치 행은 Archive_ 시트로 복사 후 메인에서 제거
     const sheetsToArchive = [
@@ -5418,6 +5517,8 @@ function archiveOldBatches(daysOld) {
       { name: SCANLOG_SHEET,  get: scanlogSheet_,   headers: ['BatchId','ScanId','Timestamp','Worker','Barcode','SKU','Slot','Customer','Invoice','Result','Status','Qty'] },
       { name: PICKTIME_SHEET, get: picktimeSheet_,  headers: ['BatchId','Worker','PageRange','PickStart','PickEnd','DurationMinutes'] },
       { name: ISSUELOG_SHEET, get: issuelogSheet_,  headers: ['BatchId','IssueId','Timestamp','Worker','Barcode','SKU','Name','Invoice','Customer','Reason','Qty','Note','Status'] },
+      // ★ 2026-10-28 — PackScanLog 는 4만 행이라 이 일괄(통째 읽기/쓰기) 방식이 'Spreadsheets timed out' 으로 실패함(새벽 2:16 실행 로그로 확인).
+      //   아래 compactPackScanLog_ (작은 구간 단위·이어서 처리) 가 따로 담당함.
     ];
 
     const summary = [];
@@ -5448,7 +5549,13 @@ function archiveOldBatches(daysOld) {
           const bid0 = String(r[0]);
           if (bid0 === STANDALONE_BATCH_ID) {
             const ix = SO_INV_IDX[name];
-            return ix !== undefined && !!standaloneDoneOld[String(r[ix] || '').trim()];
+            if (ix === undefined) return false;
+            const invS = String(r[ix] || '').trim();
+            if (standaloneDoneOld[invS]) return true;
+            // ★ 2026-10-27 — PackScanLog 한정: 이미 BatchCustomers 에서 보관돼 사라진 단독 오더의 고아 스캔 기록도 정리(이전엔 이 시트가
+            //   보관 대상이 아니라 완료된 단독 오더 기록 2만6천 행이 그대로 쌓여 있었음). 살아있는(미완료 포함) 오더는 절대 이동 안 함.
+            if (name === PACKSCAN_SHEET && standaloneLiveOk && invS && !standaloneLive[invS]) return true;
+            return false;
           }
           return !activeBatchIdSet[bid0];
         };
@@ -5574,7 +5681,188 @@ function restoreStandaloneFromArchive() {
 
 // 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
 function archiveOldBatchesDaily() {
-  archiveOldBatches(BATCH_ARCHIVE_DAYS); // ★ 2026-10-05 — 상단 BATCH_ARCHIVE_DAYS(14일)
+  const t0 = Date.now();
+  try { archiveOldBatches(BATCH_ARCHIVE_DAYS); } catch (e) { Logger.log('❌ archiveOldBatches 예외: ' + String(e && e.message || e)); } // ★ 2026-10-05 — 상단 BATCH_ARCHIVE_DAYS(14일)
+  // ★ 2026-10-28 — PackScanLog 는 별도로, 작은 구간씩 이어서 정리(남으면 자동으로 몇 분 뒤 다시 실행됨 — 손댈 것 없음)
+  const left = 330000 - (Date.now() - t0) - 40000;
+  _pkCompactRun_(true, Math.max(0, Math.min(220000, left)));
+}
+
+/* ===================== PackScanLog 자동 정리 (★ 2026-10-28 신규) =====================
+ * [배경] PackScanLog 가 4만 행 넘게 쌓여 getSlotProgress/logPackScan/동기화가 느려짐. 기존 일괄 방식은
+ *        한 번에 통째로 읽고 다시 써서 'Spreadsheets timed out' 으로 실패(새벽 2:16 로그). 이제는:
+ *  - 2,500행짜리 작은 구간을 위에서부터 읽고 → 보관 대상은 Archive_PackScanLog 에 먼저 복사 → 그 행만 deleteRows 로 제거
+ *  - 구간마다 DocumentLock 을 잡았다가 바로 풀어서 스캔 저장을 오래 막지 않음(한 구간 수 초)
+ *  - 매 순간 시트가 일관됨(유지 행을 옮겨 쓰지 않으므로 중복/유실 구간이 없음). 중간에 끊겨도 다음 실행이 이어서 처리
+ *  - 시간이 모자라거나 실패하면 3분 뒤 자동 재실행(최대 12회, 끝나면 트리거 자동 삭제)
+ * [규칙] Batches 시트에 없는 배치 = 이미 보관된 배치 → 이동. 단독오더(STANDALONE)는 BatchCustomers 에 살아있는 인보이스만 유지(나머지 이동).
+ *        BatchId 가 비어있고 완전히 빈 행은 삭제, 내용이 있으면 유지.
+ * 지금 바로 한 번 돌리고 싶으면 편집기에서 compactPackScanLogNow 실행(선택 사항, 안 해도 밤에 자동). */
+const PK_COMPACT_WINDOW_ = 2500;
+const PK_COLS_ = 13;
+const PK_HEADERS_ = ['BatchId','PackScanId','Timestamp','Worker','Barcode','SKU','Invoice','Result','Status','Qty','Round','Box','Pallet'];
+
+// 순수 판정 함수: 0=유지, 1=보관 이동, 2=빈 행 삭제
+function _pkClassifyRow_(r, aliveBatch, standaloneLive) {
+  const bid = String(r[0] == null ? '' : r[0]).trim();
+  if (!bid) {
+    let empty = true;
+    for (let i = 0; i < r.length; i++) { if (r[i] !== '' && r[i] != null) { empty = false; break; } }
+    return empty ? 2 : 0;
+  }
+  if (bid === STANDALONE_BATCH_ID) {
+    const inv = String(r[6] == null ? '' : r[6]).trim();
+    if (!inv) return 0;
+    return standaloneLive[inv] ? 0 : 1;
+  }
+  return aliveBatch[bid] ? 0 : 1;
+}
+
+// 순수 판정 함수: 구간 안에서 연속된 보관/삭제 행 묶음(run)과 유지 행 수 계산. start 는 구간 안 0부터.
+function _pkBuildRuns_(rows, aliveBatch, standaloneLive) {
+  const runs = []; const archRows = []; let kept = 0; let cur = null;
+  for (let i = 0; i < rows.length; i++) {
+    const c = _pkClassifyRow_(rows[i], aliveBatch, standaloneLive);
+    if (c === 0) { kept++; cur = null; continue; }
+    if (c === 1) archRows.push(rows[i]);
+    if (cur) cur.count++; else { cur = { start: i, count: 1 }; runs.push(cur); }
+  }
+  return { runs: runs, archRows: archRows, kept: kept };
+}
+
+function compactPackScanLog_(budgetMs) {
+  const t0 = Date.now();
+  const res = { done: false, moved: 0, dropped: 0, windows: 0, note: '' };
+  const sp = PropertiesService.getScriptProperties();
+  const sh = packscanSheetSafe_();
+
+  // 판정에 쓰는 집합 — 읽기 실패하면 예외로 중단(아무것도 옮기지 않음)
+  const bSh = batchesSheet_();
+  const bLast = bSh.getLastRow();
+  if (bLast < 2) { res.done = true; res.note = 'Batches 시트가 비어 있어 안전상 건너뜀'; return res; }
+  const aliveBatch = {};
+  _readRangeChunked_(bSh, 2, bLast - 1, 1, 'Batches(PackScanLog 정리용)').forEach(r => { const k = String(r[0] || '').trim(); if (k) aliveBatch[k] = true; });
+  const standaloneLive = {};
+  const bcSh = bcustSheetSafe_();
+  const bcLast = bcSh.getLastRow();
+  if (bcLast >= 2) {
+    _readRangeChunked_(bcSh, 2, bcLast - 1, 2, 'BatchCustomers(PackScanLog 정리용)').forEach(r => {
+      if (String(r[0]) === STANDALONE_BATCH_ID) { const iv = String(r[1] || '').trim(); if (iv) standaloneLive[iv] = true; }
+    });
+  }
+
+  let pos = Number(sp.getProperty('pkCompactPos')) || 2;
+  if (pos < 2) pos = 2;
+  const touchedBatches = {};
+  while (true) {
+    if (Date.now() - t0 > budgetMs) { res.note = '시간 예산 소진 — 이어서 처리 예정'; break; }
+    const lock = LockService.getDocumentLock();
+    if (!lock.tryLock(20000)) { res.note = '잠금 대기 초과 — 이어서 처리 예정'; break; }
+    try {
+      const last = sh.getLastRow();
+      if (pos > last) { res.done = true; break; }
+      const take = Math.min(PK_COMPACT_WINDOW_, last - pos + 1);
+      const rows = _sheetOpWithRetry_(() => sh.getRange(pos, 1, take, PK_COLS_).getValues(), 'PackScanLog 읽기(행 ' + pos + '~' + (pos + take - 1) + ')');
+      const b = _pkBuildRuns_(rows, aliveBatch, standaloneLive);
+      res.windows++;
+      if (b.runs.length === 0) { pos += take; sp.setProperty('pkCompactPos', String(pos)); continue; }
+      if (b.archRows.length > 0) {
+        const arc = ensureBatchSheet_(ARCHIVE_PREFIX + PACKSCAN_SHEET, PK_HEADERS_);
+        _writeRowsChunked_(arc, arc.getLastRow() + 1, b.archRows, PK_COLS_, 'Archive_PackScanLog 쓰기');
+        b.archRows.forEach(r => { touchedBatches[String(r[0])] = true; });
+      }
+      // 아래쪽 묶음부터 지움(위쪽 행 번호가 안 밀리게). 각 deleteRows 는 한 번에 원자적으로 적용됨.
+      for (let k = b.runs.length - 1; k >= 0; k--) {
+        const run = b.runs[k];
+        _sheetOpWithRetry_(() => {
+          // 시트에 '고정 행 제외 전부 삭제' 는 불가 → 지우고 나면 일반 행이 0개가 되는 경우 빈 행을 먼저 보충
+          if (sh.getMaxRows() - run.count <= sh.getFrozenRows()) sh.insertRowsAfter(sh.getMaxRows(), 50);
+          sh.deleteRows(pos + run.start, run.count);
+        }, 'PackScanLog 삭제(행 ' + (pos + run.start) + ' x' + run.count + ')');
+        res.moved += run.count;
+      }
+      res.dropped += (b.runs.reduce((a, x) => a + x.count, 0) - b.archRows.length);
+      pos += b.kept; // 지운 만큼 아래 행이 올라왔으므로 유지된 행 수만큼만 전진
+      sp.setProperty('pkCompactPos', String(pos));
+    } finally {
+      try { lock.releaseLock(); } catch (eRel) { /* 무시 */ }
+    }
+    Utilities.sleep(300); // 스캔 저장 쪽에 잠금 양보
+  }
+  if (res.moved > 0) {
+    try { Object.keys(touchedBatches).forEach(k => invalidatePackScanCache_(k)); } catch (eC) { /* 무시 */ }
+    try { bumpVersion_(); } catch (eV) { /* 무시 */ }
+  }
+  return res;
+}
+
+function _pkDeleteCompactTriggers_() {
+  try {
+    ScriptApp.getProjectTriggers().forEach(t => { if (t.getHandlerFunction() === 'compactPackScanLogAuto') { try { ScriptApp.deleteTrigger(t); } catch (e) { /* 무시 */ } } });
+  } catch (e) { /* 무시 */ }
+}
+
+function _pkCompactRun_(first, budgetMs) {
+  const sp = PropertiesService.getScriptProperties();
+  _pkDeleteCompactTriggers_();
+  if (first) { sp.deleteProperty('pkCompactPos'); sp.setProperty('pkCompactTries', '0'); }
+  const tries = (Number(sp.getProperty('pkCompactTries')) || 0) + 1;
+  if (tries > 12) { Logger.log('⚠️ PackScanLog 자동 정리: 12회 시도 후에도 끝나지 않아 오늘은 중단(내일 새벽 다시 시도)'); sp.deleteProperty('pkCompactTries'); sp.deleteProperty('pkCompactPos'); return; }
+  sp.setProperty('pkCompactTries', String(tries));
+  let r;
+  if (budgetMs < 15000) r = { done: false, moved: 0, note: '이번 실행에는 시간 여유가 없어 다음 실행으로 넘김' };
+  else {
+    try { r = compactPackScanLog_(budgetMs); }
+    catch (e) { r = { done: false, moved: 0, note: '오류: ' + String(e && e.message || e) }; }
+  }
+  let rowsNow = '?';
+  try { rowsNow = Math.max(0, packscanSheet_().getLastRow() - 1); } catch (e) { /* 무시 */ }
+  Logger.log('PackScanLog 자동 정리 ' + tries + '회차: ' + (r.done ? '✅ 완료' : '⏳ 진행 중') + ' — 보관 이동/삭제 ' + (r.moved || 0) + '행, 현재 ' + rowsNow + '행' + (r.note ? ' (' + r.note + ')' : ''));
+  if (r.done) { sp.deleteProperty('pkCompactTries'); sp.deleteProperty('pkCompactPos'); return; }
+  try { ScriptApp.newTrigger('compactPackScanLogAuto').timeBased().after(3 * 60 * 1000).create(); }
+  catch (e) { Logger.log('⚠️ 재실행 예약 실패(내일 새벽 다시 시도됨): ' + String(e && e.message || e)); }
+}
+
+// 자동 재실행용(시간 트리거가 호출) — 직접 실행할 필요 없음
+function compactPackScanLogAuto() { _pkCompactRun_(false, 240000); }
+// 지금 바로 한 번 돌리고 싶을 때만(선택): 끝나지 않으면 알아서 이어서 실행됨
+function compactPackScanLogNow() { _pkCompactRun_(true, 240000); }
+
+/* ★ 2026-10-27 신규 — 읽기 전용 점검(아무것도 옮기거나 지우지 않음). PackScanLog 가 배치별로 몇 행인지,
+ * 그 배치가 현재 Batches 시트에 살아있는지(=유지) 아닌지(=보관 대상 후보)를 실행 로그에 보여줌. */
+function dryRunPackScanLogArchive() {
+  const pl = packscanSheet_();
+  const last = pl.getLastRow();
+  if (last < 2) { Logger.log('PackScanLog 데이터 없음'); return; }
+  const ids = pl.getRange(2, 1, last - 1, 1).getValues();
+  const cnt = {};
+  ids.forEach(r => { const b = String(r[0] || '(빈값)'); cnt[b] = (cnt[b] || 0) + 1; });
+  const bSh = batchesSheet_(); const bLast = bSh.getLastRow();
+  const alive = {};
+  if (bLast >= 2) bSh.getRange(2, 1, bLast - 1, 3).getValues().forEach(r => { alive[String(r[0])] = String(r[2] || ''); });
+  let keep = 0, move = 0;
+  const lines = [];
+  Object.keys(cnt).sort().forEach(b => {
+    const isAlive = (b in alive) || b === STANDALONE_BATCH_ID;
+    if (isAlive) keep += cnt[b]; else move += cnt[b];
+    lines.push(b + ': ' + cnt[b] + '행 — ' + (b === STANDALONE_BATCH_ID ? '단독오더(완료+기간경과분만 이동)' : (isAlive ? ('유지(Batches에 있음, 상태=' + alive[b] + ')') : '이미 보관된 배치 → 이동 대상')));
+  });
+  // 단독 오더: BatchCustomers 에 살아있는 인보이스는 유지, 사라진(이미 보관된) 인보이스는 이동 대상으로 추정
+  let soKeep = 0, soMove = 0, soBlank = 0;
+  try {
+    const bcDry = bcustSheetSafe_(); const bcL = bcDry.getLastRow();
+    const live = {};
+    if (bcL >= 2) bcDry.getRange(2, 1, bcL - 1, 2).getValues().forEach(r => { if (String(r[0]) === STANDALONE_BATCH_ID) { const iv = String(r[1] || '').trim(); if (iv) live[iv] = true; } });
+    const soRows = pl.getRange(2, 1, last - 1, 7).getValues();
+    soRows.forEach(r => {
+      if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+      const iv = String(r[6] || '').trim();
+      if (!iv) soBlank++; else if (live[iv]) soKeep++; else soMove++;
+    });
+    Logger.log('단독오더 PackScanLog: 유지(BatchCustomers에 살아있음) ' + soKeep + '행 / 이동 대상(이미 보관돼 사라진 오더) ' + soMove + '행 / 인보이스 빈값 ' + soBlank + '행(이동 안 함) — 살아있는 단독오더 인보이스 ' + Object.keys(live).length + '건');
+  } catch (eSoDry) { Logger.log('단독오더 점검 실패: ' + eSoDry); }
+  Logger.log('PackScanLog 총 ' + (last - 1) + '행 / 이미 Batches에서 빠진 배치 행(이동 대상 최소치) ' + move + '행 / 현재 배치 유지 ' + keep + '행(여기엔 단독오더 전체가 포함됨 — 위 단독오더 줄 참고)');
+  Logger.log(lines.join('\n'));
 }
 
 function setupArchiveTrigger() {
