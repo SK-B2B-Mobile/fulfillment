@@ -1109,6 +1109,8 @@ function createBatch(data) {
   if (result.ok && batchDocForFirestore) {
     try { queueFirestoreWrite_('batch', batchDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
   }
+  // ★ v24 — P 가 Firestore 방식이면 새 배치의 인보이스 문서를 1분 트리거가 미리 만들도록 표시(응답 지연 없음 — 시트 방식이면 아무것도 안 함)
+  if (result.ok && result.batchId) { try { if (typeof ssQueueNewBatch_ === 'function') ssQueueNewBatch_(result.batchId); } catch (eSs) { /* 무시 — 첫 스캔 때 자동으로 만들어짐 */ } }
   // ★ 2026-09-28 신규(긴급 버그 수정) — "새로 배치를 만들었는데 board.html
   //   TV 현황판에 전혀 안 뜬다" 신고로 발견함. 2026-08-25에 batch.html의
   //   "전환"/"보기" 버튼에서 setActiveBatch 호출을 의도적으로 제거했는데
@@ -1204,6 +1206,8 @@ function addStandaloneOrder(data) {
     // ★ 2026-09-01 신규 — 이 인보이스의 BatchItems 캐시(20초)를 즉시 비움.
     //   재업로드 직후에도 옛 상품 목록이 캐시에 남아있지 않도록.
     clearInvoiceCache_(STANDALONE_BATCH_ID, invoice);
+    // ★ 2026-10-29 v24 — 같은 인보이스를 다시 등록한 경우 Firestore 문서를 시트 기준으로 다시 만들도록 표시만 남김(가벼운 속성 쓰기, 시트 방식이면 아무것도 안 함)
+    try { if (typeof ssIsFs_ === 'function' && ssAnyFs_()) ssForgetInvoice_(STANDALONE_BATCH_ID, invoice); } catch (eSs) { /* 무시 */ }
     // ★ 세션C 신규 — 구글시트에 실제로 쓴 것과 동일한 내용으로 Firestore
     //   이중쓰기용 문서를 준비. items는 writeStandaloneOrderDoc_ 주석에서
     //   설명한 이유로 JSON 문자열로 안전하게 담음. 락 안에서는 절대 Firestore를
@@ -1765,6 +1769,8 @@ function clearInvoiceCache_(batchId, invoice) {
     cache.remove('biLines_v1_' + batchId + '_' + invoice + '_meta');
     cache.remove('ilIssues_v1_' + batchId + '_' + invoice + '_meta');
   } catch (e) { /* 무시 */ }
+  // ★ 2026-10-29 v24 — Firestore 방식이면 그 인보이스 문서의 필요수량·이슈를 다음 읽기 때 새로 가져오게 표시(시트 방식이면 아무것도 안 함)
+  try { if (typeof ssIsFs_ === 'function' && ssAnyFs_()) ssMarkInvoiceStale_(batchId, invoice); } catch (eSs) { /* 무시 */ }
 }
 
 /* ===================== getPackScanRowsCached_ / invalidatePackScanCache_ (★ 2026-09-25 신규) =====================
@@ -1801,8 +1807,9 @@ function getPackScanRowsCached_(batchId) {
   if (plLast >= 2) {
     pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
+      // ★ v24 — 시각은 'yyyy-MM-dd HH:mm:ss' 로 통일(시트가 Date 로 돌려주면 String() 이 긴 영어 날짜가 되어 화면 이력 표시·정렬이 깨졌음)
       rows.push([
-        r[0], r[1], String(r[2]), r[3], String(r[4]), String(r[5]),
+        r[0], r[1], fmtSheetTs_(r[2]), r[3], String(r[4]), String(r[5]),
         r[6], r[7], r[8], Number(r[9]) || 0, Number(r[10]) || 2,
         String(r[11] || ''), String(r[12] || ''),
       ]);
@@ -1844,6 +1851,8 @@ function invalidateScanStateCache_(batchId) {
   //   메타만 지우면 남은 조각(_c0, _c1, ...)이 있어도 다음 조회는 항상 새로 계산됨
   //   (조각까지 일일이 지울 필요 없음 — 조각은 TTL로 자연 소멸).
   try { CacheService.getScriptCache().remove(scanStateCacheKey_(batchId) + '_meta'); } catch (e) { /* 무시 */ }
+  // ★ v26 — 버전 표시도 바꿈: 이 무효화 "전에" 계산을 시작한 다른 요청이 늦게 옛 결과를 캐시에 넣어도, 버전이 달라 쓰이지 않음(Firestore 방식 60초 캐시용)
+  try { CacheService.getScriptCache().put('ss3Ver_' + batchId, String(Date.now()) + Math.random().toString(36).slice(2, 6), 21600); } catch (e) { /* 무시 */ }
 }
 
 // ★ 2026-09-25 신규 — board.html 슬롯 카드의 SKU/PCS 수량 표시가 스캔·이슈
@@ -1865,8 +1874,12 @@ function invalidateBatchAggregateCaches_(batchId) {
 }
 
 function logPackScan(data) {
+  // ★ 2026-10-29 v24 — 스위치(SCAN_STORE)가 fs 면 Firestore 방식(ScanStore.gs)으로 처리. 기본값 sheet 면 아래 기존 코드 그대로.
+  if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssLogPackScan_(data);
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 시트에 쓰지 않고 Firestore 방식으로 처리
+  if (typeof ssIsFsFresh_ === 'function' && ssIsFsFresh_(Number(data && data.round) || 2)) { lock.releaseLock(); return ssLogPackScan_(data); }
   let result;
   let packScanDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장(정상 채움 'pass' 케이스만 해당)
   try {
@@ -2053,8 +2066,18 @@ function logPackScan(data) {
 /* undoPackScan — 잘못 스캔한 것을 취소(실제 삭제 대신 Status를 undone으로)
  * 입력: { packScanId } */
 function undoPackScan(data) {
+  // ★ 2026-10-29 v24 — Firestore 문서에 있는 기록이면 거기서 취소. 못 찾으면(시트에만 있는 기록) 아래 기존 코드로.
+  const _fsAtStart = (typeof ssIsFs_ === 'function' && ssAnyFs_());
+  if (_fsAtStart) { const _fr = ssUndoPackScan_(data); if (_fr) return _fr; }
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 먼저 Firestore 문서에서 찾아봄
+  if (!_fsAtStart && typeof ssAnyFsFresh_ === 'function' && ssAnyFsFresh_()) {
+    lock.releaseLock();
+    const _fr2 = ssUndoPackScan_(data);
+    if (_fr2) return _fr2;
+    lock.waitLock(10000);
+  }
   try {
     const id = data.packScanId;
     if (!id) return { ok: false, error: 'packScanId required' };
@@ -2104,8 +2127,11 @@ function undoPackScan(data) {
 //   절대 여러 박스에 나뉘지 않는다는 원칙이라, 이 바코드의 활성 pass 기록을
 //   찾아서 Box/Pallet 값만 덮어씀(수량·다른 값은 그대로).
 function updatePackScanBoxPallet(data) {
+  if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssUpdatePackScanBoxPallet_(data); // ★ 2026-10-29 v24 — Firestore 방식(스위치 fs 일 때만)
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 시트에 쓰지 않고 Firestore 방식으로 처리
+  if (typeof ssIsFsFresh_ === 'function' && ssIsFsFresh_(Number(data && data.round) || 2)) { lock.releaseLock(); return ssUpdatePackScanBoxPallet_(data); }
   try {
     if (!data.batchId || !data.invoice || !data.barcode) return { ok: false, error: '필요한 값이 없습니다' };
     const round = Number(data.round) || 2;
@@ -2160,8 +2186,11 @@ function updatePackScanBoxPallet(data) {
 //   박스로 옮긴 별도 기록을 만듦 — 화면·패킹슬립에는 같은 SKU가 두 줄(각각의
 //   박스)로 나뉘어 보이게 됨.
 function splitScannedItemBox(data) {
+  if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssSplitScannedItemBox_(data); // ★ 2026-10-29 v24 — Firestore 방식(스위치 fs 일 때만)
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 시트에 쓰지 않고 Firestore 방식으로 처리
+  if (typeof ssIsFsFresh_ === 'function' && ssIsFsFresh_(Number(data && data.round) || 2)) { lock.releaseLock(); return ssSplitScannedItemBox_(data); }
   try {
     if (!data.batchId || !data.invoice || !data.barcode || !data.splitQty) {
       return { ok: false, error: '필요한 값이 없습니다' };
@@ -2242,8 +2271,11 @@ function splitScannedItemBox(data) {
 //   mode: 'box' — fromBox의 모든 상품을 toBox로 이동(팔렛은 그대로 유지)
 //         'pallet' — fromPallet의 모든 상품(여러 박스 포함)을 toPallet으로 이동
 function moveBoxOrPallet(data) {
+  if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssMoveBoxOrPallet_(data); // ★ 2026-10-29 v24 — Firestore 방식(스위치 fs 일 때만)
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 시트에 쓰지 않고 Firestore 방식으로 처리
+  if (typeof ssIsFsFresh_ === 'function' && ssIsFsFresh_(Number(data && data.round) || 2)) { lock.releaseLock(); return ssMoveBoxOrPallet_(data); }
   try {
     if (!data.batchId || !data.invoice || !data.mode || !data.fromValue || !data.toValue) {
       return { ok: false, error: '필요한 값이 없습니다' };
@@ -2290,8 +2322,11 @@ function moveBoxOrPallet(data) {
 //   스캔했거나 화면이 오래된 경우의 안전장치). 기존 기록은 undone 처리하고 새 배정대로 기록을 다시 씀
 //   (원래 작업자/SKU 유지, 수량 합계는 절대 안 변함 → 진행률·슬립 수량에 영향 없음).
 function reassignPackScanBoxes(data) {
+  if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssReassignPackScanBoxes_(data); // ★ 2026-10-29 v24 — Firestore 방식(스위치 fs 일 때만)
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 시트에 쓰지 않고 Firestore 방식으로 처리
+  if (typeof ssIsFsFresh_ === 'function' && ssIsFsFresh_(Number(data && data.round) || 2)) { lock.releaseLock(); return ssReassignPackScanBoxes_(data); }
   try {
     if (!data.batchId || !data.invoice || !data.barcode) return { ok: false, error: '필요한 값이 없습니다' };
     const kind = data.kind === 'pallet' ? 'pallet' : 'box';
@@ -2399,8 +2434,11 @@ function reassignPackScanBoxes(data) {
 }
 
 function forceCompletePackScan(data) {
+  if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssForceCompletePackScan_(data); // ★ 2026-10-29 v24 — Firestore 방식(스위치 fs 일 때만)
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
+  // ★ v24 — 잠금을 기다리는 사이 Firestore 방식으로 바뀌었으면(전환 직후) 시트에 쓰지 않고 Firestore 방식으로 처리
+  if (typeof ssIsFsFresh_ === 'function' && ssIsFsFresh_(Number(data && data.round) || 2)) { lock.releaseLock(); return ssForceCompletePackScan_(data); }
   try {
     const batchId = data.batchId, invoice = data.invoice;
     if (!batchId || !invoice) return { ok: false, error: 'batchId, invoice required' };
@@ -2472,6 +2510,7 @@ function getPackScanState(batchId, invoice, round) {
     // ★ 2026-09-03 신규 — logPackScan과 동일한 1차/2차 분리(Round). round를 안 넘기면
     //   기존과 동일하게 2(2차/총량 Pack Verify 기본값)로 취급되어 총량피킹은 영향 없음.
     round = Number(round) || 2;
+    if (typeof ssIsFs_ === 'function' && ssIsFs_(round)) return ssGetPackScanState_(batchId, invoice, round); // ★ 2026-10-29 v24 — Firestore 방식(스위치 fs 일 때만)
 
     // ★ 2026-09-01 수정(속도) — logPackScan과 완전히 동일한 이유. 스캔 1번마다
     //   화면이 곧바로 이 함수를 다시 불러서(진행률 카드 갱신용) BatchItems/IssueLog
@@ -2912,7 +2951,17 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   //   표시되는 증상). 총량피킹(ScanLog)과 단독오더(PackScanLog)는 기록되는
   //   시트 자체가 다르므로, batchId로 분기해서 실제로 스캔이 쌓이는 시트를 읽는다.
   const scannedByKey = {}; // ★ 2026-07-28 수정: "바코드"만이 아니라 "바코드|SKU"로 키 변경
-  if (batchId === STANDALONE_BATCH_ID) {
+  // ★ 2026-10-29 v24 — Firestore 방식인 라운드는 시트(1~2분 늦음) 대신 Firestore 문서의 행을 씀. 둘 다 시트 방식이면 null → 기존 코드 그대로.
+  const _fsRows = (batchId === STANDALONE_BATCH_ID && typeof ssIsFs_ === 'function') ? ssRowsForInspection_(batchId, invoice, round) : null;
+  if (_fsRows) {
+    _fsRows.forEach(r => {
+      if (r[8] === 'undone') return;
+      if (r[7] !== 'pass') return;
+      if (round && (Number(r[10]) || 2) !== Number(round)) return;
+      const key = normBarcode_(r[4]) + '|' + String(r[5]);
+      scannedByKey[key] = (scannedByKey[key] || 0) + (Number(r[9]) || 0);
+    });
+  } else if (batchId === STANDALONE_BATCH_ID) {
     const pl = packscanSheetSafe_();
     const plLast = pl.getLastRow();
     if (plLast >= 2) {
@@ -2929,10 +2978,11 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
       });
     }
   } else {
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
+    const _fs3Rows = (typeof ss3RowsForInvoice_ === 'function') ? ss3RowsForInvoice_(batchId, invoice) : null; // ★ v26 — Step 03 Firestore 방식이면 그 인보이스 문서 1개만
+    const sl = _fs3Rows ? null : scanlogSheet_();
+    const slLast = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
     if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      (_fs3Rows || sl.getRange(2, 1, slLast - 1, 12).getValues()).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (String(r[8]) !== String(invoice)) return;
         if (r[10] === 'undone') return;
@@ -3011,8 +3061,12 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
 }
 
 function logScan(data) {
+  // ★ 2026-10-29 v26 — Step 03 이 Firestore 방식(스위치 03=fs)이면 문서 잠금·시트 쓰기 없이 ScanStore 로(같은 행·같은 후속 처리)
+  if (typeof ss3OnFor_ === 'function' && ss3OnFor_(data && data.batchId)) return ss3LogScanFull_(data);
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  // 잠금을 기다리는 사이 Firestore 로 전환됐으면(전환 함수가 이 잠금을 쥔 채 문서를 만듦) 시트에 쓰지 않음
+  if (typeof ss3OnForFresh_ === 'function' && ss3OnForFresh_(data && data.batchId)) { lock.releaseLock(); return ss3LogScanFull_(data); }
   let result;
   let scanDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
@@ -3236,6 +3290,23 @@ function logIssue(data) {
     //   뜻이지 "이미 스캔된 걸로 자동 확정한다"는 뜻이 아니기 때문
     //   (다시 필요하다고 표시된 이상, 실제로 다시 스캔해서 확인해야 정확함).
     // ★ 2026-08-05 긴급 수정 — 이 ADJ 상쇄기록도 같은 이유로 텍스트 고정.
+    // ★ 2026-10-29 v26 — Step 03 이 Firestore 방식이면 상쇄 기록은 그 인보이스 문서에(시트는 1분 뒤 따라옴).
+    //   문서에 못 넣으면 방금 쓴 이슈 행을 취소 상태로 되돌리고 실패를 알림(이슈만 있고 상쇄가 없는 어긋남 방지 — 화면이 다시 시도).
+    if (typeof ss3OnForFresh_ === 'function' && ss3OnForFresh_(data.batchId)) {
+      let _adj;
+      try {
+        _adj = ss3AppendAdj_(data.batchId, data.invoice, [
+          data.batchId, 'ADJ-' + issueId, nowStr, data.worker || '',
+          String(data.barcode || ''), String(data.sku || ''), '', data.customer || '',
+          data.invoice, 'pass', 'active', -qty, 1,
+        ]);
+      } catch (eAdj) { _adj = { ok: false, detail: String(eAdj && eAdj.message || eAdj).slice(0, 80) }; } // 예외(할당량·장애)도 실패로 — 이슈 행을 되돌림
+      if (!_adj || !_adj.ok) {
+        try { il.getRange(ilNewRow, 13).setValue('undone'); } catch (eU) { /* 무시 */ }
+        try { clearInvoiceCache_(data.batchId, data.invoice); invalidateScanStateCache_(data.batchId); invalidateBatchAggregateCaches_(data.batchId); } catch (eC) { /* 무시 */ } // 실패 처리 중에 읽힌 값이 남지 않게
+        return { ok: false, error: 'server_busy', detail: 'adj_save_failed' + (_adj && _adj.detail ? ':' + _adj.detail : '') };
+      }
+    } else {
     const sl2 = scanlogSheet_();
     const sl2NewRow = sl2.getLastRow() + 1;
     ensureSheetRoom_(sl2, sl2NewRow); // ★ 2026-08-12 신규
@@ -3245,6 +3316,7 @@ function logIssue(data) {
       data.barcode || '', data.sku || '', '', data.customer || '',
       data.invoice, 'pass', 'active', -qty
     ]]);
+    }
     bumpVersion_();
     // ★ 2026-09-01 신규 — 이 인보이스의 이슈수량 캐시(20초)를 즉시 비움. 이슈
     //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
@@ -3575,13 +3647,22 @@ function editIssue(data) {
     for (let i = 0; i < ids.length; i++) {
       if (String(ids[i][0]) === String(issueId)) {
         const row = i + 2;
+        // ★ 2026-10-29 v26 — Step 03 Firestore 방식: 상쇄 기록(ADJ) 수량을 먼저 문서에서 고침 — 실패하면 이슈도 안 바꾸고 알림(둘이 어긋나지 않게)
+        let _adjDoneFs = false;
+        const _cur = sh.getRange(row, 1, 1, 8).getValues()[0];
+        if (typeof ss3OnForFresh_ === 'function' && ss3OnForFresh_(_cur[0])) {
+          let _r;
+          try { _r = ss3SetAdjQty_(_cur[0], _cur[7], issueId, qty); } catch (eAdj) { _r = null; }
+          if (!_r || !_r.ok) return { ok: false, error: 'server_busy', detail: 'adj_save_failed' };
+          _adjDoneFs = !!_r.found;
+        }
         sh.getRange(row, 10).setValue(data.reason || 'ETC'); // J: Reason
         sh.getRange(row, 11).setValue(qty);                  // K: Qty
         sh.getRange(row, 12).setValue(data.note || '');      // L: Note
         // ★ 2026-07-22 신규: 수량을 고치면, logIssue가 같이 남겨둔 상쇄용
         //   보정 스캔 기록(ADJ-이슈ID)의 수량도 같이 맞춰줘야 정확함.
         const sl = scanlogSheet_();
-        const slLast = sl.getLastRow();
+        const slLast = _adjDoneFs ? 0 : sl.getLastRow(); // 문서에서 이미 고쳤으면 시트는 1분 동기화가 따라옴
         if (slLast >= 2) {
           const scanIds = sl.getRange(2, 2, slLast - 1, 1).getValues();
           const adjTarget = 'ADJ-' + issueId;
@@ -3642,8 +3723,17 @@ function editIssue(data) {
  * → 실제 삭제 대신 Status를 'undone' 으로 변경 (동시 스캔 중 안전)
  * ============================================================ */
 function undoScan(data) {
+  // ★ 2026-10-29 v26 — Step 03 Firestore 방식: 문서에서 찾아 취소. 어느 문서에도 없으면(null) 아래 시트 방식(시트에만 있는 옛 기록)
+  const _fs3AtStart = (typeof ss3IsFs_ === 'function' && ss3IsFs_());
+  if (_fs3AtStart) { const r3 = ss3UndoScan_(data || {}); if (r3) return r3; }
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
+  if (!_fs3AtStart && typeof ss3IsFsFresh_ === 'function' && ss3IsFsFresh_()) {
+    lock.releaseLock();
+    const r3b = ss3UndoScan_(data || {});
+    if (r3b) return r3b;
+    lock.waitLock(10000);
+  }
   try {
     const scanId = data.scanId;
     if (!scanId) return { ok: false, error: 'scanId required' };
@@ -3717,6 +3807,10 @@ function _deleteBatchIfEmptyCore_(data) {
       { name: 'IssueLog', sh: issuelogSheet_() },
       { name: 'PickTiming', sh: picktimeSheetSafe_() },
     ];
+    // ★ v26 — Step 03 Firestore 방식: 아직 시트에 안 옮겨진 스캔도 "작업 흔적"으로 봄
+    if (typeof ss3AnyRows_ === 'function' && ss3AnyRows_(batchId)) {
+      return { ok: false, blocked: true, error: 'ScanLog에 이미 기록이 있어 삭제할 수 없습니다(실제 작업 흔적). "완료 처리"를 사용해주세요.' };
+    }
     for (const c of checks) {
       const last = c.sh.getLastRow();
       if (last < 2) continue;
@@ -3861,7 +3955,30 @@ function logPickTimingCore_(data) {
             sh.getRange(i + 2, 5).setValue(forceEndTs);
             sh.getRange(i + 2, 6).setValue(forceMins);
             sh.getRange(i + 2, 7).setValue('⚠ force-closed · 전날(이전) 세션 미종료 상태에서 강제종료됨 · 시간은 근무시간 기준 자동계산');
+            rows0[i][4] = forceEndTs; rows0[i][6] = '⚠ force-closed'; // 아래 페이지 중복 검사에서 '강제종료'로 봄
             break; // 한 작업자당 열린 세션은 최대 1개이므로 찾으면 종료 처리 후 계속 진행
+          }
+        }
+        // ★ 2026-10-29 v27 — 이미 피킹이 끝난 페이지(누가 했든) 또는 다른 작업자가 지금 피킹 중인 페이지는 다시 시작하지 못하게(서버 최종 확인).
+        //   관리자가 확인하고 다시 피킹해야 하는 경우만 allowRepick=true 로 통과(기록에 표시). 강제종료된 기록은 '끝난 페이지'로 보지 않음.
+        const _req = pickPagesOf_(data.pageRange);
+        if (_req && !data.allowRepick) {
+          const STALE_MS0 = 4 * 60 * 60 * 1000;
+          for (let i = 0; i < rows0.length; i++) {
+            if (String(rows0[i][0]) !== String(data.batchId)) continue;
+            const _pg = pickPagesOf_(rows0[i][2]);
+            if (!pickPagesOverlap_(_req, _pg)) continue;
+            const _ended = (rows0[i][4] !== '' && rows0[i][4] !== null && rows0[i][4] !== undefined);
+            const _forced = String(rows0[i][6] || '').indexOf('force-closed') >= 0;
+            const _who = String(rows0[i][1] || '');
+            if (_ended && !_forced) {
+              return { ok: false, error: 'pages_already_picked', conflict: { worker: _who, pageRange: fixPageRange_(rows0[i][2]), end: pickHHmm_(rows0[i][4]) } };
+            }
+            if (!_ended && _who !== String(data.worker)) {
+              const _st = rows0[i][3];
+              const _fresh = !(Object.prototype.toString.call(_st) === '[object Date]' && !isNaN(_st)) || (Date.now() - _st.getTime() < STALE_MS0);
+              if (_fresh) return { ok: false, error: 'pages_in_progress', conflict: { worker: _who, pageRange: fixPageRange_(rows0[i][2]), start: pickHHmm_(_st) } };
+            }
           }
         }
       }
@@ -3872,7 +3989,7 @@ function logPickTimingCore_(data) {
       //   → 저장할 칸의 서식을 '텍스트'로 고정해서 입력값이 그대로 남게 함.
       const _ptRow = sh.getLastRow() + 1;
       try { sh.getRange(_ptRow, 3).setNumberFormat('@'); } catch (e) { /* 서식 실패해도 저장은 진행 */ }
-      sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '', '']);
+      sh.appendRow([data.batchId, data.worker, data.pageRange || '', batchNow_(), '', '', data.allowRepick ? '↻ repick (manager approved)' : '']);
       // ★ 2026-08-06 신규 — 작업자가 "▶ 피킹 시작"을 누른 이 순간이 실제 피킹 시작.
       //   스캔은 분류 단계일 뿐이라 스캔 유무로 판단하면 안 됨(매니저 확인 사항).
       //   배치에 속한 모든 오더를 한꺼번에 Started로 만들어, 메인 대시보드·영업
@@ -3947,9 +4064,18 @@ function getActivePickers(batchId) {
     //   시간순 append라 순서대로 훑으면 마지막에 남는 게 최신).
     //   batch.html에서 "전날 담당페이지 이어서 시작할까요?" 확인창에 씀.
     const lastPageRange = {};
+    const sessions = []; // ★ v27 — 이 배치의 피킹 기록 전부(화면 '피킹 기록' 목록 + 같은 페이지 재시작 막기)
     if (last >= 2) {
-      sh.getRange(2, 1, last - 1, 6).getValues().forEach(r => {
+      sh.getRange(2, 1, last - 1, 7).getValues().forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
+        try {
+          const _hasEnd = (r[4] !== '' && r[4] !== null && r[4] !== undefined);
+          sessions.push({
+            worker: String(r[1] || ''), pageRange: fixPageRange_(r[2]), start: pickHHmm_(r[3]), end: _hasEnd ? pickHHmm_(r[4]) : '',
+            mins: (r[5] === '' || r[5] === null || r[5] === undefined) ? '' : Number(r[5]),
+            open: !_hasEnd, forced: String(r[6] || '').indexOf('force-closed') >= 0,
+          });
+        } catch (eS) { /* 한 줄 실패해도 나머지는 표시 */ }
         const worker = r[1];
         const pageRange = fixPageRange_(r[2]);
         const startTs = r[3], endTs = r[4];
@@ -3966,7 +4092,7 @@ function getActivePickers(batchId) {
         }
       });
     }
-    const _result = { ok: true, active: active, lastPageRange: lastPageRange };
+    const _result = { ok: true, active: active, lastPageRange: lastPageRange, sessions: sessions };
     try {
       const _payload = JSON.stringify(_result);
       _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 4); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
@@ -4005,13 +4131,14 @@ function getBatchKPI(batchId) {
 
     // 이 배치의 pass 스캔 전체를 먼저 한 번에 읽어둔다 (세션별 SKU/PCS 계산과
     // 작업자별 Pass 집계 양쪽에서 재사용)
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
+    const _fs3Rows = (typeof ss3RowsForBatch_ === 'function') ? ss3RowsForBatch_(batchId) : null; // ★ v26 — Step 03 Firestore 방식이면 문서에서
+    const sl = _fs3Rows ? null : scanlogSheet_();
+    const slLast = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
     const passScans = []; // {worker, sku, qty, timeMs}
     const scanByWorker = {}; // worker -> {pass}
     let totalPass = 0;
     if (slLast >= 2) {
-      sl.getRange(2, 1, slLast - 1, 12).getValues().forEach(r => {
+      (_fs3Rows || sl.getRange(2, 1, slLast - 1, 12).getValues()).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[10] === 'undone' || r[9] !== 'pass') return;
         const w = r[3];
@@ -4250,11 +4377,12 @@ function _buildBatchAggregates_(batchId) {
   _diagPush_('_buildBatchAggregates_ CACHE MISS batchId=' + batchId + ' cache.get(청크)=' + (_tAfterCacheGet - _t0) + 'ms — 실제 시트 읽기 시작');
 
   // 고객사별/SKU별 스캔 통과(pass) 수량 집계 (undone 제외) — getSlotProgress()와 동일 로직
-  const sl = scanlogSheet_();
-  const slLast = sl.getLastRow();
+  const _fs3Rows = (typeof ss3RowsForBatch_ === 'function') ? ss3RowsForBatch_(batchId) : null; // ★ v26 — Step 03 Firestore 방식이면 문서에서
+  const sl = _fs3Rows ? null : scanlogSheet_();
+  const slLast = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
   const scannedByKey = {}; // "invoice|barcode|sku"
   if (slLast >= 2) {
-    _vals_(sl, slLast - 1, 12).forEach(r => {
+    (_fs3Rows || _vals_(sl, slLast - 1, 12)).forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       if (r[10] === 'undone') return;
       if (r[9] !== 'pass') return;
@@ -4511,9 +4639,11 @@ function getSlotProgressCore_(batchId) {
     // ★ 2026-08-24 신규 — 패킹검증 진행률 집계(오출고 방지 신기능). 검수 진행률과는
     //   완전히 별개로, PackScanLog(패킹존 재검증 스캔)를 바코드 단위로 집계함.
     //   패킹 작업자는 SKU를 모르고 바코드만 스캔하므로 SKU가 아니라 바코드로 매칭.
-    const pl = packscanSheet_();
-    const plLast = pl.getLastRow();
     const packedByInvBarcode = {}; // "invoice|바코드"
+    // ★ v24 — P/04 가 Firestore 방식이면 시트(1~2분 늦음) 대신 문서의 실제 합계를 씀(아래 필요수량 계산 뒤에 채움). 시트 방식이면 아래 기존 코드 그대로.
+    const _fsPackMode = (typeof ssAnyFs_ === 'function') && ssAnyFs_();
+    const pl = _fsPackMode ? null : packscanSheet_();
+    const plLast = _fsPackMode ? 0 : pl.getLastRow();
     if (plLast >= 2) {
       _vals_(pl, plLast - 1, 10).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
@@ -4532,6 +4662,11 @@ function getSlotProgressCore_(batchId) {
         const key = String(inv) + '|' + normBarcode_(r[4]);
         packReqByInvBarcode[key] = (packReqByInvBarcode[key] || 0) + (Number(r[5]) || 0);
       });
+    }
+    if (_fsPackMode) {
+      const _invs = {};
+      Object.keys(packReqByInvBarcode).forEach(k => { _invs[k.slice(0, k.lastIndexOf('|'))] = true; });
+      Object.assign(packedByInvBarcode, ssPackedForBatch_(batchId, Object.keys(_invs)) || {});
     }
     const packIssueByInvBarcode = {}; // 검수 단계 이슈 반영(같은 바코드 기준으로 재집계)
     if (ilLast >= 2) {
@@ -4687,11 +4822,12 @@ function getUnfulfilledSkuAlerts(batchId) {
     }
     if (!custLines.length) return { ok: true, alerts: [] };
 
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
+    const _fs3Rows = (typeof ss3RowsForBatch_ === 'function') ? ss3RowsForBatch_(batchId) : null; // ★ v26 — Step 03 Firestore 방식이면 문서에서
+    const sl = _fs3Rows ? null : scanlogSheet_();
+    const slLast = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
     const allScanRows = [];
     if (slLast >= 2) {
-      _vals_(sl, slLast - 1, 12).forEach(r => {
+      (_fs3Rows || _vals_(sl, slLast - 1, 12)).forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[9] !== 'pass' || r[10] === 'undone') return;
         allScanRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[8]), qty: Number(r[11]) || 0 });
@@ -4783,16 +4919,30 @@ function getScanState(batchId) {
     //   JSON이 100KB CacheService 한도를 넘는 경우가 실제로 있음(예: 스캔 2만건대 배치).
     //   기존 단일 cache.get()은 그런 배치에서 "캐시가 있는 척 하다가 실은 한 번도
     //   저장된 적 없는" 상태라 매번 전체 시트 재계산 → 팝업/폴링이 느려짐. 청크 캐시로 교체.
+    // ★ v26 — 버전(무효화할 때마다 바뀜). 계산 시작 "전" 값을 결과와 함께 저장 → 계산 중에 스캔이 들어왔으면 그 결과는 다음 조회에서 버려짐
+    let _verNow = '';
+    try {
+      const _vv = _cache.getAll(['ss3Ver_' + batchId, 'ss3VerAll']);
+      // 버전 표시가 캐시에서 사라졌으면(조기 삭제) 새로 만듦 — 빈 값끼리 맞아서 옛 결과가 쓰이는 일이 없게
+      ['ss3Ver_' + batchId, 'ss3VerAll'].forEach(k => { if (!_vv[k]) { _vv[k] = 'n' + Date.now() + Math.random().toString(36).slice(2, 6); try { _cache.put(k, _vv[k], 21600); } catch (eP) { /* 무시 */ } } });
+      _verNow = String(_vv['ss3Ver_' + batchId]) + '/' + String(_vv['ss3VerAll']);
+    } catch (eV) { _verNow = 'x' + Date.now(); }
     const _cached = _cacheGetChunked_(_cache, _cacheKey);
-    if (_cached) return JSON.parse(_cached);
+    if (_cached) {
+      const _o = JSON.parse(_cached);
+      if (_o._v === undefined) return _o;                    // 시트 방식으로 만든 결과(4초 캐시) — 예전 그대로
+      if (_o._v === _verNow) { delete _o._v; return _o; }    // Firestore 방식 결과 — 그 뒤 변경이 없을 때만
+    }
 
-    const sl = scanlogSheet_();
-    const last = sl.getLastRow();
+    // ★ 2026-10-29 v26 — Step 03 Firestore 방식이면 이 배치 문서들에서(쿼리 1번, 실행 내 메모 안 씀), 아니면 예전처럼 ScanLog 전체. 계산은 아래 그대로.
+    const _fs3Rows = (typeof ss3RowsForBatch_ === 'function') ? ss3RowsForBatch_(batchId, true) : null;
+    const sl = _fs3Rows ? null : scanlogSheet_();
+    const last = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
     const doneMap = {};
     const scans = [];
 
     if (last >= 2) {
-      const rows = _vals_(sl, last - 1, 12);
+      const rows = _fs3Rows || _vals_(sl, last - 1, 12);
       rows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[10] === 'undone') return; // 취소된 스캔은 진행률/로그에서 제외
@@ -4859,10 +5009,11 @@ function getScanState(batchId) {
 
     const _result = { ok: true, doneMap: doneMap, scans: scans, issueMap: issueMap, issues: issues };
     try {
-      const _payload = JSON.stringify(_result);
+      const _payload = _fs3Rows ? JSON.stringify(Object.assign({ _v: _verNow }, _result)) : JSON.stringify(_result);
       // ★ 2026-09-25 수정 — 95000자 미만일 때만 저장하던 가드 제거. 청크 캐시는
       //   크기 제한 없이 안전하게 저장되므로, 큰 배치도 이제 정상적으로 캐시가 적용됨.
-      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 4);
+      // ★ v26 — Firestore 방식(03)이면 모든 스캔·취소·이슈 변경이 이 캐시를 즉시 지우므로 60초 보관해도 최신(조회마다 Firestore 를 부르지 않게)
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, _fs3Rows ? 60 : 4);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -5176,14 +5327,30 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     if (!open.length) return { ok: true, batches: [] };
 
     // 배치별 대략적인 진행률(통과 스캔 수량 합계) 계산 — 얼마나 진행됐는지 매니저가 판단할 수 있게
-    const sl = scanlogSheet_();
-    const slLast = sl.getLastRow();
+    // ★ v26 — Step 03 Firestore 방식이면 열린 배치마다 문서에서(배치 수만큼 쿼리), 아니면 예전처럼 ScanLog 전체
+    let _fs3Rows = null;
+    if (typeof ss3IsFs_ === 'function' && ss3IsFs_()) {
+      _fs3Rows = [];
+      open.forEach(b => {
+        if (String(b.batchId) === STANDALONE_BATCH_ID) { // 단독 오더는 시트 방식 그대로(이 배치 행만 시트에서)
+          const _sl0 = scanlogSheet_(); const _l0 = _sl0.getLastRow();
+          if (_l0 >= 2) _vals_(_sl0, _l0 - 1, 12).forEach(r => { if (String(r[0]) === STANDALONE_BATCH_ID) _fs3Rows.push(r); });
+          return;
+        }
+        let _rb = null;
+        try { _rb = ss3RowsForBatch_(b.batchId); } catch (eRb) { _rb = null; } // 한 배치 읽기 실패로 목록 전체가 비지 않게 — 그 배치만 시트 값
+        if (!_rb) { const _sl1 = scanlogSheet_(); const _l1 = _sl1.getLastRow(); _rb = _l1 >= 2 ? _vals_(_sl1, _l1 - 1, 12).filter(r => String(r[0]) === String(b.batchId)) : []; }
+        _rb.forEach(r => _fs3Rows.push(r));
+      });
+    }
+    const sl = _fs3Rows ? null : scanlogSheet_();
+    const slLast = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
     const passByBatch = {};
     // ★ 2026-08-03 신규 — SKU 줄 단위 완료 계산용: "batchId|invoice|barcode|sku" 키로
     //   스캔량 집계(오늘 다른 함수들과 동일한 원칙 — 초과분은 그 줄 자체 몫만 인정)
     const scannedByKey = {};
     if (slLast >= 2) {
-      _vals_(sl, slLast - 1, 12).forEach(r => {
+      (_fs3Rows || _vals_(sl, slLast - 1, 12)).forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         if (r[10] === 'undone') return;
@@ -5669,6 +5836,11 @@ function restoreStandaloneFromArchive() {
       } catch (eS) { out.push(cfg.name + ': 실패 — ' + String(eS && eS.message || eS)); }
     });
     try { bumpVersion_(); } catch (eB) {}
+    // ★ v24 — 복구한 인보이스는 캐시를 비우고, Firestore 방식이면 문서를 시트 기준으로 다시 만들게 표시
+    Object.keys(pick).forEach(inv => {
+      try { clearInvoiceCache_(STANDALONE_BATCH_ID, inv); } catch (eC) { /* 무시 */ }
+      try { if (typeof ssForgetInvoice_ === 'function' && ssAnyFs_()) ssForgetInvoice_(STANDALONE_BATCH_ID, inv); } catch (eS) { /* 무시 */ }
+    });
     Logger.log('✅ 단독 오더 복구 완료 — ' + out.join(' / '));
     return { ok: true, restored: bcRestore.length, summary: out };
   } catch (e) {
@@ -5682,6 +5854,9 @@ function restoreStandaloneFromArchive() {
 // 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
 function archiveOldBatchesDaily() {
   const t0 = Date.now();
+  // ★ 2026-10-29 v24 — 보관 전에 Firestore 에만 있는 기록을 먼저 PackScanLog 에 다 씀(시트 방식이면 할 일 없음 — 즉시 끝남)
+  try { if (typeof ss3FlushAll_ === 'function') ss3FlushAll_(60000); } catch (eS3) { Logger.log('ScanStore(03) 동기화(보관 전) 실패: ' + String(eS3 && eS3.message || eS3)); }
+  try { if (typeof ssFlushAll_ === 'function') ssFlushAll_(60000); } catch (eSs) { Logger.log('ScanStore 동기화(보관 전) 실패: ' + String(eSs && eSs.message || eSs)); }
   try { archiveOldBatches(BATCH_ARCHIVE_DAYS); } catch (e) { Logger.log('❌ archiveOldBatches 예외: ' + String(e && e.message || e)); } // ★ 2026-10-05 — 상단 BATCH_ARCHIVE_DAYS(14일)
   // ★ 2026-10-28 — PackScanLog 는 별도로, 작은 구간씩 이어서 정리(남으면 자동으로 몇 분 뒤 다시 실행됨 — 손댈 것 없음)
   const left = 330000 - (Date.now() - t0) - 40000;
@@ -5804,6 +5979,10 @@ function _pkDeleteCompactTriggers_() {
 
 function _pkCompactRun_(first, budgetMs) {
   const sp = PropertiesService.getScriptProperties();
+  // ★ 2026-10-29 v24 — 정리 전에 Firestore 에만 있는 기록을 먼저 시트에 씀(재실행 회차 포함)
+  const _tFl = Date.now();
+  try { if (typeof ssFlushAll_ === 'function') ssFlushAll_(Math.min(30000, Math.max(0, budgetMs - 60000))); } catch (eSs) { /* 다음 회차/1분 동기화가 처리 */ }
+  budgetMs = Math.max(0, budgetMs - (Date.now() - _tFl)); // 동기화에 쓴 시간만큼 정리 예산을 줄여 6분 한도를 넘지 않게
   _pkDeleteCompactTriggers_();
   if (first) { sp.deleteProperty('pkCompactPos'); sp.setProperty('pkCompactTries', '0'); }
   const tries = (Number(sp.getProperty('pkCompactTries')) || 0) + 1;
@@ -6716,6 +6895,8 @@ function getSalesInvoiceDetail(invoice) {
         if (String(slRange[i][0]).trim() !== invoice) continue;
         if (slRange[i][1] === 'pass' && slRange[i][2] !== 'undone') { hasBatchRecord = true; break; }
       }
+      // ★ v26 — Step 03 Firestore 방식: 시트에 아직 안 옮겨진(1분 이내) 분류 스캔도 확인
+      if (!hasBatchRecord && typeof ss3InvoiceHasPass_ === 'function') hasBatchRecord = ss3InvoiceHasPass_(invoice);
     } catch (e) { /* best-effort */ }
 
     // ★ 2026-08-06 신규(매니저 요청) — 디멘션이 저장됐다는 건 물리적으로 이미
@@ -7839,6 +8020,24 @@ function syncBatchJobsAll(batchId) {
  *   "1-3" → 2026-01-03 (Date) → 다시 "1-3"
  * 앞으로 저장되는 값은 텍스트 서식으로 고정했으므로 변환되지 않음.
  * ------------------------------------------------------------------- */
+// ★ 2026-10-29 v27 — 페이지 범위 "7-12" / "7" → { f: 7, t: 12 } (잘못된 값·빈 값이면 null)
+function pickPagesOf_(range) {
+  const str = fixPageRange_(range);
+  if (!str) return null;
+  const m = String(str).match(/^\s*(\d+)\s*(?:-\s*(\d+))?\s*$/);
+  if (!m) return null;
+  const f = parseInt(m[1], 10);
+  let t = m[2] ? parseInt(m[2], 10) : f;
+  if (!f || f < 1) return null;
+  if (!t || t < f) t = f;
+  return { f: f, t: t };
+}
+function pickPagesOverlap_(a, b) { return !!(a && b && a.f <= b.t && b.f <= a.t); }
+function pickHHmm_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return Utilities.formatDate(v, batchTz_(), 'HH:mm');
+  const m = String(v || '').match(/(\d{2}):(\d{2})(?::\d{2})?\s*$/);
+  return m ? m[1] + ':' + m[2] : '';
+}
 function fixPageRange_(raw) {
   if (raw === null || raw === undefined || raw === '') return '';
   if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
