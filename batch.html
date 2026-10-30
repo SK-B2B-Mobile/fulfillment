@@ -1140,6 +1140,41 @@ nav{position:relative; z-index:1;}
 .as-sum.ok{background:var(--green-bg); color:var(--green);}
 .as-sum.bad{background:var(--red-bg); color:var(--red);}
 .as-warn{background:var(--amber-bg); border:1px solid rgba(245,158,11,0.45); color:var(--amber); border-radius:8px; padding:8px 10px; font-size:11px; line-height:1.5; margin-bottom:12px;}
+
+/* ★ v22 — 피킹 기록(접기/펴기) — 5.5인치(약 360px)에서도 2줄로 깔끔하게 */
+#pickSessionList .pl-head{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; cursor:pointer;}
+#pickSessionList .pl-sum{font-size:13px; color:var(--text-dim); font-family:var(--mono); line-height:1.5;}
+#pickSessionList .pl-sum b{color:var(--text);}
+#pickSessionList .pl-done{color:var(--purple); margin-top:2px;}
+#pickSessionList .pl-btn, #pickSessionListM .pl-btn{flex:0 0 auto; background:var(--surface3); border:1px solid var(--border2); color:var(--text); border-radius:8px; padding:7px 10px; font-size:13px; font-weight:800; cursor:pointer;}
+#pickSessionList .pl-body{margin-top:6px;}
+#pickSessionList .pl-scroll{max-height:220px; overflow-y:auto;}
+#pickSessionList .pl-row, #pickSessionListM .pl-row{display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; padding:6px 0; border-top:1px solid var(--border2); font-family:var(--mono); font-size:13px;}
+#pickSessionList .pl-w, #pickSessionListM .pl-w{min-width:110px; font-weight:800; color:var(--text);}
+#pickSessionList .pl-p, #pickSessionListM .pl-p{min-width:70px; color:var(--cyan);}
+#pickSessionList .pl-t, #pickSessionListM .pl-t{min-width:130px; color:var(--text-dim);}
+@media (max-width:560px){
+  #pickSessionList .pl-w, #pickSessionListM .pl-w{min-width:0; flex:1 1 55%;}
+  #pickSessionList .pl-p, #pickSessionListM .pl-p{min-width:0; flex:0 0 auto;}
+  #pickSessionList .pl-t, #pickSessionListM .pl-t{min-width:0; flex:1 1 55%; font-size:12px;}
+  #pickSessionList .pl-s{flex:0 0 auto; font-size:12px;} #pickSessionListM .pl-s{flex:0 0 auto; font-size:12px;}
+}
+#pickPageHint{font-size:13px; font-weight:700; color:var(--text-dim);}
+
+/* ★ v22 — 5.5인치(360px): 이름 칸과 페이지 칸을 한 줄에 나란히(좌우 균형), 시작/종료 버튼은 그 아래 반반 */
+.pp-short{display:none;}
+@media (max-width:560px){
+  #pickInputRow{display:grid !important; grid-template-columns:1fr 1fr; gap:10px !important; align-items:end;}
+  #pickInputRow .pp-long{display:none;}
+  #pickInputRow .pp-short{display:inline;}
+  #pickWorkerBox{min-width:0;}
+  #pickWorkerSelect{min-width:0 !important; width:100% !important; padding:0 8px !important; font-size:17px !important; height:54px;}
+  #pickPagesBox{min-width:0;}
+  #pickPagesBox > div{gap:4px !important; justify-content:space-between;}
+  #pickPageFrom, #pickPageTo{width:calc(50% - 10px) !important; padding:0 2px !important; font-size:19px !important; height:54px; box-sizing:border-box;}
+  #pickPageCount{display:none !important;}
+  #btnPickStart, #btnPickEnd{min-width:0; padding:14px 6px !important; font-size:16px !important; height:54px;}
+}
 </style>
 </head>
 <body>
@@ -1656,16 +1691,16 @@ document.addEventListener('DOMContentLoaded', function(){
               <span id="pickAreaBatchChip" style="font-family:var(--mono); font-size:15px; font-weight:800; color:#B39CFF;">—</span>
             </div>
 
-            <div style="display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;">
-              <div>
+            <div id="pickInputRow" style="display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;">
+              <div id="pickWorkerBox">
                 <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">
-                  <span id="pickWorkerDot" title="Off/Active" style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-dim2); margin-right:6px; transition:background 0.2s;"></span>Worker name
+                  <span id="pickWorkerDot" title="Off/Active" style="display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--text-dim2); margin-right:6px; transition:background 0.2s;"></span>Worker<span class="pp-long"> name</span>
                 </label>
                 <select id="pickWorkerSelect" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 14px; font-size:17px; font-weight:700; min-width:190px;"></select>
               </div>
 
-              <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Pages assigned <span style="font-weight:500; color:var(--text-dim2);">(one page: first box only)</span></label>
+              <div id="pickPagesBox">
+                <label style="display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:6px;">Pages<span class="pp-long"> assigned</span> <span class="pp-long" style="font-weight:500; color:var(--text-dim2);">(one page: first box only)</span><span id="pickPageCount2" class="pp-short" style="color:var(--purple); font-weight:800;"></span></label>
                 <div style="display:flex; align-items:center; gap:8px;">
                   <input type="number" id="pickPageFrom" placeholder="From" min="1" inputmode="numeric" oninput="updatePickPageCount()" style="background:var(--surface3); border:2px solid var(--border2); border-radius:9px; color:var(--text); padding:12px 12px; font-size:19px; font-weight:800; width:104px; text-align:center; font-family:var(--mono);">
                   <span style="color:var(--text-dim); font-size:18px; font-weight:800;">~</span>
@@ -1680,6 +1715,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
             <span id="pickTimerStat" style="font-size:12px; color:var(--text-dim); font-family:var(--mono);"></span>
             <!-- ★ 2026-10-29 v21 — 같은 페이지 재시작 막기 안내 + 이 배치의 피킹 기록 -->
+            <div id="pickPageHint" style="display:none;">Enter the page numbers you are picking to start.</div>
             <div id="pickPageWarn" style="display:none; padding:10px 14px; border-radius:9px; background:var(--red-bg, rgba(239,68,68,0.12)); border:1px solid var(--red); color:var(--red); font-size:14px; font-weight:800;"></div>
             <div id="pickSessionList" style="display:none; border:1px solid var(--border2); border-radius:10px; padding:10px 14px; background:var(--surface2, rgba(255,255,255,0.02));"></div>
           </div>
@@ -6203,6 +6239,8 @@ function updatePickPageCount(){
   const t = document.getElementById('pickPageTo').value.trim();
   const el = document.getElementById('pickPageCount');
   const n = pickPageCountOf(f, t);
+  const el2 = document.getElementById('pickPageCount2'); // ★ v22 — 좁은 화면에서는 라벨 옆에 장수 표시
+  if (el2) el2.textContent = n ? ' · ' + n + (n === 1 ? ' sheet' : ' sheets') : '';
   if (!n){ el.textContent = '— sheets'; el.style.color = 'var(--text-dim2)'; return; }
   el.textContent = n + (n === 1 ? ' sheet' : ' sheets');
   el.style.color = 'var(--purple)';
@@ -6257,9 +6295,47 @@ function updatePickStartGuard_(){
   if(state.pickTimerRunning){ warn.style.display = 'none'; return; }
   const w = document.getElementById('pickWorkerSelect').value;
   if(w && state.activePickers && state.activePickers[w]){ warn.style.display = 'none'; return; } // 이 작업자가 피킹 중 — 종료 버튼 상태는 onPickWorkerChange 가 관리
+  const hint = document.getElementById('pickPageHint');
+  // ★ v22 — 페이지를 입력해야만 시작 가능(빈 페이지로 시작하면 중복 검사가 안 되므로)
+  if(!pickPagesOfC_(currentPickRange_())){
+    warn.style.display = 'none'; if(hint) hint.style.display = 'block';
+    btn.disabled = true; btn.title = 'Enter pages first';
+    return;
+  }
+  if(hint) hint.style.display = 'none';
   const c = pickConflictFor_(w, currentPickRange_());
   if(c){ warn.textContent = pickConflictText_(c); warn.style.display = 'block'; btn.disabled = true; btn.title = 'Already picked'; }
   else { warn.style.display = 'none'; btn.disabled = false; btn.title = ''; }
+}
+// ★ v22 — 접었다 펴는 피킹 기록(5.5인치 핸드헬드에서도 슬롯 칸을 밀어내지 않게)
+//   접힘(기본): 요약 한 줄 + 지금 피킹 중인 사람만 / 펼침: 전체(최대 높이, 넘으면 스크롤). 상태는 기기마다 기억.
+function pickDoneRanges_(list){
+  const segs = [];
+  list.forEach(s => { if(s.open || s.forced) return; const p = pickPagesOfC_(s.pageRange); if(p) segs.push([p.f, p.t]); });
+  segs.sort((a, b) => a[0] - b[0]);
+  const out = [];
+  segs.forEach(g => { const l = out[out.length - 1]; if(l && g[0] <= l[1] + 1) l[1] = Math.max(l[1], g[1]); else out.push(g.slice()); });
+  return out.map(g => g[0] === g[1] ? String(g[0]) : g[0] + '-' + g[1]).join(', ');
+}
+function pickLogIsOpen_(){ try{ return localStorage.getItem('sk_picklog_open') === '1'; }catch(e){ return false; } }
+function togglePickLog_(){
+  try{ localStorage.setItem('sk_picklog_open', pickLogIsOpen_() ? '0' : '1'); }catch(e){}
+  renderPickSessions_();
+}
+// 2안 — 화면에는 요약 버튼 한 줄만, 누르면 전체 기록을 큰 팝업으로
+function openPickLogModal_(){
+  const list = (state.pickSessions || []).slice();
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+  let ov = document.getElementById('pickLogModal');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'pickLogModal'; ov.style.cssText = 'position:fixed; inset:0; z-index:9997; background:rgba(0,0,0,0.6); display:flex; align-items:flex-end; justify-content:center;'; ov.addEventListener('click', e => { if(e.target === ov) ov.style.display = 'none'; }); document.body.appendChild(ov); }
+  const rows = list.map(s => `<div class="pl-row">
+      <span class="pl-w">${esc(s.worker)}</span><span class="pl-p">${s.pageRange ? 'p.' + esc(s.pageRange) : 'p.-'}</span>
+      <span class="pl-t">${esc(s.start||'')}→${esc(s.end||'…')}${(s.mins===''||s.mins==null)?'':' · '+esc(s.mins)+'m'}</span>
+      <span class="pl-s">${s.open?'<span style="color:var(--green);font-weight:800">● Picking</span>':s.forced?'<span style="color:var(--amber)">⚠ Force-closed</span>':'<span style="color:var(--purple);font-weight:800">✓ Done</span>'}</span></div>`).join('');
+  ov.innerHTML = `<div id="pickSessionListM" style="width:100%; max-width:640px; max-height:80vh; overflow:auto; background:var(--surface,#111827); border-top:2px solid var(--purple); border-radius:16px 16px 0 0; padding:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><b style="font-size:16px;">Picking log · ${esc(state.batchId||'')}</b>
+    <button type="button" class="pl-btn" onclick="document.getElementById('pickLogModal').style.display='none'">✕ Close</button></div>${rows}</div>`;
+  ov.style.display = 'flex';
 }
 function renderPickSessions_(){
   const el = document.getElementById('pickSessionList');
@@ -6267,20 +6343,12 @@ function renderPickSessions_(){
   const list = (state.pickSessions || []).slice();
   if(!list.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
   const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
-  const rows = list.map(s => {
-    const st = s.open ? '<span style="color:var(--green); font-weight:800;">● Picking</span>'
-      : s.forced ? '<span style="color:var(--amber);">⚠ Force-closed</span>'
-      : s.pending ? '<span style="color:var(--amber);">… Saving</span>'
-      : '<span style="color:var(--purple); font-weight:800;">✓ Done</span>';
-    return `<div style="display:flex; gap:12px; align-items:center; padding:5px 0; border-top:1px solid var(--border2); font-family:var(--mono); font-size:13px;">
-      <span style="min-width:110px; font-weight:800; color:var(--text);">${esc(s.worker)}</span>
-      <span style="min-width:80px; color:var(--cyan);">${s.pageRange ? 'p.' + esc(s.pageRange) : '-'}</span>
-      <span style="min-width:110px; color:var(--text-dim);">${esc(s.start || '')} → ${esc(s.end || '…')}</span>
-      <span style="min-width:60px; color:var(--text-dim);">${(s.mins === '' || s.mins == null) ? '' : esc(s.mins) + ' min'}</span>
-      ${st}
-    </div>`;
-  }).join('');
-  el.innerHTML = `<div style="font-size:12px; font-weight:800; color:var(--text-dim); margin-bottom:4px; letter-spacing:0.04em;">PICKING LOG · THIS BATCH</div>${rows}`;
+  const picking = list.filter(s => s.open);
+  const done = pickDoneRanges_(list);
+  el.innerHTML = `<div class="pl-head" onclick="openPickLogModal_()">
+      <div class="pl-sum">📋 <b>Picking log (${list.length})</b>${done ? ` · <span style="color:var(--purple)">✓ ${esc(done)}</span>` : ''}
+      ${picking.length ? `<div style="color:var(--green)">● ${picking.map(s => esc(s.worker) + ' p.' + esc(s.pageRange || '-')).join(', ')}</div>` : ''}</div>
+      <button type="button" class="pl-btn">Open ›</button></div>`;
   el.style.display = 'block';
 }
 function applyPickSessions_(sessions){
@@ -6426,6 +6494,7 @@ document.getElementById('btnPickStart').onclick = async () => {
   const pageRange = pageFrom ? (pageTo ? `${pageFrom}-${pageTo}` : pageFrom) : '';
   if(!worker){ toast('Select a worker', 'error'); return; }
   if(!state.batchId){ toast('Start a batch first', 'error'); return; }
+  if(!pickPagesOfC_(pageRange)){ toast('Enter the page numbers first (From ~ To)', 'error'); updatePickStartGuard_(); return; } // ★ v22
   // ★ v21 — 이미 끝난 페이지 / 다른 사람이 피킹 중인 페이지면 시작하지 않음
   const _c = pickConflictFor_(worker, pageRange);
   if(_c){
@@ -6649,6 +6718,8 @@ document.getElementById('btnPickEnd').onclick = async () => {
   const _tEl = document.getElementById('pickStateTitle');
   if(_tEl) _tEl.textContent = _endSaved ? ('✓ Saved · ' + worker + ' finished picking') : ('… Saving · ' + worker + ' finished picking (auto-retry)');
   toast(_endSaved ? `✓ Saved · Picking complete · ${realMins} min` : 'Picking ended · saving to server…', 'success');
+  // ★ v22 — 끝낸 페이지는 입력칸에서 비움(바로 빨간 '이미 피킹됨' 경고가 뜨지 않게 — 다음 피킹은 새 페이지 입력)
+  try{ document.getElementById('pickPageFrom').value = ''; document.getElementById('pickPageTo').value = ''; updatePickPageCount(); }catch(eC){}
   updatePickStartGuard_();
 
   // ★ 2026-09-01 삭제(중요 버그 예방) — 피킹 종료 시 w.status를 자동으로 'off'로
