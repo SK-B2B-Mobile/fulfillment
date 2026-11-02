@@ -935,6 +935,30 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
 .ship-bottom{flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:6px;}
 .ship-mini{flex-wrap:wrap; row-gap:4px; min-height:20px;}
 .ship-clear-text{min-height:20px; display:flex; align-items:center;}
+
+/* ═════════ ★ 2026-11-02 — PU&TK 팔렛 디멘션 입력 ═════════ */
+.putk-tag{font-family:var(--mono); font-size:10.5px; font-weight:800; padding:3px 7px; border-radius:5px; background:#FCE7F3; color:#BE185D; border:1px solid #F9A8D4; margin-left:10px;}
+.putk-grid2{display:grid; grid-template-columns:240px 1fr; gap:26px; align-items:start;}
+@media (max-width:860px){ .putk-grid2{grid-template-columns:1fr;} }
+.putk-prow{display:grid; grid-template-columns:30px repeat(4,minmax(64px,1fr)) 34px; gap:8px; align-items:end; margin-bottom:8px;}
+.putk-prow .i{font-family:var(--mono); font-weight:800; font-size:13px; color:#475569; padding-bottom:11px;}
+.putk-f span{display:block; font-family:var(--mono); font-size:10.5px; font-weight:700; color:#64748B; margin-bottom:4px;}
+.putk-f input{width:100%; height:40px; border:1.5px solid var(--border2); border-radius:8px; padding:0 10px; font-family:var(--mono); font-weight:700; font-size:15px; background:var(--surface); color:var(--text); outline:none;}
+.putk-f input:focus{border-color:var(--purple);}
+.putk-f input.bad{border-color:#F87171; background:#FEF2F2;}
+.putk-rm{width:34px; height:40px; border:1.5px solid var(--border2); background:var(--surface); border-radius:8px; cursor:pointer; color:#64748B; font-weight:800;}
+.putk-rm:disabled,.putk-add:disabled{opacity:.5; cursor:not-allowed;}
+.putk-add{margin-top:2px; border:1.5px dashed #A78BFA; background:var(--surface); color:var(--purple); font-weight:700; font-size:13px; padding:9px 14px; border-radius:8px; cursor:pointer; font-family:var(--sans);}
+.putk-none{font-size:13px; color:#64748B; padding:6px 0 10px;}
+.putk-tot{margin-top:10px; font-family:var(--mono); font-weight:700; font-size:13px; color:#1E293B;}
+.putk-err{color:var(--red);}
+.putk-vh{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;}
+.putk-sum{font-weight:800; font-size:15px;}
+.putk-vrow{display:grid; grid-template-columns:50px 1fr 140px; padding:9px 12px; background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:6px; font-family:var(--mono); font-weight:700; font-size:14px;}
+.putk-vrow .i{color:#64748B;} .putk-vrow .w{text-align:right;}
+.putk-vrow.box{margin-bottom:10px;}
+.putk-vrow.miss{color:var(--amber); background:var(--amber-bg); border-color:#FCD34D;}
+.putk-note{font-size:12px; color:var(--amber); font-weight:600; margin-top:8px;}
 </style>
 </head>
 <body>
@@ -984,7 +1008,7 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-02-light2</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-02-putk</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Packing Progress</div>
       <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">Built by David Kim · 2026</div>
     </div>
@@ -3585,6 +3609,8 @@ function renderDimsSection(order){
   // ★ 2026-10-03 신규(시뮬레이션 승인) — 'PU & TK'는 전체 Dims 대신 박스
   //   수량만 입력하는 간편 UI를 보여줌(완전히 별도 섹션).
   if (needsBoxQty(order)){
+    // ★ 2026-11-02 — 방금 저장한 박스/팔렛 값이 있으면(낡은 상세 미러가 늦게 와도) 그 값을 우선 보여줌
+    try { const ov = _recentPuTkOverrides[order.invoice]; if (ov && ov.until > Date.now()){ order.puTkBoxQty = ov.box; order.puTkPalletQty = ov.pal; if (ov.dims) order.puTkPalletDims = ov.dims; } } catch(e){}
     return renderBoxQtySection(order);
   }
   if (!needsDims(order)){
@@ -3601,110 +3627,189 @@ function renderDimsSection(order){
 // ★ 2026-10-08 개편(사용자 요청) — 박스 수량 하나만 +/-로 "즉시 저장"하던 방식을, Boxes / Pallets 두 칸 +
 //   Save 버튼 방식으로 변경. 입력 중엔 저장되지 않고(임시 입력값), Save를 눌러야 서버에 저장됨.
 //   저장하면 바깥 목록(2번 탭 DIMS / 1번 탭 Dimensions)에도 "✓ Dims"로 바로 표시됨.
-const _putkDraft = {};   // { invoice: { box: '3', pal: '1' } }  저장 전 임시 입력값(문자열)
+// ★ 2026-11-02 개편(사용자 요청, 시뮬레이션 승인) — Pallets를 '수량'에서 '팔렛 1개당 한 줄(L×W×H in + Weight lbs)'로 변경.
+//   Boxes는 지금처럼 수량만. 팔렛 수 = 줄 수(서버가 PuTkPalletQty에도 같이 저장 → 목록·Sales Confirm 잠금 로직은 그대로).
+//   저장은 saveDimensions(puTkPallets:true) → 서버가 Jobs 행 전용 칸(PuTkPalletDims)에 저장(TK Dimensions 시트와 무관).
+//   예전에 팔렛 '수량'만 저장된 오더는 그 수만큼 "크기 미입력" 줄로 보여주고, Edit 하면 빈 줄로 채워 둠.
+const _putkDraft = {};   // { invoice: { box:'3', pal:[{l:'48',w:'40',h:'50',wt:'600'}] } }  저장 전 임시 입력값(문자열)
 const _putkSaving = {};  // { invoice: true } 저장 요청 진행 중
+const _putkEditing = {}; // { invoice: true } 편집 화면을 보는 중
+const _putkTried = {};   // { invoice: true } Save를 한 번 눌렀음(빈 칸 빨갛게 표시)
 let _recentPuTkOverrides = {}; // { invoice: { box, pal, until } } 방금 저장한 값 우선 적용(낡은 목록 갱신이 덮어쓰지 못하게)
-function _putkSaved_(order){ return { box: Math.max(0, Math.round(Number(order && order.puTkBoxQty) || 0)), pal: Math.max(0, Math.round(Number(order && order.puTkPalletQty) || 0)) }; }
-function _putkCur_(order){
-  const sv = _putkSaved_(order), d = _putkDraft[order.invoice];
-  const num = (v, fb) => { if (v === undefined) return fb; const n = Math.round(Number(v)); return (isFinite(n) && n >= 0) ? n : fb; };
-  return d ? { box: num(d.box, sv.box), pal: num(d.pal, sv.pal), boxRaw: (d.box === undefined ? String(sv.box) : d.box), palRaw: (d.pal === undefined ? String(sv.pal) : d.pal) } : { box: sv.box, pal: sv.pal, boxRaw: String(sv.box), palRaw: String(sv.pal) };
+const _PUTK_K = ['l','w','h','wt'];
+function _putkSavedDims_(order){
+  const arr = Array.isArray(order && order.puTkPalletDims) ? order.puTkPalletDims : [];
+  return arr.map(d => ({ l: Number(d.l)||0, w: Number(d.w)||0, h: Number(d.h)||0, wt: Number(d.wt)||0 }));
 }
+function _putkSaved_(order){
+  const dims = _putkSavedDims_(order);
+  const palQty = Math.max(0, Math.round(Number(order && order.puTkPalletQty) || 0));
+  return { box: Math.max(0, Math.round(Number(order && order.puTkBoxQty) || 0)), pal: Math.max(palQty, dims.length), dims: dims, legacy: palQty > dims.length };
+}
+function _putkFmt_(v){ const n = Number(v); return (isFinite(n) && n > 0) ? String(n) : ''; }
+function _putkStartDraft_(order){
+  const sv = _putkSaved_(order);
+  const rows = sv.dims.map(d => ({ l:_putkFmt_(d.l), w:_putkFmt_(d.w), h:_putkFmt_(d.h), wt:_putkFmt_(d.wt) }));
+  for (let i = rows.length; i < sv.pal; i++) rows.push({ l:'', w:'', h:'', wt:'' }); // 예전 '수량만' 저장분 → 빈 줄
+  return { box: String(sv.box), pal: rows };
+}
+function _putkDraftOf_(order){ return _putkDraft[order.invoice] || (_putkDraft[order.invoice] = _putkStartDraft_(order)); }
+function _putkNum_(v){ const t = String(v == null ? '' : v).trim(); if (t === '') return NaN; return Number(t); }
+function _putkCellBad_(v){ const n = _putkNum_(v); return !(isFinite(n) && n > 0 && n <= 9999); }
+function _putkBoxBad_(d){ const n = _putkNum_(d.box); return !(isFinite(n) && n >= 0 && Math.round(n) === n && n <= 9999); }
+function _putkRowsBad_(d){ return d.pal.some(r => _PUTK_K.some(k => _putkCellBad_(r[k]))); }
 function _putkDirty_(order){
-  if (!order || !_putkDraft[order.invoice]) return false;
-  const sv = _putkSaved_(order), c = _putkCur_(order);
-  return c.box !== sv.box || c.pal !== sv.pal;
-}
-function _putkInvalid_(order){
   const d = _putkDraft[order.invoice]; if (!d) return false;
-  const bad = v => { if (v === undefined) return false; const t = String(v).trim(); if (t === '') return true; const n = Number(t); return !isFinite(n) || n < 0 || Math.round(n) !== n || n > 9999; };
-  return bad(d.box) || bad(d.pal);
+  const sv = _putkSaved_(order);
+  if ((Number(d.box) || 0) !== sv.box || d.pal.length !== sv.pal) return true;
+  if (sv.legacy) return d.pal.some(r => _PUTK_K.some(k => String(r[k] || '').trim() !== '')); // 예전 수량만 → 크기를 하나라도 넣었으면 저장할 것이 있음
+  return d.pal.some((r, i) => _PUTK_K.some(k => _putkNum_(r[k]) !== sv.dims[i][k]));
 }
+function _putkWt_(rows){ return rows.reduce((s, r) => s + (isFinite(_putkNum_(r.wt)) ? _putkNum_(r.wt) : 0), 0); }
+function _putkLbs_(n){ return (Math.round(n * 10) / 10).toLocaleString('en-US') + ' lbs'; }
 function _putkStateHtml_(order){
-  const sv = _putkSaved_(order), entered = sv.box > 0 || sv.pal > 0;
-  if (_putkInvalid_(order)) return '<span class="putk-warn">Enter whole numbers (0 or more)</span>';
+  const d = _putkDraftOf_(order), sv = _putkSaved_(order);
+  const empty = (Number(d.box) || 0) === 0 && !d.pal.length;
+  if (_putkBoxBad_(d)) return '<span class="putk-err">Boxes must be a whole number (0 or more)</span>';
+  if (_putkTried[order.invoice] && _putkRowsBad_(d)) return '<span class="putk-err">Fill in L, W, H and Weight for every pallet (or remove the empty line).</span>';
+  if (empty && (sv.box > 0 || sv.pal > 0)) return '<span class="putk-warn">Saving will clear this entry</span>';
+  if (empty) return '<span class="putk-dim">Not entered yet</span>';
   if (_putkDirty_(order)) return '<span class="putk-warn">Unsaved changes</span>';
-  return entered ? '<span class="putk-ok">✓ Saved</span>' : '<span class="putk-dim">Not entered yet</span>';
+  return '<span class="putk-ok">✓ Saved</span>';
 }
+function _putkSummary2_(box, pal){ return box + ' Box' + (box===1?'':'es') + ' · ' + pal + ' Pallet' + (pal===1?'':'s'); }
 function renderBoxQtySection(order){
-  const c = _putkCur_(order);
   const inv = order.invoice;
-  const saving = !!_putkSaving[inv];
-  const dirty = _putkDirty_(order), invalid = _putkInvalid_(order);
-  const meta = order.puTkBoxQtyBy
-    ? `Entered by ${order.puTkBoxQtyBy}${order.puTkBoxQtyAt ? ' · ' + order.puTkBoxQtyAt : ''}`
-    : '';
-  const fld = (key, label, val, raw) => `<div class="putk-field">
-      <div class="lbl">${label}</div>
-      <div class="putk-ctl">
-        <button class="boxqty-btn" type="button" data-putk-minus="${key}" onclick="putkStep('${inv}','${key}',-1)" ${(saving||val<=0)?'disabled':''}>−</button>
-        <input class="putk-input" id="putk-${key}" type="text" inputmode="numeric" autocomplete="off" value="${String(raw).replace(/"/g,'&quot;')}" ${saving?'disabled':''}
-          oninput="putkType('${inv}','${key}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();putkSave('${inv}');}" onfocus="this.select()">
-        <button class="boxqty-btn" type="button" onclick="putkStep('${inv}','${key}',1)" ${saving?'disabled':''}>+</button>
-      </div>
+  const sv = _putkSaved_(order);
+  const entered = sv.box > 0 || sv.pal > 0;
+  const editing = !!_putkEditing[inv] || !entered;
+  const meta = order.puTkBoxQtyBy ? `Entered by ${_escH_(order.puTkBoxQtyBy)}${order.puTkBoxQtyAt ? ' · ' + _escH_(order.puTkBoxQtyAt) : ''}` : '';
+  const head = `<div class="section-title-row"><span class="section-title">Shipping Dimensions</span><span class="putk-tag">PU&amp;TK</span></div>`;
+  if (!editing){
+    const wt = sv.dims.reduce((s, d) => s + d.wt, 0);
+    const rows = [];
+    for (let i = 0; i < sv.pal; i++){
+      const d = sv.dims[i];
+      rows.push(d ? `<div class="putk-vrow"><span class="i">#${i+1}</span><span>${d.l}" × ${d.w}" × ${d.h}"</span><span class="w">${_putkLbs_(d.wt)}</span></div>`
+                  : `<div class="putk-vrow miss"><span class="i">#${i+1}</span><span>Size not entered</span><span class="w">—</span></div>`);
+    }
+    return `${head}<div class="dims-panel" id="boxqty-panel">
+      <div class="putk-vh"><span class="putk-sum">${_putkSummary2_(sv.box, sv.pal)}${sv.dims.length ? ' · Total ' + _putkLbs_(wt) : ''}</span>
+        <button class="edit-pencil-btn" type="button" onclick="putkEdit('${inv}')">✏️ Edit</button></div>
+      <div class="putk-vrow box"><span class="i">📦</span><span>Boxes</span><span class="w">${sv.box}</span></div>
+      ${rows.join('') || '<div class="putk-none">No pallets — boxes only.</div>'}
+      ${sv.legacy ? '<div class="putk-note">⚠ Pallet sizes were not recorded for this order (count only). Click Edit to add L × W × H and weight.</div>' : ''}
+      ${meta ? `<div class="boxqty-meta">${meta}</div>` : ''}
     </div>`;
-  return `<div class="section-title-row"><span class="section-title">Shipping Dimensions</span></div>
-    <div class="dims-panel" id="boxqty-panel">
-      <div class="putk-grid">
-        ${fld('box', 'Boxes', c.box, c.boxRaw)}
-        ${fld('pal', 'Pallets', c.pal, c.palRaw)}
+  }
+  const d = _putkDraftOf_(order);
+  const saving = !!_putkSaving[inv], tried = !!_putkTried[inv];
+  const dis = saving ? 'disabled' : '';
+  const box = Number(d.box) || 0;
+  const prow = (r, i) => {
+    const f = (k, lab) => `<label class="putk-f"><span>${lab}</span><input id="putk-p${i}-${k}" type="text" inputmode="decimal" autocomplete="off" value="${_escH_(r[k])}" class="${tried && _putkCellBad_(r[k]) ? 'bad' : ''}" ${dis}
+        oninput="putkPalType('${inv}',${i},'${k}',this)" onkeydown="if(event.key==='Enter'){event.preventDefault();putkSave('${inv}');}" onfocus="this.select()"></label>`;
+    return `<div class="putk-prow"><span class="i">#${i+1}</span>${f('l','L (in)')}${f('w','W (in)')}${f('h','H (in)')}${f('wt','Weight (lbs)')}
+      <button class="putk-rm" type="button" title="Remove this pallet" onclick="putkPalRemove('${inv}',${i})" ${dis}>✕</button></div>`;
+  };
+  const empty = box === 0 && !d.pal.length;
+  const canSave = !saving && _putkDirty_(order) && !_putkBoxBad_(d) && !(empty && !entered);
+  return `${head}<div class="dims-panel" id="boxqty-panel">
+    <div class="putk-grid2">
+      <div class="putk-field"><div class="lbl">Boxes</div>
+        <div class="putk-ctl">
+          <button class="boxqty-btn" type="button" data-putk-minus="box" onclick="putkStep('${inv}',-1)" ${(saving||box<=0)?'disabled':''}>−</button>
+          <input class="putk-input" id="putk-box" type="text" inputmode="numeric" autocomplete="off" value="${_escH_(d.box)}" ${dis}
+            oninput="putkType('${inv}',this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();putkSave('${inv}');}" onfocus="this.select()">
+          <button class="boxqty-btn" type="button" onclick="putkStep('${inv}',1)" ${dis}>+</button>
+        </div></div>
+      <div class="putk-field"><div class="lbl">Pallets — one line per pallet</div>
+        ${d.pal.map(prow).join('') || '<div class="putk-none">No pallets yet. Leave empty if this order ships in boxes only.</div>'}
+        <button class="putk-add" type="button" onclick="putkPalAdd('${inv}')" ${dis}>+ Add Pallet</button>
+        <div class="putk-tot" id="putk-tot">${d.pal.length ? d.pal.length + ' pallet' + (d.pal.length===1?'':'s') + ' · Total ' + _putkLbs_(_putkWt_(d.pal)) : ''}</div>
       </div>
-      <div class="dims-save-row putk-actions">
-        <button class="dims-save-btn" id="putk-save" type="button" onclick="putkSave('${inv}')" ${(saving||!dirty||invalid)?'disabled':''}>${saving ? 'Saving…' : 'Save'}</button>
-        <span class="putk-state" id="putk-state">${_putkStateHtml_(order)}</span>
-      </div>
-      ${meta ? `<div class="boxqty-meta" id="putk-meta">${meta}</div>` : ''}
-    </div>`;
+    </div>
+    <div class="dims-save-row putk-actions">
+      <button class="dims-save-btn" id="putk-save" type="button" onclick="putkSave('${inv}')" ${canSave?'':'disabled'}>${saving ? 'Saving…' : 'Save'}</button>
+      ${entered ? `<button class="dims-cancel-btn" type="button" onclick="putkCancel('${inv}')" ${dis}>Cancel</button>` : ''}
+      <span class="putk-state" id="putk-state">${_putkStateHtml_(order)}</span>
+    </div>
+    ${meta ? `<div class="boxqty-meta" id="putk-meta">${meta}</div>` : ''}
+  </div>`;
 }
 function _putkRepaint_(invoice){
   if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return;
   const panel = document.getElementById('boxqty-panel');
   if (!panel) return;
-  // 패널을 다시 그리되, 입력 중이던 칸의 포커스·커서 위치는 유지
   const ae = document.activeElement, aid = ae && ae.id, pos = ae && ae.selectionStart;
   const tmp = document.createElement('div'); tmp.innerHTML = renderBoxQtySection(CURRENT_ORDER);
   const np = tmp.querySelector('#boxqty-panel'); if (np) panel.replaceWith(np);
-  if (aid && /^putk-(box|pal)$/.test(aid)){ const el = document.getElementById(aid); if (el && !el.disabled){ el.focus(); try { el.setSelectionRange(pos, pos); } catch(e){} } }
+  if (aid && /^putk-/.test(aid)){ const el = document.getElementById(aid); if (el && !el.disabled){ el.focus(); try { el.setSelectionRange(pos, pos); } catch(e){} } }
 }
 function _putkUpdateState_(invoice){
-  // 입력 중에는 패널을 다시 그리지 않고(커서 튐 방지) Save 버튼/안내 문구/− 버튼만 갱신
+  // 입력 중에는 패널을 다시 그리지 않고(커서 튐 방지) Save 버튼/안내 문구/합계/− 버튼만 갱신
   if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice) return;
-  const btn = document.getElementById('putk-save'), st = document.getElementById('putk-state');
-  const dirty = _putkDirty_(CURRENT_ORDER), invalid = _putkInvalid_(CURRENT_ORDER), saving = !!_putkSaving[invoice];
-  if (btn){ btn.disabled = saving || !dirty || invalid; btn.textContent = saving ? 'Saving…' : 'Save'; }
-  if (st) st.innerHTML = _putkStateHtml_(CURRENT_ORDER);
-  const c = _putkCur_(CURRENT_ORDER);
-  ['box','pal'].forEach(k => { const m = document.querySelector('[data-putk-minus="' + k + '"]'); if (m) m.disabled = saving || c[k] <= 0; });
+  const o = CURRENT_ORDER, d = _putkDraftOf_(o), sv = _putkSaved_(o);
+  const saving = !!_putkSaving[invoice], entered = sv.box > 0 || sv.pal > 0;
+  const empty = (Number(d.box) || 0) === 0 && !d.pal.length;
+  const btn = document.getElementById('putk-save'), st = document.getElementById('putk-state'), tot = document.getElementById('putk-tot');
+  if (btn){ btn.disabled = saving || !_putkDirty_(o) || _putkBoxBad_(d) || (empty && !entered); btn.textContent = saving ? 'Saving…' : 'Save'; }
+  if (st) st.innerHTML = _putkStateHtml_(o);
+  if (tot) tot.textContent = d.pal.length ? d.pal.length + ' pallet' + (d.pal.length===1?'':'s') + ' · Total ' + _putkLbs_(_putkWt_(d.pal)) : '';
+  const m = document.querySelector('[data-putk-minus="box"]'); if (m) m.disabled = saving || (Number(d.box) || 0) <= 0;
+  if (_putkTried[invoice]) d.pal.forEach((r, i) => _PUTK_K.forEach(k => { const el = document.getElementById('putk-p' + i + '-' + k); if (el) el.classList.toggle('bad', _putkCellBad_(r[k])); }));
 }
-function putkType(invoice, key, raw){
-  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice || _putkSaving[invoice]) return;
-  const d = _putkDraft[invoice] || (_putkDraft[invoice] = {});
-  const sv = _putkSaved_(CURRENT_ORDER);
-  if (d.box === undefined) d.box = String(sv.box);
-  if (d.pal === undefined) d.pal = String(sv.pal);
-  d[key] = String(raw).replace(/[^\d]/g, '').slice(0, 4);   // 숫자만, 최대 4자리
-  const el = document.getElementById('putk-' + key); if (el && el.value !== d[key]) el.value = d[key];
+function _putkOk_(invoice){ return CURRENT_ORDER && CURRENT_ORDER.invoice === invoice && !_putkSaving[invoice]; }
+function putkEdit(invoice){ if (!_putkOk_(invoice)) return; _putkEditing[invoice] = true; delete _putkTried[invoice]; _putkDraft[invoice] = _putkStartDraft_(CURRENT_ORDER); _putkRepaint_(invoice); }
+function putkCancel(invoice){ if (!_putkOk_(invoice)) return; delete _putkEditing[invoice]; delete _putkDraft[invoice]; delete _putkTried[invoice]; _putkRepaint_(invoice); }
+function putkType(invoice, raw){
+  if (!_putkOk_(invoice)) return;
+  const d = _putkDraftOf_(CURRENT_ORDER);
+  d.box = String(raw).replace(/[^\d]/g, '').slice(0, 4);   // 숫자만, 최대 4자리
+  const el = document.getElementById('putk-box'); if (el && el.value !== d.box) el.value = d.box;
   _putkUpdateState_(invoice);
 }
-function putkStep(invoice, key, delta){
-  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice || _putkSaving[invoice]) return;
-  const c = _putkCur_(CURRENT_ORDER);
-  const next = Math.min(9999, Math.max(0, c[key] + delta));
-  const d = _putkDraft[invoice] || (_putkDraft[invoice] = {});
-  const sv = _putkSaved_(CURRENT_ORDER);
-  if (d.box === undefined) d.box = String(c.box);
-  if (d.pal === undefined) d.pal = String(c.pal);
-  d[key] = String(next);
+function putkStep(invoice, delta){
+  if (!_putkOk_(invoice)) return;
+  const d = _putkDraftOf_(CURRENT_ORDER);
+  d.box = String(Math.min(9999, Math.max(0, (Number(d.box) || 0) + delta)));
+  _putkRepaint_(invoice);
+}
+function putkPalType(invoice, idx, key, el){
+  if (!_putkOk_(invoice)) return;
+  const d = _putkDraftOf_(CURRENT_ORDER); if (!d.pal[idx]) return;
+  let v = String(el.value).replace(/[^\d.]/g, '');
+  const dot = v.indexOf('.'); if (dot >= 0) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, 1); // 소수 첫째 자리까지
+  v = v.slice(0, 7);
+  d.pal[idx][key] = v; if (el.value !== v) el.value = v;
+  _putkUpdateState_(invoice);
+}
+function putkPalAdd(invoice){
+  if (!_putkOk_(invoice)) return;
+  const d = _putkDraftOf_(CURRENT_ORDER);
+  if (d.pal.length >= 60){ alert('Up to 60 pallets per order.'); return; }
+  d.pal.push({ l:'', w:'', h:'', wt:'' });
+  _putkRepaint_(invoice);
+  const el = document.getElementById('putk-p' + (d.pal.length - 1) + '-l'); if (el) el.focus();
+}
+function putkPalRemove(invoice, idx){
+  if (!_putkOk_(invoice)) return;
+  const d = _putkDraftOf_(CURRENT_ORDER);
+  d.pal.splice(idx, 1);
   _putkRepaint_(invoice);
 }
 async function putkSave(invoice){
-  if (!CURRENT_ORDER || CURRENT_ORDER.invoice !== invoice || _putkSaving[invoice]) return;
-  if (!_putkDirty_(CURRENT_ORDER) || _putkInvalid_(CURRENT_ORDER)) return;
-  const c = _putkCur_(CURRENT_ORDER);
+  if (!_putkOk_(invoice)) return;
+  const o = CURRENT_ORDER, d = _putkDraftOf_(o), sv = _putkSaved_(o);
+  const empty = (Number(d.box) || 0) === 0 && !d.pal.length;
+  if (_putkBoxBad_(d) || !_putkDirty_(o) || (empty && !(sv.box > 0 || sv.pal > 0))) return;
+  if (_putkRowsBad_(d)){ _putkTried[invoice] = true; _putkRepaint_(invoice); return; }
+  const box = Number(d.box) || 0;
+  const pallets = d.pal.map(r => ({ l: _putkNum_(r.l), w: _putkNum_(r.w), h: _putkNum_(r.h), wt: _putkNum_(r.wt) }));
   _putkSaving[invoice] = true; _putkRepaint_(invoice);
   let res;
   try {
-    res = await _serial_(invoice, () => gasPostSmart_('setPuTkBoxQty', { invoice: invoice, qty: c.box, pallets: c.pal, by: (authGetName() || 'Sales (Order Detail Lookup)') }));
+    res = await _serial_(invoice, () => gasPostSmart_('saveDimensions', { invoice: invoice, puTkPallets: true, qty: box, pallets: pallets, by: (authGetName() || 'Sales (Order Detail Lookup)') }));
   } catch (e) {
     res = { ok:false, error: String(e && e.message || e) };
   }
@@ -3714,29 +3819,30 @@ async function putkSave(invoice){
     alert('Save failed: ' + (res && res.error || 'Unknown error') + '\nYour numbers are still on screen — please try again.');
     return;
   }
-  const box = (res.qty !== undefined) ? Number(res.qty) : c.box;
-  const pal = (res.pallets !== undefined) ? Number(res.pallets) : c.pal;
-  delete _putkDraft[invoice];
-  _applyPuTkToJobs_(invoice, box, pal);
-  _recentPuTkOverrides[invoice] = { box: box, pal: pal, until: Date.now() + 120000 };
+  const outBox = (res.qty !== undefined) ? Number(res.qty) : box;
+  const outDims = Array.isArray(res.palletDims) ? res.palletDims : pallets;
+  const outPal = (res.pallets !== undefined) ? Number(res.pallets) : outDims.length;
+  delete _putkDraft[invoice]; delete _putkEditing[invoice]; delete _putkTried[invoice];
+  _applyPuTkToJobs_(invoice, outBox, outPal, outDims);
+  _recentPuTkOverrides[invoice] = { box: outBox, pal: outPal, dims: outDims, until: Date.now() + 120000 };
   if (CURRENT_ORDER && CURRENT_ORDER.invoice === invoice){
-    CURRENT_ORDER.puTkBoxQty = box; CURRENT_ORDER.puTkPalletQty = pal;
+    CURRENT_ORDER.puTkBoxQty = outBox; CURRENT_ORDER.puTkPalletQty = outPal; CURRENT_ORDER.puTkPalletDims = outDims;
     CURRENT_ORDER.puTkBoxQtyAt = res.qtyAt; CURRENT_ORDER.puTkBoxQtyBy = res.qtyBy;
-    _putkRepaint_(invoice);
+    try { renderDetail(CURRENT_ORDER); } catch(e){ _putkRepaint_(invoice); } // Sales Confirm 잠금 표시도 같이 갱신
   }
   try { renderToday(); } catch(e){}
   try { renderSheet(); } catch(e){}
   _syncInvoiceMirror_(invoice);
 }
-function _applyPuTkToJobs_(invoice, box, pal){
-  [TODAY_JOBS, SHEET_JOBS].forEach(arr => (arr || []).forEach(j => { if (j.invoice === invoice){ j.puTkBoxQty = box; j.puTkPalletQty = pal; } }));
+function _applyPuTkToJobs_(invoice, box, pal, dims){
+  [TODAY_JOBS, SHEET_JOBS].forEach(arr => (arr || []).forEach(j => { if (j.invoice === invoice){ j.puTkBoxQty = box; j.puTkPalletQty = pal; if (dims) j.puTkPalletDims = dims; } }));
 }
 function _applyPuTkOverrides_(arr, now){
   Object.keys(_recentPuTkOverrides).forEach(inv => {
     const ov = _recentPuTkOverrides[inv];
     if (ov.until < now) { delete _recentPuTkOverrides[inv]; return; }
     const j = (arr || []).find(x => x.invoice === inv);
-    if (j){ j.puTkBoxQty = ov.box; j.puTkPalletQty = ov.pal; }
+    if (j){ j.puTkBoxQty = ov.box; j.puTkPalletQty = ov.pal; if (ov.dims) j.puTkPalletDims = ov.dims; }
   });
 }
 // PU & TK의 "치수 입력됨" 기준: 박스 또는 팔레트가 1 이상
@@ -4467,7 +4573,15 @@ function shippedCellHtml_(j){
   return '<span class="ship-cell"><span class="plain-tag ready">● Ready to ship</span><span class="ship-cell-time ready">Sales confirmed</span></span>';
 }
 
+// ★ 2026-11-02 — 실시간 갱신(다른 기기 저장 등)으로 팝업이 다시 그려져도, PU&TK 입력 칸에서 치던 커서는 그대로 유지
 function renderDetail(res){
+  const ae = document.activeElement;
+  const aid = (ae && ae.id && /^putk-/.test(ae.id)) ? ae.id : '';
+  let pos = null; try { pos = aid ? ae.selectionStart : null; } catch(e){}
+  _renderDetailCore_(res);
+  if (aid){ const el = document.getElementById(aid); if (el && !el.disabled){ el.focus(); try { if (pos !== null) el.setSelectionRange(pos, pos); } catch(e){} } }
+}
+function _renderDetailCore_(res){
   const card = document.getElementById('detail-card');
   card.classList.add('show');
   const items = res.items || [];
@@ -4667,7 +4781,7 @@ function renderDetail(res){
 // Today" 목록만 다시 깔끔하게 보이는 상태로 되돌림.
 function closeDetailCard(){
   if (CURRENT_ORDER && typeof _putkDirty_ === 'function' && _putkDirty_(CURRENT_ORDER) && !confirm('You have unsaved Box / Pallet numbers.\nClose without saving?')) return;
-  if (CURRENT_ORDER && CURRENT_ORDER.invoice) delete _putkDraft[CURRENT_ORDER.invoice];
+  if (CURRENT_ORDER && CURRENT_ORDER.invoice){ delete _putkDraft[CURRENT_ORDER.invoice]; delete _putkEditing[CURRENT_ORDER.invoice]; delete _putkTried[CURRENT_ORDER.invoice]; }
   // ★ 2026-08-06 — 팝업만 닫음. 검색어와 목록 위치는 그대로 두어서,
   //   여러 건을 연속으로 처리할 때 매번 다시 찾지 않아도 되게 함.
   _stopInvoiceDetailSub(); // ★ 세션A 신규 — 모달을 닫으면 실시간 구독도 반드시 해제(누수 방지)
