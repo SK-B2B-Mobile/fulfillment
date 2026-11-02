@@ -917,6 +917,24 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
 #opsShipBar{background:#2563EB;}
 .ops-seg.done{border-left-color:#16A34A; background:var(--green-bg);}
 .ops-seg.done .ops-n{color:var(--green);}
+
+/* ═════════ ★ 2026-11-02 (2차) — 회색 데이터 글자 진하게 + TK 위 칸 색 띠(3안) ═════════ */
+.cell-mono-dim,.today-time,.ship2-age{color:#1E293B; font-weight:600;}
+.ship2-age.overdue{color:var(--red); font-weight:800;}
+.ship2-tile .lbl{color:#1E293B; font-weight:700; font-size:12.5px;}
+.ship2-tile{border-left:5px solid #64748B;}
+.ship2-tile .num{font-size:26px;}
+.ship2-tile.awaiting,.ship2-tile.pending{border-left-color:#F59E0B; background:linear-gradient(90deg,#FFFBEB 0,#FFFFFF 65%);}
+.ship2-tile.confirmed{border-left-color:#2563EB; background:linear-gradient(90deg,#EFF6FF 0,#FFFFFF 65%);}
+.ship2-tile.late{border-left-color:#DC2626; background:linear-gradient(90deg,#FEF2F2 0,#FFFFFF 65%);}
+.ship2-tile.shipped{border-left-color:#16A34A; background:linear-gradient(90deg,#F0FDF4 0,#FFFFFF 65%);}
+/* ═════════ ★ 2026-11-02 (2차) — Sales Sheet Preview 위 5칸 줄 맞춤 ═════════
+   예전: 칸 안 내용을 세로 '가운데' 정렬 + 아래 줄이 길면 줄바꿈 → 칸마다 이름·날짜·숫자 높이가 달랐음.
+   지금: 5칸 모두 같은 3줄 — ① 이름 + 날짜 ② 건수 ③ TK·UPS·PU + 배지 — 위에서부터 같은 높이. */
+.ship-card{justify-content:flex-start; gap:6px;}
+.ship-bottom{flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:6px;}
+.ship-mini{flex-wrap:wrap; row-gap:4px; min-height:20px;}
+.ship-clear-text{min-height:20px; display:flex; align-items:center;}
 </style>
 </head>
 <body>
@@ -966,7 +984,7 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-02-light</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-02-light2</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Packing Progress</div>
       <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">Built by David Kim · 2026</div>
     </div>
