@@ -1029,7 +1029,9 @@ function _findBatchRow_(batchId) {
  * 입력: { sumItems:[{sku,name,barcode,req_qty,rack}],
  *         customers:[{ meta:{invoice_no,customer,ship_date,ship_via}, items:[...] }] }
  * ============================================================ */
-function createBatch(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 createBatch_bsCore_
+function createBatch(data) { return _bsWA_(['bi', 'bc'], function () { return createBatch_bsCore_(data); }); }
+function createBatch_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   let result;
@@ -1150,7 +1152,9 @@ const BATCH_ARCHIVE_DAYS = 14;
 
 /* addStandaloneOrder — 단독 오더 PDF 파싱 결과(고객사명/상품목록)를 저장.
  * 이미 같은 인보이스로 등록된 게 있으면(재업로드) 깨끗이 지우고 새로 씀. */
-function addStandaloneOrder(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 addStandaloneOrder_bsCore_
+function addStandaloneOrder(data) { return _bsWA_(['bi', 'bc'], function () { return addStandaloneOrder_bsCore_(data); }, [STANDALONE_BATCH_ID]); }
+function addStandaloneOrder_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   let result;
@@ -1266,7 +1270,9 @@ function getStandaloneOrders() {
 }
 
 /* removeStandaloneOrder — 잘못 올린 단독 오더 정리(등록 취소). */
-function removeStandaloneOrder(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 removeStandaloneOrder_bsCore_
+function removeStandaloneOrder(data) { return _bsWA_(['bi', 'bc'], function () { return removeStandaloneOrder_bsCore_(data); }, [STANDALONE_BATCH_ID]); }
+function removeStandaloneOrder_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
@@ -1306,7 +1312,9 @@ function removeStandaloneOrder(data) {
  * 읽어서 요청받은 인보이스들을 한 번의 락 안에서 전부 처리 — 선택 건수가
  * 많아져도 서버 부담이 거의 늘지 않음.
  * 입력: { invoices: [invoice, ...] } */
-function removeStandaloneOrdersBulk(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 removeStandaloneOrdersBulk_bsCore_
+function removeStandaloneOrdersBulk(data) { return _bsWA_(['bi', 'bc'], function () { return removeStandaloneOrdersBulk_bsCore_(data); }, [STANDALONE_BATCH_ID]); }
+function removeStandaloneOrdersBulk_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
   try {
@@ -1390,14 +1398,14 @@ function getBatch(batchId) {
       totalSku: bRow[3], totalQty: bRow[4], createdAt: bRow[5], completedAt: bRow[6]
     };
 
-    const bc = bcustSheetSafe_();
-    const bcLast = bc.getLastRow();
+    const _bs_bcRows = _bsR_('bc', resolvedId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const bcLast = _bs_bcRows.length + 1;
     let customers = [];
     if (bcLast >= 2) {
       // ★ 2026-08-07 수정 — 11개 컬럼만 읽어서 12번째인 TakenOut(파란)이
       //   배열에 아예 안 들어왔음. 그래서 batch.html은 항상 false를 받았고,
       //   TV 현황판에서 파란으로 바꿔도 계속 핵크로 보였음 — 색 불일치의 진짜 원인.
-      const rows = _vals_(bc, bcLast - 1, 13);
+      const rows = _bs_bcRows;
       customers = rows.filter(r => String(r[0]) === String(resolvedId)).map(r => ({
         invoice: r[1], customer: r[2], shipDate: r[3], shipVia: r[4],
         totalQty: r[5], totalSku: r[6], slotNum: r[7], slotSize: r[8], cleared: r[9] || '',
@@ -1409,11 +1417,11 @@ function getBatch(batchId) {
       }));
     }
 
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
+    const _bs_biRows = _bsR_('bi', resolvedId, 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const biLast = _bs_biRows.length + 1;
     let sumItems = [], custItemsMap = {};
     if (biLast >= 2) {
-      const rows = _vals_(bi, biLast - 1, 7);
+      const rows = _bs_biRows;
       rows.forEach(r => {
         if (String(r[0]) !== String(resolvedId)) return;
         const item = { sku:r[2], name:r[3], barcode:r[4], req_qty:r[5], rack:r[6] };
@@ -1440,7 +1448,9 @@ function getBatch(batchId) {
 /* ===================== ③ assignSlots =====================
  * 입력: { batchId, assignments:[{invoice, slotNum, slotSize}] }
  * ============================================================ */
-function assignSlots(data) {
+// ★ v30 — 배치 사본 표시는 잠금이 풀린 뒤 한 번(원래 내용은 assignSlots_bsCore_)
+function assignSlots(data) { return _bsPW_(function () { return assignSlots_bsCore_(data); }); }
+function assignSlots_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
@@ -1472,6 +1482,7 @@ function assignSlots(data) {
     //   안 보이고 예전 값(미배정)으로 되돌아간 것처럼 보일 수 있었음 — 실제로
     //   현장에서 "슬롯 배정했는데 새로고침하니 사라졌다"로 보고된 증상과
     //   정확히 일치하는 경로라 즉시 무효화 추가.
+    _bsD_('bc', batchId); // ★ v30 — 배치 사본: 고객/슬롯 줄 바뀜(화면 캐시 지우기 '전'에)
     try { CacheService.getScriptCache().remove('getBatch_v1_' + batchId + '_meta'); } catch (eCache) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨(_cacheGetChunked_ 참고)
     bumpBatchVer_(batchId); // ★ v28 — 슬롯 배정 변경
     return { ok: true, updated: updated };
@@ -1540,7 +1551,9 @@ function _drainInvMirrorDirty_(maxN) {
   return take.length;
 }
 
-function setPackingMoved(data) {
+// ★ v30 — 배치 사본 표시는 잠금이 풀린 뒤 한 번(원래 내용은 setPackingMoved_bsCore_)
+function setPackingMoved(data) { return _bsPW_(function () { return setPackingMoved_bsCore_(data); }); }
+function setPackingMoved_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   // ★ 2026-08-18 신규 — 15초→25초로 상향. TV 현황판에서 여러 슬롯을 짧은 시간에
   //   연달아 눌러(배치 막바지에 32개가 한꺼번에 완료되는 경우 자주 발생) 이
@@ -1638,6 +1651,7 @@ function setPackingMoved(data) {
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
 
     bumpVersion_();
+    _bsD_('bc', batchId); // ★ v30 — 배치 사본: 패킹존 이동 칸 바뀜
     bumpBatchVer_(batchId); // ★ v28 — 패킹존 이동(핑크·파랑·주황) 변경 → TV 슬롯 색이 다음 동기화에 바로
     _markInvMirrorDirty_(invoice); // ★ 2026-10-28 — 인보이스 상세 미러 재계산은 응답 뒤 1분 주기 동기화가 처리(캐시는 즉시 무효화). 락 안에서 표시만(캐시 1회, 가벼움).
     result = { ok: true, stage: stage, moved: stage !== 'none' };
@@ -1829,6 +1843,39 @@ function invalidatePackScanCache_(batchId) {
 }
 /* ★ 2026-10-30 v28 — 배치별 "변경 번호". 스캔·이슈·패킹·슬롯 배정 등 이 배치 화면에 보이는 값이 바뀔 때마다 새 값.
  * 1분 동기화(FirestoreSync v8)가 이 번호가 지난번과 같으면 그 배치는 다시 계산하지 않음(최대 2분마다는 안전하게 다시 계산). */
+/* ★ v30 — 배치 사본(BatchSnap.gs) 연결. BatchSnap.gs 가 없어도(파일을 빠뜨려도) 예전처럼 시트를 직접 읽고 쓰기는 그대로 — 멈추지 않게 */
+function _bsFallbackRows_(kind, n) {
+  const sh = kind === 'il' ? issuelogSheet_() : kind === 'bi' ? bitemsSheet_() : bcustSheetSafe_();
+  const L = sh.getLastRow();
+  return L >= 2 ? _vals_(sh, L - 1, n) : [];
+}
+function _bsR_(kind, batchId, n) { return (typeof bsSheetRows_ === 'function') ? bsSheetRows_(kind, batchId, n) : _bsFallbackRows_(kind, n); }
+function _bsRM_(kind, batchIds, n) { return (typeof bsSheetRowsMulti_ === 'function') ? bsSheetRowsMulti_(kind, batchIds, n) : _bsFallbackRows_(kind, n); }
+var __BS_PEND = []; // 이번 실행에서 표시할 [종류, 배치] — 잠금 안에서는 기록만 하고, 함수가 끝난 뒤(잠금 해제 후) _bsFlushPend_ 가 한 번에 표시
+function _bsMarkNow_(kind, batchId) { try { if (typeof bsDirty_ === 'function') bsDirty_(kind, batchId); } catch (e) { /* 무시 — 최대 10분 안에 다시 맞춰짐 */ } }
+// ★ 시트에 쓴 직후(잠금 안) 바로 '가벼운 표시'(시트 확정 + 버전 변경만) → 그 뒤 어떤 계산도 옛 사본을 쓰지 않음(검토 3차 #1)
+//   화면 캐시 비우기(조금 더 무거움)는 함수가 끝난 뒤(잠금 해제 후) _bsFlushPend_ 가 배치마다 한 번.
+function _bsD_(kind, batchId) {
+  if (!batchId) return;
+  try { if (typeof bsBump_ === 'function') bsBump_(kind, batchId); } catch (e) { /* 무시 — 최대 10분 안에 다시 맞춰짐 */ }
+  __BS_PEND.push([kind, String(batchId)]);
+}
+function _bsFlushPend_() {
+  const list = __BS_PEND; __BS_PEND = [];
+  const seen = {};
+  list.forEach(function (x) { if (seen[x[1]]) return; seen[x[1]] = true; try { if (typeof bsAfterWrite_ === 'function') bsAfterWrite_(x[0], x[1]); } catch (e) { /* 무시 */ } });
+}
+// 쓰기 함수 감싸기: 끝나면(성공·실패·예외 모두) 기록해 둔 표시를 한 번에
+function _bsPW_(fn) { try { return fn(); } finally { _bsFlushPend_(); } }
+function _bsWA_(kinds, fn, clearIds) { try { return fn(); } finally { _bsFlushPend_(); try { if (typeof bsDirtyAll_ === 'function') bsDirtyAll_(kinds, clearIds); } catch (e) { /* 무시 */ } } }
+function _bsWB_(kind, batchId, fn) {
+  try { return fn(); } finally {
+    // 안쪽에서 이미 표시했으면(정상 경로) 다시 하지 않음. 오류로 중간에 끝난 경우(시트엔 쓰였을 수 있음)에만 여기서 표시.
+    if (batchId && !__BS_PEND.some(function (x) { return x[0] === kind && x[1] === String(batchId); })) _bsD_(kind, batchId);
+    _bsFlushPend_();
+  }
+}
+
 function bumpBatchVer_(batchId) {
   if (!batchId) return;
   try { CacheService.getScriptCache().put('bVer_' + batchId, String(Date.now()) + Math.random().toString(36).slice(2, 6), 21600); } catch (e) { /* 무시 — 최대 2분 안에 다시 계산됨 */ }
@@ -2649,7 +2696,9 @@ function getPackScanState(batchId, invoice, round) {
  * 진짜 빠진 것은 다를 수 있어서, 완료 안 된 슬롯은 절대 못 비우게 안전장치를 둠.
  * 입력: { batchId, invoice }
  * ============================================================ */
-function clearSlot(data) {
+// ★ v30 — 배치 사본 표시는 잠금이 풀린 뒤 한 번(원래 내용은 clearSlot_bsCore_)
+function clearSlot(data) { return _bsPW_(function () { return clearSlot_bsCore_(data); }); }
+function clearSlot_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
@@ -2674,6 +2723,7 @@ function clearSlot(data) {
       if (String(rows[i][0]) !== String(batchId)) continue;
       if (String(rows[i][1]) !== String(invoice)) continue;
       bc.getRange(i + 2, 10).setValue(batchNow_());
+      _bsD_('bc', batchId); // ★ v30 — 배치 사본(쓴 직후)
       bumpBatchVer_(batchId); // ★ v28 — 슬롯 비움 → TV 다음 동기화에 바로
       found = true;
       break;
@@ -2828,7 +2878,9 @@ function getOccupiedSlots() {
  *   6) 시간대: "오전 12시~오전 1시" 선택 (자정 직후)
  *   7) 저장
  * ============================================================ */
-function autoClearStaleDoneSlots() {
+// ★ v30 — 배치 사본 표시는 잠금이 풀린 뒤 한 번
+function autoClearStaleDoneSlots() { return _bsPW_(function () { return autoClearStaleDoneSlots_bsCore_(); }); }
+function autoClearStaleDoneSlots_bsCore_() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
@@ -2862,6 +2914,7 @@ function autoClearStaleDoneSlots() {
 
       bc.getRange(i + 2, 10).setValue('auto:' + batchNow_());
       bumpBatchVer_(batchId); // ★ v28
+      _bsD_('bc', batchId); // ★ v30 — 배치 사본(쓴 직후 — 같은 반복의 다음 슬롯 확인도 새 값으로)
       clearedCount++;
     }
     if (clearedCount) bumpVersion_();
@@ -3201,7 +3254,9 @@ function logScan(data) {
  *       배분했는지는 작업자가 직접 판단해서 각 카드별로 등록.)
  * 입력: { batchId, worker, barcode, sku, name, invoice, customer, reason, qty, note }
  * ============================================================ */
-function logIssue(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 logIssue_bsCore_
+function logIssue(data) { return _bsWB_('il', data && data.batchId, function () { return logIssue_bsCore_(data); }); }
+function logIssue_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
   let result;
@@ -3334,6 +3389,7 @@ function logIssue(data) {
     bumpVersion_();
     // ★ 2026-09-01 신규 — 이 인보이스의 이슈수량 캐시(20초)를 즉시 비움. 이슈
     //   등록 직후 패킹 검증 스캔(logPackScan)이 곧바로 최신 필요수량을 보게 함.
+    _bsD_('il', data.batchId); // ★ v30 — 배치 사본 표시(시트 확정 + 버전)를 화면 캐시 비우기 '전'에(그 사이 계산이 옛 사본으로 캐시를 다시 채우지 않게)
     clearInvoiceCache_(data.batchId, data.invoice);
     invalidateScanStateCache_(data.batchId); // ★ 2026-09-23 신규 — ADJ- 상쇄 기록이 doneMap을 바꾸므로 같이 무효화
     invalidateBatchAggregateCaches_(data.batchId); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
@@ -3484,7 +3540,9 @@ function getInvoiceIssues(batchId, invoice) {
  *   아니기 때문. 다시 필요하다고 표시된 이상, 실제로 재스캔해서 확인해야 함.
  * 입력: { issueId }
  * ============================================================ */
-function undoIssue(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 undoIssue_bsCore_
+function undoIssue(data) { return _bsPW_(function () { return undoIssue_bsCore_(data); }); } // ★ v30 — 사본 표시는 안쪽에서 그 배치로(rowVals[0]) 기록 → 끝에 한 번
+function undoIssue_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
   let result;
@@ -3508,6 +3566,7 @@ function undoIssue(data) {
         //   필요해서 13개 컬럼 전체로 확장. 기존 rowVals 인덱스(0,3,7)는 그대로
         //   유효하므로 기존 로직에는 전혀 영향 없음.
         const rowVals = sh.getRange(i + 2, 1, 1, 13).getValues()[0]; // A~M
+        _bsD_('il', rowVals[0]); // ★ v30 — 배치 사본 표시(그 배치만, 화면 캐시 비우기 '전')
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         invalidateScanStateCache_(rowVals[0]); // ★ 2026-09-23 신규 — 이슈 취소로 issueMap이 바뀌므로 같이 무효화
         invalidateBatchAggregateCaches_(rowVals[0]); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
@@ -3642,7 +3701,9 @@ function diagnoseAndFixInvoiceInspection() {
  *       "287pcs를 87pcs로 고친다" 같은 실제 수정 요청에 맞는 기능.)
  * 입력: { issueId, reason, qty, note }
  * ============================================================ */
-function editIssue(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 editIssue_bsCore_
+function editIssue(data) { return _bsPW_(function () { return editIssue_bsCore_(data); }); } // ★ v30 — 사본 표시는 안쪽에서 그 배치로(rowVals[0]) 기록 → 끝에 한 번
+function editIssue_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
   let result;
@@ -3695,6 +3756,7 @@ function editIssue(data) {
         //   문서를 만들기 위해 필요. 기존 rowVals 인덱스(0,3,7)는 그대로
         //   유효하므로 기존 로직에는 전혀 영향 없음.
         const rowVals = sh.getRange(row, 1, 1, 13).getValues()[0]; // A~M (수정된 값 포함)
+        _bsD_('il', rowVals[0]); // ★ v30 — 배치 사본 표시(그 배치만, 화면 캐시 비우기 '전')
         clearInvoiceCache_(rowVals[0], rowVals[7]); // ★ 2026-09-01 신규 — 이슈수량 캐시 즉시 무효화
         invalidateScanStateCache_(rowVals[0]); // ★ 2026-09-23 신규 — 수량 수정이 issueMap/doneMap(ADJ-)을 바꾸므로 같이 무효화
         invalidateBatchAggregateCaches_(rowVals[0]); // ★ 2026-09-25 신규 — board.html 슬롯 SKU/PCS 수량도 즉시 최신화
@@ -3790,7 +3852,9 @@ function undoScan(data) {
  * 통과하면 Batches / BatchCustomers / BatchItems 세 시트에서 이 배치의 행을
  * 전부 제거하고, 이 배치가 활성 배치로 지정돼 있었다면 그것도 같이 해제함.
  * 입력: { batchId } */
-function deleteBatchIfEmpty(data) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 deleteBatchIfEmpty_bsCore_
+function deleteBatchIfEmpty(data) { return _bsWA_(null, function () { return deleteBatchIfEmpty_bsCore_(data); }); }
+function deleteBatchIfEmpty_bsCore_(data) {
   const res = _deleteBatchIfEmptyCore_(data);
   // ★ 2026-10-19 신규 — 락이 풀린 뒤(외부 호출을 락 안에서 하지 않는 기존 원칙), 모든 화면이 1분 동기화를 기다리지 않고
   //   즉시 "삭제됨"을 알아채도록 Firestore 미러를 바로 갱신(best-effort — 실패해도 삭제 결과엔 영향 없음).
@@ -4422,13 +4486,13 @@ function _buildBatchAggregates_(batchId) {
   _diagPush_('ScanLog 읽기+집계: ' + (_tAfterScanLog - _tAfterCacheGet) + 'ms (총 ' + (slLast - 1) + '행 읽음)');
 
   // 이슈 집계 — getSlotProgress()와 동일 로직
-  const il = issuelogSheet_();
-  const ilLast = il.getLastRow();
+  const _bs_ilRows = _bsR_('il', batchId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+  const ilLast = _bs_ilRows.length + 1;
   const issueQtyByInvoice = {};
   const issueQtyByKey = {};
   const issuesByInvoice = {};
   if (ilLast >= 2) {
-    _vals_(il, ilLast - 1, 13).forEach(r => {
+    _bs_ilRows.forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       if (r[12] === 'undone') return;
       const inv = r[7];
@@ -4448,11 +4512,11 @@ function _buildBatchAggregates_(batchId) {
 
   // 고객사별 필요 SKU 목록 — getSlotProgress()와 동일 로직 + getInvoiceItemStatus()가
   // 쓰는 상품정보(sku/name/barcode 표시값)만 추가로 같이 담음(getSlotProgress는 그냥 무시).
-  const bi = bitemsSheet_();
-  const biLast = bi.getLastRow();
+  const _bs_biRows = _bsR_('bi', batchId, 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+  const biLast = _bs_biRows.length + 1;
   const skuLinesByKey = {}; // "invoice|barcode|sku" -> {invoice, reqQty, sku, name, barcode}
   if (biLast >= 2) {
-    _vals_(bi, biLast - 1, 7).forEach(r => {
+    _bs_biRows.forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       const inv = r[1];
       if (!inv) return; // 총량 행(Invoice 빈값)은 제외
@@ -4656,10 +4720,10 @@ function getSlotProgressCore_(batchId) {
     //   쓰던 bi/biLast, il/ilLast 원본 시트 참조가 없어졌으므로 다시 선언함(패킹
     //   집계는 "invoice|바코드"만 키로 쓰는 별도 구조라 공유 집계에는 안 담음 — 기존과
     //   동일하게 이 구간에서 별도로 한 번 더 읽음, 동작 변화 없음).
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    const _bs_biRows = _bsR_('bi', batchId, 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const biLast = _bs_biRows.length + 1;
+    const _bs_ilRows = _bsR_('il', batchId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const ilLast = _bs_ilRows.length + 1;
 
     // ★ 2026-08-24 신규 — 패킹검증 진행률 집계(오출고 방지 신기능). 검수 진행률과는
     //   완전히 별개로, PackScanLog(패킹존 재검증 스캔)를 바코드 단위로 집계함.
@@ -4680,7 +4744,7 @@ function getSlotProgressCore_(batchId) {
     }
     const packReqByInvBarcode = {}; // "invoice|바코드" -> 필요수량(합산)
     if (biLast >= 2) {
-      _vals_(bi, biLast - 1, 7).forEach(r => {
+      _bs_biRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const inv = r[1];
         if (!inv) return;
@@ -4695,7 +4759,7 @@ function getSlotProgressCore_(batchId) {
     }
     const packIssueByInvBarcode = {}; // 검수 단계 이슈 반영(같은 바코드 기준으로 재집계)
     if (ilLast >= 2) {
-      _vals_(il, ilLast - 1, 13).forEach(r => {
+      _bs_ilRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[12] === 'undone') return;
         const key = String(r[7]) + '|' + normBarcode_(r[4]);
@@ -4717,12 +4781,12 @@ function getSlotProgressCore_(batchId) {
     });
 
     // 고객사별 슬롯 정보 + 목표 수량
-    const bc = bcustSheetSafe_();
-    const bcLast = bc.getLastRow();
+    const _bs_bcRows = _bsR_('bc', batchId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const bcLast = _bs_bcRows.length + 1;
     const slots = [];
     if (bcLast >= 2) {
       // ★ 2026-08-24 확장 — 13번째 컬럼(PackVerified, 주황/최종 2차 검증완료)까지 읽음
-      _vals_(bc, bcLast - 1, 13).forEach(r => {
+      _bs_bcRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (!r[7] && r[7] !== 0) return; // 슬롯 미배정이면 현황판에 안 띄움
         const invoice = r[1];
@@ -4834,11 +4898,11 @@ function getUnfulfilledSkuAlerts(batchId) {
     const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
+    const _bs_biRows = _bsR_('bi', batchId, 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const biLast = _bs_biRows.length + 1;
     const custLines = [];
     if (biLast >= 2) {
-      _vals_(bi, biLast - 1, 7).forEach(r => {
+      _bs_biRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         const inv = String(r[1]);
         if (!inv) return;
@@ -4859,11 +4923,11 @@ function getUnfulfilledSkuAlerts(batchId) {
       });
     }
 
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    const _bs_ilRows = _bsR_('il', batchId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const ilLast = _bs_ilRows.length + 1;
     const allIssueRows = [];
     if (ilLast >= 2) {
-      _vals_(il, ilLast - 1, 13).forEach(r => {
+      _bs_ilRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[12] === 'undone') return;
         allIssueRows.push({ barcode: r[4], sku: String(r[5]), invoice: String(r[7]), qty: Number(r[10]) || 0 });
@@ -4871,11 +4935,11 @@ function getUnfulfilledSkuAlerts(batchId) {
     }
 
     // 슬롯 배정 정보(고객사명 표시용)
-    const bc = bcustSheetSafe_();
-    const bcLast = bc.getLastRow();
+    const _bs_bcRows = _bsR_('bc', batchId, 8); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const bcLast = _bs_bcRows.length + 1;
     const custNameByInvoice = {}, slotByInvoice = {};
     if (bcLast >= 2) {
-      _vals_(bc, bcLast - 1, 8).forEach(r => {
+      _bs_bcRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         custNameByInvoice[String(r[1])] = r[2];
         slotByInvoice[String(r[1])] = r[7];
@@ -5007,10 +5071,10 @@ function getScanState(batchId) {
     // ★ 2026-07-16 신규: 이슈 맵도 함께 반환 — invoice|barcode|sku 키로 누적 수량 집계
     const issueMap = {};
     const issues = [];
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    const _bs_ilRows = _bsR_('il', batchId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const ilLast = _bs_ilRows.length + 1;
     if (ilLast >= 2) {
-      _vals_(il, ilLast - 1, 13).forEach(r => {
+      _bs_ilRows.forEach(r => {
         if (String(r[0]) !== String(batchId)) return;
         if (r[12] === 'undone') return;
         const inv = r[7], bc = String(r[4]), skuCode = String(r[5]);
@@ -5392,11 +5456,11 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     // ★ 2026-08-03 신규 — 요청: "이어서 작업하기" 목록에서 고객사 몇 건 중 몇 건
     //   완료, SKU 몇 건 중 몇 건 완료인지 한눈에 보이게. BatchItems(필요수량 줄)
     //   + IssueLog(이슈 수량) + 위 scannedByKey로 계산.
-    const il = issuelogSheet_();
-    const ilLast = il.getLastRow();
+    const _bs_ilRows = _bsRM_('il', Object.keys(openIds), 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const ilLast = _bs_ilRows.length + 1;
     const issueByKey = {};
     if (ilLast >= 2) {
-      _vals_(il, ilLast - 1, 13).forEach(r => {
+      _bs_ilRows.forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         if (r[12] === 'undone') return;
@@ -5406,12 +5470,12 @@ function _computeOpenBatches_(_cache, _cacheKey) {
       });
     }
 
-    const bi = bitemsSheet_();
-    const biLast = bi.getLastRow();
+    const _bs_biRows = _bsRM_('bi', Object.keys(openIds), 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const biLast = _bs_biRows.length + 1;
     const skuLinesByKey = {}; // "batchId|invoice|barcode|sku" -> reqQty(합산)
     const linesByInvoiceKey = {}; // "batchId|invoice" -> [key,...] (고객사별 완료판정용)
     if (biLast >= 2) {
-      _vals_(bi, biLast - 1, 7).forEach(r => {
+      _bs_biRows.forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         const inv = r[1];
@@ -5438,11 +5502,11 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     });
 
     // 고객사 단위 완료 개수 (그 고객사 소속 모든 SKU줄이 다 채워졌는지)
-    const bc = bcustSheetSafe_();
-    const bcLast = bc.getLastRow();
+    const _bs_bcRows = _bsRM_('bc', Object.keys(openIds), 6); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    const bcLast = _bs_bcRows.length + 1;
     const doneCustByBatch = {}, totalCustByBatch = {};
     if (bcLast >= 2) {
-      _vals_(bc, bcLast - 1, 6).forEach(r => {
+      _bs_bcRows.forEach(r => {
         const bid = String(r[0]);
         if (!openIds[bid]) return;
         const inv = String(r[1]);
@@ -5586,7 +5650,9 @@ function _clearRangeChunked_(sh, startRow, numRows, numCols, label) {
   }
 }
 
-function archiveOldBatches(daysOld) {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 archiveOldBatches_bsCore_
+function archiveOldBatches(daysOld) { return _bsWA_(null, function () { return archiveOldBatches_bsCore_(daysOld); }); }
+function archiveOldBatches_bsCore_(daysOld) {
   daysOld = daysOld || BATCH_ARCHIVE_DAYS; // ★ 2026-10-05 — 60일 → 14일(상단 BATCH_ARCHIVE_DAYS). (2026-09-28: 90일→60일) 완료+검증까지 다 끝난 지 60일 지난 배치만 대상.
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
@@ -5810,7 +5876,9 @@ function archiveOldBatches(daysOld) {
  * - 아직 끝나지 않은 것(2차 검증 PackVerified가 아닌 것)만 복구. 이미 현재 BatchCustomers에 있는 인보이스는 건너뜀(중복 방지).
  * - Archive_ 시트의 원본은 지우지 않고 그대로 둠(복사만) — 여러 번 실행해도 안전함.
  * - 대상 시트: BatchCustomers / BatchItems / ScanLog / IssueLog (인보이스 기준으로 같이 복구). */
-function restoreStandaloneFromArchive() {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 restoreStandaloneFromArchive_bsCore_
+function restoreStandaloneFromArchive() { return _bsWA_(null, function () { return restoreStandaloneFromArchive_bsCore_(); }, [STANDALONE_BATCH_ID]); }
+function restoreStandaloneFromArchive_bsCore_() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(20000);
   try {
@@ -6119,7 +6187,9 @@ function removeArchiveTrigger() {
  *      시트를 열어서, KEEP_BATCH_IDS에 없는 배치들의 행이 다 지워졌는지
  *      확인 (Logger.log에 몇 행 지웠는지 출력됨 — 실행 → 로그 보기)
  * ===================================================== */
-function cleanupOldBatchData() {
+// ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 cleanupOldBatchData_bsCore_
+function cleanupOldBatchData() { return _bsWA_(null, function () { return cleanupOldBatchData_bsCore_(); }); }
+function cleanupOldBatchData_bsCore_() {
   // 🔴 여기에 남길 배치ID만 적으세요. 나머지는 전부 삭제됩니다.
   const KEEP_BATCH_IDS = ['B20260710-D6A879']; // ← 실제로 계속 쓸 배치ID로 바꿔서 실행하세요
 
