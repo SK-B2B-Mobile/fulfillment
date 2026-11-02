@@ -1473,6 +1473,7 @@ function assignSlots(data) {
     //   현장에서 "슬롯 배정했는데 새로고침하니 사라졌다"로 보고된 증상과
     //   정확히 일치하는 경로라 즉시 무효화 추가.
     try { CacheService.getScriptCache().remove('getBatch_v1_' + batchId + '_meta'); } catch (eCache) { /* 무시 */ } // ★ 2026-09-25 수정 — 청크 캐시는 메타 키만 지우면 됨(_cacheGetChunked_ 참고)
+    bumpBatchVer_(batchId); // ★ v28 — 슬롯 배정 변경
     return { ok: true, updated: updated };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1637,6 +1638,7 @@ function setPackingMoved(data) {
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
 
     bumpVersion_();
+    bumpBatchVer_(batchId); // ★ v28 — 패킹존 이동(핑크·파랑·주황) 변경 → TV 슬롯 색이 다음 동기화에 바로
     _markInvMirrorDirty_(invoice); // ★ 2026-10-28 — 인보이스 상세 미러 재계산은 응답 뒤 1분 주기 동기화가 처리(캐시는 즉시 무효화). 락 안에서 표시만(캐시 1회, 가벼움).
     result = { ok: true, stage: stage, moved: stage !== 'none' };
   } catch (e) {
@@ -1771,6 +1773,7 @@ function clearInvoiceCache_(batchId, invoice) {
   } catch (e) { /* 무시 */ }
   // ★ 2026-10-29 v24 — Firestore 방식이면 그 인보이스 문서의 필요수량·이슈를 다음 읽기 때 새로 가져오게 표시(시트 방식이면 아무것도 안 함)
   try { if (typeof ssIsFs_ === 'function' && ssAnyFs_()) ssMarkInvoiceStale_(batchId, invoice); } catch (eSs) { /* 무시 */ }
+  bumpBatchVer_(batchId); // ★ v28 — 필요수량·이슈 변경(캐시를 다 비운 '뒤에' 번호 변경)
 }
 
 /* ===================== getPackScanRowsCached_ / invalidatePackScanCache_ (★ 2026-09-25 신규) =====================
@@ -1822,6 +1825,13 @@ function getPackScanRowsCached_(batchId) {
 }
 function invalidatePackScanCache_(batchId) {
   try { CacheService.getScriptCache().remove('pkScanRows_v1_' + batchId + '_meta'); } catch (e) { /* 무시 */ }
+  bumpBatchVer_(batchId); // ★ v28 — 패킹 기록이 바뀜 → 1분 동기화가 이 배치를 다시 계산
+}
+/* ★ 2026-10-30 v28 — 배치별 "변경 번호". 스캔·이슈·패킹·슬롯 배정 등 이 배치 화면에 보이는 값이 바뀔 때마다 새 값.
+ * 1분 동기화(FirestoreSync v8)가 이 번호가 지난번과 같으면 그 배치는 다시 계산하지 않음(최대 2분마다는 안전하게 다시 계산). */
+function bumpBatchVer_(batchId) {
+  if (!batchId) return;
+  try { CacheService.getScriptCache().put('bVer_' + batchId, String(Date.now()) + Math.random().toString(36).slice(2, 6), 21600); } catch (e) { /* 무시 — 최대 2분 안에 다시 계산됨 */ }
 }
 
 // ★ 2026-09-23 신규(batch.html 실시간화 Phase 2 — §4-1 재설계, 트리거 없는 버전) —
@@ -1853,6 +1863,7 @@ function invalidateScanStateCache_(batchId) {
   try { CacheService.getScriptCache().remove(scanStateCacheKey_(batchId) + '_meta'); } catch (e) { /* 무시 */ }
   // ★ v26 — 버전 표시도 바꿈: 이 무효화 "전에" 계산을 시작한 다른 요청이 늦게 옛 결과를 캐시에 넣어도, 버전이 달라 쓰이지 않음(Firestore 방식 60초 캐시용)
   try { CacheService.getScriptCache().put('ss3Ver_' + batchId, String(Date.now()) + Math.random().toString(36).slice(2, 6), 21600); } catch (e) { /* 무시 */ }
+  bumpBatchVer_(batchId); // ★ v28 — 캐시를 비운 '뒤에'
 }
 
 // ★ 2026-09-25 신규 — board.html 슬롯 카드의 SKU/PCS 수량 표시가 스캔·이슈
@@ -1871,6 +1882,7 @@ function invalidateBatchAggregateCaches_(batchId) {
     cache.remove('batchAggr_v1_' + batchId + '_meta');
     cache.remove('slotProgress_v1_' + batchId + '_meta');
   } catch (e) { /* 무시 */ }
+  bumpBatchVer_(batchId); // ★ v28 — 캐시를 비운 '뒤에'
 }
 
 function logPackScan(data) {
@@ -2662,6 +2674,7 @@ function clearSlot(data) {
       if (String(rows[i][0]) !== String(batchId)) continue;
       if (String(rows[i][1]) !== String(invoice)) continue;
       bc.getRange(i + 2, 10).setValue(batchNow_());
+      bumpBatchVer_(batchId); // ★ v28 — 슬롯 비움 → TV 다음 동기화에 바로
       found = true;
       break;
     }
@@ -2848,6 +2861,7 @@ function autoClearStaleDoneSlots() {
       if (!slot || slot.status !== 'done') continue; // 완료된 것만 자동 비움 대상
 
       bc.getRange(i + 2, 10).setValue('auto:' + batchNow_());
+      bumpBatchVer_(batchId); // ★ v28
       clearedCount++;
     }
     if (clearedCount) bumpVersion_();
@@ -3879,6 +3893,7 @@ function completeBatch(data) {
       batchesSheet_().getRange(row, 3).setValue('completed');
       batchesSheet_().getRange(row, 7).setValue(nowStr);
       bumpVersion_();
+      bumpBatchVer_(data.batchId); // ★ v28
       // ★ 세션E 신규 — completeBatch는 status/completedAt 두 필드만 바뀌므로,
       //   여기선 그 두 필드만 담아 Firestore 이중쓰기용 문서를 준비함(문서
       //   전체를 새로 만들지 않음). writeBatchDoc_이 기존 문서(createBatch가
@@ -3914,7 +3929,7 @@ function completeBatch(data) {
 function logPickTiming(data) {
   const r = logPickTimingCore_(data);
   // ★ 2026-10-28 — 시작/종료가 저장되면 '지금 피킹 중' 목록 캐시(4초)를 즉시 비움(안 비우면 방금 종료한 사람이 몇 초간 다시 '피킹 중'으로 보였음)
-  try { if (r && r.ok && data && data.batchId) CacheService.getScriptCache().remove('activePickers_v1_' + data.batchId + '_meta'); } catch (eC) { /* 무시 */ }
+  try { if (r && r.ok && data && data.batchId) { const _c = CacheService.getScriptCache(); _c.remove('activePickers_v1_' + data.batchId + '_meta'); _c.put('apVer_' + data.batchId, String(Date.now()) + Math.random().toString(36).slice(2, 6), 21600); } } catch (eC) { /* 무시 */ }
   if (r && r.ok && data && data.action === 'start') {
     try { syncBatchJobsStart(data.batchId); } catch (e) { Logger.log('syncBatchJobsStart 실패: ' + e); }
   }
@@ -4029,6 +4044,7 @@ function logPickTimingCore_(data) {
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
+    try { SpreadsheetApp.flush(); } catch (eF) { /* 무시 */ } // ★ v28 — 저장이 시트에 확실히 반영된 뒤 잠금 해제·번호 변경(60초 캐시에 옛 값이 들어가지 않게)
     lock.releaseLock();
   }
 }
@@ -4051,8 +4067,16 @@ function getActivePickers(batchId) {
     //   확인은 좀 더 즉각적이어야 하므로.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'activePickers_v1_' + batchId;
+    // ★ v28 — 버전 표시(피킹 시작·종료 때마다 바뀜). 계산 시작 전 값을 결과와 함께 저장 → 계산 중에 바뀌었으면 그 결과는 다음 조회에서 버림.
+    //   그래서 4초 → 60초 보관해도 항상 최신(기기 20대가 25초마다 PickTiming 시트를 읽던 부담을 줄임)
+    let _apVer = '';
+    try { _apVer = _cache.get('apVer_' + batchId) || ''; if (!_apVer) { _apVer = 'n' + Date.now() + Math.random().toString(36).slice(2, 6); _cache.put('apVer_' + batchId, _apVer, 21600); } } catch (eV) { _apVer = 'x' + Date.now(); }
     const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
-    if (_cached) return JSON.parse(_cached);
+    if (_cached) {
+      const _o = JSON.parse(_cached);
+      if (_o._v === undefined) return _o;
+      if (_o._v === _apVer) { delete _o._v; return _o; }
+    }
 
     const sh = picktimeSheetSafe_();
     const last = sh.getLastRow();
@@ -4094,8 +4118,9 @@ function getActivePickers(batchId) {
     }
     const _result = { ok: true, active: active, lastPageRange: lastPageRange, sessions: sessions };
     try {
-      const _payload = JSON.stringify(_result);
-      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 4); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
+      const _payload = JSON.stringify(Object.assign({ _v: _apVer }, _result));
+      // ★ v28 — 60초(피킹 시작·종료 때 버전이 바뀌므로 바로 새로 읽음). 단, 4시간 지난 세션을 '활성'에서 빼는 시간 판정은 최대 60초 늦을 수 있음(무해)
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 60);
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
   } catch (e) {
@@ -6344,6 +6369,10 @@ function getDimensions_(invoice) {
  * 짧아서 부분수정보다 통째로 다시 쓰는 게 더 단순하고 버그가 적음).
  * ------------------------------------------------------------------- */
 function saveDimensions(data) {
+  // ★ 2026-11-02 v29 — 'PU & TK' 팔렛 디멘션(박스 수량 + 팔렛별 L×W×H·무게)은 TK용 Dimensions 시트가 아니라
+  //   그 오더의 Jobs 행 전용 칸에 저장(아래 savePuTkPalletDims_). Dimensions 시트에 넣으면 서버가 "디멘션 있음 = 패킹 이동 완료"로
+  //   자동 판정해 PU & TK 진행 단계가 저절로 바뀌는 부작용이 있기 때문. 기존 TK/UPS 저장은 아래 그대로.
+  if (data && data.puTkPallets === true) return savePuTkPalletDims_(data);
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
   try {
@@ -6396,6 +6425,108 @@ function saveDimensions(data) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * ★ 2026-11-02 v29 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 팔렛 디멘션 저장.
+ * 입력: { invoice, puTkPallets:true, qty(박스 수, 정수 0~9999), pallets:[{l,w,h,wt}, ...](팔렛마다 4칸 모두 0 초과), by }
+ * 저장: Jobs 행의 PuTkBoxQty / PuTkBoxQtyAt / PuTkBoxQtyBy / PuTkPalletQty(= 팔렛 줄 수) / PuTkPalletDims(JSON) — 한 번에 같이 씀.
+ *   (팔렛 수량 칸도 같이 맞춰 쓰므로 목록·Sales Confirm 잠금 등 기존 화면 로직은 그대로 동작)
+ * 팔렛 칸(PuTkPalletDims)을 만들 수 없으면(시트 셀 한도 등) 팔렛이 있을 때는 아무것도 저장하지 않고 오류를 돌려줌(어중간한 저장 방지).
+ * ------------------------------------------------------------------- */
+function _scanPuTkPalletDimsCol_(headers) {
+  for (let i = 0; i < headers.length; i++) if (String(headers[i]).trim().toLowerCase() === 'putkpalletdims') return i + 1;
+  return 0;
+}
+function _ensurePuTkPalletDimsCol_(sh) {
+  let col = _scanPuTkPalletDimsCol_(_hdrRow_(sh, sh.getLastColumn()));
+  if (col) return col;
+  const colLock = LockService.getDocumentLock();
+  colLock.waitLock(15000);
+  try {
+    const lastCol = sh.getLastColumn();
+    col = _scanPuTkPalletDimsCol_(_hdrRow_(sh, lastCol)); // 다른 요청이 방금 만들었는지 다시 확인
+    if (col) return col;
+    sh.insertColumnsAfter(lastCol, 1);
+    sh.getRange(1, lastCol + 1).setValue('PuTkPalletDims');
+    try { __HDR_CACHE = null; } catch (eH) { /* 무시 */ }
+    return lastCol + 1;
+  } catch (eIns) {
+    Logger.log('_ensurePuTkPalletDimsCol_: column insert skipped: ' + eIns);
+    return 0;
+  } finally {
+    colLock.releaseLock();
+  }
+}
+function _parsePuTkPalletDims_(v) {
+  try {
+    const arr = JSON.parse(String(v || '').trim() || '[]');
+    if (!Array.isArray(arr)) return [];
+    return arr.map(function (d) { return { l: Number(d.l) || 0, w: Number(d.w) || 0, h: Number(d.h) || 0, wt: Number(d.wt) || 0 }; });
+  } catch (e) { return []; }
+}
+function savePuTkPalletDims_(data) {
+  try {
+    const invoice = String((data && data.invoice) || '').trim();
+    const by = String((data && data.by) || '').trim();
+    if (!invoice) return { ok: false, error: 'invoice required' };
+    let qty = Number(data && data.qty);
+    if (!isFinite(qty) || qty < 0 || Math.round(qty) !== qty || qty > 9999) return { ok: false, error: 'Boxes must be a whole number from 0 to 9999' };
+    const raw = Array.isArray(data && data.pallets) ? data.pallets : [];
+    if (raw.length > 60) return { ok: false, error: 'Too many pallets (max 60)' };
+    const pallets = [];
+    for (let i = 0; i < raw.length; i++) {
+      const d = raw[i] || {};
+      const v = { l: Number(d.l), w: Number(d.w), h: Number(d.h), wt: Number(d.wt) };
+      const ok = ['l', 'w', 'h', 'wt'].every(function (k) { return isFinite(v[k]) && v[k] > 0 && v[k] <= 9999; });
+      if (!ok) return { ok: false, error: 'Pallet #' + (i + 1) + ': enter L, W, H and Weight (numbers greater than 0)' };
+      ['l', 'w', 'h', 'wt'].forEach(function (k) { v[k] = Math.round(v[k] * 10) / 10; }); // 소수 첫째 자리까지
+      pallets.push(v);
+    }
+
+    const sh = SHEET_();
+    const norm = normalizeHeaderName_;
+    let ctx = _readJobRowFast_(sh, invoice);
+    if (ctx.error) return { ok: false, error: ctx.error };
+    const iTruck = ctx.hm[norm('Trucking')];
+    const method = iTruck ? String(ctx.rowVals[iTruck - 1] || '').trim().toUpperCase() : '';
+    if (method !== 'PU & TK') return { ok: false, error: 'PU & TK 오더만 박스/팔렛 디멘션을 이 방식으로 저장합니다' };
+
+    let cols = _scanPuTkBoxQtyCols_(sh, ctx.headers);
+    let iDims = _scanPuTkPalletDimsCol_(ctx.headers);
+    if (!cols.iQty || !cols.iAt || !cols.iBy || !cols.iPal || !iDims) {
+      ensurePuTkBoxQtyCol_(sh);
+      _ensurePuTkPalletDimsCol_(sh);
+      ctx = _readJobRowFast_(sh, invoice);
+      if (ctx.error) return { ok: false, error: ctx.error };
+      cols = _scanPuTkBoxQtyCols_(sh, ctx.headers);
+      iDims = _scanPuTkPalletDimsCol_(ctx.headers);
+    }
+    if (!cols.iQty || !cols.iAt || !cols.iBy) return { ok: false, error: 'PuTkBoxQty column unavailable (server setup) — please contact the administrator' };
+    if (pallets.length && (!cols.iPal || !iDims)) return { ok: false, error: 'Pallet dimensions are not available yet (the sheet could not add the column) — nothing was saved. Please contact the administrator.' };
+
+    const lock = LockService.getDocumentLock();
+    lock.waitLock(15000);
+    let atRaw = '';
+    try {
+      atRaw = nowLocal_();
+      const cells = [
+        { col: cols.iQty, value: qty, int: true },
+        { col: cols.iAt, value: atRaw, text: true },
+        { col: cols.iBy, value: by }
+      ];
+      if (cols.iPal) cells.push({ col: cols.iPal, value: pallets.length, int: true });
+      if (iDims) cells.push({ col: iDims, value: JSON.stringify(pallets), text: true });
+      _writeRowCells_(sh, ctx.row, cells);
+    } finally {
+      lock.releaseLock();
+    }
+    try { bumpVersionLite_(); } catch (eV) { /* 무시 */ }
+    try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort — 화면이 이어서 미러 재계산 요청 */ }
+    return { ok: true, invoice: invoice, qty: qty, pallets: pallets.length, palletDims: pallets, qtyAt: fmtShortTs_(atRaw), qtyBy: by };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
   }
 }
 
@@ -6796,6 +6927,8 @@ function getSalesInvoiceDetail(invoice) {
     const puTkBoxQty = iPuTkQty ? Number(jobRow[iPuTkQty - 1] || 0) : 0;
     const iPuTkPal = getFreshColIndex_(sh, 'PuTkPalletQty'); // ★ 2026-10-08 — 팔레트 수량
     const puTkPalletQty = iPuTkPal ? Math.max(0, Math.round(Number(jobRow[iPuTkPal - 1]) || 0)) : 0;
+    const iPuTkDims = getFreshColIndex_(sh, 'PuTkPalletDims'); // ★ 2026-11-02 v29 — 팔렛별 L×W×H·무게(JSON)
+    const puTkPalletDims = iPuTkDims ? _parsePuTkPalletDims_(jobRow[iPuTkDims - 1]) : [];
     // ★ 2026-10-02 긴급 수정 — fmtShortTs_(Code.gs)로 짧은 "MM/dd h:mm a" 형식
     //   통일(길게 찍히는 Date.toString() 버그 수정, fmtShortTs_ 주석 참고).
     const puTkBoxQtyAt = iPuTkAt ? fmtShortTs_(jobRow[iPuTkAt - 1]) : '';
@@ -7050,6 +7183,7 @@ function getSalesInvoiceDetail(invoice) {
       // ★ 2026-10-03 신규 — 'PU & TK' 전용 박스 수량
       puTkBoxQty: puTkBoxQty,
       puTkPalletQty: puTkPalletQty, // ★ 2026-10-08
+      puTkPalletDims: puTkPalletDims, // ★ 2026-11-02 v29
       shipped: shippedFlag,        // ★ 2026-10-07 — 출고 완료 여부(PU/UPS/PU & TK 팝업의 Shipped 칸)
       shippedAt: shippedAtOut,
       shippedBy: shippedByOut,
