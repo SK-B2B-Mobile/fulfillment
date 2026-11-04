@@ -479,6 +479,10 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
 .pv-msg.pv-lastscan{display:block; text-align:left; padding:10px 14px; overflow:hidden; max-width:100%; box-sizing:border-box;}
 .pv-msg.pv-lastscan.ok{background:rgba(139,92,246,0.15); border:1px solid var(--purple);}
 .pv-msg.pv-lastscan.bad{background:var(--red-bg); border:1px solid var(--red);}
+/* ★ v22 — 화면 즉시 판정 후 서버 결과가 달라 고친 경우(주황) */
+.pv-msg.pv-lastscan.warn{background:rgba(245,158,11,0.15); border:1px solid #F59E0B;}
+.pv-msg.pv-lastscan.warn .pv-lastscan-title{color:#FCD34D;}
+.pv-msg.pv-lastscan.warn .pv-lastscan-qty{color:#FCD34D;}
 /* ★ 2026-09-01 재설계 — 예전엔 아이콘/상품명/수량을 한 줄에 다 욱여넣어서, 상품명이
    길면(실제로 흔함) 수량이 화면 밖으로 밀려나 손가락으로 옆으로 밀어야 보이는
    문제가 있었음(매니저 지적). 이제 "1행: 아이콘+상품명" / "2행: 부가정보+수량"으로
@@ -1353,6 +1357,7 @@ function authTranslateError_(msg){
   return 'Login failed. Please check your username and password.';
 }
 function authLogout(){
+  if(typeof _psvUnloadOk_ === 'function' && !_psvUnloadOk_()) return; // ★ v22 — 저장 안 된 스캔이 있으면 먼저 물어봄(로그아웃 처리 전에)
   // ★ 2026-10-02 수정 — 누르자마자 바로 새로고침돼서 눌렸는지 티가 안 나던 문제 수정.
   const btn = document.getElementById('authLogoutBtn');
   if (btn){ btn.disabled = true; btn.innerHTML = '<span class="auth-logout-spin"></span>Logging out...'; }
@@ -2868,7 +2873,7 @@ function pkOnLive_(key, msg){
   const on = pkSlotOf_(key);
   try{ if(on.pv && typeof renderPvBody === 'function'){ _pvState = st; renderPvBody(); } }catch(e){ console.warn('[packState] pv render', e); }
   try{ if(on.ss && typeof renderSsBody === 'function'){ _ssState = st; renderSsBody(); } }catch(e){ console.warn('[packState] ss render', e); }
-  try{ if(on.psv && typeof renderPsvBody === 'function'){ _psvState = st; renderPsvBody(); } }catch(e){ console.warn('[packState] psv render', e); }
+  try{ if(on.psv && typeof renderPsvBody === 'function'){ _psvState = st; _psvStateInv = _psvInvoice; renderPsvBody(); } }catch(e){ console.warn('[packState] psv render', e); }
 }
 function pkSubscribe_(slot, key, round){
   if(!window._subscribePackState || _pk.failed[key]) return;
@@ -3462,7 +3467,9 @@ async function pingWorkerLogoutClear_(){
 
 async function doLogout(){
   const cur = getLoginWorker();
-  if(!confirm((cur ? (cur + '님 ') : '') + '로그아웃할까요?\n\n지금까지 스캔·입력한 내용은 이미 저장되어 있어 안전합니다.')) return;
+  const _uns = (typeof _psvHasUnsaved_ === 'function') && _psvHasUnsaved_();
+  if(!confirm((cur ? (cur + '님 ') : '') + '로그아웃할까요?' + (_uns ? '' : '\n\n지금까지 스캔·입력한 내용은 이미 저장되어 있어 안전합니다.'))) return;
+  if(typeof _psvUnloadOk_ === 'function' && !_psvUnloadOk_()) return; // ★ v22 — 로그아웃하기로 한 뒤에 미저장 스캔 확인(취소하면 아무것도 안 바뀜)
   await pingWorkerLogoutClear_(); // ★ 2026-09-25 신규 — 로그인 화면의 Active 점이 즉시 꺼지도록
   clearLoginWorker();
   location.reload(); // 로그인 화면부터 새로 시작 — 가장 안전하게 모든 화면 상태를 초기화
@@ -8309,7 +8316,7 @@ let _standaloneOrders = []; // getStandaloneOrders() 캐시(01-S/04/단독PackVe
 
 async function fetchStandaloneOrders(){
   const res = await gasQueryWithRetry('getStandaloneOrders', {});
-  if(res.ok) _standaloneOrders = res.orders || [];
+  if(res.ok){ _standaloneOrders = res.orders || []; window.__soFetchOkAt = Date.now(); } // ★ v22 — 성공한 조회 시각(확정 표시를 언제 서버 값으로 넘길지 판단)
   return _standaloneOrders;
 }
 
@@ -10022,8 +10029,9 @@ async function onPsvInvoiceChange(){
   const sel = document.getElementById('psvInvoiceSelect');
   const invoice = sel.value;
   const panel = document.getElementById('psvScanPanel');
-  if(!invoice){ panel.classList.remove('active'); _psvInvoice = null; _psvState = null; renderPsvUsed_(); return; }
+  if(!invoice){ panel.classList.remove('active'); _psvInvoice = null; _psvState = null; _psvStateInv = null; renderPsvUsed_(); return; }
   _psvInvoice = invoice;
+  _psvState = null; _psvStateInv = null; // ★ v22 — 이전 오더 상태가 새 오더 화면에 그려지지 않게(그려지면 다른 오더 내용으로 확정·인쇄될 수 있었음)
   _psvForceVerified = false;
   // ★ 2026-09-04 신규 — 오더가 바뀌면 박스/팔렛도 1번부터 새로 시작
   _psvCurrentBox = 1; _psvCurrentPallet = 1;
@@ -10049,7 +10057,13 @@ async function onPsvInvoiceChange(){
   document.getElementById('psvCompleteBtn').disabled = true;
   document.getElementById('psvCompleteBtn').textContent = '🟣 Confirm Final Verification (2nd)';
   document.getElementById('psvLines').innerHTML = '<div class="empty-log">Loading...</div>';
+  { // ★ v22 — 진행률도 비움(이전 오더 숫자가 남아 보이지 않게)
+    const _pt = document.getElementById('psvProgressText'); if(_pt) _pt.textContent = '… pcs';
+    const _ps = document.getElementById('psvProgressSku'); if(_ps) _ps.textContent = '…';
+    const _pb = document.getElementById('psvProgressBar'); if(_pb) _pb.style.width = '0%';
+  }
   await refreshPsvState();
+  _psvShowFailCard_(); // ★ v22
   psvResumeNumbers_();
   const ord = _standaloneOrders.find(o => o.invoice === invoice);
   if(ord && ord.packVerified){
@@ -10079,12 +10093,15 @@ async function refreshPsvState(){
     document.getElementById('psvLines').innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`;
     return;
   }
-  _psvState = res;
+  // ★ v22 — 실시간 구독이 이미 더 새 상태(rev)를 줬으면 늦게 온 조회 결과로 되돌리지 않음(즉시 판정이 옛 상태를 보지 않게)
+  if(_psvState && _psvStateInv === _inv && res.rev != null && _psvState.rev != null && Number(res.rev) < Number(_psvState.rev)){ renderPsvBody(); return; }
+  _psvState = res; _psvStateInv = _inv; // ★ v22 — 이 상태가 어느 오더 것인지(즉시 판정은 같은 오더일 때만)
   renderPsvBody();
 }
 
 function renderPsvBody(){
-  const st = _psvState;
+  if(_psvStateInv !== _psvInvoice) return; // ★ v22 — 지금 오더의 상태가 아니면 그리지 않음
+  const st = _psvView_(_psvState); // ★ v22 — 저장 중인 스캔(화면 판정 통과)을 수량에 미리 반영(서버 값과 겹치지 않게 큰 값만)
   if(!st) return;
   // ★ 2026-09-08 버그 수정 — onPsvInvoiceChange에서만 팔렛 필드 표시/숨김을
   //   처리했더니, 새로고침 복원 등 change 이벤트를 안 거치는 경로로 오더가
@@ -10126,7 +10143,20 @@ function renderPsvBody(){
   const psvSkuEl = document.getElementById('psvProgressSku');
   if(psvSkuEl) psvSkuEl.textContent = `${psvDoneSku} / ${psvTotalSku}`;
   document.getElementById('psvProgressBar').style.width = pct + '%';
-  document.getElementById('psvCompleteBtn').disabled = !st.complete;
+  {
+    // ★ v22 — 확정 버튼: 이미 확정·확정 처리 중이면 잠금. 저장 실패한 스캔이 있으면 버튼이 "다시 저장" 안내로 바뀜(눌러서 Retry — 이유 없이 잠겨 보이지 않게)
+    const cb = document.getElementById('psvCompleteBtn');
+    const inv = _psvInvoice;
+    const verified = _psvIsVerified_(inv);
+    const failN = _psvFail.filter(f => f.inv === inv).length;
+    if(!verified && !_psvConfirming){
+      if(failN){ cb.disabled = false; cb.textContent = '↻ Retry ' + failN + ' unsaved scan' + (failN > 1 ? 's' : ''); cb.dataset.v22retry = '1'; }
+      else {
+        if(cb.dataset.v22retry){ cb.textContent = '🟣 Confirm Final Verification (2nd)'; delete cb.dataset.v22retry; }
+        cb.disabled = !st.complete || _psvBusyFor_(inv);
+      }
+    } else cb.disabled = true;
+  }
 
   // ★ 2026-09-03 신규 — 04(단독 1차)와 동일하게, 미완료 SKU를 위로 · 완료는
   //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
@@ -10185,19 +10215,193 @@ function renderPsvBody(){
 }
 
 // ★ 2026-09-01 신규 — submitPvScan과 동일한 이유·동일한 구조(직렬 큐 + 즉시 피드백).
+// ★ 2026-11-03 v22 — 화면 즉시 판정(C안, 시뮬레이션 "Instant Scan Preview" 그대로).
+//   ① 스캔하는 순간 화면이 가진 최신 오더 정보(packState 실시간 구독)로 서버와 똑같은 규칙(ScanStore ssLogPackScan_)으로 판정해
+//      PASS/중복/다른 오더 상품을 바로 보여 줌(소리·카드). ② 저장은 예전처럼 순서대로(같은 reqId 재시도 — 중복 기록 없음).
+//   ③ 최종 기준은 서버: 결과가 다르면 주황 "Corrected" 로 바로 고침. ④ 저장 실패는 빨간 "NOT SAVED" + Retry, 저장 안 된 스캔이 있으면
+//      Confirm·인쇄 잠금. ⑤ 판정할 정보가 없거나 드문 경우(한 바코드에 여러 SKU 등)는 예전처럼 서버 결과를 기다림.
+//   ★ 함께 고침: 스캔한 "그 순간"의 오더로 저장(예전엔 대기 중에 오더를 바꾸면 남은 스캔이 새 오더로 저장될 수 있었음).
 let _psvScanQueue = [];
 let _psvScanBusy = false;
+let _psvStateInv = null;  // _psvState 가 어느 오더 것인지
+let _psvPend = [];        // 저장 중인 스캔 { id, inv, nb, kind, target }
+let _psvFail = [];        // 저장 실패한 스캔 { id, inv, job }
+let _psvMsgSeq = 0;       // 화면 카드에 마지막으로 띄운 스캔 번호(늦게 온 서버 결과가 새 카드를 덮지 않게)
+let _psvIdSeq = 0;
+let _psvCardJob = 0;      // 카드를 띄운 가장 최근(나중에 스캔한) 스캔 번호
+let _psvVerifiedInv = {}; // 이 화면에서 확정(일반·강제)한 오더
+let _psvConfirming = false; // 확정(일반·강제) 처리 중
+function _psvIsVerified_(inv){
+  if(!inv) return false;
+  // 이 화면에서 확정한 표시는, 확정 '뒤에' 성공한 목록 조회가 "미확정"이라고 할 때만 지움(확정이 풀린 오더가 새로고침 전까지 잠기지 않게,
+  // 조회 실패로 옛 목록이 남아 있을 땐 계속 확정으로 봄 — 두 번 확정·두 번 인쇄 방지)
+  if(_psvVerifiedInv[inv]){
+    let o = null; try { o = (_standaloneOrders || []).find(x => x.invoice === inv); } catch(e){ o = null; }
+    const freshAfter = (window.__soFetchOkAt || 0) > _psvVerifiedInv[inv] + 1000;
+    if(freshAfter && o && o.packVerified === false){ delete _psvVerifiedInv[inv]; return false; }
+    return true;
+  }
+  try { const o = (_standaloneOrders || []).find(x => x.invoice === inv); return !!(o && o.packVerified); } catch(e){ return false; }
+}
+function _psvBusyFor_(inv){ _psvPrunePend_(); return !!inv && (_psvPend.some(p => p.inv === inv) || _psvFail.some(f => f.inv === inv)); }
+// 서버에 저장됐지만(saved) 화면 상태에 아직 안 들어온 PASS 는, 화면 상태가 따라잡을 때(그 줄 수량 ≥ 목표)까지 유지 → 수량이 잠깐 되돌아가거나,
+// 그 사이 같은 상품 재스캔을 PASS 로 잘못 판정하거나, 옛 상태로 인쇄되는 일 없음. 20초가 지나도 안 따라오면(이슈로 필요수량 변경 등) 정리.
+const PSV_SAVED_HOLD_MS_ = 20000;
+function _psvPrunePend_(){
+  if(!_psvPend.some(p => p.saved)) return;
+  const now = Date.now();
+  const st = _psvState;
+  _psvPend = _psvPend.filter(p => {
+    if(!p.saved) return true;
+    if(now - p.savedAt > PSV_SAVED_HOLD_MS_) return false;
+    if(!st || _psvStateInv !== p.inv || !Array.isArray(st.lines)) return true;
+    if(p.rev && st.rev != null && Number(st.rev) >= p.rev) return false; // Firestore 방식: 화면 상태가 저장 시점 이후 것이면(취소 포함) 끝
+    const l = st.lines.find(x => normBarcode(x.barcode) === p.nb);
+    if(!l) return false;
+    const req = Number(l.effectiveReq) || 0;
+    return (Number(l.packed) || 0) < Math.min(p.target, req);
+  });
+}
+// 확정·인쇄 전에 확인: 저장 실패가 있으면 바로 다시 저장할지 묻고, 저장 중이면 잠깐 기다리라고 안내. true = 막음
+function _psvBlocked_(inv){
+  if(!_psvBusyFor_(inv)) return false;
+  if(_psvFail.some(f => f.inv === inv)){
+    if(confirm('Some scans were NOT saved yet.\n\nRetry saving them now?')) retryPsvFailed();
+    else if(confirm('Discard the unsaved scans?\n\nThey will NOT be counted. Scan those items again if needed.')){ _psvFail = _psvFail.filter(f => f.inv !== inv); try { renderPsvBody(); } catch(e){} }
+  } else alert('Saving scans… try again in a moment.');
+  return true;
+}
+// 오더를 다시 열었을 때 그 오더에 저장 실패한 스캔이 남아 있으면 빨간 카드 + Retry 를 다시 보여 줌
+// ★ v22 — 저장 중·실패한 스캔이 있으면 새로고침·닫기 전에 경고
+function _psvHasUnsaved_(){ try { return _psvPend.some(p => !p.saved) || _psvFail.length > 0; } catch(x){ return false; } }
+let _psvUnloadAsked = false; // 로그아웃처럼 먼저 물어본 경우 새로고침 때 또 묻지 않음
+function _psvUnloadOk_(){
+  if(!_psvHasUnsaved_()) return true;
+  if(!confirm('Some scans are still saving or were NOT saved.\n\nLeave anyway? (Unsaved scans will be lost — scan them again later.)')) return false;
+  _psvUnloadAsked = true; return true;
+}
+window.addEventListener('beforeunload', function(e){
+  try { if(!_psvUnloadAsked && _psvHasUnsaved_()){ e.preventDefault(); e.returnValue = ''; return ''; } } catch(x){}
+});
+function _psvShowFailCard_(){
+  const list = _psvFail.filter(f => f.inv === _psvInvoice);
+  if(!list.length) return;
+  _psvMsgSeq++;
+  _psvCardJob = Math.max(_psvCardJob, _psvIdSeq);
+  showPsvMsg({ kind: 'bad', icon: '⛔', title: 'NOT SAVED — ' + list.length + ' scan' + (list.length > 1 ? 's' : ''),
+    sub: 'Barcode ' + list.map(f => f.job.barcode).join(', ') + ' — not saved yet. Tap Retry.',
+    action: { label: '↻ Retry', onClick: () => retryPsvFailed() } });
+}
+function _psvPassTarget_(inv, nb){ let t = 0; _psvPend.forEach(p => { if(p.inv === inv && p.nb === nb && p.kind === 'pass') t = Math.max(t, p.target); }); return t; }
+// 화면 표시용 상태: 저장 중인 PASS 를 수량에 반영(max — 서버 값이 먼저 와도 두 번 세지 않음). 완료(complete)는 서버 값 그대로.
+function _psvView_(st){
+  _psvPrunePend_();
+  if(!st || !Array.isArray(st.lines) || !_psvPend.some(p => p.inv === _psvInvoice && p.kind === 'pass')) return st;
+  let total = 0;
+  const lines = st.lines.map(l => {
+    const t = _psvPassTarget_(_psvInvoice, normBarcode(l.barcode));
+    let out = l;
+    if(t > 0){
+      const req = Number(l.effectiveReq) || 0;
+      const packed = Math.max(Number(l.packed) || 0, Math.min(t, req));
+      if(packed !== l.packed) out = Object.assign({}, l, { packed: packed, complete: packed >= req });
+    }
+    total += Number(out.packed) || 0;
+    return out;
+  });
+  return Object.assign({}, st, { lines: lines, totalPacked: total });
+}
+// 서버(ssLogPackScan_)와 같은 규칙. null = 판정 안 함(서버 결과 기다림)
+function _psvPredict_(barcode, inv){
+  if(!inv || inv !== _psvInvoice || _psvStateInv !== inv) return null;
+  const st = _psvState;
+  if(!st || !st.ok || !Array.isArray(st.lines)) return null;
+  const nb = normBarcode(barcode);
+  if(!nb) return null;
+  if(_psvPend.some(p => p.inv === inv && p.nb === nb && p.kind === 'wait')) return null; // 같은 상품의 앞 스캔이 아직 판정 전 → 이번도 서버 결과를 기다림
+  const line = st.lines.find(l => normBarcode(l.barcode) === nb);
+  if(!line) return { kind: 'wrong', nb: nb };
+  if(line.skuBreakdown && line.skuBreakdown.length > 1) return null;
+  const req = Number(line.effectiveReq) || 0;
+  if(req <= 0) return { kind: 'over', nb: nb, line: line, note: 'excluded', packed: 0, required: 0 };
+  const have = Math.max(Number(line.packed) || 0, _psvPassTarget_(inv, nb));
+  if(have >= req) return { kind: 'over', nb: nb, line: line, note: 'duplicate', packed: Math.min(have, req), required: req };
+  return { kind: 'pass', nb: nb, line: line, packed: req, required: req };
+}
+function _psvLineBoxes_(l){
+  if(!l) return [];
+  if(l.boxBreakdown && l.boxBreakdown.length > 1) return l.boxBreakdown;
+  return (l.box || l.pallet) ? [{ box: l.box, pallet: l.pallet, qty: l.packed }] : [];
+}
+function _psvBoxLabel_(job){ return job.kind === 'pallet' ? 'Pallet ' + job.pallet : 'Box ' + job.box; }
+function _psvSetSub_(seq, text){ if(seq === _psvMsgSeq){ const el = document.getElementById('psvMsgSub'); if(el) el.textContent = text; } }
+// 카드 내용(서버 결과든 화면 판정이든 같은 모양). warn = 서버가 화면 판정과 달라 고친 경우
+function _psvShowResult_(r, barcode, job, opt){
+  opt = opt || {};
+  if(job && job.id) _psvCardJob = Math.max(_psvCardJob, job.id);
+  const warn = !!opt.warn;
+  const pre = warn ? 'Corrected — ' : '';
+  if(r.result === 'pass'){
+    const required = Number(r.required) || 0;
+    const packed = Number(r.packed) || 0;
+    const complete = required > 0 && packed >= required;
+    showPsvMsg({
+      kind: warn ? 'warn' : 'ok',
+      icon: warn ? '⚠' : (complete ? '✅' : '✓'),
+      title: pre + (r.name || r.sku || barcode),
+      sub: (r.sku ? `SKU ${r.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed') + ` · ${_psvBoxLabel_(job)}` + (warn ? ' · Counted by server' : '') + (opt.saving ? ' · Saving…' : ''),
+      qty: `${packed}/${required}`,
+      action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(r.sku || '', barcode, r.name || '') },
+    });
+  } else if(r.result === 'wrong'){
+    const owners = (r.ownerInvoices && r.ownerInvoices.length) ? r.ownerInvoices.join(', ') : (opt.saving ? '' : 'Unknown');
+    showPsvMsg({ kind: warn ? 'warn' : 'bad', icon: warn ? '⚠' : '🚫', title: pre + (opt.saving ? 'This item is not in this order' : 'This item belongs to a different customer'),
+      sub: opt.saving ? 'Checking which customer it belongs to…' : `Actually belongs to [${owners}]` });
+  } else if(r.result === 'over'){
+    const boxes = r.existingBoxes || [];
+    const boxSub = boxes.length
+      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty} pcs)`).join(' / ')
+      : '';
+    showPsvMsg({
+      kind: warn ? 'warn' : 'bad', icon:'⚠',
+      title: pre + (r.name || r.sku || barcode),
+      sub: `Barcode ${barcode} · ${r.note === 'excluded' ? 'Excluded via issue — no quantity required' : (warn ? 'Already scanned (another device or earlier scan) — not counted again' : 'Duplicate scan — already complete')}${boxSub ? ' · Already packed in: ' + boxSub : ''}`,
+      qty: r.note === 'excluded' ? '' : `${Number(r.packed) || 0}/${Number(r.required) || 0}`, // ★ 2026-10-23 — 중복 스캔해도 수량은 "완료/필요" 그대로(박스 내 수량과 혼동 방지)
+      action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(r.sku || '', barcode, r.name || '') },
+    });
+  }
+}
 function submitPsvScan(){
   const input = document.getElementById('psvScanInput');
   const barcode = input.value.trim();
   if(!barcode || !_psvInvoice) return;
+  // ★ v22 — 확정됐거나 확정 처리 중인 오더에는 스캔 안 받음(수동 입력창·자동 입력 타이머로도)
+  if(_psvConfirming || _psvIsVerified_(_psvInvoice) || input.disabled){ input.value = ''; try { playScanResultSound(false); } catch(eS){} showPsvMsg({ kind: 'bad', icon: '⛔', title: 'Scan not accepted', sub: _psvConfirming ? 'Confirming this order — please wait.' : 'This order is already verified.' }); return; }
   // ★ 2026-09-01 버그 수정 — submitPvScan과 동일한 이유(alert 반복 방지)
   if(!currentPsvWorker()){ alert('Please select a worker first'); input.focus(); return; }
   input.value = '';
   flashScannedIntoInput(input, barcode);
   // ★ 2026-10-08 — 스캔한 "그 순간"의 박스/팔렛 번호를 같이 저장(대기 중에 번호를 바꿔도 이 스캔은 원래 번호로 기록)
-  _psvScanQueue.push({ barcode: barcode, box: _psvCurrentBox, pallet: _psvCurrentPallet, kind: _psvKind_(), t0: performance.now() });
+  const job = { id: ++_psvIdSeq, barcode: barcode, inv: _psvInvoice, worker: currentPsvWorker(), box: _psvCurrentBox, pallet: _psvCurrentPallet, kind: _psvKind_(), t0: performance.now() };
+  _psvInstant_(job);
+  _psvScanQueue.push(job);
   processPsvScanQueue();
+}
+// ★ v22 — 즉시 판정해서 카드·소리·수량을 바로 보여 줌(판정 못 하면 아무것도 안 함 → 서버 결과 때 예전처럼 표시)
+function _psvInstant_(job){
+  let pred = null;
+  try { pred = _psvPredict_(job.barcode, job.inv); } catch(e){ pred = null; }
+  job.pred = pred;
+  job.seqAtSubmit = _psvMsgSeq;
+  if(!pred){ _psvPend.push({ id: job.id, inv: job.inv, nb: normBarcode(job.barcode), kind: 'wait', target: 0 }); try { renderPsvBody(); } catch(e){} return; } // ★ 판정 못 해도 '저장 중'으로 잡아 확정·인쇄를 막음
+  job.msgSeq = ++_psvMsgSeq;
+  _psvPend.push({ id: job.id, inv: job.inv, nb: pred.nb, kind: pred.kind, target: pred.kind === 'pass' ? pred.required : 0 });
+  const l = pred.line || {};
+  const r = { result: pred.kind, sku: l.sku, name: l.name, packed: pred.packed, required: pred.required, note: pred.note, existingBoxes: _psvLineBoxes_(pred.line) };
+  playScanResultSound(pred.kind === 'pass');
+  if(pred.kind === 'pass') pushRecentScan('psvRecentScans', l.name || l.sku || job.barcode);
+  _psvShowResult_(r, job.barcode, job, { saving: true });
+  try { renderPsvBody(); if(pred.kind === 'pass') scrollToAndHighlightLine_('psvLines', job.barcode); } catch(e){ console.warn('[psv] instant render', e); }
 }
 async function processPsvScanQueue(){
   if(_psvScanBusy) return;
@@ -10206,7 +10410,9 @@ async function processPsvScanQueue(){
     while(_psvScanQueue.length){
       const job = _psvScanQueue.shift();
       window.__tmJobT0 = job.t0 != null ? job.t0 : null; // ★ v21 속도 측정용(앞 스캔 기다린 시간)
-      try{ await doPsvScanOne(job.barcode, job); } finally { window.__tmJobT0 = null; }
+      try{ await doPsvScanOne(job.barcode, job); }
+      catch(e){ _psvOnSaveFail_(job, String(e && e.message || e)); }
+      finally { window.__tmJobT0 = null; }
     }
   } finally {
     _psvScanBusy = false;
@@ -10214,55 +10420,93 @@ async function processPsvScanQueue(){
     if(input) input.focus();
   }
 }
+function _psvDropPend_(job){ _psvPend = _psvPend.filter(p => p.id !== job.id); }
+function _psvOnSaveFail_(job, err){
+  _psvDropPend_(job);
+  _psvFail.push({ id: job.id, inv: job.inv, job: job });
+  playScanResultSound(false);
+  if(job.inv === _psvInvoice){
+    job.msgSeq = ++_psvMsgSeq;
+    _psvCardJob = Math.max(_psvCardJob, _psvIdSeq); // 빨간 카드는 늦게 온 다른 결과로 덮지 않음
+    showPsvMsg({ kind: 'bad', icon: '⛔', title: 'NOT SAVED — Barcode ' + job.barcode,
+      sub: 'This scan was not saved (' + (err || 'Unknown error') + '). Quantity was rolled back. Tap Retry.',
+      action: { label: '↻ Retry', onClick: () => retryPsvFailed() } });
+    try { renderPsvBody(); } catch(e){}
+  }
+}
+// 저장 실패한 스캔을 같은 오더·같은 박스로 다시 저장(서버가 이미 저장했었다면 중복으로 판정될 뿐 두 번 세지 않음)
+function retryPsvFailed(){
+  const list = _psvFail.filter(f => f.inv === _psvInvoice);
+  if(!list.length) return;
+  _psvFail = _psvFail.filter(f => f.inv !== _psvInvoice);
+  list.forEach(f => {
+    const job = Object.assign({}, f.job, { id: ++_psvIdSeq, pred: null, msgSeq: 0, t0: performance.now() });
+    _psvInstant_(job);
+    _psvScanQueue.push(job);
+  });
+  try { renderPsvBody(); } catch(e){}
+  processPsvScanQueue();
+}
 async function doPsvScanOne(barcode, job){
-  job = job || { box: _psvCurrentBox, pallet: _psvCurrentPallet, kind: _psvKind_() };
-  const worker = currentPsvWorker();
-  if(!worker){ alert('Please select a worker first'); return; }
+  job = job || { barcode: barcode, inv: _psvInvoice, worker: currentPsvWorker(), box: _psvCurrentBox, pallet: _psvCurrentPallet, kind: _psvKind_() };
+  const worker = job.worker || currentPsvWorker();
+  const inv = job.inv || _psvInvoice;
+  if(!worker){ _psvDropPend_(job); alert('Please select a worker first'); try { renderPsvBody(); } catch(e){} return; }
   // ★ 2026-09-01 긴급 수정 — doSsScanOne과 동일한 이유(재시도해도 서버가 중복을
   //   안전하게 걸러내므로 재시도가 항상 안전함).
-  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, worker, barcode, round: 2, box: job.box, pallet: job.pallet });
-  if(!res.ok){
-    showPsvMsg('Error: ' + (res.error || 'Unknown error'), 'bad');
+  const res = await gasCallWithRetry('logPackScan', { batchId: STANDALONE_BATCH_ID, invoice: inv, worker, barcode, round: 2, box: job.box, pallet: job.pallet });
+  if(!res || !res.ok){
+    _psvOnSaveFail_(job, res && res.error);
     return;
   }
+  try { await _psvAfterSave_(res, barcode, job, inv); }
+  catch(e){ // ★ 저장은 됐으므로 NOT SAVED 로 보이지 않게. PASS 는 '저장됨(대기)' 그대로 두고 상태만 다시 받음(20초 안전망)
+    console.warn('[psv] 저장 뒤 화면 갱신 오류(저장은 정상):', e);
+    if(res.result !== 'pass') _psvDropPend_(job);
+    try { renderPsvBody(); } catch(e2){}
+    try { refreshPsvState().catch(() => {}); } catch(e3){}
+  }
+}
+async function _psvAfterSave_(res, barcode, job, inv){
+  const pred = job.pred;
   if(res.result === 'pass'){
-    playScanResultSound(true); // ★ 2026-09-09 신규
-    pushRecentScan('psvRecentScans', res.name || res.sku || barcode); // ★ 2026-09-14 신규
-    // ★ 2026-09-01 재수정(속도 핵심) — doSsScanOne과 동일한 이유. logPackScan
-    //   응답에 이미 packed/required가 있으므로 추가 서버 왕복 없이 즉시 표시.
-    const required = Number(res.required) || 0;
-    const packed = Number(res.packed) || 0;
-    const complete = required > 0 && packed >= required;
-    showPsvMsg({
-      kind: 'ok',
-      icon: complete ? '✅' : '✓',
-      title: res.name || res.sku || barcode,
-      sub: (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + (complete ? ' · This item is complete' : ' · Confirmed') + ` · ${job.kind === 'pallet' ? 'Pallet ' + job.pallet : 'Box ' + job.box}`,
-      qty: `${packed}/${required}`,
-      action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
-    });
-    refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode)); // 백그라운드
+    // 저장됨 — 화면 상태가 이 스캔을 반영할 때까지 '저장됨(대기)'으로 유지(_psvPrunePend_ 가 정리)
+    const p = _psvPend.find(x => x.id === job.id);
+    if(p){ p.saved = true; p.savedAt = Date.now(); p.kind = 'pass'; p.target = Math.max(p.target || 0, Number(res.required) || 0); p.nb = normBarcode(barcode); p.rev = Number(res.rev) || 0; }
+    setTimeout(() => { try { renderPsvBody(); } catch(e){} }, PSV_SAVED_HOLD_MS_ + 200);
+  } else _psvDropPend_(job);
+  const here = inv === _psvInvoice;
+  if(pred && pred.kind === res.result){
+    // 화면 판정이 맞았음 — 카드가 아직 이 스캔이면 서버 값으로 다듬기(소리는 이미 냄)
+    if(here && job.msgSeq === _psvMsgSeq){
+      if(res.result === 'pass'){
+        _psvSetSub_(job.msgSeq, (res.sku ? `SKU ${res.sku} · Barcode ${barcode}` : `Barcode ${barcode}`) + ' · This item is complete · ' + _psvBoxLabel_(job) + ' · Saved');
+        const qEl = document.getElementById('psvMsgQty'); if(qEl) qEl.textContent = `${Number(res.packed) || 0}/${Number(res.required) || 0}`; // 서버 값으로
+      }
+      else _psvShowResult_(res, barcode, job);
+    }
+  } else if(pred){
+    // ★ 서버가 다름 — 서버 결과로 바로 고치고 주황 경고(새 카드가 떠 있어도 반드시 보여 줌)
+    if(here){
+      playScanResultSound(res.result === 'pass');
+      if(res.result === 'pass') pushRecentScan('psvRecentScans', res.name || res.sku || barcode);
+      job.msgSeq = ++_psvMsgSeq;
+      _psvShowResult_(res, barcode, job, { warn: true });
+    }
+  } else if(here){
+    // 예전 방식(화면 판정 안 함) — 서버 결과를 그대로 표시. 그 사이 더 새 스캔 카드가 떠 있으면 PASS 는 카드 대신 소리·목록만(문제 결과는 반드시 카드로)
+    playScanResultSound(res.result === 'pass'); // ★ 2026-09-09 신규
+    if(res.result === 'pass') pushRecentScan('psvRecentScans', res.name || res.sku || barcode); // ★ 2026-09-14 신규
+    if(res.result !== 'pass' || job.id >= _psvCardJob){ // 이 스캔보다 나중 스캔의 카드가 떠 있으면 PASS 는 카드 생략
+      job.msgSeq = ++_psvMsgSeq;
+      _psvShowResult_(res, barcode, job);
+    }
+  }
+  if(!here) return; // 다른 오더 화면으로 바뀜 — 그 오더에 정상 저장됨(화면은 그 오더를 다시 열면 보임)
+  try { renderPsvBody(); } catch(e){}
+  if(res.result === 'pass'){
+    refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode)).catch(e => console.warn('[psv] refresh', e)); // 백그라운드
     return;
-  } else if(res.result === 'wrong'){
-    playScanResultSound(false);
-    const owners = (res.ownerInvoices && res.ownerInvoices.length) ? res.ownerInvoices.join(', ') : 'Unknown';
-    showPsvMsg({ kind:'bad', icon:'🚫', title:'This item belongs to a different customer', sub:`Actually belongs to [${owners}]` });
-  } else if(res.result === 'over'){
-    playScanResultSound(false);
-    // ★ 2026-09-09 신규(현장 질문) — 중복 스캔(이미 확인 완료된 상품을 또
-    //   스캔)한 건, "이거 몇 번 박스/팔렛이었지?" 확인 용도로도 쓸 수 있게
-    //   서버가 같이 보낸 박스·팔렛 정보를 보여줌.
-    const boxes = res.existingBoxes || [];
-    const boxSub = boxes.length
-      ? boxes.map(b => `${b.box ? 'Box ' + b.box : ''}${b.pallet && b.pallet !== '1' ? ' · Pallet ' + b.pallet : ''} (${b.qty} pcs)`).join(' / ')
-      : '';
-    showPsvMsg({
-      kind:'bad', icon:'⚠',
-      title: res.name || res.sku || barcode,
-      sub: `Barcode ${barcode} · ${res.note === 'excluded' ? 'Excluded via issue — no quantity required' : 'Duplicate scan — already complete'}${boxSub ? ' · Already packed in: ' + boxSub : ''}`,
-      qty: res.note === 'excluded' ? '' : `${Number(res.packed) || 0}/${Number(res.required) || 0}`, // ★ 2026-10-23 — 중복 스캔해도 수량은 "완료/필요" 그대로(박스 내 수량과 혼동 방지)
-      action: { label: '⚠ Report Issue', onClick: () => openPsvIssueModal(res.sku || '', barcode, res.name || '') },
-    });
   }
   await refreshPsvState().then(() => scrollToAndHighlightLine_('psvLines', barcode));
 }
@@ -10316,16 +10560,26 @@ function showPsvMsg(msgOrOpts, kind){
 async function undoPsvScanEntry(packScanId){
   if(!confirm('Undo this scan?')) return;
   const res = await gasCallWithRetry('undoPackScan', { packScanId, batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, round: 2 }); // ★ v20 — 위치 정보 추가(시트 방식에서는 무시됨)
-  if(res.ok) await refreshPsvState();
+  if(res.ok){ const _uinv = _psvInvoice; _psvPend = _psvPend.filter(p => !(p.saved && p.inv === _uinv)); await refreshPsvState(); } // ★ v22 — 취소했으면 '저장됨(대기)' 표시도 지움(되돌린 수량이 완료로 보이지 않게)
   else alert('Undo failed: ' + (res.error || 'Unknown error'));
 }
 
 async function completePsvVerify(){
   if(!_psvInvoice) return;
+  if(_psvIsVerified_(_psvInvoice)) return; // ★ v22 — 이미 확정된 오더(두 번 확정·두 번 인쇄 방지)
+  if(_psvBlocked_(_psvInvoice)) return; // ★ v22 — 저장 안 된 스캔이 있으면 확정 안 함
+  if(_psvConfirming) return; // ★ v22 — 두 번 누름 방지
+  if(_psvStateInv !== _psvInvoice || !_psvState || !_psvState.complete){ alert('Order is still loading — try again in a moment.'); return; } // ★ v22 — 지금 오더의 상태로만 확정
+  _psvConfirming = true;
+  try { await _psvCompleteCore_(); } finally { _psvConfirming = false; try { renderPsvBody(); } catch(e){} }
+}
+async function _psvCompleteCore_(){
   const btn = document.getElementById('psvCompleteBtn');
   btn.disabled = true; btn.textContent = 'Processing...';
+  const _cin = document.getElementById('psvScanInput'); const _cinWas = _cin ? _cin.disabled : false; if(_cin) _cin.disabled = true; // ★ v22 — 확정 처리 중엔 스캔 막음
   const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified' });
   if(res.ok){
+    _psvVerifiedInv[_psvInvoice] = Date.now(); // ★ v22
     showPsvMsg('🟣 Final Verification (2nd) complete — switched to purple status', 'ok');
     // ★ 2026-09-01 버그 수정 — completePvVerify와 동일한 버그. 성공해도 버튼이
     //   "처리 중..."에 멈춰있는 것처럼 보이던 것을 여기서도 직접 확정해서 고침.
@@ -10336,6 +10590,7 @@ async function completePsvVerify(){
     printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 검증완료 확정 시 자동으로 패킹슬립 인쇄
   } else {
     btn.disabled = false; btn.textContent = '🟣 Confirm Final Verification (2nd)';
+    if(_cin) _cin.disabled = _cinWas;
     alert('Failed to switch status: ' + (res.error || 'Unknown error'));
     await refreshPsvState();
   }
@@ -10343,8 +10598,18 @@ async function completePsvVerify(){
 
 async function forcePsvComplete(){
   if(!_psvInvoice) return;
+  if(_psvIsVerified_(_psvInvoice)) return; // ★ v22 — 이미 확정됨
+  if(_psvBlocked_(_psvInvoice)) return; // ★ v22 — 저장 중·실패한 스캔이 있으면 강제 확정도 안 함(박스 정보가 사라지지 않게)
+  if(_psvConfirming) return; // ★ v22
+  if(_psvStateInv !== _psvInvoice){ alert('Order is still loading — try again in a moment.'); return; }
   const worker = currentPsvWorker();
   if(!worker){ alert('Please select a worker first (needed for the audit record)'); return; }
+  _psvConfirming = true;
+  const _fin = document.getElementById('psvScanInput'); const _finWas = _fin ? _fin.disabled : false; if(_fin) _fin.disabled = true; // ★ v22 — 강제 확정 중엔 스캔 막음
+  let _fok = false;
+  try { _fok = await _psvForceCore_(worker); } finally { _psvConfirming = false; if(!_fok && _fin) _fin.disabled = _finWas; try { renderPsvBody(); } catch(e){} }
+}
+async function _psvForceCore_(worker){
   if(!confirm('⚠ Verification isn\'t finished yet — force this to "Final Verification (2nd) Complete" using manager authority?\n\nThis bypasses the mis-ship prevention safeguard, so only use it if you have already physically confirmed the items.\n\nAll remaining items will be automatically recorded as "confirmed", so the screen and packing slip always stay in sync.')) return;
   const forceBtn = document.getElementById('psvForceBtn');
   if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = 'Processing...'; }
@@ -10360,7 +10625,7 @@ async function forcePsvComplete(){
   const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified', force: true });
   if(res.ok){
     showPsvMsg('⚠ Manager force confirm — all remaining quantity recorded as confirmed', 'ok');
-    _psvForceVerified = true;
+    _psvForceVerified = true; _psvVerifiedInv[_psvInvoice] = Date.now(); // ★ v22
     await refreshPsvState(); // ★ 신규 — 방금 채운 수량을 화면에 즉시 반영
     await populatePsvInvoiceSelect();
     const input = document.getElementById('psvScanInput');
@@ -10369,7 +10634,9 @@ async function forcePsvComplete(){
     if(completeBtn){ completeBtn.disabled = true; completeBtn.textContent = '✅ Already Verified (Manager Confirmed)'; }
     // ★ 2026-09-01 버그 수정 — forcePvComplete와 동일한 이유. 강제확정 버튼 자체를 잠금.
     if(forceBtn){ forceBtn.disabled = true; forceBtn.textContent = '✅ Already Confirmed'; }
+    _psvConfirming = false; // (인쇄는 확정이 끝난 뒤의 일 — 인쇄 잠금에 걸리지 않게)
     printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 강제확정 시에도 자동 인쇄
+    return true;
   } else {
     if(forceBtn){ forceBtn.disabled = false; forceBtn.textContent = '⚠ Manager Force Confirm'; }
     alert('Failed: ' + (res.error || 'Unknown error'));
@@ -11416,6 +11683,8 @@ async function printPsvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _psvInvoice;
   if(!invoice){ alert('Please select an order first'); return; }
+  if(_psvBlocked_(invoice)) return; // ★ v22 — 저장 확인 뒤에만 인쇄
+  if(_psvStateInv !== invoice || !_psvState){ alert('Order is still loading — try again in a moment.'); return; } // ★ v22 — 지금 오더 내용으로만 인쇄
   const order = _standaloneOrders.find(o => o.invoice === invoice);
   const st = _psvState;
   const rawLines = (st && st.lines) ? st.lines : [];
