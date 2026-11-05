@@ -17,6 +17,113 @@ const SALES_TIMEZONE   = 'America/Los_Angeles';
 const JOBS_SHEET     = 'Jobs';
 const SETTINGS_SHEET = 'Settings';
 
+/* ===================== ★ 2026-11-04 빠른 날짜 글자 변환(fmtDate_) =====================
+ * [왜] 작업 시간에 1분 동기화·workerJobs 미러·sales 미러가 3~10분씩 걸리던 원인을 측정으로 확정함(ReadProbe v3, 11/4 15:15~16:15):
+ *   Jobs 목록 계산의 "행마다 시간→글자 변환"(Utilities.formatDate / Session.getScriptTimeZone, 한 번에 약 1만 800번 서비스 호출)이
+ *   한가할 땐 4~6초, 바쁠 땐 같은 호출이 100배 느려져 최대 464초. 시트 읽기·메모·디멘션은 같은 순간에도 1~4초.
+ * [어떻게] 같은 결과 글자를 서비스 호출 없이 JavaScript 로 직접 만듦(이 스크립트의 JS 시계는 스크립트 시간대로 동작).
+ *   - 실행마다 처음 한 번: 겨울·여름·지금·1899-12-30(시간만 든 칸) 4개 시각을 Utilities.formatDate 결과와 글자 하나까지 비교 → 하나라도 다르면 이 실행은 전부 예전 방식.
+ *   - 시간대가 스크립트 시간대와 다르거나, 패턴에 yyyy yy MM dd HH mm ss 와 '글자' 말고 다른 기호(h, a, E, z …)가 있거나,
+ *     값이 올바른 날짜가 아니면 → 예전과 똑같이 Utilities.formatDate 를 그대로 부름(결과·오류 모두 예전과 동일).
+ *   - 비상 스위치: 스크립트 속성 FAST_DATE_OFF = 1 → 전부 예전 방식.
+ * [주의] 이 블록은 Code.gs 와 BatchPicking.gs 에 글자 하나까지 똑같이 들어 있음(한 파일만 교체돼도 멈추지 않게). 고칠 땐 두 곳 모두 똑같이.
+ * ================================================================================ */
+var __SCRIPT_TZ_MEMO = null, __FD_STATE = null, __FD_PAT = {};
+function scriptTz_() {
+  if (__SCRIPT_TZ_MEMO == null) __SCRIPT_TZ_MEMO = Session.getScriptTimeZone();
+  return __SCRIPT_TZ_MEMO;
+}
+function _fdCompile_(p) {
+  if (!__FD_PAT) __FD_PAT = {};
+  if (Object.prototype.hasOwnProperty.call(__FD_PAT, p)) return __FD_PAT[p];
+  const parts = [];
+  let i = 0, ok = true;
+  while (i < p.length) {
+    const ch = p.charAt(i);
+    if (ch === "'") {
+      if (p.charAt(i + 1) === "'") { parts.push("'"); i += 2; continue; }
+      const j = p.indexOf("'", i + 1);
+      if (j < 0) { ok = false; break; }
+      let lit = p.substring(i + 1, j);
+      // 'it''s' 처럼 따옴표 안의 '' 는 따옴표 하나
+      let k = j;
+      while (p.charAt(k + 1) === "'") { const j2 = p.indexOf("'", k + 2); if (j2 < 0) { ok = false; break; } lit += "'" + p.substring(k + 2, j2); k = j2; }
+      if (!ok) break;
+      parts.push(lit); i = k + 1; continue;
+    }
+    if (/[A-Za-z]/.test(ch)) {
+      let j = i; while (j < p.length && p.charAt(j) === ch) j++;
+      const tok = p.substring(i, j);
+      if (['yyyy', 'yy', 'MM', 'dd', 'HH', 'mm', 'ss'].indexOf(tok) < 0) { ok = false; break; }
+      parts.push({ t: tok }); i = j; continue;
+    }
+    parts.push(ch); i++;
+  }
+  __FD_PAT[p] = ok ? parts : null;
+  return __FD_PAT[p];
+}
+function _fdRender_(parts, d) {
+  const p2 = function (n) { return n < 10 ? '0' + n : String(n); };
+  let s = '';
+  for (let i = 0; i < parts.length; i++) {
+    const x = parts[i];
+    if (typeof x === 'string') { s += x; continue; }
+    switch (x.t) {
+      case 'yyyy': { const y = d.getFullYear(); s += (y >= 0 && y < 1000) ? ('000' + y).slice(-4) : String(y); break; }
+      case 'yy': s += p2(((d.getFullYear() % 100) + 100) % 100); break;
+      case 'MM': s += p2(d.getMonth() + 1); break;
+      case 'dd': s += p2(d.getDate()); break;
+      case 'HH': s += p2(d.getHours()); break;
+      case 'mm': s += p2(d.getMinutes()); break;
+      case 'ss': s += p2(d.getSeconds()); break;
+    }
+  }
+  return s;
+}
+function _fdReady_() {
+  if (__FD_STATE) return __FD_STATE.ok;
+  let ok = false, why = '';
+  try {
+    if (String(PropertiesService.getScriptProperties().getProperty('FAST_DATE_OFF') || '') === '1') { why = 'off'; }
+    else {
+      const tz = scriptTz_(), P = "yyyy-MM-dd'T'HH:mm:ss", parts = _fdCompile_(P);
+      const probes = [Date.UTC(2026, 0, 15, 20, 5, 7), Date.UTC(2026, 6, 15, 20, 5, 7), Date.now(), Date.UTC(1899, 11, 30, 17, 0, 0)]; // 1899-12-30 = 시트의 '시간만' 칸 날짜(옛 지방시 차이 확인)
+      ok = !!parts && probes.every(function (ms) { const d = new Date(ms); return _fdRender_(parts, d) === Utilities.formatDate(d, tz, P); });
+      if (!ok) why = 'mismatch';
+    }
+  } catch (e) { ok = false; why = 'err'; }
+  __FD_STATE = { ok: ok, why: why };
+  return ok;
+}
+function fmtDate_(d, tz, pattern) {
+  if (typeof pattern === 'string' && Object.prototype.toString.call(d) === '[object Date]' && !isNaN(d.getTime()) &&
+      tz === scriptTz_() && _fdReady_()) {
+    const parts = _fdCompile_(pattern);
+    if (parts) return _fdRender_(parts, d);
+  }
+  return Utilities.formatDate(d, tz, pattern);
+}
+/* 편집기에서 ▶ 실행: 빠른 변환이 켜졌는지 + 실제 Jobs 날짜로 예전 방식과 글자 비교(읽기만) */
+function checkFastDate() {
+  const out = [];
+  const ready = _fdReady_();
+  out.push('빠른 날짜 변환: ' + (ready ? '✅ 켜짐' : '⏸ 꺼짐(' + (__FD_STATE && __FD_STATE.why) + ') — 예전 방식으로 동작(정상)') + ' · 스크립트 시간대 ' + scriptTz_());
+  const pats = ['yyyy-MM-dd', 'yyyy-MM-dd HH:mm:ss', 'HH:mm', "yyyy-MM-dd'T'HH:mm:ss", 'MM-dd HH:mm', 'yyyyMMdd', 'HHmm', 'MM-dd HH'];
+  let n = 0, bad = 0; const badEx = [];
+  const t0 = Date.now();
+  try {
+    const sh = SHEET_(); const lr = sh.getLastRow(), lc = sh.getLastColumn();
+    const rows = lr >= 2 ? sh.getRange(2, 1, Math.min(lr - 1, 1500), lc).getValues() : [];
+    const tz = scriptTz_();
+    rows.forEach(function (r) { r.forEach(function (v) {
+      if (Object.prototype.toString.call(v) !== '[object Date]' || isNaN(v)) return;
+      pats.forEach(function (p) { n++; const a = fmtDate_(v, tz, p), b = Utilities.formatDate(v, tz, p); if (a !== b) { bad++; if (badEx.length < 5) badEx.push(p + ' ' + a + ' ≠ ' + b); } });
+    }); });
+  } catch (e) { out.push('비교 중 오류: ' + e); }
+  out.push('Jobs 실제 날짜 ' + n + '건 비교 → ' + (bad ? '❌ 다름 ' + bad + '건: ' + badEx.join(' / ') : '✅ 전부 같음') + ' (' + Math.round((Date.now() - t0) / 100) / 10 + 's)');
+  const text = out.join('\n'); Logger.log(text); return text;
+}
+
 // === Version Channel Utils ===
 const PROP = PropertiesService.getScriptProperties();
 
@@ -349,7 +456,7 @@ function _noteSlowReq_(kind, op, ms) {
     if (ms < 5000) return;
     const pr = PropertiesService.getScriptProperties();
     const arr = String(pr.getProperty('reqSlowLog') || '').split('\n').filter(Boolean);
-    arr.push(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd HH:mm:ss') + ' ' + kind + ' ' + op + ' ' + Math.round(ms / 100) / 10 + 's');
+    arr.push(fmtDate_(new Date(), scriptTz_(), 'MM-dd HH:mm:ss') + ' ' + kind + ' ' + op + ' ' + Math.round(ms / 100) / 10 + 's');
     pr.setProperty('reqSlowLog', arr.slice(-40).join('\n'));
   } catch (e) { /* 기록 실패는 무시 */ }
 }
@@ -398,16 +505,38 @@ function doGet_core_(e) {
     const cache = CacheService.getScriptCache();
     const cacheKey = 'listJobs_cache_v1';
     let out;
-    const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시). Jobs가 늘어나 payload가 100KB를 넘어도 이제 항상 정상 캐싱됨
+    let cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시). Jobs가 늘어나 payload가 100KB를 넘어도 이제 항상 정상 캐싱됨
     if (cached) {
       try { out = JSON.parse(cached); } catch (e) { out = null; }
     }
+    // ★ 2026-10-27 안정화(실측: listJobs 9~34초) — 캐시가 비는 순간 여러 기기가 동시에 Jobs 시트 전체를 각자 다시 읽던 것을,
+    //   먼저 계산 중인 요청이 있으면(표식 _calc, 최대 40초) 그 결과가 캐시에 올라올 때까지 기다렸다가 받도록 함(안전망: 시간 초과/실패 시 직접 계산).
     if (!out) {
-      out = listJobs_textSafe_();
-      out.pickers = getPickers_();
-      out.pickerColors = getPickerColors_();
-      out.ver = getVersion_();
-      try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 8); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+      const _lk = cacheKey + '_calc';
+      try {
+        if (cache.get(_lk)) {
+          const tEnd = Date.now() + 15000;
+          while (Date.now() < tEnd && !out) {
+            Utilities.sleep(500);
+            const c2 = _cacheGetChunked_(cache, cacheKey);
+            if (c2) { try { out = JSON.parse(c2); } catch (eP) { out = null; } }
+            if (!out && !cache.get(_lk)) break;
+          }
+        }
+      } catch (eW) { /* 대기 실패 → 직접 계산 */ }
+    }
+    if (!out) {
+      let _mine = false;
+      try { cache.put(cacheKey + '_calc', '1', 40); _mine = true; } catch (eL) { /* 무시 */ }
+      try {
+        out = listJobs_textSafe_();
+        out.pickers = getPickers_();
+        out.pickerColors = getPickerColors_();
+        out.ver = getVersion_();
+        try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 8); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+      } finally {
+        if (_mine) { try { cache.remove(cacheKey + '_calc'); } catch (eR) { /* 무시 */ } }
+      }
     }
     return json_(out);
   }
@@ -1505,7 +1634,7 @@ function _isPuTkMethod_(v) { return String(v == null ? '' : v).trim().toUpperCas
 function _puTkScalar_(v) {
   try {
     if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
-      const ymd = Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd').split('-');
+      const ymd = fmtDate_(v, scriptTz_(), 'yyyy-MM-dd').split('-');
       const days = Math.round((Date.UTC(+ymd[0], +ymd[1] - 1, +ymd[2]) - Date.UTC(1899, 11, 30)) / 86400000);
       return Math.max(0, days);
     }
@@ -1598,7 +1727,7 @@ function findRowByKey_(keyName, keyValue) {
 function toHHmm_(v) {
   if (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)) return v;
   if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'HH:mm');
+    return fmtDate_(v, scriptTz_(), 'HH:mm');
   }
   if (v != null) {
     const s = String(v);
@@ -1795,7 +1924,7 @@ function listJobs_textSafe_() {
   //   바꾸기 위해, 각 인보이스의 디멘션 저장 여부·시각을 같이 내려줌.
   const dimsMap = buildDimsExistsMap_();
 
-  const tz = Session.getScriptTimeZone();
+  const tz = scriptTz_();
   const jobs = rows.map((r, i) => ({
     _rowIndex: i + 2, // ★ 2026-07-29 신규: 원본 시트 행 번호를 미리 저장해둠(아래 메모 읽기용)
     invoice: iInv ? r[iInv - 1] : '',
@@ -1817,7 +1946,7 @@ function listJobs_textSafe_() {
     //   형식('yyyy-MM-dd HH:mm:ss')으로 통일해서, 이후 어디서든 이 값으로
     //   정렬/비교해도 항상 안전하게 함.
     createdAt: iCreated
-      ? (r[iCreated - 1] instanceof Date ? Utilities.formatDate(r[iCreated - 1], tz, 'yyyy-MM-dd HH:mm:ss') : String(r[iCreated - 1] || ''))
+      ? (r[iCreated - 1] instanceof Date ? fmtDate_(r[iCreated - 1], tz, 'yyyy-MM-dd HH:mm:ss') : String(r[iCreated - 1] || ''))
       : '',
     archivedAt: iArchAt ? r[iArchAt - 1] : '',
     archived: iArch ? r[iArch - 1] : '',
@@ -2249,7 +2378,7 @@ function repairPrematurelyArchivedJobs() {
   function isInspected(insp) { const v = String(insp || '').trim(); return v.indexOf('PASS') >= 0 || v.indexOf('ISSUES') >= 0; }
   function toDateStr(v) {
     if (!v) return '';
-    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return fmtDate_(v, scriptTz_(), 'yyyy-MM-dd');
     return String(v).slice(0, 10);
   }
 
@@ -2334,7 +2463,7 @@ function undoOverRestoredJobs() {
   function isInspected(insp) { const v = String(insp || '').trim(); return v.indexOf('PASS') >= 0 || v.indexOf('ISSUES') >= 0; }
   function toDateStr(v) {
     if (!v) return '';
-    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return fmtDate_(v, scriptTz_(), 'yyyy-MM-dd');
     return String(v).slice(0, 10);
   }
 
@@ -2377,8 +2506,8 @@ function undoOverRestoredJobs() {
 function applyInvoiceTextFormat_(sh, lastRow) { if (lastRow < 2) return; sh.getRange(2, 1, lastRow - 1, 1).setNumberFormat('@'); }
 
 function nowLocal_() {
-  const tz = Session.getScriptTimeZone();
-  return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+  const tz = scriptTz_();
+  return fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
 }
 
 /* ★ 2026-10-02 긴급 수정(현장 버그 리포트) — "Confirmed by David · Fri Oct 02
@@ -2408,7 +2537,7 @@ function fmtShortTs_(v) {
       }
     }
     if (!d || isNaN(d.getTime())) return String(v);
-    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd h:mm a');
+    return fmtDate_(d, scriptTz_(), 'MM/dd h:mm a');
   } catch (e) {
     return String(v || '');
   }
@@ -2417,8 +2546,8 @@ function fmtShortTs_(v) {
 function toLocalDateTimeString_(v) {
   const d = toDate_(v);
   if (!d) return '';
-  const tz = Session.getScriptTimeZone();
-  return Utilities.formatDate(d, tz, 'yyyy-MM-dd HH:mm:ss');
+  const tz = scriptTz_();
+  return fmtDate_(d, tz, 'yyyy-MM-dd HH:mm:ss');
 }
 
 function enforceTextFormat_() {
@@ -2433,7 +2562,7 @@ function enforceTextFormat_() {
 function resetTimeColumnsToTextOnce_() {
   const sh = SHEET_();
   const hdr = headerMapCached_();
-  const tz = Session.getScriptTimeZone();
+  const tz = scriptTz_();
   const norm = normalizeHeaderName_;
 
   const startCol = hdr[norm('Start Time')] || hdr[norm('Start')];
@@ -2447,7 +2576,7 @@ function resetTimeColumnsToTextOnce_() {
       return ('0' + m[1]).slice(-2) + ':' + m[2];
     }
     if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
-      return Utilities.formatDate(v, tz, 'HH:mm');
+      return fmtDate_(v, tz, 'HH:mm');
     }
     const s = String(v || '');
     const m = s.match(/(\d{1,2}):(\d{2})/);
@@ -2534,7 +2663,7 @@ function fixISOTimesToLocal_() {
 
   const cStartISO = hdr[norm('StartAtISO')];
   const cEndISO   = hdr[norm('EndAtISO')];
-  const tz = Session.getScriptTimeZone();
+  const tz = scriptTz_();
 
   const lastCol = sh.getLastColumn();
   const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
@@ -2551,7 +2680,7 @@ function fixISOTimesToLocal_() {
       if (s.endsWith('Z') || s.endsWith('.000Z')) {
         const d = new Date(s);
         if (!isNaN(d)) {
-          const local = Utilities.formatDate(d, tz, "yyyy-MM-dd'T'HH:mm:ss");
+          const local = fmtDate_(d, tz, "yyyy-MM-dd'T'HH:mm:ss");
           row[col - 1] = local;
           changed = true;
           Logger.log(`Row ${i+2} col ${col}: ${s} → ${local}`);
@@ -2610,8 +2739,8 @@ function utcToLocalISO_(isoStr) {
   try {
     const d = new Date(s);
     if (isNaN(d)) return s;
-    const tz = Session.getScriptTimeZone();
-    return Utilities.formatDate(d, tz, "yyyy-MM-dd'T'HH:mm:ss");
+    const tz = scriptTz_();
+    return fmtDate_(d, tz, "yyyy-MM-dd'T'HH:mm:ss");
   } catch(e) { return s; }
 }
 
@@ -2648,10 +2777,10 @@ function fillMissingProcessingMinutes() {
     if (!startVal || !endVal) return;
 
     var startISO = (startVal instanceof Date)
-      ? Utilities.formatDate(startVal, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss")
+      ? fmtDate_(startVal, scriptTz_(), "yyyy-MM-dd'T'HH:mm:ss")
       : String(startVal).trim();
     var endISO = (endVal instanceof Date)
-      ? Utilities.formatDate(endVal, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss")
+      ? fmtDate_(endVal, scriptTz_(), "yyyy-MM-dd'T'HH:mm:ss")
       : String(endVal).trim();
 
     if (!startISO || !endISO) return;
@@ -2811,10 +2940,10 @@ function scanEmptyProcMin() {
     if (isEmpty && startVal && endVal) {
       found++;
       var startISO = (startVal instanceof Date)
-        ? Utilities.formatDate(startVal, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss")
+        ? fmtDate_(startVal, scriptTz_(), "yyyy-MM-dd'T'HH:mm:ss")
         : String(startVal);
       var endISO = (endVal instanceof Date)
-        ? Utilities.formatDate(endVal, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss")
+        ? fmtDate_(endVal, scriptTz_(), "yyyy-MM-dd'T'HH:mm:ss")
         : String(endVal);
       var hours = calcWorkHours(startISO, endISO);
       Logger.log('Row '+(i+2)+' | '+invoice+' | '+startISO+' ~ '+endISO+' | hours='+hours+' | minutes='+Math.round(hours*60));
@@ -2892,12 +3021,12 @@ function saveInspection(data) {
     var ss      = SpreadsheetApp.openById(SS_ID);
     var sheet   = ss.getSheetByName(JOBS_SHEET);
     var lastRow = sheet.getLastRow();
-    var tz      = Session.getScriptTimeZone();
+    var tz      = scriptTz_();
 
     function fmtTime(isoStr) {
-      if (!isoStr) return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+      if (!isoStr) return fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
       try {
-        return Utilities.formatDate(new Date(isoStr), tz, 'yyyy-MM-dd HH:mm:ss');
+        return fmtDate_(new Date(isoStr), tz, 'yyyy-MM-dd HH:mm:ss');
       } catch(e) { return String(isoStr); }
     }
 
@@ -3196,11 +3325,11 @@ function saveInspectionBulk_(dataList) {
     var ss      = SpreadsheetApp.openById(SS_ID);
     var sheet   = ss.getSheetByName(JOBS_SHEET);
     var lastRow = sheet.getLastRow();
-    var tz      = Session.getScriptTimeZone();
+    var tz      = scriptTz_();
 
     function fmtTime(isoStr) {
-      if (!isoStr) return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
-      try { return Utilities.formatDate(new Date(isoStr), tz, 'yyyy-MM-dd HH:mm:ss'); }
+      if (!isoStr) return fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+      try { return fmtDate_(new Date(isoStr), tz, 'yyyy-MM-dd HH:mm:ss'); }
       catch (e) { return String(isoStr); }
     }
 
@@ -3353,9 +3482,9 @@ function clearInspection(data) {
 
 function formatInspEnd_(val) {
   if (!val) return '';
-  var tz = Session.getScriptTimeZone();
+  var tz = scriptTz_();
   if (Object.prototype.toString.call(val) === '[object Date]' && !isNaN(val)) {
-    return Utilities.formatDate(val, tz, 'yyyy-MM-dd HH:mm:ss');
+    return fmtDate_(val, tz, 'yyyy-MM-dd HH:mm:ss');
   }
   return String(val).trim();
 }
@@ -3476,7 +3605,7 @@ function salesRepOf_(repMap, invoice) {
 function pullFromSalesSheet(dateFrom, dateTo) {
   try {
     const today = new Date();
-    const todayStr = Utilities.formatDate(today, SALES_TIMEZONE, 'yyyy-MM-dd');
+    const todayStr = fmtDate_(today, SALES_TIMEZONE, 'yyyy-MM-dd');
 
     let fromStr = String(dateFrom || '').trim();
     let toStr = String(dateTo || '').trim();
@@ -3640,11 +3769,11 @@ function pullFromSalesSheet(dateFrom, dateTo) {
 
       let rowDateStr = '';
       if (dateVal instanceof Date) {
-        rowDateStr = Utilities.formatDate(dateVal, SALES_TIMEZONE, 'yyyy-MM-dd');
+        rowDateStr = fmtDate_(dateVal, SALES_TIMEZONE, 'yyyy-MM-dd');
       } else {
         const parsed = new Date(dateVal);
         if (!isNaN(parsed.getTime())) {
-          rowDateStr = Utilities.formatDate(parsed, SALES_TIMEZONE, 'yyyy-MM-dd');
+          rowDateStr = fmtDate_(parsed, SALES_TIMEZONE, 'yyyy-MM-dd');
         }
       }
 
@@ -3679,11 +3808,11 @@ function pullFromSalesSheet(dateFrom, dateTo) {
       if (colShipDate >= 0) {
         const shipVal = row[colShipDate];
         if (shipVal instanceof Date) {
-          shipDateStr = Utilities.formatDate(shipVal, SALES_TIMEZONE, 'yyyy-MM-dd');
+          shipDateStr = fmtDate_(shipVal, SALES_TIMEZONE, 'yyyy-MM-dd');
         } else if (shipVal) {
           const parsed = new Date(shipVal);
           if (!isNaN(parsed.getTime())) {
-            shipDateStr = Utilities.formatDate(parsed, SALES_TIMEZONE, 'yyyy-MM-dd');
+            shipDateStr = fmtDate_(parsed, SALES_TIMEZONE, 'yyyy-MM-dd');
           }
         }
       }
@@ -3998,7 +4127,7 @@ function getRevenueSummary() {
     const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
-    const tz = Session.getScriptTimeZone();
+    const tz = scriptTz_();
     const summary = {};
 
     // ★ 2026-09-04 긴급 버그 수정 — 이 함수가 지금까지 "살아있는" Jobs 시트만
@@ -4039,7 +4168,7 @@ function getRevenueSummary() {
 
         let shipDateStr = '';
         if (Object.prototype.toString.call(shipVal) === '[object Date]' && !isNaN(shipVal)) {
-          shipDateStr = Utilities.formatDate(shipVal, tz, 'yyyy-MM-dd');
+          shipDateStr = fmtDate_(shipVal, tz, 'yyyy-MM-dd');
         } else {
           const s = String(shipVal).trim();
           if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
@@ -4047,7 +4176,7 @@ function getRevenueSummary() {
           } else {
             const d = new Date(s);
             if (!isNaN(d.getTime())) {
-              shipDateStr = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+              shipDateStr = fmtDate_(d, tz, 'yyyy-MM-dd');
             }
           }
         }
@@ -4074,7 +4203,7 @@ function getRevenueSummary() {
     }
 
     accumulateRevenueFrom_(SHEET_());
-    accumulateRevenueFrom_(ss_().getSheetByName(ARCHIVE_PREFIX + JOBS_SHEET));
+    accumulateRevenueFrom_((typeof arcSheet_ === 'function' ? arcSheet_(ARCHIVE_PREFIX + JOBS_SHEET) : _arcMainOrThrow_(ss_(), ARCHIVE_PREFIX + JOBS_SHEET))); // ★ 2026-11-03 — 보관용 파일 전환 시 그쪽(못 열면 오류 응답 — 합계가 조용히 줄지 않게, ArchiveStore.gs)
 
     Object.keys(summary).forEach(function(k) {
       summary[k].amount = Math.round(summary[k].amount * 100) / 100;
@@ -4139,7 +4268,7 @@ function getShipSchedule() {
     var _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
     if (_cached) return JSON.parse(_cached);
 
-    var tz = Session.getScriptTimeZone(); // America/Los_Angeles
+    var tz = scriptTz_(); // America/Los_Angeles
 
     // ── 미국 연방 공휴일 2025-2027 ──────────────────────────
     var HOLIDAYS = {
@@ -4155,7 +4284,7 @@ function getShipSchedule() {
     };
 
     function fmtDate(d) {
-      return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+      return fmtDate_(d, tz, 'yyyy-MM-dd');
     }
 
     function isBizDay(s) {
@@ -4206,7 +4335,7 @@ function getShipSchedule() {
         ok: true,
         schedule: buckets,
         dates: { today: today, d1: d1, d2: d2 },
-        asOf: Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
+        asOf: fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
       };
     }
 
@@ -4289,7 +4418,7 @@ function getShipSchedule() {
         if (iStartISO) {
           var isoRaw = r[iStartISO - 1];
           if (isoRaw instanceof Date && !isNaN(isoRaw)) {
-            startISO = Utilities.formatDate(isoRaw, tz, "yyyy-MM-dd'T'HH:mm:ss");
+            startISO = fmtDate_(isoRaw, tz, "yyyy-MM-dd'T'HH:mm:ss");
           } else {
             startISO = String(isoRaw || '').trim();
           }
@@ -4351,7 +4480,7 @@ function getShipSchedule() {
       ok: true,
       schedule: buckets,
       dates: { today: today, d1: d1, d2: d2 },
-      asOf: Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
+      asOf: fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
     };
     try {
       var _payload = JSON.stringify(_result);
@@ -4422,10 +4551,10 @@ function testShipSchedule() {
  * ===================================================== */
 function getWorkerKPI(dateStr) {
   try {
-    var tz = Session.getScriptTimeZone();
+    var tz = scriptTz_();
     var targetDate = String(dateStr || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-      targetDate = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+      targetDate = fmtDate_(new Date(), tz, 'yyyy-MM-dd');
     }
 
     var sh   = SHEET_();
@@ -4436,7 +4565,7 @@ function getWorkerKPI(dateStr) {
     var empty = {
       ok: true, date: targetDate, workers: [],
       totals: { jobs:0, sku:0, qty:0, amount:0, inspPass:0, inspIssues:0, inspPending:0 },
-      asOf: Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
+      asOf: fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
     };
     if (lastRow < 2) return empty;
 
@@ -4458,7 +4587,7 @@ function getWorkerKPI(dateStr) {
     function completedDateOf(r) {
       if (iEndISO) {
         var v = r[iEndISO - 1];
-        if (v instanceof Date && !isNaN(v)) return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+        if (v instanceof Date && !isNaN(v)) return fmtDate_(v, tz, 'yyyy-MM-dd');
         var s = String(v || '').trim();
         if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
       }
@@ -4533,7 +4662,7 @@ function getWorkerKPI(dateStr) {
       date: targetDate,
       workers: workers,
       totals: totals,
-      asOf: Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
+      asOf: fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss')
     };
 
   } catch(e) {
@@ -4764,7 +4893,7 @@ function setShippedStatus(data) {
         return { ok: false, error: 'Sales must confirm this order before it can be marked shipped.' };
       }
       const iBol = _scanBolCol_(ctx.headers);
-      const bolNow = iBol ? String(ctx.rowVals[iBol - 1] || '').trim() : '';
+      const bolNow = iBol ? _bolText_(ctx.rowVals[iBol - 1]) : ''; // ★ 2026-11-03 — 날짜로 바뀐 BOL# 도 '입력됨'으로 봄(표시는 확인 필요)
       if (!bolNow) {
         return { ok: false, error: 'A BOL# must be entered before this order can be marked shipped.' };
       }
@@ -4824,10 +4953,98 @@ function ensureBolCol_(sh) {
     const curLastCol = sh.getLastColumn();
     sh.insertColumnsAfter(curLastCol, 1);
     sh.getRange(1, curLastCol + 1, 1, 1).setValues([['BOL']]);
+    // ★ 2026-11-03 — 새 열은 옆 열(날짜 열)의 서식을 물려받아 숫자 BOL# 이 날짜로 바뀌었음 → 처음부터 텍스트 서식
+    try { sh.getRange(2, curLastCol + 1, Math.max(1, sh.getMaxRows() - 1), 1).setNumberFormat('@'); } catch (eF) { /* 무시 */ }
     __HDR_CACHE = null;
     iBol = curLastCol + 1;
   }
   return { iBol: iBol };
+}
+
+/* ★ 2026-11-03 — BOL# 칸에 "날짜"가 들어간 경우(구글시트가 숫자 BOL# 을 날짜로 자동 변환 — BOL 열이 날짜 서식을 물려받음).
+ *  예전엔 String(날짜) 그대로 내려가 화면에 "Wed Dec 31 1969 16:00:00 GMT-0800 (...)" 같은 긴 문장이 보였음.
+ *  이제 화면에는 아래 표시만 보이고(입력은 된 것으로 취급 — 출고 체크 조건은 예전과 같음), repairBolDateCells 로 원래 번호를 되살림. */
+var BOL_DATE_FLAG_ = '⚠ Check BOL#';
+function _bolText_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]') return BOL_DATE_FLAG_;
+  return String(v == null ? '' : v).trim();
+}
+/* 편집기에서 실행(한 번) — Jobs 시트 BOL# 열에서 날짜로 바뀐 칸을 찾아 원래 숫자로 되살리고, BOL# 열 전체를 텍스트 서식으로 고정.
+ *  - 날짜 칸만 고침(글자로 된 BOL# 은 전혀 안 건드림). 원래 숫자(시트 일련번호)를 서식만 바꿔 정확히 읽어서 텍스트로 다시 씀.
+ *  - 정수가 아니면(시각이 섞인 값) 자동으로 고치지 않고 목록만 보여줌 → 실제 BOL# 을 확인해서 직접 입력.
+ *  - 고친 내용은 BolHistory 칸에 한 줄씩 남김. 실행 로그를 캡처해 주세요. */
+function repairBolDateCells() {
+  const out = [];
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(20000)) { Logger.log('잠금 대기 초과 — 잠시 뒤 다시 실행해 주세요'); return; }
+  let fixed = 0, manual = 0;
+  try {
+    const sh = SHEET_();
+    const cols = ensureBolCol_(sh);
+    if (!cols.iBol) { Logger.log('BOL 열 없음'); return; }
+    const hdr = headerMapCached_();
+    const norm = normalizeHeaderName_;
+    const iInv = hdr[norm('Invoice')];
+    const iHist = hdr[norm('BolHistory')] || 0;
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2 || !iInv) { Logger.log('데이터 없음'); return; }
+    const n = lastRow - 1;
+    const invVals = sh.getRange(2, iInv, n, 1).getValues();
+    const bolRange = sh.getRange(2, cols.iBol, n, 1);
+    const bolVals = bolRange.getValues();
+    const bolShown = bolRange.getDisplayValues();
+    const tz = scriptTz_();
+    const stamp = fmtDate_(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+    const manualRows = {}; // 직접 확인할 줄 — 열 전체 텍스트 서식에서 제외(숫자가 그대로 보이지 않게)
+    for (let i = 0; i < n; i++) {
+      if (Object.prototype.toString.call(bolVals[i][0]) !== '[object Date]') continue;
+      const row = i + 2;
+      const inv = String(invVals[i][0] || '').trim();
+      const cell = sh.getRange(row, cols.iBol);
+      let origFmt = 'M/d/yyyy';
+      try { origFmt = cell.getNumberFormat() || origFmt; } catch (eG) { /* 기본값 */ }
+      cell.setNumberFormat('0.##########');
+      SpreadsheetApp.flush();
+      const num = cell.getValue();
+      if (typeof num === 'number' && isFinite(num) && Math.floor(num) === num && num >= 0) {
+        const text = String(num);
+        cell.setNumberFormat('@');
+        cell.setValue(text);
+        if (iHist) {
+          const hc = sh.getRange(row, iHist);
+          const prev = String(hc.getValue() || '');
+          hc.setValue((prev ? prev + '\n' : '') + stamp + ' repaired BOL# (sheet showed date ' + bolShown[i][0] + ') → ' + text);
+        }
+        out.push('✅ 행 ' + row + ' ' + inv + ' | 시트 표시 ' + bolShown[i][0] + ' → BOL# ' + text);
+        fixed++;
+      } else {
+        try { cell.setNumberFormat(origFmt); } catch (eR) { /* 무시 */ } // 원래 서식으로 되돌림(값은 그대로 — 화면엔 '⚠ Check BOL#' 로 보임)
+        manualRows[row] = true;
+        out.push('⚠ 행 ' + row + ' ' + inv + ' | 시트 표시 ' + bolShown[i][0] + ' → 정수가 아님(' + num + ') — 실제 BOL# 을 확인해서 직접 입력해 주세요');
+        manual++;
+      }
+    }
+    // BOL# 열 전체를 텍스트 서식으로(앞으로 시트에 직접 입력해도 날짜로 안 바뀜) — 직접 확인할 줄만 빼고 구간별로
+    try {
+      const maxR = sh.getMaxRows();
+      let start = 2;
+      for (let r = 2; r <= maxR + 1; r++) {
+        if (r === maxR + 1 || manualRows[r]) {
+          if (r > start) sh.getRange(start, cols.iBol, r - start, 1).setNumberFormat('@');
+          start = r + 1;
+        }
+      }
+    } catch (eF) { out.push('BOL 열 텍스트 서식 지정 실패: ' + eF); }
+    // PU&TK 박스·팔렛 수량 열도 날짜 서식을 물려받아 "2/8/1900"(=40) 처럼 보였음 → 숫자 서식으로(값은 그대로, 화면 계산은 이미 숫자로 읽고 있음)
+    try {
+      ['PuTkBoxQty', 'PuTkPalletQty'].forEach(function (h) { const c = hdr[norm(h)]; if (c) sh.getRange(2, c, Math.max(1, sh.getMaxRows() - 1), 1).setNumberFormat('0'); });
+      out.push('PU&TK 박스·팔렛 수량 열: 숫자 서식으로 고정');
+    } catch (eP) { out.push('PU&TK 수량 열 서식 지정 실패: ' + eP); }
+    if (fixed) { try { bumpVersionLite_(); } catch (eB) { /* 무시 */ } }
+  } finally { try { lock.releaseLock(); } catch (e) { /* 무시 */ } }
+  out.unshift('=== BOL# 날짜 칸 복구: 고침 ' + fixed + '건 · 직접 확인 ' + manual + '건 (BOL# 열은 이제 텍스트 서식) ===');
+  Logger.log(out.join('\n'));
+  return out.join('\n');
 }
 
 /* ---------------------------------------------------------------------
@@ -4929,7 +5146,7 @@ function buildBolInfoMap_() {
     for (let i = 0; i < n; i++) {
       const inv = String(invVals[i][0] || '').trim();
       if (!inv) continue;
-      const bol = String(bolVals[i][0] || '').trim();
+      const bol = _bolText_(bolVals[i][0]); // ★ 2026-11-03 — 시트가 날짜로 바꾼 BOL# 은 긴 날짜 문장 대신 '확인 필요'로
       let cost = costVals ? _parseBolCost_(costVals[i][0]) : null;
       if (cost !== null && isNaN(cost)) cost = null;
       if (!bol && cost === null) continue;
@@ -4967,7 +5184,7 @@ function buildBolMap_() {
     for (let i = 0; i < n; i++) {
       const inv = String(invVals[i][0] || '').trim();
       if (!inv) continue;
-      const bol = String(bolVals[i][0] || '').trim();
+      const bol = _bolText_(bolVals[i][0]); // ★ 2026-11-03
       if (bol) map[inv] = bol;
     }
   } catch (e) { /* best-effort — 실패해도 호출부는 bol:''로 안전하게 처리됨 */ }
@@ -5050,7 +5267,7 @@ function setBolNumber(data) {
       return { ok: false, error: 'This order is already shipped — BOL# and trucking cost are view only.' };
     }
     // ★ 2026-10-05 규칙: BOL#과 비용이 둘 다 저장된 뒤에는 수정 불가(보기 전용). BOL#만 있고 비용이 없는 옛 건은 비용 입력 가능.
-    const existBol = String(ctx.rowVals[iBol - 1] || '').trim();
+    const existBol = _bolText_(ctx.rowVals[iBol - 1]); // ★ 2026-11-03
     const existCost = ex.iCost ? _parseBolCost_(ctx.rowVals[ex.iCost - 1]) : null;
     const wasComplete = !!(existBol && existCost !== null && !isNaN(existCost));
     if (wasComplete && !wantEdit) {
@@ -5398,7 +5615,7 @@ function _writeRowCells_(sh, row, entries) {
 function _tsToIso_(v) {
   try {
     if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
-      return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+      return fmtDate_(v, scriptTz_(), 'yyyy-MM-dd HH:mm:ss');
     }
   } catch (e) { /* 아래에서 문자열로 */ }
   return String(v || '');
@@ -5696,7 +5913,9 @@ function buildPackStageMap_() {
 function archiveOldJobs(daysOld) {
   daysOld = daysOld || 30; // 기본값: 검수완료 후 30일
   const lock = LockService.getDocumentLock();
-  lock.waitLock(20000);
+  // ★ 2026-11-03 — 새벽 2시엔 배치 보관(archiveOldBatchesDaily)이 문서 잠금을 수 분 쥐고 있어서, 예전엔 waitLock 예외로 그날 Jobs 보관이 통째로 빠졌음.
+  //   이제 잠금을 못 잡으면 오류 대신 { busy:true } 로 돌려주고, 매일 밤 실행(archiveOldJobsDaily)이 10분 뒤 한 번 더 시도함.
+  if (!lock.tryLock(30000)) { Logger.log('archiveOldJobs: 다른 작업이 문서를 잠그고 있음 — 나중에 다시'); return { ok: false, busy: true }; }
   try {
     const cutoffMs = Date.now() - daysOld * 24 * 60 * 60 * 1000;
     const sh = SHEET_();
@@ -5749,40 +5968,66 @@ function archiveOldJobs(daysOld) {
       }
     });
 
-    if (archiveIdx.length > 0) {
-      const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + JOBS_SHEET, headers);
-      const toArchiveRows = archiveIdx.map(i => allRows[i]);
-      const archStartRow = archiveSh.getLastRow() + 1;
-      archiveSh.getRange(archStartRow, 1, toArchiveRows.length, lastCol).setValues(toArchiveRows);
-      // 보관본에도 Inspection 메모는 같이 옮겨줌(감사기록 목적 — 배경색은 보관 시트라 생략)
-      archiveIdx.forEach((srcI, k) => {
-        const note = allNotes[srcI][iInspIdx];
-        if (note) archiveSh.getRange(archStartRow + k, iInsp).setNote(note);
+    // ★ 2026-11-03 안전 재작성(전수 검사에서 발견) — 예전엔 옮길 행이 0건이어도 매일 밤 Jobs 전체를 clear()(서식까지 삭제) 후 다시 썼음:
+    //   ① 서식이 지워져 BOL 열 텍스트(@)·PuTk 숫자 서식이 매일 밤 사라짐(BOL# 이 날짜로 바뀌는 원인) ② clear 뒤 쓰기가 실패하면 남길 행이 사라짐
+    //   ③ 보관 시트에 쓴 뒤 실패하면 다음 날 같은 행을 또 보관 → Archive_Jobs 중복 → 매출 이중 합산.
+    //   이제: 옮길 게 없으면 아무것도 안 건드림 / 보관 시트에 "행 전체가 똑같은" 줄이 이미 있으면 다시 안 씀(지난번 중간 실패분 — 재등록 인보이스는 내용이 달라 정상 보관)
+    //   / Jobs 에서는 보관한 행만 아래쪽부터 deleteRows 로 지움(한 번의 삭제는 통째로 적용 → 어디서 끊겨도 유실·중복 없음, 색·메모·서식은 행과 함께 그대로).
+    if (archiveIdx.length === 0) {
+      Logger.log('✅ archiveOldJobs: 보관할 오더 없음(Jobs 시트는 건드리지 않음)');
+      return { ok: true, archived: 0, kept: keepIdx.length };
+    }
+    const archiveSh = (typeof arcEnsureSheet_ === 'function' ? arcEnsureSheet_(ARCHIVE_PREFIX + JOBS_SHEET, headers) : _arcMainOrThrow_(null, ARCHIVE_PREFIX + JOBS_SHEET, headers)); // ★ 2026-11-03 — 보관용 파일 전환 시 그쪽(ArchiveStore.gs)
+    {
+      // 같은 줄 판정: 날짜는 시각, 숫자 모양 문자열은 숫자로 맞춰 비교(텍스트 서식 칸이 보관 시트에서 숫자로 읽혀도 같은 줄로 봄)
+      const rowKey = r => JSON.stringify(r.slice(0, lastCol).map(v => {
+        if (v instanceof Date) return 'D' + v.getTime();
+        const t = String(v == null ? '' : v).trim();
+        return /^-?\d+(\.\d+)?$/.test(t) ? 'N' + String(Number(t)) : 'S' + t;
+      }));
+      const already = {};
+      const aLast = archiveSh.getLastRow();
+      if (aLast >= 2) archiveSh.getRange(2, 1, aLast - 1, lastCol).getValues().forEach(r => { already[rowKey(r)] = true; });
+      const toWrite = archiveIdx.filter(i => !already[rowKey(allRows[i])]);
+      if (toWrite.length) {
+        const archStartRow = archiveSh.getLastRow() + 1;
+        const wr = archiveSh.getRange(archStartRow, 1, toWrite.length, lastCol);
+        // 보관본에도 Inspection 메모는 같이 옮겨줌(감사기록 목적 — 배경색은 보관 시트라 생략). 메모 먼저 → 값(값이 있어야 '들어간 줄'로 봄)
+        const nts = toWrite.map(i => { const row = new Array(lastCol).fill(''); row[iInspIdx] = allNotes[i][iInspIdx] || ''; return row; });
+        try { const allFmts = dataRange.getNumberFormats(); wr.setNumberFormats(toWrite.map(i => allFmts[i])); } catch (eFm) { /* 서식 복사 실패해도 값은 씀(비교는 위 규칙으로 맞춤) */ } // 서식 먼저(BOL 텍스트·앞자리 0 보존)
+        wr.setNotes(nts);
+        wr.setValues(toWrite.map(i => allRows[i]));
+      }
+      if (toWrite.length < archiveIdx.length) Logger.log('archiveOldJobs: 보관 시트에 이미 똑같이 있는 ' + (archiveIdx.length - toWrite.length) + '줄은 다시 쓰지 않음(지난번 중간 실패분)');
+    }
+    // Jobs 에서 보관한 행 삭제 — 연속된 묶음 단위로, 아래쪽부터(위쪽 행 번호가 안 밀리게)
+    {
+      const runs = [];
+      archiveIdx.slice().sort((a, b) => a - b).forEach(i => {
+        const row = i + 2;
+        const lastRun = runs[runs.length - 1];
+        if (lastRun && lastRun.start + lastRun.count === row) lastRun.count++;
+        else runs.push({ start: row, count: 1 });
       });
+      for (let k = runs.length - 1; k >= 0; k--) {
+        const run = runs[k];
+        if (sh.getMaxRows() - run.count <= sh.getFrozenRows()) sh.insertRowsAfter(sh.getMaxRows(), 50); // 고정 행 빼고 전부 지우는 것은 불가 → 빈 행 먼저 보충
+        sh.deleteRows(run.start, run.count);
+      }
     }
 
-    // 값+배경색+메모 전체를 한 번에 비운 뒤, "남길 행"만 값·배경색·폰트색·메모를
-    // 다 같이 묶어서 다시 씀 — 이 네 가지가 서로 다른 행으로 어긋나는 일이 없음.
-    dataRange.clear();
-    // ★ 2026-09-03 재긴급수정 — clear()는 메모(note)를 지우지 않는다는 게 실제로
-    //   확인됨(diagnoseOrphanedRow로 직접 검증). 그래서 clear() 직후에도 이 범위의
-    //   메모가 그대로 남아있을 수 있음 — 아래에서 keptNotes로 다시 채우기 전에,
-    //   먼저 전체 범위의 메모를 명시적으로 빈 값으로 지워서 확실하게 정리함.
-    const emptyNotesFull = Array.from({ length: last - 1 }, () => new Array(lastCol).fill(''));
-    dataRange.setNotes(emptyNotesFull);
-
-    if (keepIdx.length > 0) {
-      const keptRows = keepIdx.map(i => allRows[i]);
-      const keptBgs = keepIdx.map(i => allBgs[i]);
-      const keptFontColors = keepIdx.map(i => allFontColors[i]);
-      const keptNotes = keepIdx.map(i => allNotes[i]);
-      const targetRange = sh.getRange(2, 1, keptRows.length, lastCol);
-      targetRange.setValues(keptRows);
-      targetRange.setBackgrounds(keptBgs);
-      targetRange.setFontColors(keptFontColors);
-      targetRange.setNotes(keptNotes);
-    }
-
+    // ★ 2026-11-03 — 행을 지운 만큼 아래 빈 행이 줄어듦 → 앞으로 새로 생길 빈 행에도 BOL 텍스트(@)·PuTk 수량(0) 서식이 이어지도록, 데이터 아래 빈 행에만 다시 지정(데이터 칸은 안 건드림)
+    try {
+      const lr = sh.getLastRow(), mr = sh.getMaxRows();
+      if (mr > lr) {
+        const h2 = _hdrRow_(sh, sh.getLastColumn());
+        h2.forEach((h, i) => {
+          const k = norm(String(h || ''));
+          if (k === 'bol' || k === 'bolnumber') sh.getRange(lr + 1, i + 1, mr - lr, 1).setNumberFormat('@');
+          if (k === norm('PuTkBoxQty') || k === norm('PuTkPalletQty')) sh.getRange(lr + 1, i + 1, mr - lr, 1).setNumberFormat('0');
+        });
+      }
+    } catch (eF) { Logger.log('archiveOldJobs: 빈 행 서식 지정 실패(무시): ' + eF); }
     if (archiveIdx.length > 0) bumpVersion_();
     Logger.log('✅ archiveOldJobs: ' + archiveIdx.length + '건 보관 이동(검수완료 후 ' + daysOld + '일 경과), ' + keepIdx.length + '건 유지 (배경색·메모도 값과 함께 정상 이동)');
     return { ok: true, archived: archiveIdx.length, kept: keepIdx.length };
@@ -5886,8 +6131,28 @@ function cleanupStaleInspectionNotes() {
   Logger.log('✅ cleanupStaleInspectionNotes: 메모 ' + cleaned + '개, 배경색 ' + bgCleaned + '개 흔적 정리 완료 (검수결과 없는 칸만 — 실제 검수결과 있는 칸은 전혀 안 건드림)');
 }
 
+// ★ 2026-11-03 — 잠금을 못 잡았으면 10분 간격으로 최대 4번 더(새벽 2시 배치 보관과 겹쳐도 그날 보관이 빠지지 않게). 재시도 트리거는 실행되면 스스로 지움
+function _archiveJobsRetrySchedule_(n) {
+  try { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'archiveOldJobsRetry') ScriptApp.deleteTrigger(t); }); } catch (e0) { /* 무시 */ }
+  if (n > 4) { Logger.log('archiveOldJobs: 4번 다시 시도해도 잠금을 못 잡음 — 다음 날 다시'); return; }
+  try {
+    PropertiesService.getScriptProperties().setProperty('archiveJobsRetryN', String(n));
+    ScriptApp.newTrigger('archiveOldJobsRetry').timeBased().after(10 * 60 * 1000).create();
+    Logger.log('archiveOldJobs: 10분 뒤 다시 시도 예약(' + n + '/4)');
+  } catch (eT) { Logger.log('archiveOldJobs: 재시도 예약 실패(다음 날 다시) — ' + eT); }
+}
 function archiveOldJobsDaily() {
-  archiveOldJobs(30);
+  try { PropertiesService.getScriptProperties().deleteProperty('archiveJobsRetryN'); } catch (e1) { /* 무시 */ }
+  try { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'archiveOldJobsRetry') ScriptApp.deleteTrigger(t); }); } catch (e0) { /* 무시 */ }
+  const r = archiveOldJobs(30);
+  if (r && r.busy) _archiveJobsRetrySchedule_(1);
+}
+function archiveOldJobsRetry() {
+  let n = 1; try { n = Number(PropertiesService.getScriptProperties().getProperty('archiveJobsRetryN')) || 1; } catch (e1) { /* 무시 */ }
+  try { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'archiveOldJobsRetry') ScriptApp.deleteTrigger(t); }); } catch (e0) { /* 무시 */ }
+  const r = archiveOldJobs(30);
+  if (r && r.busy) _archiveJobsRetrySchedule_(n + 1);
+  else { try { PropertiesService.getScriptProperties().deleteProperty('archiveJobsRetryN'); } catch (e2) { /* 무시 */ } }
 }
 
 function setupArchiveJobsTrigger() {
@@ -6038,8 +6303,8 @@ function getSalesTodayList_impl_() {
     const iPayStatus = getFreshColIndex_(sh, 'PaymentStatus'); // ★ 2026-09-02 신규 — PU 결제확인
     if (!iInv || !iInsp || !iInspEnd) return { ok: true, jobs: [] };
 
-    const tz = Session.getScriptTimeZone();
-    const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    const tz = scriptTz_();
+    const today = fmtDate_(new Date(), tz, 'yyyy-MM-dd');
 
     const invVals     = _jobsCol_(sh, iInv, lastRow - 1);
     const remarksVals = iRemarks ? _jobsCol_(sh, iRemarks, lastRow - 1) : null;
@@ -6098,7 +6363,7 @@ function getSalesTodayList_impl_() {
       const inspEnd = formatInspEnd_(inspEndVals[i][0]);
       const invoice = String(invVals[i][0] || '');
       const shipRaw = shipVals ? shipVals[i][0] : '';
-      const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
+      const shipDate = shipRaw instanceof Date ? fmtDate_(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
       // ★ 2026-10-02 신규 — 같은 팔렛(LINKED 그룹)이면 항상 대표(PRIMARY)의
       //   출고 상태를 그대로 보여줌(디멘션과 동일한 "대표에서만 진짜 값" 원칙).
       const dimsLinkedTo_ = (dimsMap[invoice] || {}).linkedTo || '';
@@ -6233,7 +6498,7 @@ function getSalesOverview_impl_() {
     const iStatus    = hdr[norm('Status')];   // ★ 2026-08-06 신규 — 메인 대시보드와 기준을 100% 맞추기 위해
     if (!iInv) return { ok: true, jobs: [] };
 
-    const tz = Session.getScriptTimeZone();
+    const tz = scriptTz_();
     const n = lastRow - 1;
 
     // ★ 2026-07-28 신규 — 성능 개선: 예전엔 전체 컬럼(lastCol개)을 통째로
@@ -6288,7 +6553,7 @@ function getSalesOverview_impl_() {
       const invoice = String(invVals[i][0] || '');
       if (!invoice) continue;
       const shipRaw = shipVals ? shipVals[i][0] : '';
-      const shipDate = shipRaw instanceof Date ? Utilities.formatDate(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
+      const shipDate = shipRaw instanceof Date ? fmtDate_(shipRaw, tz, 'yyyy-MM-dd') : String(shipRaw || '');
       const createdRaw = createdVals ? createdVals[i][0] : '';
       // ★ 2026-08-31 긴급 버그 수정(진짜 원인) — 구글시트가 "2026-08-26 16:53:39"
       //   같은 문자열을 날짜/시간으로 자동 인식해서 내부적으로 Date 타입으로
@@ -6302,13 +6567,13 @@ function getSalesOverview_impl_() {
       //   ('yyyy-MM-dd HH:mm:ss')으로 다시 포맷해서, 문자열이든 Date든 항상
       //   똑같은 형태로 비교되게 함.
       const createdAt = createdRaw
-        ? (createdRaw instanceof Date ? Utilities.formatDate(createdRaw, tz, 'yyyy-MM-dd HH:mm:ss') : String(createdRaw))
+        ? (createdRaw instanceof Date ? fmtDate_(createdRaw, tz, 'yyyy-MM-dd HH:mm:ss') : String(createdRaw))
         : '';
       // 작업(피킹) 시작일 — StartAtISO의 날짜 부분만 추출.
       let pickStart = '';
       if (startISOVals) {
         const sv = startISOVals[i][0];
-        if (sv instanceof Date && !isNaN(sv)) pickStart = Utilities.formatDate(sv, tz, 'yyyy-MM-dd');
+        if (sv instanceof Date && !isNaN(sv)) pickStart = fmtDate_(sv, tz, 'yyyy-MM-dd');
         else { const s = String(sv || '').trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10); }
       }
       // ★ 2026-08-06 긴급 수정 — 메인 대시보드와 영업 화면이 서로 다른 값을 보이던 문제.
@@ -6524,7 +6789,7 @@ function isHoliday_(d) {
 function ymdOf_(raw) {
   if (!raw) return '';
   if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
-    return Utilities.formatDate(raw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return fmtDate_(raw, scriptTz_(), 'yyyy-MM-dd');
   }
   const m = String(raw).match(/\d{4}-\d{2}-\d{2}/);
   return m ? m[0] : '';
@@ -6880,7 +7145,7 @@ function runBulkArchive()     { return bulkArchiveBefore_(BULK_ARCHIVE_BEFORE, f
 
 function _bulkShipYmd_(v, tz) {
   if (v === null || v === undefined || v === '') return '';
-  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, tz, 'yyyy-MM-dd');
+  if (Object.prototype.toString.call(v) === '[object Date]') return isNaN(v.getTime()) ? '' : fmtDate_(v, tz, 'yyyy-MM-dd');
   const s = String(v).trim();
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
@@ -6904,7 +7169,7 @@ function bulkArchiveBefore_(cutoff, dryRun) {
     const lastRow = sh.getLastRow();
     if (lastRow < 2) { Logger.log('Jobs 시트에 데이터 없음'); return { ok: true, count: 0 }; }
     const n = lastRow - 1;
-    const tz = Session.getScriptTimeZone();
+    const tz = scriptTz_();
     const col = c => sh.getRange(2, c, n, 1).getValues();
     const inv = col(iInv), ship = col(iShip), arch = col(iArch);
     const archAt = iArchAt ? col(iArchAt) : null;
