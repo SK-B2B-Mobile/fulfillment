@@ -1670,7 +1670,37 @@ function _drainInvMirrorDirty_(maxN) {
 }
 
 // ★ v30 — 배치 사본 표시는 잠금이 풀린 뒤 한 번(원래 내용은 setPackingMoved_bsCore_)
-function setPackingMoved(data) { return _bsPW_(function () { return setPackingMoved_bsCore_(data); }); }
+function setPackingMoved(data) {
+  // ★ 2026-11-05 v37 — 측정만(동작 동일): 완료 버튼 저장이 30초 가까이 걸리는 원인 찾기. 3초 넘으면 구간별 시간을 기록 → showPackingMovedTiming
+  __PM_T_ = { t0: Date.now(), seg: [] };
+  let r;
+  try { r = _bsPW_(function () { return setPackingMoved_bsCore_(data); }); }
+  finally { try { _pmTimingFlush_(data, r); } catch (eT) { /* 측정 실패는 무시 */ } __PM_T_ = null; }
+  return r;
+}
+var __PM_T_ = null;
+function _pmMark_(k) { try { if (__PM_T_) __PM_T_.seg.push(k + '=' + (Math.round((Date.now() - __PM_T_.t0) / 100) / 10)); } catch (e) { /* 무시 */ } }
+function _pmTimingFlush_(data, r) {
+  if (!__PM_T_) return;
+  const total = Date.now() - __PM_T_.t0;
+  if (total < 3000) return;
+  const line = batchNow_() + ' ' + String(data && data.stage || '') + ' ' + String(data && data.invoice || '') + ' total=' + (Math.round(total / 100) / 10) + 's' +
+    (r && r.ok === false ? ' FAIL(' + String(r.error || '').slice(0, 30) + ')' : '') + ' | ' + __PM_T_.seg.join(' ');
+  const pr = PropertiesService.getScriptProperties();
+  const arr = String(pr.getProperty('pmTiming') || '').split('\n').filter(Boolean);
+  arr.push(line);
+  let keep = arr.slice(-40), txt = keep.join('\n');
+  while (txt.length > 8500 && keep.length > 1) { keep = keep.slice(1); txt = keep.join('\n'); }
+  pr.setProperty('pmTiming', txt);
+}
+/* 편집기에서 ▶ 실행: 완료 버튼 저장(setPackingMoved) 중 3초 넘은 것의 구간별 누적 시각(초) */
+function showPackingMovedTiming() {
+  const v = String(PropertiesService.getScriptProperties().getProperty('pmTiming') || '(아직 3초 넘은 기록 없음)');
+  const t = '=== 완료 버튼 저장(setPackingMoved) 3초 넘은 실행 — 구간 끝난 시각(초, 누적) ===\n' +
+    'lock=저장 순서 기다림 끝 · read=고객사 행 찾기 · pv=2차 검증 상태 재계산(verified 만) · write=칸 쓰기 · bump=버전 표시 · unlock=잠금 해제 · insp=Jobs 검수 결과 쓰기 · queue=Firestore 대기열 · end=끝\n' + v;
+  Logger.log(t);
+  return t;
+}
 function setPackingMoved_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   // ★ 2026-08-18 신규 — 15초→25초로 상향. TV 현황판에서 여러 슬롯을 짧은 시간에
@@ -1682,6 +1712,7 @@ function setPackingMoved_bsCore_(data) {
   // ★ 2026-10-28 — 25초→15초. board.html 은 20초 안에 응답이 없으면 포기하고 화면을 핑크로 되돌리는데, 서버가 25초까지 기다리면
   //   화면이 포기한 '뒤에' 서버가 파랑으로 저장하는 어긋남(핑크로 튕겼다가 나중에 파랑)이 생김. 15초 안에 못 잡으면 서버가 먼저 'server_busy' 로 알려 재시도하게 함.
   lock.waitLock(15000);
+  _pmMark_('lock');
   let result;
   let syncArgs = null; // ★ 2026-09-03 — 락 밖에서 처리(logScan과 동일한 이유)
   let mirrorInvoice = null; // ★ 세션A 신규 — 락 밖에서 상세조회 미러 갱신하기 위해 스코프 확장
@@ -1706,6 +1737,7 @@ function setPackingMoved_bsCore_(data) {
     const last = bc.getLastRow();
     if (last < 2) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
     const rows = bc.getRange(2, 1, last - 1, 2).getValues();
+    _pmMark_('read');
     let found = false;
     for (let i = 0; i < rows.length; i++) {
       if (String(rows[i][0]) !== String(batchId)) continue;
@@ -1742,6 +1774,7 @@ function setPackingMoved_bsCore_(data) {
         }
         if (!data.force) {
           const pv = getPackScanState(batchId, invoice);
+          _pmMark_('pv');
           if (!pv.ok || !pv.complete) {
             return {
               ok: false,
@@ -1767,22 +1800,26 @@ function setPackingMoved_bsCore_(data) {
       break;
     }
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
+    _pmMark_('write');
 
     bumpVersion_();
     _bsD_('bc', batchId); // ★ v30 — 배치 사본: 패킹존 이동 칸 바뀜
     bumpBatchVer_(batchId); // ★ v28 — 패킹존 이동(핑크·파랑·주황) 변경 → TV 슬롯 색이 다음 동기화에 바로
     _markInvMirrorDirty_(invoice); // ★ 2026-10-28 — 인보이스 상세 미러 재계산은 응답 뒤 1분 주기 동기화가 처리(캐시는 즉시 무효화). 락 안에서 표시만(캐시 1회, 가벼움).
     result = { ok: true, stage: stage, moved: stage !== 'none' };
+    _pmMark_('bump');
   } catch (e) {
     result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+    _pmMark_('unlock');
   }
   // ★ 2026-09-03 긴급 성능수정 — logScan과 동일한 이유. syncInspectionFromPicking_은
   //   여러 시트를 통째로 다시 읽는 무거운 함수라 락 밖으로 옮김. TV 현황판에서
   //   슬롯 여러 개가 짧은 시간에 연달아 눌리는 상황(배치 막바지)에 특히 효과가 큼.
   if (syncArgs) {
     try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], false, syncArgs[3]); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+    _pmMark_('insp');
   }
   // ★ 세션A 신규 — 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
   //   건드렸음(신규 발견 버그). 패킹존 이동 상태를 바꾸면 상세조회 결과의
@@ -1797,7 +1834,9 @@ function setPackingMoved_bsCore_(data) {
   //   패킹존 이동 처리 결과 자체엔 전혀 영향이 없음(완전한 best-effort).
   if (packingDocForFirestore && result && result.ok) {
     try { queueFirestoreWrite_('packing', packingDocForFirestore); } catch (eFs) { /* 무시 — Firestore 이중쓰기는 best-effort */ }
+    _pmMark_('queue');
   }
+  _pmMark_('end');
   return result;
 }
 
