@@ -1179,6 +1179,19 @@ nav{position:relative; z-index:1;}
   #pickPageCount{display:none !important;}
   #btnPickStart, #btnPickEnd{min-width:0; padding:14px 6px !important; font-size:16px !important; height:54px;}
 }
+/* ★ v24 — 완료 버튼 저장 막대(저장 중·실패·인쇄 대기) */
+#icBar{position:fixed;left:0;right:0;bottom:0;z-index:9000;display:flex;flex-direction:column;gap:6px;
+  padding:8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  background:rgba(10,13,28,0.96);border-top:1px solid rgba(255,255,255,0.12);font-size:13px;}
+#icBar .ic-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-radius:8px;padding:8px 10px;border:1px solid;color:#e6e9f7;}
+#icBar .ic-row > span{flex:1;min-width:0;line-height:1.45;}
+#icBar .ic-saving{border-color:rgba(245,158,11,0.6);background:rgba(245,158,11,0.10);color:#fcd34d;}
+#icBar .ic-fail{border-color:rgba(239,68,68,0.75);background:rgba(239,68,68,0.14);color:#fecaca;}
+#icBar .ic-print{border-color:rgba(45,212,191,0.6);background:rgba(45,212,191,0.10);color:#99f6e4;}
+#icBar .ic-t{font-family:monospace;opacity:.8;}
+#icBar .ic-btn{border:1px solid currentColor;background:transparent;color:inherit;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer;}
+#icBar .ic-x{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;padding:4px 6px;}
+#icBar .ic-btn:focus-visible,#icBar .ic-x:focus-visible{outline:2px solid #fff;outline-offset:2px;}
 </style>
 </head>
 <body>
@@ -2926,7 +2939,7 @@ function pkOnLive_(key, msg){
   _pk.cache[key] = { rev: msg.rev, state: st };
   // 지금 열려 있는 화면이 이 인보이스면 바로 다시 그림(다른 기기의 스캔도 즉시 보임)
   const on = pkSlotOf_(key);
-  try{ if(on.pv && typeof renderPvBody === 'function'){ _pvState = st; renderPvBody(); } }catch(e){ console.warn('[packState] pv render', e); }
+  try{ if(on.pv && typeof renderPvBody === 'function'){ _pvState = Object.assign({}, st, { __inv: _pvInvoice }); renderPvBody(); } }catch(e){ console.warn('[packState] pv render', e); }
   try{ if(on.ss && typeof renderSsBody === 'function'){ _ssState = st; renderSsBody(); } }catch(e){ console.warn('[packState] ss render', e); }
   try{ if(on.psv && typeof renderPsvBody === 'function'){ _psvState = st; _psvStateInv = _psvInvoice; renderPsvBody(); } }catch(e){ console.warn('[packState] psv render', e); }
 }
@@ -8927,7 +8940,7 @@ async function populateSsInvoiceSelect(){
   if(!sel) return;
   await fetchStandaloneOrders();
   // 1차 검수 대상 = 아직 패킹존 이동(파랑) 표시 안 된 것들
-  const candidates = _standaloneOrders.filter(o => !o.takenOut);
+  const candidates = _standaloneOrders.filter(o => !o.takenOut && !(typeof _icBusy_ === 'function' && _icBusy_('ss', o.invoice))); // ★ v24 — 저장 중인 오더는 빼 둠(실패하면 다시 나옴)
   _ssCandidates = candidates; // 검색창이 재사용할 수 있게 저장해둠
   if(candidates.length === 0){
     if(picker) picker.style.display = 'none';
@@ -9010,7 +9023,7 @@ function renderSsBody(){
   const ssSkuEl = document.getElementById('ssProgressSku');
   if(ssSkuEl) ssSkuEl.textContent = `${ssDoneSku} / ${ssTotalSku}`;
   document.getElementById('ssProgressBar').style.width = pct + '%';
-  document.getElementById('ssCompleteBtn').disabled = !st.complete;
+  document.getElementById('ssCompleteBtn').disabled = !st.complete || (typeof _icBusy_ === 'function' && _icBusy_('ss', _ssInvoice)); // ★ v24
 
   // ★ 2026-09-03 신규(현장 지적) — SKU가 많을 때(예: 174종) 스캔할 항목을 찾으려고
   //   매번 아래로 스크롤해야 하는 불편 해결. "미완료(안 된 것)"를 위로, "완료"는
@@ -9551,19 +9564,159 @@ function showSsMsg(msgOrOpts, kind){
   el.classList.add('pulse');
 }
 
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-11-05 v24 — 완료 버튼 즉시 반응(Step 04 단독 1차 검수 · Step P 총량 2차 · 단독 2차 공통)
+//   예전: 버튼을 누르면 서버 저장(setPackingMoved — 저장 순서 대기 + 검증 재계산 + Jobs 검수 결과 쓰기)과 목록 다시 불러오기가
+//   모두 끝날 때까지(바쁠 때 30초 가까이) "처리 중…"으로 멈춤.
+//   지금: 누르는 순간 화면은 "완료 — 저장 중"으로 바뀌고 다음 오더를 바로 고를 수 있음. 저장은 같은 순간 바로 서버로 보냄(미루지 않음).
+//   - 저장 결과는 화면 아래 저장 막대(icBar)에 표시. 실패하면(3번 자동 재시도 뒤) 빨간 줄 + 그 오더를 미완료로 되돌림 + Retry.
+//   - 패킹 슬립 인쇄는 지금처럼 저장 성공 뒤에만. 그때 다른 오더를 보고 있으면 막대에 "🖨 Print slip" 버튼으로 남김.
+//   - 저장 중·실패가 남아 있으면 새로고침·로그아웃 전에 물어봄(_psvHasUnsaved_ 에 포함).
+// ═══════════════════════════════════════════════════════════
+const _ic = { jobs: [], prints: [], seq: 0 };
+function _icFind_(kind, inv){ return _ic.jobs.find(j => j.kind === kind && j.inv === inv) || null; }
+function _icBusy_(kind, inv){ const j = inv ? _icFind_(kind, inv) : null; return !!(j && (j.st === 'saving' || j.st === 'finishing')); }
+function _icStart_(job){
+  _ic.jobs = _ic.jobs.filter(j => !(j.kind === job.kind && j.inv === job.inv));
+  _ic.prints = _ic.prints.filter(p => !(p.kind === job.kind && p.inv === job.inv));
+  job.id = ++_ic.seq; job.st = 'saving'; job.t0 = Date.now(); job.err = '';
+  _ic.jobs.push(job);
+  _icRender_();
+  _icRun_(job);
+}
+async function _icRun_(job){
+  let res = null;
+  try { res = await job.run(); } catch(e){ res = { ok:false, error: String(e && e.message || e) }; }
+  if(!_ic.jobs.includes(job)) return;
+  if(res && res.ok){
+    job.st = 'finishing'; // 저장 성공 — 확정 표시·자동 인쇄가 끝날 때까지는 계속 잠금(그 사이 수동 인쇄·재확정 방지)
+    _icRender_();
+    try { await job.onOk(res); } catch(e){ console.error('[ic] onOk', e); }
+    _ic.jobs = _ic.jobs.filter(j => j !== job);
+  } else {
+    job.st = 'fail'; job.err = String((res && res.error) || 'Unknown error');
+    try { job.onFail(res); } catch(e){ console.error('[ic] onFail', e); }
+  }
+  _icRender_();
+}
+function _icRetry_(id){
+  const j = _ic.jobs.find(x => x.id === id);
+  if(!j || j.st !== 'fail') return;
+  try { if(j.beforeRetry) j.beforeRetry(); } catch(e){}
+  j.st = 'saving'; j.t0 = Date.now(); j.err = '';
+  _icRender_();
+  _icRun_(j);
+}
+function _icAddPrint_(kind, inv, bid){
+  if(!_ic.prints.some(p => p.kind === kind && p.inv === inv)) _ic.prints.push({ kind, inv, bid: bid || '', id: ++_ic.seq });
+  _icRender_();
+}
+function _icDropPrint_(id){ _ic.prints = _ic.prints.filter(p => p.id !== id); _icRender_(); }
+// 저장된 뒤 다른 오더를 보고 있어서 못 찍은 슬립: 그 오더를 다시 열고(내용이 다 오면) 인쇄
+async function _icPrint_(id){
+  const p = _ic.prints.find(x => x.id === id);
+  if(!p) return;
+  const tP = Date.now();
+  if(p.kind === 'pv' && p.bid && state.batchId !== p.bid){ alert('Switch to batch ' + p.bid + ' first, then press Print slip again.'); return; }
+  const selId = p.kind === 'psv' ? 'psvInvoiceSelect' : 'pvInvoiceSelect';
+  const sel = document.getElementById(selId);
+  if(!sel){ alert('Open the Pack Verify screen first.'); return; }
+  try {
+    const v = p.kind === 'psv' ? 'v-pack-standalone' : 'v-pack';
+    const vEl = document.getElementById(v);
+    if(vEl && !vEl.classList.contains('active') && typeof gotoView === 'function'){
+      gotoView(v);
+      await Promise.resolve(p.kind === 'psv' ? populatePsvInvoiceSelect() : populatePvInvoiceSelect());
+    }
+  } catch(e){}
+  if(sel.value !== p.inv || (p.kind === 'psv' ? _psvInvoice : _pvInvoice) !== p.inv){
+    sel.value = p.inv;
+    if(sel.value !== p.inv){ alert(p.inv + ' is not in the order list right now. Open it from the list and press Print.'); return; }
+    if(p.kind === 'psv') await onPsvInvoiceChange(); else await onPvInvoiceChange();
+  }
+  const t0 = Date.now();
+  while(Date.now() - t0 < 15000){
+    if(p.kind === 'psv' ? (_psvInvoice === p.inv && _psvStateInv === p.inv && _psvState) : (_pvInvoice === p.inv && _pvState && _pvState.__inv === p.inv)) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  if(p.kind === 'psv') { if(_psvStateInv !== p.inv){ alert('Order is still loading — try again in a moment.'); return; } await printPsvSlip(); }
+  else { if(_pvInvoice !== p.inv || !_pvState || _pvState.__inv !== p.inv){ alert('Order is still loading — try again in a moment.'); return; } await printPvSlip(); }
+  if(_icPrinted_(p.inv, tP)) _icDropPrint_(id); // 실제로 인쇄 창이 열렸을 때만 줄을 지움(인쇄가 막히면 남겨 둠)
+}
+function _icPrinted_(inv, since){ const l = window.__lastSlip; return !!(l && l.inv === inv && l.at >= since); }
+async function _icAutoPrint_(kind, inv, bid){ // 저장 성공 뒤 자동 인쇄 — 인쇄가 막히면(이슈 조회 실패 등) 인쇄 대기 줄로 남김
+  const t = Date.now();
+  try { if(kind === 'psv') await printPsvSlip(); else await printPvSlip(); } catch(e){ console.error('[ic] print', e); }
+  if(!_icPrinted_(inv, t)) _icAddPrint_(kind, inv, bid);
+}
+// 저장 중인 오더를 화면에서 잠금(확정 표시는 서버 저장 성공 뒤에만 켬 — 실패하면 아무것도 되돌릴 필요 없음)
+function _icLockPanel_(kind){
+  const pre = kind === 'psv' ? 'psv' : 'pv';
+  const i = document.getElementById(pre + 'ScanInput'); if(i){ i.disabled = true; i.placeholder = 'Verified — saving…'; }
+  const b = document.getElementById(pre + 'CompleteBtn'); if(b){ b.disabled = true; b.textContent = '✓ Verified — saving…'; }
+  const f = document.getElementById(pre + 'ForceBtn'); if(f){ f.disabled = true; f.textContent = '⏳ Saving…'; }
+}
+function _icUnlockPanel_(kind, complete){
+  const pre = kind === 'psv' ? 'psv' : 'pv';
+  const i = document.getElementById(pre + 'ScanInput'); if(i){ i.disabled = false; i.placeholder = 'Scan a barcode...'; }
+  const b = document.getElementById(pre + 'CompleteBtn'); if(b){ b.textContent = '🟣 Confirm Final Verification (2nd)'; b.disabled = !complete; }
+  const f = document.getElementById(pre + 'ForceBtn'); if(f){ f.disabled = false; f.textContent = '⚠ Manager Force Confirm'; }
+}
+function _icEsc_(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c])); }
+function _icRender_(){
+  let bar = document.getElementById('icBar');
+  if(!bar){
+    bar = document.createElement('div'); bar.id = 'icBar';
+    bar.setAttribute('role', 'status'); bar.setAttribute('aria-live', 'polite');
+    document.body.appendChild(bar);
+  }
+  const rows = [];
+  _ic.jobs.forEach(j => {
+    if(j.st === 'saving' || j.st === 'finishing'){
+      rows.push(`<div class="ic-row ic-saving"><span>⏳ ${_icEsc_(j.what)} <b>${_icEsc_(j.inv)}</b> — saving… <span class="ic-t" data-t0="${j.t0}">${Math.floor((Date.now() - j.t0) / 1000)}s</span></span></div>`);
+    } else {
+      rows.push(`<div class="ic-row ic-fail"><span>⚠ <b>${_icEsc_(j.inv)}</b> NOT saved — ${_icEsc_(j.what)} is NOT done. ${_icEsc_(j.err).slice(0, 80)}</span><button type="button" class="ic-btn" onclick="_icRetry_(${j.id})">↻ Retry</button></div>`);
+    }
+  });
+  _ic.prints.forEach(p => {
+    rows.push(`<div class="ic-row ic-print"><span>✓ <b>${_icEsc_(p.inv)}</b> saved — packing slip not printed yet</span><button type="button" class="ic-btn" onclick="_icPrint_(${p.id})">🖨 Print slip</button><button type="button" class="ic-x" aria-label="Dismiss" onclick="_icDropPrint_(${p.id})">✕</button></div>`);
+  });
+  bar.innerHTML = rows.join('');
+  bar.hidden = rows.length === 0;
+}
+setInterval(function(){
+  try {
+    if(!_ic.jobs.some(j => j.st === 'saving')) return;
+    document.querySelectorAll('#icBar .ic-t').forEach(el => { el.textContent = Math.floor((Date.now() - Number(el.dataset.t0)) / 1000) + 's'; });
+  } catch(e){}
+}, 1000);
+
 async function completeSsInspection(){
   if(!_ssInvoice) return;
+  const inv = _ssInvoice;
+  if(_icBusy_('ss', inv)) return; // ★ v24 — 저장 중인 오더 두 번 누름 방지
+  if(_ssScanBusy || _ssScanQueue.length){ alert('Scans are still saving — wait a moment, then press complete again.'); return; } // ★ v24 — 남은 스캔이 이 오더로 저장된 뒤에만
   const btn = document.getElementById('ssCompleteBtn');
-  btn.disabled = true; btn.textContent = '처리 중...';
-  const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _ssInvoice, stage: 'taken', worker: currentSsWorker() });
-  if(res.ok){
-    showSsMsg('✓ 1차 검수 완료 — 패킹존 이동으로 표시됐습니다. 이제 "단독 Pack Verify"에서 2차 검증할 수 있습니다.', 'ok');
-    await populateSsInvoiceSelect();
-    document.getElementById('ssScanPanel').classList.remove('active');
-  } else {
-    btn.disabled = false; btn.textContent = '✓ 1차 검수 완료 · 패킹존 이동 표시';
-    alert('처리 실패: ' + (res.error || '알 수 없는 오류'));
-  }
+  if(btn.disabled) return;
+  const worker = currentSsWorker();
+  // ★ v24 — 화면은 즉시: 패널을 닫고 목록에서 뺌(저장 중 표시). 저장은 바로 서버로.
+  btn.disabled = true;
+  document.getElementById('ssScanPanel').classList.remove('active');
+  showSsMsg('✓ 1차 검수 완료 — 저장 중… 다음 오더를 바로 시작하세요.', 'ok');
+  _icStart_({ kind: 'ss', inv, what: '1st inspection',
+    run: () => gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: inv, stage: 'taken', worker }),
+    onOk: () => {
+      if(!_ssInvoice || _ssInvoice === inv) showSsMsg('✓ 1차 검수 완료 — 저장됨. 이제 "단독 Pack Verify"에서 2차 검증할 수 있습니다.', 'ok');
+      populateSsInvoiceSelect().catch(() => {});
+    },
+    onFail: (res) => {
+      showSsMsg({ kind: 'bad', icon: '⛔', title: inv + ' 1차 검수 저장 실패 — 아직 완료 아님', sub: String((res && res.error) || '알 수 없는 오류').slice(0, 80) + ' · 아래 Retry 를 누르세요' });
+      populateSsInvoiceSelect().catch(() => {});
+    },
+  });
+  btn.textContent = '✓ 1차 검수 완료 · 패킹존 이동 표시';
+  try { clearSsSelection(); } catch(e){ _ssInvoice = null; } // 검색창·선택 모두 비우고 목록으로(다음 오더 바로 선택)
+  populateSsInvoiceSelect().catch(() => {});
 }
 
 // ── 단독 Pack Verify (2차 검증) ──────────────────────────────
@@ -10135,6 +10288,7 @@ async function onPsvInvoiceChange(){
   _psvShowFailCard_(); // ★ v22
   psvResumeNumbers_();
   const ord = _standaloneOrders.find(o => o.invoice === invoice);
+  if(_icBusy_('psv', invoice)){ _icLockPanel_('psv'); return; } // ★ v24 — 확정 저장 중인 오더: 스캔·확정·강제확정 잠금
   if(ord && ord.packVerified){
     _psvForceVerified = !(_psvState && _psvState.complete);
     input.disabled = true;
@@ -10218,7 +10372,8 @@ function renderPsvBody(){
     const inv = _psvInvoice;
     const verified = _psvIsVerified_(inv);
     const failN = _psvFail.filter(f => f.inv === inv).length;
-    if(!verified && !_psvConfirming){
+    if(_icBusy_('psv', inv)){ cb.disabled = true; cb.textContent = '✓ Verified — saving…'; } // ★ v24 — 저장 중
+    else if(!verified && !_psvConfirming){
       if(failN){ cb.disabled = false; cb.textContent = '↻ Retry ' + failN + ' unsaved scan' + (failN > 1 ? 's' : ''); cb.dataset.v22retry = '1'; }
       else {
         if(cb.dataset.v22retry){ cb.textContent = '🟣 Confirm Final Verification (2nd)'; delete cb.dataset.v22retry; }
@@ -10342,11 +10497,11 @@ function _psvBlocked_(inv){
 }
 // 오더를 다시 열었을 때 그 오더에 저장 실패한 스캔이 남아 있으면 빨간 카드 + Retry 를 다시 보여 줌
 // ★ v22 — 저장 중·실패한 스캔이 있으면 새로고침·닫기 전에 경고
-function _psvHasUnsaved_(){ try { return _psvPend.some(p => !p.saved) || _psvFail.length > 0; } catch(x){ return false; } }
+function _psvHasUnsaved_(){ try { return _psvPend.some(p => !p.saved) || _psvFail.length > 0 || (typeof _ic !== 'undefined' && _ic.jobs.length > 0); } catch(x){ return false; } } // ★ v24 — 완료 버튼 저장 중·실패 포함
 let _psvUnloadAsked = false; // 로그아웃처럼 먼저 물어본 경우 새로고침 때 또 묻지 않음
 function _psvUnloadOk_(){
   if(!_psvHasUnsaved_()) return true;
-  if(!confirm('Some scans are still saving or were NOT saved.\n\nLeave anyway? (Unsaved scans will be lost — scan them again later.)')) return false;
+  if(!confirm('Some scans or order confirmations are still saving or were NOT saved.\n\nLeave anyway? (Anything not saved will be lost — redo it later.)')) return false;
   _psvUnloadAsked = true; return true;
 }
 window.addEventListener('beforeunload', function(e){
@@ -10638,35 +10793,46 @@ async function completePsvVerify(){
   if(_psvIsVerified_(_psvInvoice)) return; // ★ v22 — 이미 확정된 오더(두 번 확정·두 번 인쇄 방지)
   if(_psvBlocked_(_psvInvoice)) return; // ★ v22 — 저장 안 된 스캔이 있으면 확정 안 함
   if(_psvConfirming) return; // ★ v22 — 두 번 누름 방지
+  if(_icBusy_('psv', _psvInvoice)) return; // ★ v24 — 저장 중
   if(_psvStateInv !== _psvInvoice || !_psvState || !_psvState.complete){ alert('Order is still loading — try again in a moment.'); return; } // ★ v22 — 지금 오더의 상태로만 확정
   _psvConfirming = true;
-  try { await _psvCompleteCore_(); } finally { _psvConfirming = false; try { renderPsvBody(); } catch(e){} }
+  try { _psvCompleteCore_(); } finally { _psvConfirming = false; try { renderPsvBody(); } catch(e){} }
 }
-async function _psvCompleteCore_(){
-  const btn = document.getElementById('psvCompleteBtn');
-  btn.disabled = true; btn.textContent = 'Processing...';
-  const _cin = document.getElementById('psvScanInput'); const _cinWas = _cin ? _cin.disabled : false; if(_cin) _cin.disabled = true; // ★ v22 — 확정 처리 중엔 스캔 막음
-  const res = await gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: _psvInvoice, stage: 'verified' });
-  if(res.ok){
-    _psvVerifiedInv[_psvInvoice] = Date.now(); // ★ v22
-    showPsvMsg('🟣 Final Verification (2nd) complete — switched to purple status', 'ok');
-    // ★ 2026-09-01 버그 수정 — completePvVerify와 동일한 버그. 성공해도 버튼이
-    //   "처리 중..."에 멈춰있는 것처럼 보이던 것을 여기서도 직접 확정해서 고침.
-    const input = document.getElementById('psvScanInput');
-    if(input){ input.disabled = true; input.placeholder = 'This order is already verified'; }
-    btn.disabled = true; btn.textContent = '✅ Already Verified (100% Scanned)';
-    await populatePsvInvoiceSelect();
-    printPsvSlip(); // ★ 2026-09-04 신규 — printPvSlip과 동일하게, 검증완료 확정 시 자동으로 패킹슬립 인쇄
-  } else {
-    btn.disabled = false; btn.textContent = '🟣 Confirm Final Verification (2nd)';
-    if(_cin) _cin.disabled = _cinWas;
-    alert('Failed to switch status: ' + (res.error || 'Unknown error'));
-    await refreshPsvState();
-  }
+function _psvCompleteCore_(){
+  // ★ v24 — 화면은 즉시 "확정됨 — 저장 중", 저장은 바로 서버로(기다리지 않음). 슬립은 저장 성공 뒤에만.
+  const inv = _psvInvoice;
+  _icLockPanel_('psv');
+  showPsvMsg('🟣 Verified — saving… You can start the next order now.', 'ok');
+  _icStart_({ kind: 'psv', inv, what: 'Final verification (2nd)',
+    run: () => gasCallWithRetry('setPackingMoved', { batchId: STANDALONE_BATCH_ID, invoice: inv, stage: 'verified' }),
+    beforeRetry: () => { if(_psvInvoice === inv) _icLockPanel_('psv'); },
+    onOk: async () => {
+      _psvVerifiedInv[inv] = Date.now(); // 확정 표시는 저장 성공 뒤에만
+      try { const o0 = (_standaloneOrders || []).find(x => x.invoice === inv); if(o0) o0.packVerified = true; } catch(e){}
+      try { await populatePsvInvoiceSelect(); } catch(e){} // 슬립이 서버 목록의 "확정" 상태를 쓰므로 먼저 새로 받음(예전과 같음)
+      try { const o = (_standaloneOrders || []).find(x => x.invoice === inv); if(o) o.packVerified = true; } catch(e){} // 목록 조회가 실패해도 방금 저장 성공한 사실은 반영
+      if(_psvInvoice === inv && _psvStateInv === inv){
+        showPsvMsg('🟣 Final Verification (2nd) complete — saved', 'ok');
+        const b = document.getElementById('psvCompleteBtn'); if(b){ b.disabled = true; b.textContent = '✅ Already Verified (100% Scanned)'; }
+        const i = document.getElementById('psvScanInput'); if(i){ i.disabled = true; i.placeholder = 'This order is already verified'; }
+        const f = document.getElementById('psvForceBtn'); if(f){ f.disabled = true; f.textContent = '✅ Already Confirmed'; }
+        _ic.jobs = _ic.jobs.filter(j => !(j.kind === 'psv' && j.inv === inv)); // 인쇄 전에 잠금 해제(인쇄 함수의 저장 중 확인에 걸리지 않게)
+        await _icAutoPrint_('psv', inv); // 저장 성공 뒤 자동 인쇄(예전과 같음)
+      } else _icAddPrint_('psv', inv);
+    },
+    onFail: (res) => {
+      if(_psvInvoice === inv){
+        _icUnlockPanel_('psv', !!(_psvStateInv === inv && _psvState && _psvState.complete));
+        showPsvMsg({ kind: 'bad', icon: '⛔', title: 'NOT SAVED — ' + inv + ' is NOT verified yet', sub: String((res && res.error) || 'Unknown error').slice(0, 80) + ' · tap Retry below or Confirm again' });
+        try { renderPsvBody(); } catch(e){}
+        refreshPsvState().catch(() => {});
+      }
+    },
+  });
 }
-
 async function forcePsvComplete(){
   if(!_psvInvoice) return;
+  if(_icBusy_('psv', _psvInvoice)) return; // ★ v24 — 일반 확정 저장 중
   if(_psvIsVerified_(_psvInvoice)) return; // ★ v22 — 이미 확정됨
   if(_psvBlocked_(_psvInvoice)) return; // ★ v22 — 저장 중·실패한 스캔이 있으면 강제 확정도 안 함(박스 정보가 사라지지 않게)
   if(_psvConfirming) return; // ★ v22
@@ -10808,8 +10974,10 @@ async function onPvInvoiceChange(){
   document.getElementById('pvCompleteBtn').disabled = true;
   document.getElementById('pvCompleteBtn').textContent = '🟣 Confirm Final Verification (2nd)';
   document.getElementById('pvLines').innerHTML = '<div class="empty-log">Loading...</div>';
+  _pvState = null; // ★ v24 — 이전 오더 상태가 남아 있지 않게
   await refreshPvState();
   pvResumeNumbers_();
+  if(_icBusy_('pv', invoice)){ _icLockPanel_('pv'); return; } // ★ v24 — 확정 저장 중인 오더: 스캔·확정·강제확정 잠금
   // ★ 2026-08-24 신규 — 이미 검증완료된(정상 스캔이든 관리자 강제확정이든) 오더를
   //   다시 선택했을 때도, 처음 볼 때와 똑같이 "완료됨" 상태가 바로 보이게 함.
   if(state.packVerifiedInvoices.has(invoice)){
@@ -10835,8 +11003,9 @@ async function onPvInvoiceChange(){
 async function refreshPvState(){
   if(!_pvInvoice) return;
   const _inv = _pvInvoice;
-  const res = await pkFetchState_('pv', state.batchId, _inv, 2); // ★ v20
+  let res = await pkFetchState_('pv', state.batchId, _inv, 2); // ★ v20
   if(_inv !== _pvInvoice) return;
+  try { if(res && res.ok) res = Object.assign({}, res, { __inv: _inv }); } catch(eT){} // ★ v24 — 이 상태가 어느 오더 것인지 표시(인쇄·확정이 다른 오더 내용으로 되지 않게)
   if(!res.ok){
     document.getElementById('pvLines').innerHTML = `<div class="empty-log">Failed to load: ${res.error||''}</div>`;
     return;
@@ -10881,7 +11050,7 @@ function renderPvBody(){
   const pvSkuEl = document.getElementById('pvProgressSku');
   if(pvSkuEl) pvSkuEl.textContent = `${pvDoneSku} / ${pvTotalSku}`;
   document.getElementById('pvProgressBar').style.width = pct + '%';
-  document.getElementById('pvCompleteBtn').disabled = !st.complete;
+  document.getElementById('pvCompleteBtn').disabled = !st.complete || state.packVerifiedInvoices.has(_pvInvoice) || (typeof _icBusy_ === 'function' && _icBusy_('pv', _pvInvoice)); // ★ v24 — 확정·저장 중이면 다시 못 누름
 
   // ★ 2026-09-03 신규 — 04(단독 1차)와 동일하게, 미완료 SKU를 위로 · 완료는
   //   아래로. 안정 정렬이라 각 그룹 안에서는 원래 순서 유지(스캔할 때마다
@@ -11203,33 +11372,53 @@ async function undoPvScanEntry(packScanId){
 }
 
 async function completePvVerify(){
+  // ★ v24 — 화면은 즉시 "확정됨 — 저장 중", 저장은 바로 서버로(기다리지 않음). 슬립은 저장 성공 뒤에만.
   if(!_pvInvoice) return;
+  const inv = _pvInvoice, bid = state.batchId;
+  if(_icBusy_('pv', inv) || state.packVerifiedInvoices.has(inv)) return; // 저장 중·이미 확정 — 두 번 누름 방지
+  if(!_pvState || _pvState.__inv !== inv || !_pvState.complete) return; // 지금 오더의 상태로만 확정
+  if(_pvScanBusy || _pvScanQueue.length){ alert('Scans are still saving — wait a moment, then press Confirm again.'); return; } // 남은 스캔이 이 오더로 저장된 뒤에만
+  if(_pvConfirming) return; // 강제 확정 진행 중
   const btn = document.getElementById('pvCompleteBtn');
-  btn.disabled = true; btn.textContent = 'Processing...';
-  const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified' });
-  if(res.ok){
-    showPvMsg('🟣 Final Verification (2nd) complete — switched to purple status', 'ok');
-    state.packVerifiedInvoices.add(_pvInvoice);
-    // ★ 2026-09-01 버그 수정 — forcePvComplete()엔 이미 있던 처리(버튼을 "완료됨"으로
-    //   확정 표시 + 스캔 입력 잠금)가 정작 정상 스캔 완료 경로인 여기엔 빠져 있었음.
-    //   그래서 성공해도 버튼이 "처리 중..."에 계속 멈춰있는 것처럼 보이는 버그가
-    //   있었음(실제로는 서버 처리는 성공했지만 화면만 안 바뀐 상태). populatePvInvoiceSelect가
-    //   목록만 다시 그릴 뿐 지금 열려있는 패널의 onchange를 자동으로 다시 안 부르므로,
-    //   버튼/입력 상태는 반드시 여기서 직접 확정해줘야 함.
-    const input = document.getElementById('pvScanInput');
-    if(input){ input.disabled = true; input.placeholder = 'This order is already verified'; }
-    btn.disabled = true; btn.textContent = '✅ Already Verified (100% Scanned)';
-    populatePvInvoiceSelect();
-    printPvSlip();
-  } else {
-    btn.disabled = false; btn.textContent = '🟣 Confirm Final Verification (2nd)';
-    alert('Failed to switch status: ' + (res.error || 'Unknown error'));
-    await refreshPvState();
-  }
+  if(btn.disabled) return;
+  _icLockPanel_('pv');
+  showPvMsg('🟣 Verified — saving… You can start the next order now.', 'ok');
+  _icStart_({ kind: 'pv', inv, bid, what: 'Final verification (2nd)',
+    run: () => gasCallWithRetry('setPackingMoved', { batchId: bid, invoice: inv, stage: 'verified' }),
+    beforeRetry: () => { if(_pvInvoice === inv && state.batchId === bid) _icLockPanel_('pv'); },
+    onOk: async () => {
+      if(state.batchId !== bid){ _icAddPrint_('pv', inv, bid); return; } // 다른 배치를 보고 있음 → 인쇄 대기로 남김(조용히 사라지지 않게)
+      state.packVerifiedInvoices.add(inv); // 확정 표시는 저장 성공 뒤에만
+      try { populatePvInvoiceSelect(); } catch(e){}
+      if(_pvInvoice === inv){
+        try { await refreshPvState(); } catch(e){} // 지금 화면 상태가 이 오더 것인지 새로 받아서 확인(다른 오더 내용으로 인쇄되지 않게)
+      }
+      if(_pvInvoice === inv && state.batchId === bid && _pvState && _pvState.__inv === inv){
+        showPvMsg('🟣 Final Verification (2nd) complete — saved', 'ok');
+        const b = document.getElementById('pvCompleteBtn'); if(b){ b.disabled = true; b.textContent = '✅ Already Verified (100% Scanned)'; }
+        const i = document.getElementById('pvScanInput'); if(i){ i.disabled = true; i.placeholder = 'This order is already verified'; }
+        const f = document.getElementById('pvForceBtn'); if(f){ f.disabled = true; f.textContent = '✅ Already Confirmed'; }
+        _ic.jobs = _ic.jobs.filter(j => !(j.kind === 'pv' && j.inv === inv)); // 인쇄 전에 잠금 해제(인쇄 함수의 저장 중 확인에 걸리지 않게)
+        await _icAutoPrint_('pv', inv, bid); // 저장 성공 뒤 자동 인쇄(예전과 같음)
+      } else _icAddPrint_('pv', inv, bid);
+    },
+    onFail: (res) => {
+      if(_pvInvoice === inv && state.batchId === bid){
+        _icUnlockPanel_('pv', !!(_pvState && _pvState.complete));
+        showPvMsg({ kind: 'bad', icon: '⛔', title: 'NOT SAVED — ' + inv + ' is NOT verified yet', sub: String((res && res.error) || 'Unknown error').slice(0, 80) + ' · tap Retry below or Confirm again' });
+        refreshPvState().catch(() => {});
+      }
+    },
+  });
 }
-
+let _pvConfirming = false; // ★ v24 — 강제 확정 진행 중(일반 확정과 동시에 저장되지 않게)
 async function forcePvComplete(){
   if(!_pvInvoice) return;
+  if(_icBusy_('pv', _pvInvoice) || _pvConfirming) return; // ★ v24 — 일반 확정 저장 중·강제 확정 진행 중
+  _pvConfirming = true;
+  try { return await _forcePvCompleteCore_(); } finally { _pvConfirming = false; }
+}
+async function _forcePvCompleteCore_(){
   const worker = currentPvWorker();
   if(!worker){ alert('Please select a worker first (needed for the audit record)'); return; }
   if(!confirm('⚠ Verification isn\'t finished yet — force this to "Final Verification (2nd) Complete" using manager authority?\n\nThis bypasses the mis-ship prevention safeguard, so only use it if you have already physically confirmed the items.\n\nAll remaining items will be automatically recorded as "confirmed", so the screen and packing slip always stay in sync.')) return;
@@ -11522,6 +11711,8 @@ async function printPvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _pvInvoice;
   if(!invoice){ alert('Please select an order first'); return; }
+  if(_icBusy_('pv', invoice)){ alert('Saving the confirmation… the slip prints automatically when it is saved.'); return; } // ★ v24
+  if(!_pvState || (_pvState.__inv && _pvState.__inv !== invoice)){ alert('Order is still loading — try again in a moment.'); return; } // ★ v24 — 지금 오더 내용으로만 인쇄
   const cf = state.custFiles.find(c => c.meta && c.meta.invoice_no === invoice);
   const slotObj = state.slots.find(s => s.assignedTo === invoice);
   const st = _pvState;
@@ -11737,6 +11928,7 @@ async function printPvSlip(format, forceFlat){
   if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
+  window.__lastSlip = { inv: invoice, at: Date.now() }; // ★ v24 — 실제로 인쇄 창을 연 기록(인쇄 대기 줄 정리용)
   logSlipPrint_('total', invoice, state.batchId, worker);
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
@@ -11752,6 +11944,7 @@ async function printPsvSlip(format, forceFlat){
   format = format || 'letter';
   const invoice = _psvInvoice;
   if(!invoice){ alert('Please select an order first'); return; }
+  if(_icBusy_('psv', invoice)){ alert('Saving the confirmation… the slip prints automatically when it is saved.'); return; } // ★ v24
   if(_psvBlocked_(invoice)) return; // ★ v22 — 저장 확인 뒤에만 인쇄
   if(_psvStateInv !== invoice || !_psvState){ alert('Order is still loading — try again in a moment.'); return; } // ★ v22 — 지금 오더 내용으로만 인쇄
   const order = _standaloneOrders.find(o => o.invoice === invoice);
@@ -11943,6 +12136,7 @@ async function printPsvSlip(format, forceFlat){
   if(!win){ alert('The popup was blocked. Please allow popups for this site.'); return; }
   win.document.write(html);
   win.document.close();
+  window.__lastSlip = { inv: invoice, at: Date.now() }; // ★ v24
   logSlipPrint_('standalone', invoice, STANDALONE_BATCH_ID, worker);
   setTimeout(() => { win.focus(); win.print(); }, 300);
 }
