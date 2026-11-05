@@ -37,8 +37,115 @@ const PACKSCAN_SHEET = 'PackScanLog';
 // 이미 정상 출고된 옛날 배치들까지 전부 되살아나는 사고로 이어짐 — 실제 발생).
 const PACK_VERIFY_LAUNCH_MS = new Date(2026, 7, 24, 0, 0, 0).getTime(); // 2026-08-24 00:00 (월=0 기준이라 7=8월)
 
-function batchTz_() { return Session.getScriptTimeZone(); }
-function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
+function batchTz_() { return scriptTz_(); }
+
+/* ===================== ★ 2026-11-04 빠른 날짜 글자 변환(fmtDate_) =====================
+ * [왜] 작업 시간에 1분 동기화·workerJobs 미러·sales 미러가 3~10분씩 걸리던 원인을 측정으로 확정함(ReadProbe v3, 11/4 15:15~16:15):
+ *   Jobs 목록 계산의 "행마다 시간→글자 변환"(Utilities.formatDate / Session.getScriptTimeZone, 한 번에 약 1만 800번 서비스 호출)이
+ *   한가할 땐 4~6초, 바쁠 땐 같은 호출이 100배 느려져 최대 464초. 시트 읽기·메모·디멘션은 같은 순간에도 1~4초.
+ * [어떻게] 같은 결과 글자를 서비스 호출 없이 JavaScript 로 직접 만듦(이 스크립트의 JS 시계는 스크립트 시간대로 동작).
+ *   - 실행마다 처음 한 번: 겨울·여름·지금·1899-12-30(시간만 든 칸) 4개 시각을 Utilities.formatDate 결과와 글자 하나까지 비교 → 하나라도 다르면 이 실행은 전부 예전 방식.
+ *   - 시간대가 스크립트 시간대와 다르거나, 패턴에 yyyy yy MM dd HH mm ss 와 '글자' 말고 다른 기호(h, a, E, z …)가 있거나,
+ *     값이 올바른 날짜가 아니면 → 예전과 똑같이 Utilities.formatDate 를 그대로 부름(결과·오류 모두 예전과 동일).
+ *   - 비상 스위치: 스크립트 속성 FAST_DATE_OFF = 1 → 전부 예전 방식.
+ * [주의] 이 블록은 Code.gs 와 BatchPicking.gs 에 글자 하나까지 똑같이 들어 있음(한 파일만 교체돼도 멈추지 않게). 고칠 땐 두 곳 모두 똑같이.
+ * ================================================================================ */
+var __SCRIPT_TZ_MEMO = null, __FD_STATE = null, __FD_PAT = {};
+function scriptTz_() {
+  if (__SCRIPT_TZ_MEMO == null) __SCRIPT_TZ_MEMO = Session.getScriptTimeZone();
+  return __SCRIPT_TZ_MEMO;
+}
+function _fdCompile_(p) {
+  if (!__FD_PAT) __FD_PAT = {};
+  if (Object.prototype.hasOwnProperty.call(__FD_PAT, p)) return __FD_PAT[p];
+  const parts = [];
+  let i = 0, ok = true;
+  while (i < p.length) {
+    const ch = p.charAt(i);
+    if (ch === "'") {
+      if (p.charAt(i + 1) === "'") { parts.push("'"); i += 2; continue; }
+      const j = p.indexOf("'", i + 1);
+      if (j < 0) { ok = false; break; }
+      let lit = p.substring(i + 1, j);
+      // 'it''s' 처럼 따옴표 안의 '' 는 따옴표 하나
+      let k = j;
+      while (p.charAt(k + 1) === "'") { const j2 = p.indexOf("'", k + 2); if (j2 < 0) { ok = false; break; } lit += "'" + p.substring(k + 2, j2); k = j2; }
+      if (!ok) break;
+      parts.push(lit); i = k + 1; continue;
+    }
+    if (/[A-Za-z]/.test(ch)) {
+      let j = i; while (j < p.length && p.charAt(j) === ch) j++;
+      const tok = p.substring(i, j);
+      if (['yyyy', 'yy', 'MM', 'dd', 'HH', 'mm', 'ss'].indexOf(tok) < 0) { ok = false; break; }
+      parts.push({ t: tok }); i = j; continue;
+    }
+    parts.push(ch); i++;
+  }
+  __FD_PAT[p] = ok ? parts : null;
+  return __FD_PAT[p];
+}
+function _fdRender_(parts, d) {
+  const p2 = function (n) { return n < 10 ? '0' + n : String(n); };
+  let s = '';
+  for (let i = 0; i < parts.length; i++) {
+    const x = parts[i];
+    if (typeof x === 'string') { s += x; continue; }
+    switch (x.t) {
+      case 'yyyy': { const y = d.getFullYear(); s += (y >= 0 && y < 1000) ? ('000' + y).slice(-4) : String(y); break; }
+      case 'yy': s += p2(((d.getFullYear() % 100) + 100) % 100); break;
+      case 'MM': s += p2(d.getMonth() + 1); break;
+      case 'dd': s += p2(d.getDate()); break;
+      case 'HH': s += p2(d.getHours()); break;
+      case 'mm': s += p2(d.getMinutes()); break;
+      case 'ss': s += p2(d.getSeconds()); break;
+    }
+  }
+  return s;
+}
+function _fdReady_() {
+  if (__FD_STATE) return __FD_STATE.ok;
+  let ok = false, why = '';
+  try {
+    if (String(PropertiesService.getScriptProperties().getProperty('FAST_DATE_OFF') || '') === '1') { why = 'off'; }
+    else {
+      const tz = scriptTz_(), P = "yyyy-MM-dd'T'HH:mm:ss", parts = _fdCompile_(P);
+      const probes = [Date.UTC(2026, 0, 15, 20, 5, 7), Date.UTC(2026, 6, 15, 20, 5, 7), Date.now(), Date.UTC(1899, 11, 30, 17, 0, 0)]; // 1899-12-30 = 시트의 '시간만' 칸 날짜(옛 지방시 차이 확인)
+      ok = !!parts && probes.every(function (ms) { const d = new Date(ms); return _fdRender_(parts, d) === Utilities.formatDate(d, tz, P); });
+      if (!ok) why = 'mismatch';
+    }
+  } catch (e) { ok = false; why = 'err'; }
+  __FD_STATE = { ok: ok, why: why };
+  return ok;
+}
+function fmtDate_(d, tz, pattern) {
+  if (typeof pattern === 'string' && Object.prototype.toString.call(d) === '[object Date]' && !isNaN(d.getTime()) &&
+      tz === scriptTz_() && _fdReady_()) {
+    const parts = _fdCompile_(pattern);
+    if (parts) return _fdRender_(parts, d);
+  }
+  return Utilities.formatDate(d, tz, pattern);
+}
+/* 편집기에서 ▶ 실행: 빠른 변환이 켜졌는지 + 실제 Jobs 날짜로 예전 방식과 글자 비교(읽기만) */
+function checkFastDate() {
+  const out = [];
+  const ready = _fdReady_();
+  out.push('빠른 날짜 변환: ' + (ready ? '✅ 켜짐' : '⏸ 꺼짐(' + (__FD_STATE && __FD_STATE.why) + ') — 예전 방식으로 동작(정상)') + ' · 스크립트 시간대 ' + scriptTz_());
+  const pats = ['yyyy-MM-dd', 'yyyy-MM-dd HH:mm:ss', 'HH:mm', "yyyy-MM-dd'T'HH:mm:ss", 'MM-dd HH:mm', 'yyyyMMdd', 'HHmm', 'MM-dd HH'];
+  let n = 0, bad = 0; const badEx = [];
+  const t0 = Date.now();
+  try {
+    const sh = SHEET_(); const lr = sh.getLastRow(), lc = sh.getLastColumn();
+    const rows = lr >= 2 ? sh.getRange(2, 1, Math.min(lr - 1, 1500), lc).getValues() : [];
+    const tz = scriptTz_();
+    rows.forEach(function (r) { r.forEach(function (v) {
+      if (Object.prototype.toString.call(v) !== '[object Date]' || isNaN(v)) return;
+      pats.forEach(function (p) { n++; const a = fmtDate_(v, tz, p), b = Utilities.formatDate(v, tz, p); if (a !== b) { bad++; if (badEx.length < 5) badEx.push(p + ' ' + a + ' ≠ ' + b); } });
+    }); });
+  } catch (e) { out.push('비교 중 오류: ' + e); }
+  out.push('Jobs 실제 날짜 ' + n + '건 비교 → ' + (bad ? '❌ 다름 ' + bad + '건: ' + badEx.join(' / ') : '✅ 전부 같음') + ' (' + Math.round((Date.now() - t0) / 100) / 10 + 's)');
+  const text = out.join('\n'); Logger.log(text); return text;
+}
+function batchNow_() { return fmtDate_(new Date(), batchTz_(), 'yyyy-MM-dd HH:mm:ss'); }
 
 /* ===================== fmtSheetTs_ (★ 세션C 버그 수정) =====================
  * 목적: 구글시트가 'yyyy-MM-dd HH:mm:ss' 형식의 텍스트를 셀에 쓰면, 다시
@@ -54,7 +161,7 @@ function batchNow_() { return Utilities.formatDate(new Date(), batchTz_(), 'yyyy
  * ============================================================================= */
 function fmtSheetTs_(raw) {
   if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw)) {
-    return Utilities.formatDate(raw, batchTz_(), 'yyyy-MM-dd HH:mm:ss');
+    return fmtDate_(raw, batchTz_(), 'yyyy-MM-dd HH:mm:ss');
   }
   return String(raw || '');
 }
@@ -537,6 +644,14 @@ function _vals_(sh, nRows, nCols) {
   return (m[k] = sh.getRange(2, 1, nRows, nCols).getValues());
 }
 
+// ★ v35 — ArchiveStore.gs(보관용 파일)가 프로젝트에 없을 때만 쓰임: 보관용 파일 전환이 꺼져 있으면 예전처럼 본 파일, 켜져 있으면 오류
+//   (켜진 상태에서 조용히 본 파일을 쓰면 보관 기록이 두 파일로 갈라지고 매출 합계가 줄어듦). 설정을 못 읽으면 안전하게 오류.
+function _arcMainOrThrow_(ss, name, headers) {
+  let on = false;
+  try { const pr = PropertiesService.getScriptProperties(); const raw = pr.getProperty('ARCHIVE_SS'); if (raw) { const c = JSON.parse(raw); on = !!(c && c.on && c.id); } if (pr.getProperty('ARCHIVE_SS_MOVED')) on = true; } catch (e) { on = true; }
+  if (on) throw new Error('보관용 파일 전환이 켜져 있는데 ArchiveStore.gs 가 없음 — 파일을 다시 추가해 주세요');
+  return headers ? ensureBatchSheet_(name, headers) : (ss || ss_()).getSheetByName(name);
+}
 function ensureBatchSheet_(name, headers) {
   if (__SYNC_MEMO && __SYNC_MEMO.sheets[name]) return __SYNC_MEMO.sheets[name]; // ★ 동기화 사이클 중에는 시트 객체/헤더 확인을 1번만
   const ss = ss_(); // 기존 Code.gs 의 ss_() 재사용 (SS_ID 스프레드시트)
@@ -841,7 +956,7 @@ function workerPresenceSheet_() { return ensureBatchSheet_('WorkerPresence', ['D
  * 작업자를 한 번의 요청으로 같이 보고함(요청 수를 줄이기 위해 배열로 묶음 —
  * getScanAndPickers/getSalesOverviewAndToday와 같은 이유).
  * 입력: { deviceId, entries:[{screen, worker}, ...] } */
-function pingWorkerPresenceBatch(data) {
+function pingWorkerPresenceBatch_tmCore_(data) {
   // ★ pingScanWorker와 동일한 이유 — 이 하트비트가 진짜 중요한 작업(스캔/검수
   //   확정 등)의 락 대기시간을 늘리면 안 되므로, 락을 짧게(1초)만 시도하고
   //   못 잡으면 조용히 포기함(다음 30초 주기에 다시 시도되므로 한 번 놓쳐도 무해).
@@ -1008,8 +1123,8 @@ function _unmarkBatchDeleted_(batchId) {
 }
 
 function generateBatchId_() {
-  const datePart = Utilities.formatDate(new Date(), batchTz_(), 'yyyyMMdd');
-  const timePart = Utilities.formatDate(new Date(), batchTz_(), 'HHmm'); // ★ 2026-08-24 신규(매니저 요청) — "몇 시에 만든 배치인지"까지 한눈에 보이도록 시:분(HHmm) 추가
+  const datePart = fmtDate_(new Date(), batchTz_(), 'yyyyMMdd');
+  const timePart = fmtDate_(new Date(), batchTz_(), 'HHmm'); // ★ 2026-08-24 신규(매니저 요청) — "몇 시에 만든 배치인지"까지 한눈에 보이도록 시:분(HHmm) 추가
   const seq = nextBatchSeqForDate_(datePart);
   return 'B' + datePart + '-' + timePart + seqToLetters_(seq);
 }
@@ -1037,7 +1152,7 @@ function createBatch_bsCore_(data) {
   let result;
   let batchDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
   try {
-    const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
+    const today = fmtDate_(new Date(), batchTz_(), 'yyyy-MM-dd');
     const batchId = generateBatchId_();
     _unmarkBatchDeleted_(batchId); // ★ 2026-10-19 — 삭제된 배치와 같은 번호로 새로 만들어진 경우 삭제 표시 해제
 
@@ -1209,6 +1324,7 @@ function addStandaloneOrder_bsCore_(data) {
     bumpVersion_();
     // ★ 2026-09-01 신규 — 이 인보이스의 BatchItems 캐시(20초)를 즉시 비움.
     //   재업로드 직후에도 옛 상품 목록이 캐시에 남아있지 않도록.
+    _bsD_('bc', STANDALONE_BATCH_ID); // ★ v33 — BatchCustomers 사본도 잠금 안에서 바로 표시(검수 연동이 옛 줄을 읽지 않게)
     clearInvoiceCache_(STANDALONE_BATCH_ID, invoice);
     // ★ 2026-10-29 v24 — 같은 인보이스를 다시 등록한 경우 Firestore 문서를 시트 기준으로 다시 만들도록 표시만 남김(가벼운 속성 쓰기, 시트 방식이면 아무것도 안 함)
     try { if (typeof ssIsFs_ === 'function' && ssAnyFs_()) ssForgetInvoice_(STANDALONE_BATCH_ID, invoice); } catch (eSs) { /* 무시 */ }
@@ -1248,7 +1364,7 @@ function getStandaloneOrders() {
       if (String(r[0]) !== STANDALONE_BATCH_ID) return;
       const createdRaw = r[13];
       const createdAt = createdRaw
-        ? (createdRaw instanceof Date ? Utilities.formatDate(createdRaw, batchTz_(), 'yyyy-MM-dd HH:mm:ss') : String(createdRaw))
+        ? (createdRaw instanceof Date ? fmtDate_(createdRaw, batchTz_(), 'yyyy-MM-dd HH:mm:ss') : String(createdRaw))
         : '';
       orders.push({
         invoice: String(r[1] || ''),
@@ -1296,6 +1412,7 @@ function removeStandaloneOrder_bsCore_(data) {
       }
     }
     if (removed) bumpVersion_();
+    _bsD_('bc', STANDALONE_BATCH_ID); // ★ v33 — 잠금 안에서 바로 표시
     clearInvoiceCache_(STANDALONE_BATCH_ID, invoice); // ★ 2026-09-01 신규
     return { ok: true, removed: removed };
   } catch (e) {
@@ -1343,6 +1460,7 @@ function removeStandaloneOrdersBulk_bsCore_(data) {
       }
     }
     if (removedCount) bumpVersion_();
+    _bsD_('bc', STANDALONE_BATCH_ID); // ★ v33 — 잠금 안에서 바로 표시
     invoices.forEach(inv => { try { clearInvoiceCache_(STANDALONE_BATCH_ID, inv); } catch (e) { /* 무시 */ } });
     return { ok: true, removed: removedCount, requested: invoices.length };
   } catch (e) {
@@ -1370,14 +1488,14 @@ function getBatch(batchId) {
     let row = 0, resolvedId = batchId;
 
     if (!batchId) {
-      const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
+      const today = fmtDate_(new Date(), batchTz_(), 'yyyy-MM-dd');
       const last = bSh.getLastRow();
       if (last >= 2) {
         const vals = _vals_(bSh, last - 1, 7);
         for (let i = vals.length - 1; i >= 0; i--) {
           let rowDateStr = vals[i][1];
           if (Object.prototype.toString.call(rowDateStr) === '[object Date]') {
-            rowDateStr = Utilities.formatDate(rowDateStr, batchTz_(), 'yyyy-MM-dd');
+            rowDateStr = fmtDate_(rowDateStr, batchTz_(), 'yyyy-MM-dd');
           } else {
             rowDateStr = String(rowDateStr || '').slice(0, 10);
           }
@@ -1735,16 +1853,13 @@ function getInvoiceBatchItemsCached_(batchId, invoice) {
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
   }
-  const bi = bitemsSheet_();
-  const biLast = bi.getLastRow();
   const lines = [];
-  if (biLast >= 2) {
-    bi.getRange(2, 1, biLast - 1, 7).getValues().forEach(r => {
-      if (String(r[0]) !== String(batchId)) return;
-      if (String(r[1]) !== String(invoice)) return;
-      lines.push({ sku: String(r[2]), name: String(r[3]), barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
-    });
-  }
+  // ★ v33 (2026-11-02 속도) — 배치 사본(BatchSnap)에서 이 배치 줄만 읽음(꺼져 있으면 예전처럼 시트 전체 — 결과 동일). 측정: 캐시 없을 때 2.6~2.7초
+  _bsR_('bi', batchId, 7).forEach(r => {
+    if (String(r[0]) !== String(batchId)) return;
+    if (String(r[1]) !== String(invoice)) return;
+    lines.push({ sku: String(r[2]), name: String(r[3]), barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
+  });
   try {
     const payload = JSON.stringify(lines);
     _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자류 가드 제거(청크 캐시)
@@ -1758,17 +1873,14 @@ function getInvoiceIssueQtyCached_(batchId, invoice) {
   if (cached) {
     try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
   }
-  const il = issuelogSheet_();
-  const ilLast = il.getLastRow();
   const issues = []; // { barcode, qty, reason } — ★ 2026-09-01: reason 추가(syncInspectionFromPicking_도 재사용)
-  if (ilLast >= 2) {
-    il.getRange(2, 1, ilLast - 1, 13).getValues().forEach(r => {
-      if (String(r[0]) !== String(batchId)) return;
-      if (String(r[7]) !== String(invoice)) return;
-      if (r[12] === 'undone') return;
-      issues.push({ barcode: String(r[4]), qty: Number(r[10]) || 0, reason: r[9] || 'ETC' });
-    });
-  }
+  // ★ v33 — 배치 사본에서 이 배치 줄만(꺼져 있으면 예전처럼 시트 전체 — 결과 동일)
+  _bsR_('il', batchId, 13).forEach(r => {
+    if (String(r[0]) !== String(batchId)) return;
+    if (String(r[7]) !== String(invoice)) return;
+    if (r[12] === 'undone') return;
+    issues.push({ barcode: String(r[4]), qty: Number(r[10]) || 0, reason: r[9] || 'ETC' });
+  });
   try {
     const payload = JSON.stringify(issues);
     _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자류 가드 제거(청크 캐시)
@@ -1779,6 +1891,8 @@ function getInvoiceIssueQtyCached_(batchId, invoice) {
 //   않고도 다음 조회부터 바로 최신 값을 쓰게 함(속도 이득은 유지하면서 오래된
 //   값을 보여줄 위험은 없앰).
 function clearInvoiceCache_(batchId, invoice) {
+  // ★ v33 — 두 캐시가 배치 사본(BatchSnap)에서 읽으므로 사본 바뀜 표시를 '먼저'(캐시를 지운 사이 옛 사본으로 다시 채워지지 않게). 꺼져 있으면 아무것도 안 함
+  try { if (typeof bsBump_ === 'function' && batchId) bsBump_(['bi', 'il'], batchId); } catch (eBs) { /* 무시 — 최대 10분 안에 다시 맞춰짐 */ }
   try {
     const cache = CacheService.getScriptCache();
     // ★ 2026-09-25 수정 — 청크 캐시로 바뀌면서 무효화 대상도 메타 키로 변경(_cacheGetChunked_ 참고)
@@ -1868,6 +1982,17 @@ function _bsFlushPend_() {
 // 쓰기 함수 감싸기: 끝나면(성공·실패·예외 모두) 기록해 둔 표시를 한 번에
 function _bsPW_(fn) { try { return fn(); } finally { _bsFlushPend_(); } }
 function _bsWA_(kinds, fn, clearIds) { try { return fn(); } finally { _bsFlushPend_(); try { if (typeof bsDirtyAll_ === 'function') bsDirtyAll_(kinds, clearIds); } catch (e) { /* 무시 */ } } }
+// ★ v33 — 이슈 취소·수정: 정상 경로는 안쪽에서 그 배치로 표시. 중간에 오류로 끝나 표시가 없으면(시트엔 쓰였을 수 있음) 여기서 표시 — 배치를 알면 그 배치, 모르면 IssueLog 전체
+function _bsWI_(data, fn) {
+  try { return fn(); } finally {
+    if (!__BS_PEND.some(function (x) { return x[0] === 'il'; })) {
+      const b = data && data.batchId ? String(data.batchId) : '';
+      if (b) _bsD_('il', b);
+      else { try { if (typeof bsDirtyAll_ === 'function') bsDirtyAll_('il'); } catch (e) { /* 무시 */ } }
+    }
+    _bsFlushPend_();
+  }
+}
 function _bsWB_(kind, batchId, fn) {
   try { return fn(); } finally {
     // 안쪽에서 이미 표시했으면(정상 경로) 다시 하지 않음. 오류로 중간에 끝난 경우(시트엔 쓰였을 수 있음)에만 여기서 표시.
@@ -1932,7 +2057,238 @@ function invalidateBatchAggregateCaches_(batchId) {
   bumpBatchVer_(batchId); // ★ v28 — 캐시를 비운 '뒤에'
 }
 
-function logPackScan(data) {
+/* ===================== ScanTiming — 스캔 속도 측정 (★ 2026-11-02 v31 신규) =====================
+ * 목적: 현장에서 "스캔 입력이 4~5초 걸린다"는 시간이 어디서 나오는지 실제 데이터로 확인.
+ *  - 서버: logScan / logPackScan 처리 중 단계별 시간을 잼(Firestore 호출·필요수량 다시 읽기 등) → 응답에 _t 로 붙여 보냄.
+ *    Date.now() 차이만 계산 — 저장·추가 호출 없음(스캔을 느리게 하지 않음). 계산 결과·저장 내용은 전혀 바뀌지 않음.
+ *  - 화면: 스캔 왕복 시간(+앞 스캔 대기 시간)을 모아 1분 하트비트(pingWorkerPresenceBatch)에 실어 보냄(새 요청 없음).
+ *  - 서버는 하트비트 처리가 끝난 뒤(잠금 밖) Firestore 'scanTiming' 에 한 번 기록 — 기기당 1분에 최대 1번, 스캔과 무관.
+ *  - 결과 보기: 편집기에서 showScanTiming 실행(오늘 기록을 화면·단계·시간대별로 자동 계산).
+ *  - 끄기: 스크립트 속성 SCAN_TIMING = off (기본 켜짐) → 기록 저장을 멈춤. 스캔 쪽 측정은 Date.now() 계산뿐이라 설정을 읽지 않음(스캔에 추가 읽기 0).
+ * ================================================================================ */
+var __TM_ACTIVE = false;
+var __TM_OFF_MEMO = null;
+function _tmOff_() {
+  if (__TM_OFF_MEMO === null) {
+    try { __TM_OFF_MEMO = String(PropertiesService.getScriptProperties().getProperty('SCAN_TIMING') || '') === 'off'; } catch (e) { __TM_OFF_MEMO = false; }
+  }
+  return __TM_OFF_MEMO;
+}
+// [함수 이름, 분류] — 이 함수들이 걸린 시간을 분류별로 합산(측정 함수 안에서 다시 불린 측정 함수 시간은 빼서 겹치지 않게)
+var _TM_FNS_ = [
+  ['ssFetch_', 'fs'], ['_getFirestoreAccessToken_', 'tok'], ['ssCountFetch_', 'cnt'],
+  ['ssReadReqDirect_', 'req'], ['ssReadRowsDirect_', 'seed'], ['ss3ReadRowsDirect_', 'seed'],
+  ['isBatchDeleted_', 'del'], ['syncInspectionFromPicking_', 'insp'],
+  ['invalidateScanStateCache_', 'inv'], ['invalidateBatchAggregateCaches_', 'inv'], ['invalidatePackScanCache_', 'inv'],
+  ['bumpVersion_', 'ver'], ['bumpVersionScan_', 'ver'],
+  ['ssCfg_', 'cfg'], ['ssGens_', 'gen'], ['ss3Gen_', 'gen'], ['ssInflightBegin_', 'ifl'], ['ssInflightEnd_', 'ifl'], ['ssClearPending_', 'pend'], ['ssCountFlush_', 'cnt'],
+  ['getInvoiceBatchItemsCached_', 'rqc'], ['getInvoiceIssueQtyCached_', 'rqc'],
+  ['saveInspection', 'insv'], ['bsGet_', 'snap'], // ★ v33 — 검수 결과 쓰기(오더 완료 순간)·배치 사본 읽기를 따로 잼
+  ['ssSave_', 'save'], ['ss3Save_', 'save'],
+];
+function _tmGlobal_() { return (typeof globalThis !== 'undefined') ? globalThis : this; }
+function _tmRun_(core, data) {
+  if (__TM_ACTIVE) return core(data); // 안쪽에서 다시 불리면(겹침) 그냥 실행 — 스캔 경로에서는 설정·캐시를 전혀 읽지 않음
+  const g = _tmGlobal_();
+  const T = {}, N = {};
+  const stack = [];
+  const saved = [];
+  __TM_ACTIVE = true;
+  const t0 = Date.now();
+  try {
+    _TM_FNS_.forEach(function (x) {
+      const name = x[0], key = x[1];
+      const orig = g[name];
+      if (typeof orig !== 'function' || orig.__tm) return;
+      const w = function () {
+        const t = Date.now();
+        const fr = { child: 0 };
+        stack.push(fr);
+        try { return orig.apply(this, arguments); }
+        finally {
+          stack.pop();
+          const el = Date.now() - t;
+          T[key] = (T[key] || 0) + (el - fr.child);
+          N[key] = (N[key] || 0) + 1;
+          if (stack.length) stack[stack.length - 1].child += el;
+        }
+      };
+      w.__tm = true;
+      w.__orig = orig; // 원래 함수(코드를 읽어야 하는 곳 — bumpVersionScan_ 이 씀)
+      g[name] = w;
+      saved.push([name, orig]);
+    });
+  } catch (eI) { /* 측정 준비 실패 — 아래에서 복원 후 그냥 실행 */ }
+  let res;
+  const canDefer = (typeof ssCountFlush_ === 'function') && (typeof __SS_CNT_DEFER !== 'undefined');
+  try {
+    if (canDefer) __SS_CNT_DEFER = 1; // ★ v32 — Firestore 호출 수 기록을 호출마다 하지 않고 끝에 한 번에(속도)
+    res = core(data);
+  } finally {
+    if (canDefer) { __SS_CNT_DEFER = 0; try { ssCountFlush_(); } catch (eC) { /* 무시 */ } }
+    for (let i = saved.length - 1; i >= 0; i--) { try { g[saved[i][0]] = saved[i][1]; } catch (eR) { /* 무시 */ } }
+    __TM_ACTIVE = false;
+  }
+  try {
+    if (res && typeof res === 'object' && !res._t) {
+      const srv = Date.now() - t0;
+      const o = { srv: srv };
+      let sum = 0;
+      Object.keys(T).forEach(function (k) { if (k !== 'save') { o[k] = T[k]; sum += T[k]; } });
+      if (N.fs) o.fsN = N.fs;
+      if (N.save) o.tries = N.save;
+      o.etc = Math.max(0, srv - sum);
+      res._t = o;
+    }
+  } catch (eT) { /* 측정 실패는 무시 — 결과는 그대로 */ }
+  return res;
+}
+// 하트비트에 실려 온 측정값을 Firestore scanTiming 에 기록 → 저장한 개수(실패 0 — 화면이 다음 하트비트에 다시 보냄)
+function _tmSave_(data, recs) {
+  if (_tmOff_()) return -1; // 꺼짐 — 화면이 기록을 버리고 더 보내지 않음
+  if (!Array.isArray(recs) || !recs.length) return 0;
+  recs = recs.slice(0, 300).filter(function (r) { return r && typeof r === 'object'; });
+  if (!recs.length) return 0;
+  const dev = String((data && data.deviceId) || 'unknown').slice(0, 80);
+  const seq0 = Number(recs[0].s) || 0;
+  const now = new Date();
+  const day = fmtDate_(now, scriptTz_(), 'yyyy-MM-dd');
+  const id = ssClean_(dev) + '_' + seq0 + '_' + recs.length; // 같은 묶음을 다시 보내면 같은 문서에 덮어씀(중복 없음)
+  const fields = { dev: dev, day: day, atMs: now.getTime(), n: recs.length, recs: JSON.stringify(recs) };
+  const c = ssCommit_([{ update: { name: ssName_('scanTiming/' + id), fields: ssEncFields_(fields) } }]);
+  return c && c.ok ? recs.length : 0;
+}
+
+/* 편집기에서 실행 — 오늘 스캔 속도를 자동 계산해서 로그에 표시(읽기 전용) */
+function showScanTiming() { return showScanTimingDays_(1); }
+function showScanTimingDays_(days) {
+  days = Math.max(1, Math.min(7, Number(days) || 1));
+  const tz = scriptTz_();
+  const today0 = Utilities.parseDate(fmtDate_(new Date(), tz, 'yyyy-MM-dd') + ' 00:00:00', tz, 'yyyy-MM-dd HH:mm:ss').getTime(); // 서머타임 바뀌는 날도 정확
+  const sinceMs = today0 - (days - 1) * 86400000;
+  const docs = ssQuery_(ssWhereGte_('atMs', sinceMs), 3000, null, 'scanTiming');
+  const seen = {};
+  const all = [];
+  docs.forEach(function (d) {
+    let recs = [];
+    try { recs = JSON.parse(d.data.recs || '[]'); } catch (e) { recs = []; }
+    recs.forEach(function (r) {
+      if (!r || typeof r !== 'object') return;
+      const k = String(d.data.dev) + '|' + r.s;
+      if (seen[k]) return; // 같은 기록이 두 번 저장된 경우 한 번만
+      seen[k] = true;
+      r.dev = d.data.dev;
+      if (Number(r.at) >= sinceMs) all.push(r);
+    });
+  });
+  const out = [];
+  const devN = Object.keys(all.reduce(function (m, r) { m[r.dev] = 1; return m; }, {})).length;
+  out.push('=== 스캔 속도 (' + (days === 1 ? '오늘' : '최근 ' + days + '일') + ' · 기록 ' + all.length + '건 · 기기 ' + devN + '대) ===');
+  if (!all.length) {
+    out.push('기록 없음 — 새 batch.html 이 디바이스에 적용됐는지(새로고침), 작업자가 스캔했는지 확인. 하트비트(1분)마다 올라옵니다.');
+    Logger.log(out.join('\n')); return out.join('\n');
+  }
+  const SCR = { pv: 'P 2차 검수', psv: '단독 P 2차', ss: '04 단독 1차', s3: '03 Scan&Sort', x: '기타' };
+  const KEYS = [['fs', 'Firestore'], ['tok', '토큰'], ['cnt', '호출수기록'], ['req', '필요수량 시트읽기'], ['rqc', '필요수량 캐시'], ['seed', '기록 시트읽기'], ['del', '삭제배치확인'], ['insp', '검수연동'], ['insv', '검수결과쓰기'], ['snap', '배치사본'], ['inv', '캐시비우기'], ['ver', '버전표시'], ['cfg', '설정읽기'], ['gen', '변경번호읽기'], ['ifl', '저장중표시'], ['pend', '대기표시'], ['prop', '설정(옛 분류)'], ['etc', '기타']];
+  const avg = function (a) { return a.length ? Math.round(a.reduce(function (x, y) { return x + y; }, 0) / a.length) : 0; };
+  const pct = function (a, p) { if (!a.length) return 0; const b = a.slice().sort(function (x, y) { return x - y; }); return b[Math.min(b.length - 1, Math.floor(b.length * p))]; };
+  const mx = function (a) { return a.length ? a.reduce(function (x, y) { return Math.max(x, y); }, 0) : 0; };
+  const sec = function (ms) { return (Math.round((Number(ms) || 0) / 100) / 10).toFixed(1) + 's'; };
+  function block(title, rs) {
+    if (!rs.length) return;
+    const rt = rs.map(function (r) { return Number(r.rt) || 0; });
+    const withT = rs.filter(function (r) { return r.t && r.t.srv != null; });
+    const srv = withT.map(function (r) { return Number(r.t.srv) || 0; });
+    const net = withT.map(function (r) { return Math.max(0, (Number(r.rt) || 0) - (Number(r.t.srv) || 0)); });
+    const qs = rs.filter(function (r) { return r.q != null; }).map(function (r) { return Number(r.q) || 0; });
+    const retry = rs.filter(function (r) { return (r.n || 1) > 1; }).length;
+    const fail = rs.filter(function (r) { return !r.ok; }).length;
+    const slow = rt.filter(function (x) { return x >= 3000; }).length;
+    out.push('■ ' + title + ' — ' + rs.length + '건 | 왕복 평균 ' + sec(avg(rt)) + ' · 중간값 ' + sec(pct(rt, 0.5)) + ' · 느린10% ' + sec(pct(rt, 0.9)) + ' · 최대 ' + sec(mx(rt)) + ' | 3초 이상 ' + slow + '건(' + Math.round(slow * 100 / rs.length) + '%)');
+    if (withT.length) {
+      const parts = KEYS.map(function (k) { const v = avg(withT.map(function (r) { return Number(r.t[k[0]]) || 0; })); return v >= 20 ? k[1] + ' ' + sec(v) : ''; }).filter(Boolean).join(' · ');
+      out.push('    서버 평균 ' + sec(avg(srv)) + (parts ? ' (' + parts + ')' : '') + ' | 서버 밖(인터넷+Google 시작) 평균 ' + sec(avg(net)) + ' · 느린10% ' + sec(pct(net, 0.9)));
+    }
+    out.push('    ' + (qs.length ? '앞 스캔 기다린 시간 평균 ' + sec(avg(qs)) + ' · 최대 ' + sec(mx(qs)) + ' | ' : '') + '재시도 ' + retry + '건 · 실패 ' + fail + '건');
+  }
+  block('전체', all);
+  Object.keys(SCR).forEach(function (k) { block(SCR[k], all.filter(function (r) { return (SCR[r.scr] ? r.scr : 'x') === k; })); });
+  out.push('--- 시간대별 ---');
+  const byH = {};
+  all.forEach(function (r) { const h = fmtDate_(new Date(Number(r.at)), tz, 'MM-dd HH') + '시'; (byH[h] = byH[h] || []).push(r); });
+  Object.keys(byH).sort().forEach(function (h) {
+    const rs = byH[h];
+    const rt = rs.map(function (r) { return Number(r.rt) || 0; });
+    const srv = rs.filter(function (r) { return r.t; }).map(function (r) { return Number(r.t.srv) || 0; });
+    out.push(h + ' ' + rs.length + '건 | 왕복 평균 ' + sec(avg(rt)) + ' · 느린10% ' + sec(pct(rt, 0.9)) + ' | 서버 평균 ' + sec(avg(srv)));
+  });
+  out.push('--- 가장 느린 8건 ---');
+  all.slice().sort(function (a, b) { return (Number(b.rt) || 0) - (Number(a.rt) || 0); }).slice(0, 8).forEach(function (r) {
+    const t = r.t || {};
+    const parts = KEYS.map(function (k) { return Number(t[k[0]]) >= 50 ? k[1] + ' ' + sec(t[k[0]]) : ''; }).filter(Boolean).join(' · ');
+    out.push(fmtDate_(new Date(Number(r.at)), tz, 'HH:mm:ss') + ' ' + (SCR[r.scr] || '기타') + ' ' + (r.w || '') + ' | 왕복 ' + sec(r.rt) + (r.q != null ? ' · 대기 ' + sec(r.q) : '') + ' | 서버 ' + (t.srv != null ? sec(t.srv) : '?') + (parts ? ' (' + parts + ')' : '') + (t.fsN ? ' · Firestore ' + t.fsN + '번' : '') + ' | 시도 ' + (r.n || 1) + (r.ok ? '' : ' · 실패'));
+  });
+  const text = out.join('\n');
+  Logger.log(text);
+  return text;
+}
+/* ★ v32 (2026-11-02 속도) — 스캔 저장 직후용 버전 표시. Code.gs 의 bumpVersion_() 과 완전히 같은 일(버전 속성 + 같은 캐시 무효화)을
+ *   하되, 캐시를 하나씩 8번 지우는 대신 removeAll 한 번으로 지움(측정: 0.3~0.4초 → 약 0.1초).
+ *   지울 캐시 목록은 실행할 때 Code.gs 의 bumpVersion_ 코드에서 직접 읽어옴 → Code.gs 가 나중에 바뀌어도 자동으로 똑같이 따라감.
+ *   bumpVersion_ 안에 "버전 쓰기 · 메모 비우기 · 캐시 지우기" 말고 다른 내용이 있으면(모르는 변경) 원래 bumpVersion_ 을 그대로 부름(정확성 우선). */
+var __BV_KEYS_MEMO = null;
+function _bumpVersionKeys_() {
+  if (__BV_KEYS_MEMO !== null) return __BV_KEYS_MEMO;
+  __BV_KEYS_MEMO = false;
+  try {
+    const f = (bumpVersion_ && bumpVersion_.__orig) || bumpVersion_; // 측정 중이면 감싼 함수가 아니라 원래 코드를 읽음
+    let src = String(f);
+    const a = src.indexOf('{'), b = src.lastIndexOf('}');
+    if (a < 0 || b <= a) return __BV_KEYS_MEMO;
+    // 한 줄씩 엄격하게 확인: 주석 줄은 건너뛰고, 나머지 줄은 아래 3가지 모양 중 하나여야 함(하나라도 다르면 원래 함수 사용)
+    const keys = [];
+    const lines = src.slice(a + 1, b).split(/\r?\n/);
+    let inBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (inBlock) { if (t.indexOf('*/') >= 0) { if (t.slice(t.indexOf('*/') + 2).trim() !== '') return __BV_KEYS_MEMO; inBlock = false; } continue; }
+      if (t === '') continue;
+      if (t.indexOf('//') === 0) continue;
+      if (t.indexOf('/*') === 0) { if (t.indexOf('*/') < 0) inBlock = true; else if (t.slice(t.indexOf('*/') + 2).trim() !== '') return __BV_KEYS_MEMO; continue; }
+      if (t === "PROP.setProperty('jobsVersion', _nowVer_());") continue;
+      if (/^__JOBS_BLOCK = null; __HDR_ROW = null;(\s*\/\/.*)?$/.test(t)) continue;
+      const m = t.match(/^try \{ CacheService\.getScriptCache\(\)\.remove\('([A-Za-z0-9_\-.]+)'\); \} catch \(e\) \{\}$/);
+      if (m) { keys.push(m[1]); continue; }
+      return __BV_KEYS_MEMO; // 모르는 줄 → 원래 함수 사용
+    }
+    if (!keys.length) return __BV_KEYS_MEMO;
+    __BV_KEYS_MEMO = keys;
+  } catch (e) { __BV_KEYS_MEMO = false; }
+  return __BV_KEYS_MEMO;
+}
+function bumpVersionScan_() {
+  const keys = _bumpVersionKeys_();
+  if (!keys) return bumpVersion_();
+  PROP.setProperty('jobsVersion', _nowVer_());
+  __JOBS_BLOCK = null; __HDR_ROW = null;
+  try { CacheService.getScriptCache().removeAll(keys); }
+  catch (e) { bumpVersion_(); }
+}
+function logPackScan(data) { return _tmRun_(logPackScan_tmCore_, data); }
+function logScan(data) { return _tmRun_(logScan_tmCore_, data); }
+function pingWorkerPresenceBatch(data) {
+  let recs = null;
+  if (data && data._tm) { recs = data._tm; try { delete data._tm; } catch (e) { /* 무시 */ } }
+  const res = pingWorkerPresenceBatch_tmCore_(data);
+  if (recs) {
+    let n = 0;
+    try { n = _tmSave_(data, recs); } catch (e) { n = 0; }
+    if (res && typeof res === 'object') res.tmSaved = n;
+  }
+  return res;
+}
+
+function logPackScan_tmCore_(data) {
   // ★ 2026-10-29 v24 — 스위치(SCAN_STORE)가 fs 면 Firestore 방식(ScanStore.gs)으로 처리. 기본값 sheet 면 아래 기존 코드 그대로.
   if (typeof ssIsFs_ === 'function' && ssIsFs_(Number(data && data.round) || 2)) return ssLogPackScan_(data);
   const lock = LockService.getDocumentLock();
@@ -2884,7 +3240,7 @@ function autoClearStaleDoneSlots_bsCore_() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   try {
-    const today = Utilities.formatDate(new Date(), batchTz_(), 'yyyy-MM-dd');
+    const today = fmtDate_(new Date(), batchTz_(), 'yyyy-MM-dd');
     const bSh = batchesSheet_();
     const bLast = bSh.getLastRow();
     const openBatchDates = {}; // batchId -> date, 완료처리 안 된 배치만
@@ -2953,11 +3309,60 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   //   기존 호출부) 예전과 동일하게 모든 라운드를 합쳐서 계산함 — 그 호출부들은
   //   이 수정으로 전혀 영향받지 않음.
 
+  // ★ v32 (2026-11-02 속도 — 03 스캔마다 1.5~2.3초) — 미완료 판정을 BatchCustomers 전체 읽기보다 먼저 함.
+  //   상품줄(캐시)이 있으면 필요수량을 상품줄로 계산하므로 BatchCustomers 의 총수량은 쓰이지 않음 → 미완료면 BatchCustomers 를 읽지 않고 끝(결과 동일:
+  //   예전에도 미완료면 아무것도 안 씀, 이 배치에 없는 인보이스여도 아무것도 안 씀). 완료일 때만 예전처럼 BatchCustomers 로 확인 후 진행.
+  //   상품줄이 없거나 계산 실패면 _syncInspCore_ 가 예전 순서 그대로 처리.
+  //   단독 오더(STANDALONE)는 스캔 경로에서 불리지 않고(완료 버튼 등), 문서를 한 번 더 읽게 되므로 사전 확인을 하지 않음 — 예전 그대로.
+  if (batchId !== STANDALONE_BATCH_ID) try {
+    const pre = _syncInspPrecheck_(batchId, invoice, round);
+    if (pre && pre.incomplete) return;
+  } catch (ePre) { /* 사전 확인 실패 — 아래 예전 방식 그대로 */ }
+  return _syncInspCore_(batchId, invoice, worker, force, round);
+}
+// 미완료 사전 확인 — 아래 _syncInspCore_ 의 2)·3) 계산과 같은 식(상품줄이 있을 때만). 반환 { incomplete: true } 이면 확실히 미완료.
+function _syncInspPrecheck_(batchId, invoice, round) {
+  const lines = getInvoiceBatchItemsCached_(batchId, invoice);
+  if (!lines || !lines.length) return null; // 상품줄 없음 → 예전 방식(총수량 사용)
+  const iss = getInvoiceIssueQtyCached_(batchId, invoice);
+  let issueQty = 0;
+  const reqByK = {}, issByK = {};
+  lines.forEach(l => { const k = normBarcode_(l.barcode); reqByK[k] = (reqByK[k] || 0) + (Number(l.reqQty) || 0); });
+  iss.forEach(x => { issueQty += x.qty; const k = normBarcode_(x.barcode); issByK[k] = (issByK[k] || 0) + (Number(x.qty) || 0); });
+  let effectiveTotal = 0;
+  Object.keys(reqByK).forEach(k => { effectiveTotal += Math.max(0, reqByK[k] - (issByK[k] || 0)); });
+  const scanned = _syncInspScanned_(batchId, invoice, round);
+  if (scanned === null) return null;
+  const isIssueOnly = issueQty > 0 && effectiveTotal === 0;
+  const isComplete = (effectiveTotal > 0 && scanned >= effectiveTotal) || isIssueOnly;
+  return isComplete ? null : { incomplete: true };
+}
+// 3) 과 같은 스캔 합계 — Firestore 방식이면 문서 행(같은 실행 안에서는 방금 저장한 값 재사용), 시트 방식이면 null(사전 확인 생략 → 예전 방식)
+function _syncInspScanned_(batchId, invoice, round) {
+  const byK = {};
+  if (batchId === STANDALONE_BATCH_ID) {
+    return null; // 단독 오더는 사전 확인 안 함(위 설명)
+  } else {
+    const rows = (typeof ss3RowsForInvoice_ === 'function') ? ss3RowsForInvoice_(batchId, invoice) : null;
+    if (!rows) return null;
+    rows.forEach(r => {
+      if (String(r[0]) !== String(batchId)) return;
+      if (String(r[8]) !== String(invoice)) return;
+      if (r[10] === 'undone') return;
+      if (r[9] !== 'pass') return;
+      const key = normBarcode_(r[4]) + '|' + String(r[5]);
+      byK[key] = (byK[key] || 0) + (Number(r[11]) || 0);
+    });
+  }
+  let scanned = 0;
+  Object.keys(byK).forEach(k => { scanned += Math.max(0, byK[k]); });
+  return scanned;
+}
+function _syncInspCore_(batchId, invoice, worker, force, round) {
   // 1) 이 인보이스의 총 필요수량(BatchCustomers) 찾기
-  const bc = bcustSheetSafe_();
-  const bcLast = bc.getLastRow();
-  if (bcLast < 2) return;
-  const bcRows = bc.getRange(2, 1, bcLast - 1, 12).getValues(); // ★ 2026-08-07: TakenOut(12번째) 포함
+  // ★ v33 — 배치 사본에서 이 배치 줄만(꺼져 있으면 예전처럼 시트 전체 — 결과 동일). 측정: 오더 완료 순간 이 읽기 포함 13초
+  const bcRows = _bsR_('bc', batchId, 12); // ★ 2026-08-07: TakenOut(12번째) 포함
+  if (!bcRows.length) return;
   let totalQty = null;
   for (let i = 0; i < bcRows.length; i++) {
     if (String(bcRows[i][0]) === String(batchId) && String(bcRows[i][1]) === String(invoice)) {
@@ -3127,7 +3532,7 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   // "미완료"로 되돌리는 것까지는 하지 않음 (검수 결과를 함부로 지우는 위험 방지, 필요하면 매니저가 clearInspection 사용)
 }
 
-function logScan(data) {
+function logScan_tmCore_(data) {
   // ★ 2026-10-29 v26 — Step 03 이 Firestore 방식(스위치 03=fs)이면 문서 잠금·시트 쓰기 없이 ScanStore 로(같은 행·같은 후속 처리)
   if (typeof ss3OnFor_ === 'function' && ss3OnFor_(data && data.batchId)) return ss3LogScanFull_(data);
   const lock = LockService.getDocumentLock();
@@ -3517,7 +3922,7 @@ function getInvoiceIssues(batchId, invoice) {
         if (r[12] === 'undone') return;
         const ts = r[2];
         const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
-          ? Utilities.formatDate(ts, batchTz_(), 'MM-dd HH:mm') : String(ts || '');
+          ? fmtDate_(ts, batchTz_(), 'MM-dd HH:mm') : String(ts || '');
         issues.push({
           issueId: r[1], time: timeStr, worker: r[3], barcode: String(r[4] || ''),
           sku: String(r[5] || ''), name: String(r[6] || ''), reason: r[9] || 'ETC',
@@ -3541,7 +3946,7 @@ function getInvoiceIssues(batchId, invoice) {
  * 입력: { issueId }
  * ============================================================ */
 // ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 undoIssue_bsCore_
-function undoIssue(data) { return _bsPW_(function () { return undoIssue_bsCore_(data); }); } // ★ v30 — 사본 표시는 안쪽에서 그 배치로(rowVals[0]) 기록 → 끝에 한 번
+function undoIssue(data) { return _bsWI_(data, function () { return undoIssue_bsCore_(data); }); } // ★ v30 — 사본 표시는 안쪽에서 그 배치로(rowVals[0]) 기록 → 끝에 한 번
 function undoIssue_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -3702,7 +4107,7 @@ function diagnoseAndFixInvoiceInspection() {
  * 입력: { issueId, reason, qty, note }
  * ============================================================ */
 // ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 editIssue_bsCore_
-function editIssue(data) { return _bsPW_(function () { return editIssue_bsCore_(data); }); } // ★ v30 — 사본 표시는 안쪽에서 그 배치로(rowVals[0]) 기록 → 끝에 한 번
+function editIssue(data) { return _bsWI_(data, function () { return editIssue_bsCore_(data); }); } // ★ v30 — 사본 표시는 안쪽에서 그 배치로(rowVals[0]) 기록 → 끝에 한 번
 function editIssue_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(10000);
@@ -4091,7 +4496,7 @@ function logPickTimingCore_(data) {
             const _em = Number(data.endedAtMs);
             if (_em && isFinite(_em) && _em <= Date.now() + 5000 && _em >= Date.now() - 36 * 3600 * 1000) {
               try {
-                const _ts2 = Utilities.formatDate(new Date(_em), batchTz_(), 'yyyy-MM-dd HH:mm:ss');
+                const _ts2 = fmtDate_(new Date(_em), batchTz_(), 'yyyy-MM-dd HH:mm:ss');
                 const _m2 = calcWorkMinutes_(rows[i][3], _ts2);
                 if (typeof _m2 === 'number' && _m2 >= 0) { endTs = _ts2; mins = _m2; }
               } catch (eEm) { /* 실패하면 서버 현재 시각 사용 */ }
@@ -4172,7 +4577,7 @@ function getActivePickers(batchId) {
         if (hasStart && !hasEnd) {
           const age = nowMs - startTs.getTime();
           if (age < STALE_MS) {
-            active[worker] = Utilities.formatDate(startTs, batchTz_(), 'HH:mm');
+            active[worker] = fmtDate_(startTs, batchTz_(), 'HH:mm');
           }
         }
         if (worker && pageRange) {
@@ -4265,8 +4670,8 @@ function getBatchKPI(batchId) {
           worker: worker,
           workerKey: workerKey,
           pageRange: fixPageRange_(r[2]),
-          start: !isNaN(startMs) ? Utilities.formatDate(startTs, batchTz_(), 'HH:mm') : '-',
-          end: !isNaN(endMs) ? Utilities.formatDate(endTs, batchTz_(), 'HH:mm') : '진행중',
+          start: !isNaN(startMs) ? fmtDate_(startTs, batchTz_(), 'HH:mm') : '-',
+          end: !isNaN(endMs) ? fmtDate_(endTs, batchTz_(), 'HH:mm') : '진행중',
           durationMinutes: Number(r[5]) || 0,
           note: String(r[6] || ''), // ★ 2026-08-18 신규 — 강제종료(전날 미종료) 등 감사용 메모
           totalSku: 0, totalQty: 0,
@@ -4329,7 +4734,7 @@ function getBatchKPI(batchId) {
         if (!issueItemsByWorker[w]) issueItemsByWorker[w] = [];
         const tsVal = r[2];
         const timeStr = (Object.prototype.toString.call(tsVal) === '[object Date]' && !isNaN(tsVal))
-          ? Utilities.formatDate(tsVal, batchTz_(), 'MM-dd HH:mm') : String(tsVal || '');
+          ? fmtDate_(tsVal, batchTz_(), 'MM-dd HH:mm') : String(tsVal || '');
         issueItemsByWorker[w].push({
           time: timeStr, barcode: r[4], sku: r[5], name: r[6],
           invoice: r[7], customer: r[8], reason: reason, qty: qty, note: r[11] || ''
@@ -5038,7 +5443,7 @@ function getScanState(batchId) {
 
         const ts = r[2];
         const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
-          ? Utilities.formatDate(ts, batchTz_(), 'yyyy-MM-dd HH:mm:ss')
+          ? fmtDate_(ts, batchTz_(), 'yyyy-MM-dd HH:mm:ss')
           : String(ts || '');
         const qty = Number(r[11]) || 1; // ★ 2026-07-13: Qty 컬럼 없는 예전 데이터는 1로 하위호환
 
@@ -5085,7 +5490,7 @@ function getScanState(batchId) {
         issueMap[key] = (issueMap[key] || 0) + qty;
         const ts = r[2];
         const timeStr = (Object.prototype.toString.call(ts) === '[object Date]' && !isNaN(ts))
-          ? Utilities.formatDate(ts, batchTz_(), 'yyyy-MM-dd HH:mm:ss')
+          ? fmtDate_(ts, batchTz_(), 'yyyy-MM-dd HH:mm:ss')
           : String(ts || '');
         issues.push({
           issueId: r[1], time: timeStr, worker: r[3], barcode: bc,
@@ -5164,11 +5569,11 @@ function getBatchHistoryList(data) {
     if (days > 0) {
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - days);
-      const cutoffStr = Utilities.formatDate(cutoff, batchTz_(), 'yyyy-MM-dd');
+      const cutoffStr = fmtDate_(cutoff, batchTz_(), 'yyyy-MM-dd');
       list = list.filter(b => {
         let dStr = b.date;
         if (Object.prototype.toString.call(dStr) === '[object Date]') {
-          dStr = Utilities.formatDate(dStr, batchTz_(), 'yyyy-MM-dd');
+          dStr = fmtDate_(dStr, batchTz_(), 'yyyy-MM-dd');
         } else {
           dStr = String(dStr || '').slice(0, 10);
         }
@@ -5823,7 +6228,7 @@ function archiveOldBatches_bsCore_(daysOld) {
         // 보관 시트에 먼저 씀(메인 시트는 아직 전혀 건드리지 않으므로, 여기서
         // 중간에 실패해도 메인 데이터는 100% 안전함).
         if (toArchive.length > 0) {
-          const archiveSh = ensureBatchSheet_(ARCHIVE_PREFIX + name, headers);
+          const archiveSh = (typeof arcEnsureSheet_ === 'function' ? arcEnsureSheet_(ARCHIVE_PREFIX + name, headers) : _arcMainOrThrow_(null, ARCHIVE_PREFIX + name, headers)); // ★ v35 — 보관용 파일 전환 시 그쪽에(꺼져 있으면 예전과 같음, ArchiveStore.gs)
           _writeRowsChunked_(archiveSh, archiveSh.getLastRow() + 1, toArchive, lastCol, name + ' 보관 시트');
         }
 
@@ -5885,7 +6290,7 @@ function restoreStandaloneFromArchive_bsCore_() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const out = [];
     // 1) BatchCustomers: 복구 대상 인보이스 결정
-    const arcBc = ss.getSheetByName(ARCHIVE_PREFIX + BCUST_SHEET);
+    const arcBc = (typeof arcSheet_ === 'function' ? arcSheet_(ARCHIVE_PREFIX + BCUST_SHEET) : _arcMainOrThrow_(ss, ARCHIVE_PREFIX + BCUST_SHEET)); // ★ v35
     if (!arcBc || arcBc.getLastRow() < 2) { Logger.log('Archive_BatchCustomers 데이터 없음 — 복구할 것이 없습니다'); return { ok: true, restored: 0 }; }
     const bc = bcustSheetSafe_();
     const bcLast = bc.getLastRow();
@@ -5912,7 +6317,7 @@ function restoreStandaloneFromArchive_bsCore_() {
       { name: SCANLOG_SHEET, get: scanlogSheet_, invIdx: 8 },
       { name: ISSUELOG_SHEET, get: issuelogSheet_, invIdx: 7 } ].forEach(cfg => {
       try {
-        const arc = ss.getSheetByName(ARCHIVE_PREFIX + cfg.name);
+        const arc = (typeof arcSheet_ === 'function' ? arcSheet_(ARCHIVE_PREFIX + cfg.name) : _arcMainOrThrow_(ss, ARCHIVE_PREFIX + cfg.name)); // ★ v35
         if (!arc || arc.getLastRow() < 2) { out.push(cfg.name + ': 보관 데이터 없음'); return; }
         const main = cfg.get();
         const cols = main.getLastColumn();
@@ -5954,6 +6359,8 @@ function archiveOldBatchesDaily() {
   // ★ 2026-10-28 — PackScanLog 는 별도로, 작은 구간씩 이어서 정리(남으면 자동으로 몇 분 뒤 다시 실행됨 — 손댈 것 없음)
   const left = 330000 - (Date.now() - t0) - 40000;
   _pkCompactRun_(true, Math.max(0, Math.min(220000, left)));
+  // ★ v35 — 매일 밤 쓰는 시트의 남는 빈 행·열 정리(보관으로 비워진 꼬리. 데이터는 안 건드림, 실패해도 무시 — ArchiveStore.gs)
+  try { if (typeof arcNightlyTrim_ === 'function') arcNightlyTrim_(); } catch (eT) { Logger.log('nightlyTrim 실패(무시): ' + String(eT && eT.message || eT)); }
 }
 
 /* ===================== PackScanLog 자동 정리 (★ 2026-10-28 신규) =====================
@@ -6035,7 +6442,7 @@ function compactPackScanLog_(budgetMs) {
       res.windows++;
       if (b.runs.length === 0) { pos += take; sp.setProperty('pkCompactPos', String(pos)); continue; }
       if (b.archRows.length > 0) {
-        const arc = ensureBatchSheet_(ARCHIVE_PREFIX + PACKSCAN_SHEET, PK_HEADERS_);
+        const arc = (typeof arcEnsureSheet_ === 'function' ? arcEnsureSheet_(ARCHIVE_PREFIX + PACKSCAN_SHEET, PK_HEADERS_) : _arcMainOrThrow_(null, ARCHIVE_PREFIX + PACKSCAN_SHEET, PK_HEADERS_)); // ★ v35
         _writeRowsChunked_(arc, arc.getLastRow() + 1, b.archRows, PK_COLS_, 'Archive_PackScanLog 쓰기');
         b.archRows.forEach(r => { touchedBatches[String(r[0])] = true; });
       }
@@ -6533,7 +6940,11 @@ function _parsePuTkPalletDims_(v) {
   try {
     const arr = JSON.parse(String(v || '').trim() || '[]');
     if (!Array.isArray(arr)) return [];
-    return arr.map(function (d) { return { l: Number(d.l) || 0, w: Number(d.w) || 0, h: Number(d.h) || 0, wt: Number(d.wt) || 0 }; });
+    return arr.map(function (d) {
+      const o = { l: Number(d.l) || 0, w: Number(d.w) || 0, h: Number(d.h) || 0, wt: Number(d.wt) || 0 };
+      const bx = Math.round(Number(d.bx) || 0); if (bx > 0) o.bx = bx; // ★ v34 2026-11-03 — 팔렛별 박스 수(선택)
+      return o;
+    });
   } catch (e) { return []; }
 }
 function savePuTkPalletDims_(data) {
@@ -6552,7 +6963,18 @@ function savePuTkPalletDims_(data) {
       const ok = ['l', 'w', 'h', 'wt'].every(function (k) { return isFinite(v[k]) && v[k] > 0 && v[k] <= 9999; });
       if (!ok) return { ok: false, error: 'Pallet #' + (i + 1) + ': enter L, W, H and Weight (numbers greater than 0)' };
       ['l', 'w', 'h', 'wt'].forEach(function (k) { v[k] = Math.round(v[k] * 10) / 10; }); // 소수 첫째 자리까지
+      // ★ v34 2026-11-03 — 팔렛별 박스 수(선택 입력). 비어 있으면 저장 안 함. 넣었으면 1~9999 정수.
+      if (d.bx !== undefined && d.bx !== null && String(d.bx).trim() !== '') {
+        const bx = Number(d.bx);
+        if (!isFinite(bx) || Math.round(bx) !== bx || bx < 1 || bx > 9999) return { ok: false, error: 'Pallet #' + (i + 1) + ': Boxes must be a whole number from 1 to 9999 (or leave it empty)' };
+        v.bx = bx;
+      }
       pallets.push(v);
+    }
+    // ★ v34 — 모든 팔렛에 박스 수가 있으면 박스 총수량은 반드시 그 합계(화면 값과 어긋나지 않게 서버가 확정). 일부만/없으면 화면이 보낸 값(예전 총수량 유지 또는 0).
+    if (pallets.length && pallets.every(function (p) { return p.bx > 0; })) {
+      qty = pallets.reduce(function (a, p) { return a + p.bx; }, 0);
+      if (qty > 9999) return { ok: false, error: 'Total boxes cannot exceed 9999' };
     }
 
     const sh = SHEET_();
@@ -6862,9 +7284,9 @@ function getIssueLogRowsCached_() {
 /* ★ 2026-10-07 신규 — Insp. End 값을 팝업용 짧은 표기('yyyy-MM-dd HH:mm')로. Date면 포맷, 문자열이면 앞 16자(초 제거). */
 function _fmtInspEndShort_(v) {
   if (!v) return '';
-  const tz = Session.getScriptTimeZone();
+  const tz = scriptTz_();
   if (Object.prototype.toString.call(v) === '[object Date]') {
-    return isNaN(v) ? '' : Utilities.formatDate(v, tz, 'yyyy-MM-dd HH:mm');
+    return isNaN(v) ? '' : fmtDate_(v, tz, 'yyyy-MM-dd HH:mm');
   }
   const str = String(v).trim();
   const m = str.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
@@ -6938,7 +7360,7 @@ function getSalesInvoiceDetail(invoice) {
     //   다시 읽어서 정확하게 매칭함.
     if (jobRowIndex < 0) {
       try {
-        const archSh = ss_().getSheetByName(ARCHIVE_PREFIX + JOBS_SHEET);
+        const archSh = (typeof arcSheet_ === 'function' ? arcSheet_(ARCHIVE_PREFIX + JOBS_SHEET) : _arcMainOrThrow_(ss_(), ARCHIVE_PREFIX + JOBS_SHEET)); // ★ v35
         if (archSh) {
           const archLast = archSh.getLastRow();
           if (archLast >= 2) {
@@ -6959,7 +7381,12 @@ function getSalesInvoiceDetail(invoice) {
             }
           }
         }
-      } catch (e) { /* best-effort — 보관함 조회 실패해도 아래에서 "찾을 수 없음"으로 안전하게 처리 */ }
+      } catch (e) {
+        // ★ v35 — 보관용 파일을 못 열면 "없는 오더"가 아니라 오류로 알림(구분)
+        // ★ v35 — 보관용 파일 전환이 켜져 있을 때만: 보관함을 읽다 실패하면 "없는 오더"가 아니라 오류로(다시 시도하면 됨). 꺼져 있으면 예전과 똑같이 "찾을 수 없음"
+        let _arcOnNow = false; try { _arcOnNow = (typeof arcOn_ === 'function') ? arcOn_() : false; } catch (eOn) { _arcOnNow = true; }
+        if (_arcOnNow || /ArchiveStore|보관용 파일/.test(String(e && e.message || e))) return { ok: false, error: 'Archive lookup failed: ' + String(e && e.message || e) };
+      }
     }
     if (jobRowIndex < 0) return { ok: false, error: 'Invoice not found: ' + invoice };
     const jobRow = sh.getRange(jobRowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
@@ -6968,7 +7395,7 @@ function getSalesInvoiceDetail(invoice) {
     const customer = String(jv('remarks') || '');
     const shipDateRaw = jv('ship date');
     const shipDate = shipDateRaw instanceof Date
-      ? Utilities.formatDate(shipDateRaw, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      ? fmtDate_(shipDateRaw, scriptTz_(), 'yyyy-MM-dd')
       : String(shipDateRaw || '');
     const method = String(jv('trucking') || '');
     const amount = jv('amount');
@@ -7034,7 +7461,7 @@ function getSalesInvoiceDetail(invoice) {
     const startISORaw = jv('startatiso');
     let pickStart = '';
     if (startISORaw instanceof Date && !isNaN(startISORaw)) {
-      pickStart = Utilities.formatDate(startISORaw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      pickStart = fmtDate_(startISORaw, scriptTz_(), 'yyyy-MM-dd');
     } else {
       const s = String(startISORaw || '').trim();
       if (/^\d{4}-\d{2}-\d{2}/.test(s)) pickStart = s.slice(0, 10);
@@ -7201,7 +7628,7 @@ function getSalesInvoiceDetail(invoice) {
             const stillMissing = items.some(it => !nameByBarcode[String(it.barcode).trim()]);
             if (stillMissing) {
               try {
-                const archiveSh = ss_().getSheetByName(ARCHIVE_PREFIX + BITEMS_SHEET);
+                const archiveSh = (typeof arcSheet_ === 'function' ? arcSheet_(ARCHIVE_PREFIX + BITEMS_SHEET) : _arcMainOrThrow_(ss_(), ARCHIVE_PREFIX + BITEMS_SHEET)); // ★ v35
                 scanForNames_(archiveSh);
               } catch (e) { /* 보관 시트가 없거나 읽기 실패해도 나머지 응답은 진행 */ }
             }
@@ -7416,7 +7843,7 @@ function dimJobsSnapshot_() {
     const insp  = col(hdr[norm('Inspection')]);
     const end   = col(hdr[norm('Insp. End')]);
     const arch  = col(hdr[norm('archived')]);
-    const tz = Session.getScriptTimeZone();
+    const tz = scriptTz_();
 
     for (let i = 0; i < n; i++) {
       const invoice = String(inv[i][0] || '').trim();
@@ -7428,12 +7855,12 @@ function dimJobsSnapshot_() {
       }
       const sRaw = ship ? ship[i][0] : '';
       const shipDate = (sRaw instanceof Date && !isNaN(sRaw))
-        ? Utilities.formatDate(sRaw, tz, 'yyyy-MM-dd')
+        ? fmtDate_(sRaw, tz, 'yyyy-MM-dd')
         : String(sRaw || '').trim().slice(0, 10);
       let inspDate = '';
       const eRaw = end ? end[i][0] : '';
       if (eRaw instanceof Date && !isNaN(eRaw)) {
-        inspDate = Utilities.formatDate(eRaw, tz, 'yyyy-MM-dd');
+        inspDate = fmtDate_(eRaw, tz, 'yyyy-MM-dd');
       } else {
         const m = String(eRaw || '').match(/\d{4}-\d{2}-\d{2}/);
         if (m) inspDate = m[0];
@@ -8058,8 +8485,8 @@ function jobsCols_() {
   };
 }
 
-function fmtHHmm_(d)   { return Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm'); }
-function fmtLocalISO_(d) { return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss"); }
+function fmtHHmm_(d)   { return fmtDate_(d, scriptTz_(), 'HH:mm'); }
+function fmtLocalISO_(d) { return fmtDate_(d, scriptTz_(), "yyyy-MM-dd'T'HH:mm:ss"); }
 
 /* ---------------------------------------------------------------------
  * syncBatchJobsStart(batchId) — "▶ 피킹 시작"을 누른 순간 호출됨.
@@ -8238,7 +8665,7 @@ function pickPagesOf_(range) {
 }
 function pickPagesOverlap_(a, b) { return !!(a && b && a.f <= b.t && b.f <= a.t); }
 function pickHHmm_(v) {
-  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return Utilities.formatDate(v, batchTz_(), 'HH:mm');
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) return fmtDate_(v, batchTz_(), 'HH:mm');
   const m = String(v || '').match(/(\d{2}):(\d{2})(?::\d{2})?\s*$/);
   return m ? m[1] + ':' + m[2] : '';
 }
