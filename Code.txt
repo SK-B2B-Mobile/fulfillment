@@ -3995,7 +3995,65 @@ function testMarkSalesPrinted() {
 /* =====================================================
  * ★ CMS 데이터 저장/조회
  * ===================================================== */
+/* ★ 2026-11-04 CMS 저장 방식 개선(v2)
+ * [왜] ① 예전엔 동기화할 때마다 목록을 통째로 덮어써서, 출고지시 목록에서 빠진(피킹 시작된) 인보이스의 Item/수량이 사라졌음.
+ *      ② 스크립트 속성 한 칸(최대 9KB, 약 200건)에 저장해서 건수가 많으면 저장 자체가 실패했음.
+ * [어떻게] 받은 목록을 기존 데이터에 "합침"(같은 인보이스는 새 값으로) · 마지막으로 본 지 CMS_KEEP_DAYS_ 일 지난 것만 정리 ·
+ *      여러 칸(각 8,000자 이하)에 나눠 저장. 칸들은 새 세대 번호로 먼저 다 쓴 뒤 안내표(cms_invoice_meta)를 바꾸고 옛 칸을 지움
+ *      → 읽는 쪽은 언제 읽어도 한 세대 전체를 읽음(섞이지 않음).
+ *      읽는 쪽(getCmsData/getCmsDataTimestamp/getCmsStatus)의 결과 모양은 예전과 같음({인보이스: {item, qty, …}}).
+ *      예전 한 칸 저장(cms_invoice_data)도 처음 한 번 그대로 읽어서 합침. */
+var CMS_KEEP_DAYS_ = 14;
+var CMS_CHUNK_CHARS_ = 8000;
+var CMS_MAX_CHARS_ = 300000;
+
+function _cmsReadAll_() {
+  const props = PropertiesService.getScriptProperties();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const metaRaw = props.getProperty('cms_invoice_meta');
+      if (metaRaw) {
+        const meta = JSON.parse(metaRaw);
+        let s = '';
+        for (let i = 0; i < meta.n; i++) {
+          const part = props.getProperty('cms_invoice_data_' + meta.gen + '_' + i);
+          if (part == null) throw new Error('chunk missing');
+          s += part;
+        }
+        return { map: JSON.parse(s || '{}'), ts: Number(meta.ts) || 0, meta: meta };
+      }
+      const legacy = props.getProperty('cms_invoice_data');
+      return { map: legacy ? JSON.parse(legacy) : {}, ts: Number(props.getProperty('cms_invoice_timestamp') || 0), meta: null };
+    } catch (e) {
+      if (attempt === 1) return { map: {}, ts: 0, meta: null };
+      Utilities.sleep(300); // 쓰는 중이던 순간이면 한 번 더
+    }
+  }
+  return { map: {}, ts: 0, meta: null };
+}
+
+function _cmsWriteAll_(map, ts, oldMeta) {
+  const props = PropertiesService.getScriptProperties();
+  const s = JSON.stringify(map);
+  const gen = String(ts);
+  const chunks = {};
+  let n = 0;
+  for (let i = 0; i < s.length; i += CMS_CHUNK_CHARS_) { chunks['cms_invoice_data_' + gen + '_' + n] = s.substring(i, i + CMS_CHUNK_CHARS_); n++; }
+  if (n === 0) { chunks['cms_invoice_data_' + gen + '_0'] = '{}'; n = 1; }
+  props.setProperties(chunks); // 새 세대 칸들 먼저
+  props.setProperty('cms_invoice_meta', JSON.stringify({ gen: gen, n: n, ts: ts, count: Object.keys(map).length, chars: s.length }));
+  // 옛 세대 칸 + 예전 한 칸 저장 정리
+  try {
+    const keep = 'cms_invoice_data_' + gen + '_';
+    props.getKeys().forEach(function (k) { if (k.indexOf('cms_invoice_data_') === 0 && k.indexOf(keep) !== 0) props.deleteProperty(k); }); // 옛 세대·중간에 끊긴 칸 모두
+    if (props.getProperty('cms_invoice_data') != null) props.deleteProperty('cms_invoice_data');
+    if (props.getProperty('cms_invoice_timestamp') != null) props.deleteProperty('cms_invoice_timestamp');
+  } catch (eDel) { /* 정리 실패는 다음 저장 때 다시 */ }
+  return s.length;
+}
+
 function receiveCmsData(dataStr) {
+  let lock = null;
   try {
     if (!dataStr) return { ok: false, error: 'No data provided' };
 
@@ -4006,7 +4064,7 @@ function receiveCmsData(dataStr) {
       return { ok: false, error: 'Invalid JSON: ' + e.message };
     }
 
-    if (typeof invoiceMap !== 'object' || invoiceMap === null) {
+    if (typeof invoiceMap !== 'object' || invoiceMap === null || Array.isArray(invoiceMap)) {
       return { ok: false, error: 'Data must be an object' };
     }
 
@@ -4015,37 +4073,58 @@ function receiveCmsData(dataStr) {
       return { ok: false, error: 'Empty invoice map' };
     }
 
-    const props = PropertiesService.getScriptProperties();
-    const jsonStr = JSON.stringify(invoiceMap);
-    const sizeKB = (jsonStr.length / 1024).toFixed(2);
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(15000)) return { ok: false, error: '다른 저장이 진행 중 — 잠시 뒤 다시 눌러 주세요' };
 
-    if (jsonStr.length > 450000) {
-      return { ok: false, error: 'Data too large: ' + sizeKB + ' KB (max 450KB)' };
+    const now = Date.now();
+    const cur = _cmsReadAll_();
+    const merged = cur.map || {};
+    // 받은 값으로 덮어쓰기(같은 인보이스는 최신 CMS 값), 마지막으로 본 시각 t 기록
+    Object.keys(invoiceMap).forEach(function (k) {
+      const inv = String(k || '').trim().toUpperCase();
+      if (!inv) return;
+      const v = invoiceMap[k] || {};
+      merged[inv] = { item: v.item, qty: v.qty, t: now };
+    });
+    // 오래된 것 정리(마지막으로 본 지 CMS_KEEP_DAYS_ 일 넘은 것). t 가 없는 예전 데이터는 이번 시각으로 시작
+    const cutoff = now - CMS_KEEP_DAYS_ * 86400000;
+    Object.keys(merged).forEach(function (k) {
+      const e = merged[k];
+      if (!e || typeof e !== 'object') { delete merged[k]; return; }
+      if (!e.t) e.t = cur.ts || now;
+      if (e.t < cutoff) delete merged[k];
+    });
+    // 너무 커지면 오래된 것부터 정리
+    let keys = Object.keys(merged);
+    if (JSON.stringify(merged).length > CMS_MAX_CHARS_) {
+      keys.sort(function (a, b) { return (merged[a].t || 0) - (merged[b].t || 0); });
+      while (keys.length && JSON.stringify(merged).length > CMS_MAX_CHARS_) delete merged[keys.shift()];
     }
 
-    props.setProperty('cms_invoice_data', jsonStr);
-    props.setProperty('cms_invoice_timestamp', String(Date.now()));
-
-    Logger.log('✓ Stored CMS data: ' + count + ' invoices, ' + sizeKB + ' KB');
+    const chars = _cmsWriteAll_(merged, now, cur.meta);
+    const total = Object.keys(merged).length;
+    const sizeKB = (chars / 1024).toFixed(2);
+    Logger.log('✓ Stored CMS data: received ' + count + ', total ' + total + ' invoices, ' + sizeKB + ' KB');
 
     return {
       ok: true,
       count: count,
+      total: total,
       sizeKB: sizeKB,
-      timestamp: Date.now(),
-      message: count + ' invoices stored successfully'
+      timestamp: now,
+      message: count + ' invoices received, ' + total + ' kept'
     };
 
   } catch (err) {
     return { ok: false, error: String(err) };
+  } finally {
+    try { if (lock) lock.releaseLock(); } catch (eL) { /* 무시 */ }
   }
 }
 
 function getCmsData() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    const jsonStr = props.getProperty('cms_invoice_data') || '{}';
-    return JSON.parse(jsonStr);
+    return _cmsReadAll_().map || {};
   } catch (e) {
     return {};
   }
@@ -4053,8 +4132,7 @@ function getCmsData() {
 
 function getCmsDataTimestamp() {
   try {
-    const props = PropertiesService.getScriptProperties();
-    return Number(props.getProperty('cms_invoice_timestamp') || 0);
+    return _cmsReadAll_().ts || 0;
   } catch (e) {
     return 0;
   }
@@ -4063,6 +4141,8 @@ function getCmsDataTimestamp() {
 function clearCmsData() {
   try {
     const props = PropertiesService.getScriptProperties();
+    props.getKeys().forEach(function (k) { if (k.indexOf('cms_invoice_data_') === 0) props.deleteProperty(k); }); // 모든 세대 칸
+    props.deleteProperty('cms_invoice_meta');
     props.deleteProperty('cms_invoice_data');
     props.deleteProperty('cms_invoice_timestamp');
     return true;
@@ -4092,8 +4172,9 @@ function testGetCmsData() {
 
 function getCmsStatus() {
   try {
-    const cmsData = getCmsData();
-    const timestamp = getCmsDataTimestamp();
+    const _cur = _cmsReadAll_(); // ★ 2026-11-04 한 번만 읽음
+    const cmsData = _cur.map || {};
+    const timestamp = _cur.ts || 0;
     const count = Object.keys(cmsData).length;
 
     return {
