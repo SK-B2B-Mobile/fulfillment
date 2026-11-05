@@ -1242,7 +1242,50 @@ const AUTH_WORKER_KEY = 'sk_auth_worker_name';
 function authGetToken(){ return localStorage.getItem(AUTH_TOKEN_KEY) || ''; }
 function authGetName(){ return localStorage.getItem(AUTH_NAME_KEY) || ''; }
 function authGetDept(){ return localStorage.getItem(AUTH_DEPT_KEY) || ''; }
-function authGetWorkerName(){ return localStorage.getItem(AUTH_WORKER_KEY) || ''; }
+// ★ 2026-11-05 v23 — 계정 이름 = 작업자 이름(사장님 결정). 로그인한 계정의 이름(Users B열)을 작업자 명단과
+//   대소문자·띄어쓰기 무시하고 맞춰서 그 이름을 작업자 이름으로 씀. 예전 "계정에 연결된 작업자 이름"(Users I열)은
+//   계정 이름이 명단에 없을 때만 예전처럼 씀(그때는 이름 선택 화면도 예전 그대로).
+//   명단이 아직 서버에서 안 왔으면(새로고침 직후) 이 기기에 저장된 값이 계정 이름과 같을 때만 그 값을 바로 씀.
+function _normName_(x){ return String(x || '').toLowerCase().replace(/\s+/g, ''); }
+function _acctWorker_(){
+  try{
+    if (!authIsLoggedIn() || localStorage.getItem(AUTH_MUST_CHANGE_KEY) === '1') return { status:'none', name:'' };
+    const acct = authGetName();
+    if (!acct) return { status:'none', name:'' };
+    let ws = null, ready = false, real = false;
+    try{ if (typeof state !== 'undefined' && state){ ws = state.workers; ready = !!state._workersReady; real = !!state._workersFromServer; } }catch(eS){ ws = null; ready = false; }
+    if (!ready || !Array.isArray(ws)) return { status:'pending', name:'' };
+    if (!real) return { status:'failed', name:'' }; // 서버 명단을 못 받음(기본 명단뿐) → 판단하지 않고 예전 동작
+    const k = _normName_(acct);
+    const hit = ws.find(function(w){ return w && _normName_(w.name) === k; });
+    try{ if (hit) localStorage.removeItem('sk_acct_nomatch'); else localStorage.setItem('sk_acct_nomatch', acct); }catch(eF){}
+    return hit ? { status:'match', name: hit.name } : { status:'nomatch', name:'' };
+  }catch(e){ return { status:'pending', name:'' }; }
+}
+function authGetWorkerName(){
+  const linked = localStorage.getItem(AUTH_WORKER_KEY) || '';
+  const a = _acctWorker_();
+  if (a.status === 'match') return a.name;
+  if (a.status === 'pending'){
+    if (linked && _normName_(linked) === _normName_(authGetName())) return linked;
+    let nm = ''; try{ nm = localStorage.getItem('sk_acct_nomatch') || ''; }catch(eN){}
+    return (nm && nm === authGetName()) ? linked : ''; // 지난번에 명단에 없던 계정이면 예전처럼 연결 이름
+  }
+  return linked; // 명단에 없음/명단 못 받음/로그인 안 됨 → 예전 동작
+}
+// 서버(Users I열)도 계정 이름으로 맞춰 둠(index·sales 등 다른 화면과 같게). 실행마다 이름당 1번.
+let _acctLinkSynced_ = '';
+function _syncAcctLink_(name){
+  try{
+    if (!name || _acctLinkSynced_ === name || _acctWorker_().status !== 'match') return;
+    _acctLinkSynced_ = name;
+    if ((localStorage.getItem(AUTH_WORKER_KEY) || '') === name) return;
+    const tok = authGetToken();
+    if (tok && typeof authPost === 'function') authPost('linkWorkerName', { token: tok, workerName: name }).then(function(r){
+      if (r && r.ok){ try{ localStorage.setItem(AUTH_WORKER_KEY, name); }catch(eW){} } else { _acctLinkSynced_ = ''; } // 실패하면 다음에 다시
+    }).catch(function(){ _acctLinkSynced_ = ''; });
+  }catch(e){ /* best-effort */ }
+}
 function authIsLoggedIn(){
   const tok = authGetToken();
   const exp = Number(localStorage.getItem(AUTH_EXPIRES_KEY) || 0);
@@ -1263,6 +1306,14 @@ function authClear(){
 function autoApplyLinkedWorker_(name){
   if (!name) return;
   try{
+    // ★ v23 — 이름이 바뀌는 경우(예: 예전 연결 이름 → 계정 이름)에는 각 탭이 기억한 예전 이름도 비워서 새 이름으로 다시 채움
+    let changing = false;
+    try{ changing = (typeof getLoginWorker === 'function') && getLoginWorker() !== name; }catch(eG){ changing = false; }
+    if (changing){
+      try{ ssCurrentWorker = null; }catch(e1){}
+      try{ pvCurrentWorker = null; }catch(e2){}
+      try{ psvCurrentWorker = null; }catch(e3){}
+    }
     if (typeof setLoginWorker === 'function') setLoginWorker(name);
     if (typeof hideLoginOverlay === 'function') hideLoginOverlay();
     if (typeof state !== 'undefined' && state) state.currentWorker = null;
@@ -1321,9 +1372,13 @@ async function authDoLogin(){
     errEl.style.display = 'none';
     pwEl.value = '';
     authHideGate();
+    const _aw = res.mustChangePassword ? '' : authGetWorkerName(); // ★ v23 — 계정 이름 우선
     if (res.mustChangePassword){
       pwmOpen(true);
-    } else if (res.workerName){
+    } else if (_aw){
+      autoApplyLinkedWorker_(_aw);
+      _syncAcctLink_(_aw);
+    } else if (res.workerName && _acctWorker_().status !== 'pending'){
       autoApplyLinkedWorker_(res.workerName);
     } else {
       // ★ 2026-10-02 버그 수정 — 이 계정이 아직 어떤 작업자와도 연결된 적이 없는 경우,
@@ -3258,16 +3313,29 @@ function refreshLoginUI(){
   //   이 메인 스크립트 맨 아래(DOMContentLoaded보다 항상 먼저 실행됨)에서 처리되는
   //   이 부분이 담당한다. authGetWorkerName/authIsLoggedIn은 위쪽 인증 스크립트에서
   //   이미 정의돼 있어 안전하게 호출 가능(함수 선언 순서상 이 스크립트가 더 늦게 실행됨).
-  if(!getLoginWorker()){
-    try{
-      const loggedIn = (typeof authIsLoggedIn !== 'function') || authIsLoggedIn();
-      const mustChange = localStorage.getItem('sk_auth_must_change') === '1';
-      const linked = (typeof authGetWorkerName === 'function') ? authGetWorkerName() : '';
-      if (loggedIn && !mustChange && linked){
-        setLoginWorker(linked);
+  // ★ v23 — 로그인돼 있으면 계정 이름(명단과 맞춘 것)을 작업자 이름으로. 이 기기에 다른 이름이 남아 있어도 계정 이름으로 바꿈.
+  try{
+    const loggedIn = (typeof authIsLoggedIn !== 'function') || authIsLoggedIn();
+    const mustChange = localStorage.getItem('sk_auth_must_change') === '1';
+    const linked = (typeof authGetWorkerName === 'function') ? authGetWorkerName() : '';
+    if (loggedIn && !mustChange && linked){
+      if (getLoginWorker() !== linked || window.__acctPendingShown){
+        window.__acctPendingShown = false; // 명단 기다리며 가렸던 경우: 각 탭 이름을 다시 채움
+        if (typeof autoApplyLinkedWorker_ === 'function') autoApplyLinkedWorker_(linked); else setLoginWorker(linked);
       }
-    }catch(e){ /* best-effort — 실패해도 기존처럼 이름 선택 화면으로 진행 */ }
-  }
+      if (typeof _syncAcctLink_ === 'function') _syncAcctLink_(linked);
+    }
+  }catch(e){ /* best-effort — 실패해도 기존처럼 이름 선택 화면으로 진행 */ }
+  // ★ v23 — 명단이 아직 안 왔고, 이 기기에 남은 이름이 계정 이름과 다르면(예: 예전에 잘못 연결된 이름) 그 이름으로 작업하지 않게
+  //   명단이 올 때까지(보통 1~2초) "Loading worker list…" 를 보여 줌. 명단이 오면 계정 이름으로 바뀜.
+  try{
+    if (authIsLoggedIn() && localStorage.getItem('sk_auth_must_change') !== '1' && !authGetWorkerName() &&
+        getLoginWorker() && _normName_(getLoginWorker()) !== _normName_(authGetName()) && _acctWorker_().status === 'pending'){
+      window.__acctPendingShown = true;
+      showLoginOverlay();
+      return;
+    }
+  }catch(eP){ /* 무시 */ }
   if(getLoginWorker()){
     hideLoginOverlay();
     updateLoginBadge();
@@ -3513,6 +3581,7 @@ async function loadBatchWorkersFromServer(){
     if(!res.ok){ state._workersReady = true; refreshLoginUI(); return; }
     if(res.workers && res.workers.length > 0){
       state.workers = res.workers;
+      state._workersFromServer = true; // ★ v23 — 실제 서버 명단(계정 이름 맞추기에 씀)
     } else {
       // 서버에 아직 아무것도 없음 → 지금 갖고 있는 기본 명단을 최초 1회 저장
       await gasCallWithRetry('setBatchWorkers', { workers: state.workers });
@@ -11994,10 +12063,11 @@ function populateWorkerSelect(){
     // ★ 2026-08-03 수정 — 예전엔 잠긴 이름이면 "잠기지 않은 첫 사람"으로 자동
     //   대체했는데, 이것도 결국 누군가의 이름이 임의로 선택되는 문제였음.
     //   이제 예전 선택이 여전히 유효할 때만 유지하고, 그 외엔 항상 "선택 안 함"으로.
-    const prevStillOk = prevPick && all.some(w => w.name === prevPick);
     // ★ 2026-09-25 신규 — 이 기기에 로그인한 작업자가 있으면 그 이름을 기본값으로 사용
     //   (1인 1기기 전제라 안전함). prevPick(이번 세션에서 이미 고른 값)이 있으면 그게 우선.
     const loginW = (typeof getLoginWorker === 'function') ? getLoginWorker() : '';
+    // ★ v23 — 로그인돼 있으면(선택란 잠김) 예전에 남은 다른 이름을 유지하지 않고 로그인 이름을 따름(피킹 중이 아닐 때만 여기 옴)
+    const prevStillOk = prevPick && all.some(w => w.name === prevPick) && (!loginW || prevPick === loginW);
     const loginOk = !prevStillOk && loginW && all.some(w => w.name === loginW);
     pickSel.value = prevStillOk ? prevPick : (loginOk ? loginW : '');
     pickSel.onchange = () => onPickWorkerChange(true);
