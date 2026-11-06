@@ -1697,7 +1697,8 @@ function _pmTimingFlush_(data, r) {
 function showPackingMovedTiming() {
   const v = String(PropertiesService.getScriptProperties().getProperty('pmTiming') || '(아직 3초 넘은 기록 없음)');
   const t = '=== 완료 버튼 저장(setPackingMoved) 3초 넘은 실행 — 구간 끝난 시각(초, 누적) ===\n' +
-    'lock=저장 순서 기다림 끝 · read=고객사 행 찾기 · pv=2차 검증 상태 재계산(verified 만) · write=칸 쓰기 · bump=버전 표시 · unlock=잠금 해제 · insp=Jobs 검수 결과 쓰기 · queue=Firestore 대기열 · end=끝\n' + v;
+    'lock=저장 순서 기다림 끝 · read=고객사 행 찾기 · pv=2차 검증 상태 재계산(verified 만) · write=칸 쓰기 · bump=버전 표시 · unlock=잠금 해제 · insp=Jobs 검수 결과 쓰기 · queue=Firestore 대기열 · end=끝\n' +
+    '(v38) insp 안: i.pre=미완료 사전확인 · i.bc=고객사 정보 · i.iss=이슈 · i.items=상품줄 · i.scan=스캔 합산 · i.find=Jobs 인보이스 줄 찾기 · i.cur=Jobs 현재 값 · i.save=검수 결과 저장 끝\n' + v;
   Logger.log(t);
   return t;
 }
@@ -3355,6 +3356,7 @@ function syncInspectionFromPicking_(batchId, invoice, worker, force, round) {
   //   단독 오더(STANDALONE)는 스캔 경로에서 불리지 않고(완료 버튼 등), 문서를 한 번 더 읽게 되므로 사전 확인을 하지 않음 — 예전 그대로.
   if (batchId !== STANDALONE_BATCH_ID) try {
     const pre = _syncInspPrecheck_(batchId, invoice, round);
+    _pmMark_('i.pre'); // ★ 2026-11-06 v38 — 측정만(완료 버튼 저장 중일 때만 기록됨)
     if (pre && pre.incomplete) return;
   } catch (ePre) { /* 사전 확인 실패 — 아래 예전 방식 그대로 */ }
   return _syncInspCore_(batchId, invoice, worker, force, round);
@@ -3401,6 +3403,7 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   // 1) 이 인보이스의 총 필요수량(BatchCustomers) 찾기
   // ★ v33 — 배치 사본에서 이 배치 줄만(꺼져 있으면 예전처럼 시트 전체 — 결과 동일). 측정: 오더 완료 순간 이 읽기 포함 13초
   const bcRows = _bsR_('bc', batchId, 12); // ★ 2026-08-07: TakenOut(12번째) 포함
+  _pmMark_('i.bc'); // ★ v38 측정
   if (!bcRows.length) return;
   let totalQty = null;
   for (let i = 0; i < bcRows.length; i++) {
@@ -3419,6 +3422,7 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   //   마지막 스캔 직후에 누르므로, 방금 스캔 때 이미 채워진 캐시를 그대로 써서
   //   이 무거운 읽기를 대부분 건너뛰게 됨.
   const invoiceIssues2 = getInvoiceIssueQtyCached_(batchId, invoice);
+  _pmMark_('i.iss'); // ★ v38 측정
   let issueQty = 0;
   const issues = [];
   invoiceIssues2.forEach(iss => {
@@ -3441,6 +3445,7 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
       effectiveTotal = tot;
     }
   } catch (eEff) { /* 실패하면 예전 계산식 유지 */ }
+  _pmMark_('i.items'); // ★ v38 측정
 
   // 3) 실제 스캔 통과 수량 합계 (undone 제외, pass만) — 초과분도 그대로 인정
   //    (batch.html 슬롯 완료 판정과 동일한 기준: q.doneRaw 합산과 동일 개념)
@@ -3512,6 +3517,7 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   //   실제로는 어디에도 반영이 안 됐음 → 이제 완료로 판정해서 ISSUES로 기록.
   const isIssueOnly = issueQty > 0 && effectiveTotal === 0;
   const isComplete = (effectiveTotal > 0 && scanned >= effectiveTotal) || isIssueOnly;
+  _pmMark_('i.scan'); // ★ v38 측정
 
   // ★ 2026-10-28 속도(현장 '스캔 저장 실패 server_busy' 대응) — 아래 4)~끝은 isComplete(또는 이슈 전량)일 때만 무언가를 씀(미완료면 '아무것도 안 씀').
   //   그런데 예전엔 미완료여도 Jobs 시트 인보이스 열(약 3천 행)을 스캔 1건마다 통째로 읽었음 → 스캔이 몰리면 동시 실행 슬롯·시트 서비스를 크게 잡아먹음.
@@ -3549,9 +3555,11 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
       if (suffixNum < bestSuffix) { bestSuffix = suffixNum; jobsRow = i + 2; }
     }
   }
+  _pmMark_('i.find'); // ★ v38 측정 — Jobs 인보이스 열 읽기 + 줄 찾기
   if (jobsRow === -1) return; // fulfillment 대시보드에 없는 인보이스(예: 오더 관리 시스템에 등록 안 된 경우)는 그냥 넘어감
 
   const currentVal = String(jobsSheet.getRange(jobsRow, 19).getValue() || '').trim();
+  _pmMark_('i.cur'); // ★ v38 측정
   const shouldBePass = isComplete && issues.length === 0;
   const shouldBeIssues = isComplete && issues.length > 0; // 완료는 됐지만 그 안에 이슈가 섞여 있으면 PASS 대신 ISSUES로
 
@@ -3569,6 +3577,7 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   }
   // isComplete가 false면(아직 덜 채워짐) 아무것도 안 씀 — 이미 PASS/ISSUES로 찍혀있던 걸
   // "미완료"로 되돌리는 것까지는 하지 않음 (검수 결과를 함부로 지우는 위험 방지, 필요하면 매니저가 clearInspection 사용)
+  _pmMark_('i.save'); // ★ v38 측정 — 검수 결과 저장(saveInspection) 끝
 }
 
 function logScan_tmCore_(data) {
