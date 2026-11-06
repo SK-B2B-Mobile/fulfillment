@@ -613,8 +613,8 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
    고객사 수(n)에 따라 tsz-lg/md/sm 세 단계로 카드 크기를 줄여서,
    10곳까지 나와도 화면이 안 넘치도록 함. */
 .target-grid{display:grid; gap:8px; margin-top:4px;}
-.tgrid-1{grid-template-columns:1fr;}
-.tgrid-2{grid-template-columns:1fr 1fr;}
+.tgrid-1{grid-template-columns:minmax(0,1fr);}            /* ★ 11-05 — 긴 글자가 있어도 칸이 상자 폭을 절대 안 넘음(예전 1fr은 늘어났음) */
+.tgrid-2{grid-template-columns:repeat(2, minmax(0,1fr));}
 
 .target-card{display:flex; align-items:center; gap:10px; background:var(--surface2); border:1px solid var(--border2); border-radius:10px; overflow:hidden; transition:opacity 0.15s, border-color 0.15s;}
 /* ★ 2026-08-04 신규 — 탭해서 "물리적으로 넣었음" 체크 표시 */
@@ -687,6 +687,45 @@ main{padding:24px; max-width:1400px; margin:0 auto; width:100%;}
   .target-card .target-co{font-size:15px !important;}
   .target-card .target-meta{font-size:11px !important;}
 }
+
+/* ★ 2026-11-05 신규(사장님 지시 — 5.5인치 스캐너 + Android 15 F2 6인치 둘 다 자동 맞춤) —
+   화면 전체 폭(@media)이 아니라 "스캔 결과 상자의 실제 폭"을 기준으로 자동 배치(@container).
+   기기·브라우저 확대 비율·데스크탑 창 크기가 달라도 카드가 상자 안에 맞게 저절로 정리됨.
+   (위 @media 규칙은 container를 모르는 오래된 브라우저용으로 그대로 둠) */
+#scanResult{container-type:inline-size; container-name:scanres; min-width:0;}
+.scan-result, .target-item, .target-grid{min-width:0;}
+@container scanres (max-width: 520px){
+  .target-card{flex-wrap:wrap !important; row-gap:9px; padding:12px !important;}
+  .target-card .target-slot{order:1; width:clamp(78px, 26cqw, 104px) !important; padding:8px 0 10px !important;}
+  .target-card .target-qty{order:2; margin-left:auto; text-align:right; font-size:clamp(34px, 12cqw, 46px) !important; padding-right:22px;}
+  .target-card .target-info{order:3; flex-basis:100%; min-width:100%;}
+  .target-card .ts-label{font-size:12px !important;}
+  .target-card .ts-num{font-size:clamp(40px, 14cqw, 54px) !important;}
+  .target-card .tq-label{font-size:12px !important;}
+  .target-card .target-co{font-size:clamp(14px, 4.2cqw, 16px) !important;}
+  .target-card .target-meta{font-size:11px !important;}
+  /* 3~6곳 2열은 좁으면 한 줄씩(숫자가 작아지거나 겹치지 않게) */
+  .tgrid-2{grid-template-columns:minmax(0,1fr) !important;}
+  .target-card.tsz-sm .target-slot{width:clamp(64px, 20cqw, 80px) !important;}
+  .target-card.tsz-sm .ts-num{font-size:clamp(30px, 10cqw, 40px) !important;}
+  .target-card.tsz-sm .target-qty{font-size:clamp(26px, 9cqw, 34px) !important;}
+}
+/* ★ 2026-11-05 신규 — 넣은 카드는 흐리게(꺼진 것처럼) 대신 선명한 초록 "✓ 넣음" */
+.target-card.placed{opacity:1 !important; border:2px solid var(--green) !important; background:rgba(34,197,94,0.12) !important;}
+.target-card.placed .tq-label{color:var(--green); font-weight:800;}
+/* ★ 2026-11-05 신규 — 그 스캔의 슬롯을 다 넣으면 한 줄 요약으로 접힘("다시 보기"로 펼침) */
+.scan-done-strip{display:none; align-items:center; gap:10px; margin-top:16px; padding:10px 12px; border:1px solid var(--green); background:var(--green-bg); border-radius:10px; min-width:0;}
+.scan-done-strip .sds-slots{background:#fff; color:#000; font-family:var(--mono); font-weight:800; border-radius:7px; padding:4px 8px; font-size:18px; flex-shrink:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:45%;}
+.scan-done-strip .sds-tx{flex:1; min-width:0; font-size:13px;}
+.scan-done-strip .sds-tx b{display:block; color:var(--green); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.scan-done-strip .sds-tx span{display:block; font-family:var(--mono); font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.scan-done-strip button{background:none; border:1px solid var(--cyan); color:var(--cyan); border-radius:8px; padding:6px 10px; font-weight:700; font-size:12px; cursor:pointer; flex-shrink:0;}
+.scan-done-ready{display:none; text-align:center; font-family:var(--mono); font-size:12px; color:var(--cyan); margin-top:8px;}
+#scanResult.sr-collapsed .scan-result{display:none;}
+#scanResult.sr-collapsed .scan-done-strip{display:flex;}
+#scanResult.sr-collapsed .scan-done-ready{display:block;}
+.scan-result.sr-collapsing{transition:opacity .25s; opacity:.4;}
+@media (prefers-reduced-motion: reduce){ .scan-result.sr-collapsing{transition:none;} }
 
 /* ★ 2026-07-16 신규 — 스캔 결과 카드별 이슈(EXP/NF/Damaged/OOS) 등록 UI */
 .target-item{margin-bottom:2px;}
@@ -6041,7 +6080,25 @@ function gotoView(vid){
 // ★ 2026-10-02 신규(사용자 요청) — 저장되는 실제 값("PU & TK")은 안 건드리고
 //   화면에 "보여줄 때"만 공백 없이 "PU&TK"로 표시 통일(sales.html/board.html과 동일).
 // ★ 2026-10-07 — 'Ship 10-09T07:00:00.000Z' 처럼 원본 날짜 문자열이 그대로 보이던 것을 'Ship 10/9'로
-function fmtShipMD_(v){ const m = String(v||'').match(/(\d{4})-(\d{2})-(\d{2})/); return m ? (parseInt(m[2],10) + '/' + parseInt(m[3],10)) : String(v||'-'); }
+// ★ 2026-11-05 수정 — 서버가 날짜를 "2026-11-09T08:00:00.000Z"(세계 표준시) 형식으로 보내도 이 기기 현지 날짜로 "11/9" 표시
+function fmtShipMD_(v){
+  const str = String(v || '').trim();
+  if(!str) return '-';
+  if(/T\d{2}:\d{2}/.test(str)){ const d = new Date(str); if(!isNaN(d.getTime())) return (d.getMonth() + 1) + '/' + d.getDate(); }
+  const m = str.match(/(\d{4})-(\d{2})-(\d{2})/); return m ? (parseInt(m[2],10) + '/' + parseInt(m[3],10)) : str;
+}
+// ★ 2026-11-05 신규 — 기록 시각 표시 통일 "MM-DD HH:mm"(이 기기 현지 시간). UTC 원본·Date 객체·시트 문자열 모두 처리
+function fmtShortTime_(t){
+  if(t == null || t === '') return '';
+  const str = String(t).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ ](\d{2}):(\d{2})/);
+  if(m) return m[2] + '-' + m[3] + ' ' + m[4] + ':' + m[5];
+  const md = str.match(/^(\d{4})-(\d{2})-(\d{2})$/); if(md) return md[2] + '-' + md[3]; // 날짜만 — 시간대 변환 안 함
+  if(!(t instanceof Date) && !/[-\/T:]|[A-Za-z]{3}/.test(str)) return '';                   // 숫자 0 등 날짜 아닌 값
+  const d = (t instanceof Date) ? t : new Date(str);
+  if(!isNaN(d.getTime())){ const p = n => String(n).padStart(2, '0'); return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+  return str.slice(5, 16);
+}
 function fmtMethodLabel_(v){ return String(v||'-').replace(' & ', '&'); }
 function shipViaBadgeClass_(v){
   const s = String(v || '').trim().toUpperCase();
@@ -6953,6 +7010,7 @@ function doScan(){
   scanInput.value = '';
   scanInput.focus();
   const el = document.getElementById('scanResult');
+  clearTimeout(window.__srCollapseTimer); window.__scanToken = (window.__scanToken || 0) + 1; el.classList.remove('sr-collapsed'); // ★ 11-05 — 새 결과는 항상 펼친 상태로
 
   // ★ 2026-08-04 신규 — 부팅 캐시로 화면만 먼저 그려진 상태(서버 확인 전)에는
   //   스캔을 잠깐 막음. 그새 배치가 완료/교체됐을 수 있는데 옛 배치에 스캔이
@@ -7023,6 +7081,7 @@ function doScan(){
 //   원칙 4번), 작업자가 자기가 집어온 랙 위치를 눈으로 확인하고 직접 골라야 함.
 function renderVariantPicker(code, primarySku, altVariants){
   const el = document.getElementById('scanResult');
+  clearTimeout(window.__srCollapseTimer); window.__scanToken = (window.__scanToken || 0) + 1; el.classList.remove('sr-collapsed'); // ★ 11-05 — 새 결과는 항상 펼친 상태로
   // 남은 슬롯이 있는 상품을 위로 정렬 (선택지 배열 자체를 정렬해서 idx 매핑도 함께 유지)
   const all = [primarySku, ...altVariants].slice().sort((a,b) => {
     const ap = a.queue.filter(q => q.done < q.need).length;
@@ -7067,6 +7126,7 @@ function pickScanVariant(code, idx){
 
 function processScanForVariant(sku, code){
   const el = document.getElementById('scanResult');
+  clearTimeout(window.__srCollapseTimer); window.__scanToken = (window.__scanToken || 0) + 1; el.classList.remove('sr-collapsed'); // ★ 11-05 — 새 결과는 항상 펼친 상태로
   // ★ 2026-07-13 대폭 변경(2차): "스캔 1번 = 고객사 1곳씩 순서대로"가 아니라
   //   "스캔 1번 = 이 SKU를 필요로 하는 모든 고객사가 동시에 완료 처리"로 변경.
   //   총량피킹은 이미 총 수량을 다 피킹해온 뒤 스캔하는 것이므로, 그 상품을
@@ -7162,6 +7222,7 @@ let _lastScanCtx = null; // ★ 2026-07-16: 이슈 등록 버튼이 참조할 �
 
 function renderAllTargets(sku, pending, code){
   const el = document.getElementById('scanResult');
+  clearTimeout(window.__srCollapseTimer); window.__scanToken = (window.__scanToken || 0) + 1; el.classList.remove('sr-collapsed'); // ★ 11-05 — 새 결과는 항상 펼친 상태로
 
   const results = pending.map(q => {
     const qty = q.need - q.done;
@@ -7198,9 +7259,9 @@ function renderAllTargets(sku, pending, code){
         <div class="target-slot"><span class="ts-label">SLOT</span><span class="ts-num">${String(r.slot).padStart(2,'0')}</span></div>
         <div class="target-info">
           <div class="target-co">${r.customer}</div>
-          <div class="target-meta">${fmtMethodLabel_(r.ship_via)} · Ship ${(r.ship_date||'').slice(5)} · ${r.invoice}</div>
+          <div class="target-meta">${fmtMethodLabel_(r.ship_via)} · Ship ${fmtShipMD_(r.ship_date)} · ${r.invoice}</div>
         </div>
-        <div class="target-qty" id="targetQty-${idx}">${r.qty}<small>pcs</small><span class="tq-label">넣기</span></div>
+        <div class="target-qty" id="targetQty-${idx}">${r.qty}<small>pcs</small><span class="tq-label" id="targetQtyLabel-${idx}">넣기</span></div>
       </div>
       <div class="target-issue-bar">
         <button class="target-issue-btn" id="targetIssueBtn-${idx}" onclick="event.stopPropagation(); toggleIssueForm(${idx})">⚠ 이슈로 정정</button>
@@ -7224,8 +7285,14 @@ function renderAllTargets(sku, pending, code){
   // ★ 2026-08-04 신규 — 여러 슬롯으로 나뉘어 들어갈 때 "어디까지 실제로
   //   넣었는지" 헷갈리는 문제 방지. 스캔 한 번마다 체크 상태를 새로 시작함.
   window.__placedSet = new Set();
+  window.__scanToken = (window.__scanToken || 0) + 1;
+  clearTimeout(window.__srCollapseTimer);
+  el.classList.remove('sr-collapsed');
+  const _sdsSlots = results.map(r => String(r.slot).padStart(2,'0')).join(' · ');
 
-  el.innerHTML = `<div class="scan-result ok">
+  el.innerHTML = `<div class="scan-done-strip" role="status"><span class="sds-slots">✓ ${_sdsSlots}</span><span class="sds-tx"><b>${n}곳 · ${totalQty}pcs 넣음 완료</b><span>${sku.name}</span></span><button type="button" onclick="reopenScanResult()">▾ 다시 보기</button></div>
+  <div class="scan-done-ready">▤ 다음 바코드를 스캔하세요</div>
+  <div class="scan-result ok" data-scan-token="${window.__scanToken}">
     <div class="product-name">${sku.name}</div>
     <div class="barcode-tag">${sku.barcode}</div>
     <div class="product-meta"><b>${sku.sku}</b><span>· 랙 ${sku.rack}</span><span>· 총 ${sku.total}pcs</span></div>
@@ -7420,15 +7487,61 @@ function togglePlaced(idx){
     if(!confirm(`"${label}"은 이미 넣음으로 체크돼 있습니다.\n다시 누르면 "안 넣음"(흰색)으로 되돌아갑니다 — 정말 되돌리시겠습니까?\n\n(참고: 실제 수량은 스캔 시점에 이미 서버에 반영돼 있어 이 체크는 영향을 주지 않습니다. 실물을 그 슬롯에서 빼실 때만 되돌리세요.)`)) return;
     window.__placedSet.delete(idx);
     card.classList.remove('placed');
+    const _lb = document.getElementById(`targetQtyLabel-${idx}`); if(_lb) _lb.textContent = '넣기';
+    clearTimeout(window.__srCollapseTimer);
+    const _srx = document.querySelector('#scanResult .scan-result'); if(_srx) _srx.classList.remove('sr-collapsing');
   } else {
     window.__placedSet.add(idx);
     card.classList.add('placed');
+    const _lb = document.getElementById(`targetQtyLabel-${idx}`); if(_lb) _lb.textContent = '✓ 넣음';
     try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
     // ★ 2026-10-29 v21 — 이 슬롯(고객사 오더)의 모든 상품이 다 분류됐으면 "이 오더 완료" 알림(오더마다 한 번)
     try{ const _r = _lastScanCtx && _lastScanCtx.results && _lastScanCtx.results[idx]; if(_r) maybeShowOrderDone_(_r.invoice, _r.slot, _r.customer); }catch(eOd){}
   }
   const counterEl = document.getElementById('placedCounter');
   if(counterEl) counterEl.textContent = window.__placedSet.size;
+  _maybeCollapseScanResult_();
+}
+// ★ 2026-11-05 신규 — 이 스캔의 슬롯을 전부 "넣음"으로 누르면 0.8초 뒤 한 줄 요약으로 접음.
+//   이슈 입력창이 열려 있으면 접지 않음. 다음 스캔이 오면 새 결과로 바뀜(그대로).
+function _scanIssueFormOpen_(){
+  const box = document.getElementById('scanResult'); if(!box) return false;
+  const forms = box.querySelectorAll('.issue-form, .sku-issue-form');
+  for(const f of forms){ if(f.style.display && f.style.display !== 'none') return true; }
+  return false;
+}
+function _maybeCollapseScanResult_(){
+  clearTimeout(window.__srCollapseTimer);
+  const total = (_lastScanCtx && _lastScanCtx.results) ? _lastScanCtx.results.length : 0;
+  if(!total || !window.__placedSet || window.__placedSet.size < total) return;
+  if(_scanIssueFormOpen_()) return;
+  const token = window.__scanToken;
+  const sr = document.querySelector('#scanResult .scan-result');
+  setTimeout(() => { if(window.__scanToken === token && sr && sr.isConnected && window.__placedSet.size >= total) sr.classList.add('sr-collapsing'); }, 500);
+  window.__srCollapseTimer = setTimeout(() => {
+    const box = document.getElementById('scanResult');
+    const cur = document.querySelector('#scanResult .scan-result');
+    if(sr) sr.classList.remove('sr-collapsing');
+    if(!box || !cur || cur !== sr || window.__scanToken !== token) return;   // 그 사이 새 스캔/다른 결과
+    if(!window.__placedSet || window.__placedSet.size < total || _scanIssueFormOpen_()) return;
+    box.classList.add('sr-collapsed');
+    _srFocusScanIfIdle_();
+  }, 800);
+}
+// 다른 입력칸(수동 바코드 입력창 등)을 쓰는 중이면 포커스를 뺏지 않음
+function _srFocusScanIfIdle_(){
+  try{
+    const si = document.getElementById('scanInput'); if(!si || si.disabled) return;
+    const a = document.activeElement, box = document.getElementById('scanResult');
+    const idle = !a || a === document.body || a === si || (box && box.contains(a));
+    const modalOpen = Array.from(document.querySelectorAll('.modal-bg')).some(m => getComputedStyle(m).display !== 'none');
+    if(idle && !modalOpen) si.focus();
+  }catch(e){}
+}
+function reopenScanResult(){
+  clearTimeout(window.__srCollapseTimer);
+  const box = document.getElementById('scanResult'); if(box) box.classList.remove('sr-collapsed');
+  try{ const si = document.getElementById('scanInput'); if(si && !si.disabled) si.focus(); }catch(e){}
 }
 
 /* ★ 2026-10-29 v21 — 오더(고객사) 하나 분류 완료 알림
@@ -7644,7 +7757,7 @@ function renderRetroIssueBody(){
       <div class="retro-issue-existing-row">
         <div class="top"><span>${reasonLabel[i.reason] || i.reason}</span><span>${Number(i.qty).toLocaleString()}pcs</span></div>
         <div>${i.name || i.sku || ''}</div>
-        <div class="meta">바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time instanceof Date ? i.time.toISOString().slice(0,16).replace('T',' ') : String(i.time||'')).slice(5,16)}</div>
+        <div class="meta">바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${fmtShortTime_(i.time)}</div>
         ${i.note ? `<div class="meta" style="font-style:italic">"${i.note}"</div>` : ''}
         <button data-undo-issue="${i.issueId}">🗑 이 이슈 취소</button>
       </div>`).join('')
@@ -10429,7 +10542,7 @@ function renderPsvBody(){
     <div style="display:none;">
       ${activeHistory.slice(0, 30).map(h => `
         <div class="pv-history-row ${h.result !== 'pass' ? h.result : ''}">
-          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · Barcode ${h.barcode}${h.result==='wrong'?' (different customer\'s item)':h.result==='over'?' (duplicate)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span>${fmtShortTime_(h.time)} · ${h.worker||'-'} · Barcode ${h.barcode}${h.result==='wrong'?' (different customer\'s item)':h.result==='over'?' (duplicate)':''}${h.qty>1?' x'+h.qty:''}</span>
           <span class="pv-history-undo" onclick="undoPsvScanEntry('${h.packScanId}')">Undo</span>
         </div>`).join('')}
     </div>` : '';
@@ -11099,7 +11212,7 @@ function renderPvBody(){
     <div style="display:none;">
       ${activeHistory.slice(0, 30).map(h => `
         <div class="pv-history-row ${h.result !== 'pass' ? h.result : ''}">
-          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · Barcode ${h.barcode}${h.result==='wrong'?' (different customer\'s item)':h.result==='over'?' (duplicate)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span>${fmtShortTime_(h.time)} · ${h.worker||'-'} · Barcode ${h.barcode}${h.result==='wrong'?' (different customer\'s item)':h.result==='over'?' (duplicate)':''}${h.qty>1?' x'+h.qty:''}</span>
           <span class="pv-history-undo" onclick="undoPvScanEntry('${h.packScanId}')">Undo</span>
         </div>`).join('')}
     </div>` : '';
