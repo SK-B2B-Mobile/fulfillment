@@ -1677,13 +1677,14 @@ document.addEventListener('DOMContentLoaded', function(){
 
   <!-- ═══════ NAV ═══════ -->
   <nav id="mainNav">
-    <button class="active" data-view="v-batch"><span class="step">01</span> Batch</button>
+    <!-- ★ 2026-11-05 — 작업 순서대로 01~05(업로드→피킹→1차 검수→2차 검수), 매니저용 Scan Log(L)·Workers(M)는 맨 뒤 -->
+    <button class="active" data-view="v-batch"><span class="step">01</span> Batch Upload</button>
     <button class="tab-standalone" data-view="v-standalone-upload"><span class="step">01-S</span> Standalone Upload</button>
-    <button data-view="v-slots" disabled><span class="step">02</span> Slot &amp; Pick</button>
+    <button data-view="v-slots" disabled><span class="step">02</span> Pick &amp; Slot</button>
     <button data-view="v-scan" disabled><span class="step">03</span> Scan & Sort</button>
     <button class="tab-standalone" data-view="v-standalone-scan"><span class="step">04</span> Standalone Scan</button>
-    <button data-view="v-log"><span class="step">05</span> Scan Log</button>
-    <button data-view="v-pack-choose" class="tab-pack"><span class="step">P</span> Pack Verify</button>
+    <button data-view="v-pack-choose" class="tab-pack"><span class="step">05</span> Pack Verify</button>
+    <button data-view="v-log"><span class="step">L</span> Scan Log</button>
     <button data-view="v-workers"><span class="step">M</span> Workers</button>
   </nav>
 
@@ -1692,7 +1693,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     <!-- ─── VIEW 1: Batch Setup ─── -->
     <div class="view active" id="v-batch">
-      <div class="eyebrow">Step 01 · Batch setup</div>
+      <div class="eyebrow">Step 01 · Batch Upload</div>
       <h2 class="h-page">오늘의 배치 생성</h2>
       <p class="sub">CMS에서 <b>GROUP PICKING CHECK LIST</b> (1차, 필요시 2차 추가분까지 최대 2개)와 <b>고객사별 피킹 리스트</b> 전부를 업로드하세요. 시스템이 자동으로 총량을 파악하고 오더 크기에 맞춰 슬롯을 배정합니다.</p>
 
@@ -1773,7 +1774,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     <!-- ─── VIEW 2: Slot Layout ─── -->
     <div class="view" id="v-slots">
-      <div class="eyebrow">Step 02 · Slot &amp; Pick</div>
+      <div class="eyebrow">Step 02 · Pick &amp; Slot</div>
       <h2 class="h-page">Slot Layout &amp; Picking Start</h2>
 
       <div class="card" style="margin-bottom:16px; padding:14px 16px;">
@@ -2072,7 +2073,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     <!-- ─── VIEW P-choose: Pack Verify selection (★ 2026-08-31 신규) ─── -->
     <div class="view" id="v-pack-choose">
-      <div class="eyebrow" style="color:var(--purple);">Step P · Pack Verify</div>
+      <div class="eyebrow" style="color:var(--purple);">Step 05 · Pack Verify</div>
       <h2 class="h-page">Final Verification (2nd) — Which one?</h2>
       <p class="sub">Scan to do a final check on orders moved to the packing zone. Please choose whether it's a <b>Total Picking order or a Standalone order</b> first — the two lists are never mixed.</p>
       <div class="pack-choose-grid">
@@ -5109,7 +5110,7 @@ function renderActiveBatchNotice(){
       </div>
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:14px;">이미 배치가 만들어져 있어 새로 만들 필요가 없습니다. 이어서 작업하시려면 아래에서 이동하세요.</div>
       <div style="display:flex; gap:8px;">
-        <button class="btn btn-primary" style="flex:1; padding:10px;" id="btnGotoSlotsFromNotice">→ Go to Slot &amp; Pick</button>
+        <button class="btn btn-primary" style="flex:1; padding:10px;" id="btnGotoSlotsFromNotice">→ Go to Pick &amp; Slot</button>
         <button class="btn btn-ghost" style="padding:10px 16px;" id="btnMakeNewBatchFromNotice">＋ 새 배치 만들기</button>
       </div>
     </div>`;
@@ -12309,19 +12310,30 @@ function populateWorkerSelect(){
     //   남아있는 옛 이름으로 되돌려버렸음 → 몇 초 뒤 폴링이 돌면 이름이 저절로
     //   복귀하는 현상. "아직 아무것도 안 정해짐(null)"과 "명시적으로 선택 안 함('')"을
     //   구분해서, null일 때만(첫 로딩/새로고침 직후) 저장된 이름으로 복원함.
-    const prev = (state.currentWorker === null || state.currentWorker === undefined)
-      ? savedWorker : state.currentWorker;
+    // ★ 2026-11-05 수정(현장 — 로그인했는데 03번 작업자가 "— 선택 안 함 —") — 새로고침 직후 서버 명단이
+    //   오기 전의 임시 기본 명단(Hyeong Kim 등)에 내 이름이 없어서 저장된 이름(sk_scan_worker)까지
+    //   지워버렸고, 진짜 명단이 와도 복원할 이름이 없었음. ①로그인돼 있으면 항상 로그인 이름을 씀
+    //   (이 칸은 로그인 이름으로 잠겨 있음) ②진짜 명단이 오기 전에는 저장된 이름을 지우지 않음.
+    let loginW = '';
+    try{ loginW = (typeof getLoginWorker === 'function' && !window.__acctPendingShown) ? getLoginWorker() : ''; }catch(eLW){ loginW = ''; } // 계정 이름 확인 중(가림 화면)엔 예전 이름을 쓰지 않음
+    const prev = loginW ? loginW
+      : (state.currentWorker === null || state.currentWorker === undefined) ? savedWorker : state.currentWorker;
     sel.innerHTML = optsHtml;
+    // ★ 11-05 — 서버 명단이 오기 전(임시 명단)에도 로그인 이름으로 바로 스캔할 수 있게 그 이름을 목록에 넣어 둠
+    if(loginW && !all.some(w => w.name === loginW)){
+      const o = document.createElement('option'); o.value = loginW; o.textContent = loginW; sel.insertBefore(o, sel.options[1] || null);
+    }
     // ★ 2026-08-04 수정 — 예전엔 저장된 이름이 없으면 "첫 번째 활성 작업자"로
     //   자동 대체했는데, 이것도 결국 실제 사용자와 무관한 이름이 임의로 선택되는
     //   문제였음. 이제 저장된 이름이 여전히 유효할 때만 유지하고, 그 외엔 항상
-    //   "선택 안 함"으로 둬서 반드시 직접 고르게 함.
-    sel.value = all.some(w => w.name === prev) ? prev : '';
+    //   "선택 안 함"으로 둬서 반드시 직접 고르게 함. (로그인돼 있으면 항상 로그인 이름)
+    sel.value = (loginW || all.some(w => w.name === prev)) ? prev : '';
     state.currentWorker = sel.value;
     // ★ 2026-08-04 수정 — "선택 안 함"이면 저장된 이름도 같이 지워야 함.
     //   안 지우면 다음 폴링/새로고침 때 옛 이름이 또 살아 돌아옴.
     if(state.currentWorker) localStorage.setItem('sk_scan_worker', state.currentWorker);
-    else localStorage.removeItem('sk_scan_worker');
+    else if(state._workersReady && !loginW) localStorage.removeItem('sk_scan_worker'); // ★ 11-05 — 임시 명단일 때·로그인 중엔 안 지움
+    if(!state.currentWorker && !state._workersReady) state.currentWorker = null;          // ★ 11-05 — 진짜 명단이 오면 다시 채우도록 "아직 안 정해짐"으로
     document.getElementById('workerInitial').textContent = state.currentWorker
       ? state.currentWorker.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase() : '--';
     sel.onchange = () => {
