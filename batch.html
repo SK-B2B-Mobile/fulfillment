@@ -1927,7 +1927,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
           <div class="scan-input-wrap">
             <span class="scan-icon">▤</span>
-            <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus>
+            <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus inputmode="none"><!-- ★ 2026-11-06 — 스캐너 입력은 그대로 받고 화면 키패드만 안 뜨게(손으로 칠 땐 "바코드 수동 입력") -->
           </div>
 
           <div id="scanResult"></div>
@@ -2462,10 +2462,11 @@ document.addEventListener('DOMContentLoaded', function(){
 <div class="modal-bg" id="manualScanModal">
   <div class="modal">
     <h3>바코드 수동 입력</h3>
-    <p class="sub">스캐너가 인식 못 하는 바코드(훼손·인쇄불량 등)일 때, 숫자를 직접 입력해서 처리합니다. 실제 스캔한 것과 동일하게 처리됩니다.</p>
+    <p class="sub">스캐너가 인식 못 하는 바코드(훼손·인쇄불량 등)일 때, 숫자를 직접 입력해서 처리합니다. 실제 스캔한 것과 동일하게 처리됩니다.<br><b>여기서 스캔해도 됩니다</b> — 스캔한 번호가 칸에 들어오면 틀린 자리만 고친 뒤 "처리"를 누르세요.</p>
     <div class="form-field">
       <label>바코드 번호</label>
       <input type="text" id="manualScanInput" placeholder="예: 8809562559924 또는 RLS01-LR9924" inputmode="text" autocapitalize="characters" autocomplete="off">
+      <div id="manualScanHint" style="margin-top:6px; font-size:12px; color:var(--green); min-height:16px;"></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" data-modal-close>취소</button>
@@ -12609,9 +12610,27 @@ document.getElementById('btnAddWorker').onclick = () => openWorkerModal();
 // 직접 입력해서, 실제 스캔한 것과 완전히 동일한 경로(doScan)로 처리함.
 document.getElementById('btnManualScan').onclick = () => {
   document.getElementById('manualScanInput').value = '';
+  _msBurst.n = 0; _msBurst.t = 0;
+  const _h = document.getElementById('manualScanHint'); if(_h) _h.textContent = '';
   document.getElementById('manualScanModal').classList.add('open');
   setTimeout(() => document.getElementById('manualScanInput').focus(), 50);
 };
+// ★ 2026-11-06 신규(현장 — "수동 입력 창에서 스캔하면 번호 몇 자리만 고치면 되는데, 지금은 스캔이 안 됨") —
+//   예전엔 스캐너가 끝에 보내는 Enter 때문에 스캔하자마자 바로 "처리"돼 버려서 고칠 틈이 없었음.
+//   이제 스캐너 입력(아주 빠르게 여러 글자가 한꺼번에 들어온 뒤 Enter)이면 처리하지 않고 번호를 칸에 남겨 둠
+//   → 틀린 자리만 고친 뒤 "처리" 버튼(또는 키패드의 Enter/→)으로 처리. 사람이 키패드로 치고 Enter 누르면 예전처럼 바로 처리.
+const _msBurst = { t: 0, n: 0, start: 0 };
+function _msOnInput_(e){
+  const el = e.target, now = Date.now();
+  // 키패드 자동완성(조합 중 글자)은 한 글자로 셈 — 사람이 친 것을 스캔으로 잘못 보지 않게
+  const added = (e.inputType && e.inputType.indexOf('insertComposition') === 0) ? 1 : ((e.data && e.data.length) || 1);
+  if(now - _msBurst.t > 80){ _msBurst.n = 0; _msBurst.start = now; } // 80ms 넘게 쉬면 새 묶음
+  _msBurst.n += added; _msBurst.t = now;
+}
+function _msLooksLikeScanner_(){
+  const now = Date.now();
+  return _msBurst.n >= 4 && (now - _msBurst.t) < 120 && (_msBurst.t - _msBurst.start) <= 60 * Math.max(1, _msBurst.n);
+}
 function submitManualScan(){
   const code = document.getElementById('manualScanInput').value.trim();
   if(!code){ toast('바코드 번호를 입력하세요', 'error'); return; }
@@ -12620,8 +12639,20 @@ function submitManualScan(){
   doScan(); // 실제 스캔과 완전히 동일한 처리(중복 체크, SKU 매칭, 완료 판정 등)
 }
 document.getElementById('manualScanSubmit').onclick = submitManualScan;
+document.getElementById('manualScanInput').addEventListener('input', _msOnInput_);
 document.getElementById('manualScanInput').addEventListener('keydown', e => {
-  if(e.key === 'Enter') submitManualScan();
+  if(e.key !== 'Enter') return;
+  e.preventDefault();
+  if(_msLooksLikeScanner_()){
+    // 스캐너가 보낸 Enter — 처리하지 않고 번호를 남겨 둠. 전체 선택 → 다시 스캔하면 새 번호로 바뀌고, 손가락으로 누르면 그 자리부터 고칠 수 있음
+    _msBurst.n = 0;
+    const el = e.target; el.value = el.value.trim();
+    try{ el.select(); }catch(eSel){}
+    const h = document.getElementById('manualScanHint');
+    if(h) h.textContent = '✓ 스캔됨 — 번호를 확인하고, 틀린 자리만 고친 뒤 "처리"를 누르세요';
+    return;
+  }
+  submitManualScan();
 });
 
 // ★ 2026-08-31 신규 — 04/Pack Verify/단독 Pack Verify 공용 바코드 수동 입력.
