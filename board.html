@@ -1365,6 +1365,20 @@ let _issLastSig = '';
 const _issPend = { adds: [], edits: {}, dels: {} };
 let _issSeq = 0;
 const _issSleep = ms => new Promise(r => setTimeout(r, ms));
+// ★ 2026-11-05 신규 — 시각 표시 통일("MM-DD HH:mm", 이 기기 현지 시간). 서버가 시트 값을 Date 그대로 보내면
+//   "2026-11-06T01:14:19.000Z"(UTC)나 "Thu Nov 05 2026 17:14:19 GMT-0800" 형식으로 와서 날짜가 하루 넘어가 보이던 문제 수정.
+function _fmtShortTime(t){
+  if(t == null || t === '') return '';
+  const str = String(t).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})[ ](\d{2}):(\d{2})/); // 이미 'yyyy-MM-dd HH:mm(:ss)' — 그대로
+  if(m) return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+  const d = (t instanceof Date) ? t : new Date(str);
+  if(!isNaN(d.getTime())){
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  return str.slice(5, 16);
+}
 function _issEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function _iisKey(b, inv){ return String(b) + '|' + String(inv); }
 function _slotSig(s){
@@ -1621,7 +1635,7 @@ function renderIssueModalBody(){
         <span class="issue-modal-qty">${Number(i.qty).toLocaleString()}pcs</span>
       </div>
       <div class="issue-modal-name">${_issEsc(i.name || i.sku || '')}</div>
-      <div class="issue-modal-meta">SKU #${_issEsc(i.sku || '-')} · 바코드 ${_issEsc(i.barcode || '-')} · ${_issEsc(i.worker || '-')} · ${_issEsc((i.time||'').slice(5,16))}</div>
+      <div class="issue-modal-meta">SKU #${_issEsc(i.sku || '-')} · 바코드 ${_issEsc(i.barcode || '-')} · ${_issEsc(i.worker || '-')} · ${_issEsc(_fmtShortTime(i.time))}</div>
       ${i.note ? `<div class="issue-modal-note">"${_issEsc(i.note)}"</div>` : ''}
       ${pendHtml}
       ${canEdit ? `<button class="issue-modal-edit-btn" data-idx="${idx}">✎ 수정</button>
@@ -2049,7 +2063,7 @@ function renderPackModalBody(){
     <div style="display:none;">
       ${activeHistory.slice(0, 30).map(h => `
         <div class="pack-history-row ${h.result !== 'pass' ? h.result : ''}">
-          <span>${(h.time||'').slice(5,16)} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (중복)':''}${h.qty>1?' x'+h.qty:''}</span>
+          <span>${_issEsc(_fmtShortTime(h.time))} · ${h.worker||'-'} · 바코드 ${h.barcode}${h.result==='wrong'?' (다른 고객사 물건)':h.result==='over'?' (중복)':''}${h.qty>1?' x'+h.qty:''}</span>
           <span class="pack-history-undo" onclick="undoPackScanEntry('${h.packScanId}')">되돌리기</span>
         </div>`).join('')}
     </div>` : '';
