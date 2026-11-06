@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner Keypad Test</title>
+<style>
+  :root{ --bg:#0b1020; --card:#141b33; --line:#2a3458; --text:#e6e9f7; --dim:#98a1c6; --ok:#22c55e; --bad:#ef4444; --acc:#22d3ee; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; padding:12px; }
+  h1{ font-size:17px; margin:0 0 4px; }
+  p.lead{ font-size:13px; color:var(--dim); margin:0 0 12px; line-height:1.5; }
+  .t{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:12px; }
+  .t h2{ font-size:15px; margin:0 0 6px; }
+  .t .how{ font-size:12px; color:var(--dim); margin-bottom:8px; line-height:1.45; }
+  .t input, .t .ce{ width:100%; box-sizing:border-box; font-size:18px; padding:12px; border-radius:8px; border:2px solid var(--acc); background:#0d1430; color:var(--text); font-family:monospace; min-height:48px; }
+  .row{ display:flex; gap:8px; margin-top:8px; }
+  .row button{ flex:1; font-size:14px; font-weight:700; padding:10px; border-radius:8px; border:1px solid var(--line); background:#1d2546; color:var(--text); }
+  .res{ margin-top:8px; font-family:monospace; font-size:13px; min-height:20px; }
+  .res .ok{ color:var(--ok); font-weight:800; } .res .bad{ color:var(--bad); font-weight:800; }
+  .ask{ font-size:13px; color:#fbbf24; margin-top:6px; }
+</style>
+</head>
+<body>
+<h1>스캐너 키패드 시험 (5가지 방법)</h1>
+<p class="lead">각 칸의 <b>"이 칸 시작"</b>을 누른 뒤 바코드를 1번 스캔하세요. 결과 줄에 <b>바코드 번호가 나오는지</b>, 그리고 <b>화면 키패드가 올라오는지</b>를 봐 주세요. 이 페이지는 저장·기록을 전혀 하지 않습니다.</p>
+
+<div class="t" id="t1">
+  <h2>방법 1 · 키패드 수동 모드</h2>
+  <div class="how">칸이 선택돼도 키패드를 자동으로 띄우지 않게 브라우저에 요청(virtualkeyboardpolicy=manual)</div>
+  <input id="i1" autocomplete="off" virtualkeyboardpolicy="manual" placeholder="스캔하세요">
+  <div class="row"><button data-start="1">이 칸 시작</button></div>
+  <div class="res" id="r1"></div>
+</div>
+
+<div class="t" id="t2">
+  <h2>방법 2 · 잠근 채 선택 후 풀기</h2>
+  <div class="how">잠근 상태(readonly)로 칸을 선택한 뒤 바로 잠금 해제 — 키패드는 손가락으로 칸을 누를 때만 뜸</div>
+  <input id="i2" autocomplete="off" placeholder="스캔하세요">
+  <div class="row"><button data-start="2">이 칸 시작</button></div>
+  <div class="res" id="r2"></div>
+</div>
+
+<div class="t" id="t3">
+  <h2>방법 3 · 스캔 끝나면 키패드 내리기</h2>
+  <div class="how">보통 칸 그대로 — 스캔이 들어오면 0.2초 뒤 키패드를 내림(다음 스캔 때 다시 뜰 수 있음)</div>
+  <input id="i3" autocomplete="off" placeholder="스캔하세요">
+  <div class="row"><button data-start="3">이 칸 시작</button></div>
+  <div class="res" id="r3"></div>
+</div>
+
+<div class="t" id="t4">
+  <h2>방법 4 · 키 신호만 받기</h2>
+  <div class="how">칸은 잠가 두고(키패드 안 뜸) 스캐너가 보내는 키 신호만 모아서 번호를 만듦</div>
+  <input id="i4" autocomplete="off" readonly placeholder="(잠긴 칸) 스캔하세요">
+  <div class="row"><button data-start="4">이 칸 시작</button></div>
+  <div class="res" id="r4"></div>
+</div>
+
+<div class="t" id="t5">
+  <h2>방법 5 · 예전 v28 방식 (비교용)</h2>
+  <div class="how">inputmode=none — 오늘 빈칸(empty)으로 실패한 방식. 같은 결과인지 확인용</div>
+  <input id="i5" autocomplete="off" inputmode="none" placeholder="스캔하세요">
+  <div class="row"><button data-start="5">이 칸 시작</button></div>
+  <div class="res" id="r5"></div>
+</div>
+
+<p class="ask">결과를 사진으로 보내 주세요 — 어느 방법에서 ① 번호가 나왔고 ② 키패드가 안 떴는지. 그리고 두 번 연속 스캔해도 되는지(방법 1·2·4).</p>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const log = (n, html) => { $('r' + n).innerHTML = html; };
+  const show = (n, code, extra) => {
+    const t = new Date().toTimeString().slice(0, 8);
+    log(n, code ? `<span class="ok">✓ 받음: ${code}</span> · ${t}${extra || ''}` : `<span class="bad">✗ 빈칸(번호 못 받음)</span> · ${t}${extra || ''}`);
+  };
+  // 방법 1, 2, 3, 5: 보통 입력 칸 — Enter(또는 300ms 정지)로 한 건 처리
+  [1, 2, 3, 5].forEach(n => {
+    const el = $('i' + n); let tm = null; let cnt = 0;
+    const done = () => { clearTimeout(tm); const v = el.value.trim(); cnt++; show(n, v, ` · ${cnt}번째`); el.value = '';
+      if(n === 3){ setTimeout(() => { el.blur(); setTimeout(() => el.focus({ preventScroll: true }), 50); }, 200); } };
+    el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); done(); } });
+    el.addEventListener('input', () => { clearTimeout(tm); if(el.value.trim().length >= 10) tm = setTimeout(done, 300); });
+  });
+  // 방법 4: 키 신호 모으기
+  (function(){
+    let buf = '', active = false, cnt = 0, tm = null;
+    const flush = () => { clearTimeout(tm); cnt++; show(4, buf.trim(), ` · ${cnt}번째`); buf = ''; };
+    document.addEventListener('keydown', e => {
+      if(!active || document.activeElement !== $('i4')) return;
+      if(e.key === 'Enter'){ e.preventDefault(); flush(); return; }
+      if(e.key && e.key.length === 1){ buf += e.key; clearTimeout(tm); tm = setTimeout(() => { if(buf.length >= 10) flush(); }, 300); }
+    });
+    $('i4').addEventListener('focus', () => { active = true; });
+  })();
+  document.querySelectorAll('[data-start]').forEach(b => b.addEventListener('click', () => {
+    const n = Number(b.dataset.start), el = $('i' + n);
+    log(n, '… 스캔 기다리는 중');
+    if(n === 1){
+      try{ if(navigator.virtualKeyboard){ el.focus(); navigator.virtualKeyboard.hide(); } else { el.focus(); log(n, '… 스캔 기다리는 중 (이 기기는 키패드 수동 모드 미지원일 수 있음)'); } }catch(e){ el.focus(); }
+    } else if(n === 2){
+      el.setAttribute('readonly', 'readonly'); el.focus(); setTimeout(() => el.removeAttribute('readonly'), 60);
+    } else {
+      el.focus();
+    }
+  }));
+})();
+</script>
+</body>
+</html>
