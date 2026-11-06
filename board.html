@@ -244,6 +244,21 @@ html,body{background:var(--bg); color:var(--text); font-family:var(--sans); -web
 .issue-modal-close{background:var(--surface2); border:1px solid var(--border); color:var(--text-dim); width:38px; height:38px; border-radius:10px; font-size:16px; cursor:pointer;}
 .issue-modal-body{padding:18px 26px; overflow-y:auto; display:flex; flex-direction:column; gap:12px;}
 .issue-modal-row{background:rgba(255,77,109,0.06); border:1px solid rgba(255,77,109,0.3); border-radius:12px; padding:14px 18px;}
+/* ★ 2026-11-05 신규 — 이슈 즉시 반영(저장 중/저장됨/실패) 표시 */
+.issue-modal-row.iss-row-pending{border-style:dashed; border-color:rgba(245,158,11,0.6); background:rgba(245,158,11,0.06);}
+.issue-modal-row.iss-row-fail{border-color:#ef4444; background:rgba(239,68,68,0.10);}
+.issue-modal-row.iss-row-deleting{opacity:.5;}
+.issue-modal-row.iss-row-deleting .issue-modal-name, .issue-modal-row.iss-row-deleting .issue-modal-qty{text-decoration:line-through;}
+.iss-pend{margin-top:8px; font-size:13px; font-weight:700; border-radius:8px; padding:7px 10px; line-height:1.5;}
+.iss-pend.saving{color:#fbbf24; background:rgba(245,158,11,0.10); border:1px solid rgba(245,158,11,0.35);}
+.iss-pend.saved{color:#4ade80; background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.35);}
+.iss-pend.fail{color:#fca5a5; background:rgba(239,68,68,0.12); border:1px solid #ef4444;}
+.iss-pend-err{font-weight:500; font-size:12px; opacity:.9; word-break:break-all;}
+.iss-pend-actions{display:flex; gap:8px; margin-top:8px;}
+.iss-pend-retry,.iss-pend-dismiss,.iss-items-retry{cursor:pointer; border-radius:8px; padding:7px 12px; font-size:13px; font-weight:700; border:1px solid #ef4444; background:transparent; color:#fca5a5;}
+.iss-pend-retry{background:#ef4444; color:#fff;}
+.iss-items-retry{margin-top:8px; border-color:#f59e0b; color:#fbbf24;}
+.issue-new-form-submit[disabled]{opacity:.55; cursor:default;}
 .issue-modal-row-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
 .issue-modal-reason{font-family:var(--mono); font-size:15px; font-weight:800; color:#FF4D6D;}
 .issue-modal-qty{font-family:var(--mono); font-size:20px; font-weight:800;}
@@ -1324,106 +1339,317 @@ async function ensureBatchItemsLoaded(){
   _batchItemsCache = { batchId: currentBatchId, byInvoice };
 }
 
-let _invoiceItemStatusByBarcode = {}; // ★ 2026-07-24 신규: barcode -> {scannedQty, issueQty, short}
-async function openIssueModal(invoice){
+let _invoiceItemStatusByBarcode = {}; // ★ 2026-07-24 신규: barcode|sku -> {scannedQty, issueQty, short}
+
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-11-05 신규(사장님 지시 — "슬롯 클릭하면 바로 열리고, 이슈는 바로바로
+ *   입력·저장") — 서버는 그대로, 화면 쪽만 바꿈.
+ *   (1) 슬롯 팝업 즉시 열기: 이슈 목록은 이미 보드에 있는 값(slot.issues)으로
+ *       바로 그리고, SKU 목록은 미리 받아둔 값(_iis 캐시)으로 바로 보여줌.
+ *       최신 값은 뒤에서 조용히 다시 받아와 입력 중인 내용은 그대로 둔 채 갱신.
+ *       (캐시는 보드가 뜬 뒤 1.2초 간격으로 한 개씩 천천히 미리 받아둠 — 서버
+ *       부담 최소화, 화면이 안 보일 때는 쉼)
+ *   (2) 이슈 등록/수정/삭제 즉시 반영: 누르는 순간 화면에 "⏳ 저장 중"으로 바로
+ *       보이고, 저장은 같은 순간 서버로 보냄(미루지 않음). 네트워크/서버 혼잡이면
+ *       자동 재시도(최대 3번, 2분 안 — 서버의 2분 중복방지와 겹쳐서 이중 등록 없음).
+ *       성공하면 "✓ 저장됨", 끝내 실패하면 빨간 표시 + "↻ 다시 시도".
+ *   ※ Firestore 6단계(이슈 쓰기 Firestore 기준) 때 서버 쪽만 바뀌고 이 화면 구조는 유지.
+ * ═══════════════════════════════════════════════════════════ */
+const _iis = {};            // 'batchId|invoice' -> { items, at, sig }
+const _iisPrefFail = {};    // 미리받기 실패 횟수(2번 실패하면 그 인보이스는 미리받기 생략 — 열 때 받음)
+let _iisModalReqSeq = 0;
+let _issItemsLoading = false;   // 지금 열린 팝업의 SKU 목록이 아직 없음(처음 받는 중)
+let _issItemsFailed = false;    // 지금 열린 팝업의 SKU 목록 받기 실패
+let _iisRefreshing = null;      // 지금 뒤에서 받는 중인 'batchId|invoice'
+let _issLastSig = '';
+const _issPend = { adds: [], edits: {}, dels: {} };
+let _issSeq = 0;
+const _issSleep = ms => new Promise(r => setTimeout(r, ms));
+function _issEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _iisKey(b, inv){ return String(b) + '|' + String(inv); }
+function _slotSig(s){
+  const iss = (s && s.issues) || [];
+  return [s ? (s.scanned || 0) : 0, iss.length, iss.reduce((a, i) => a + (Number(i.qty) || 0), 0)].join(':');
+}
+function _iisApply(items){
+  _invoiceItemStatusByBarcode = {};
+  (items || []).forEach(it => { _invoiceItemStatusByBarcode[String(it.barcode) + '|' + String(it.sku)] = it; });
+}
+async function _iisFetch(batchId, invoice){
+  let res;
+  try{ res = await gasQuery('getInvoiceItemStatus', { batchId, invoice }); }catch(e){ res = null; }
+  if(res && res.ok && Array.isArray(res.items)){
+    const s = (currentBatchId === batchId) ? _slotsByInvoice[invoice] : null;
+    _iis[_iisKey(batchId, invoice)] = { items: res.items, at: Date.now(), sig: s ? _slotSig(s) : '' };
+    return true;
+  }
+  return false;
+}
+// 보드가 뜬 뒤 SKU 목록을 한 개씩 천천히 미리 받아둠(진행 중 슬롯 먼저)
+let _iisPrefRunning = false;
+let _iisPrefEnabled = false; // ★ 리뷰 반영 — 이 기기에서 슬롯 팝업을 한 번이라도 연 뒤에만 미리받기(안 누르는 TV는 서버 부담 0)
+function _iisSchedulePrefetch(){
+  if(_iisPrefRunning || !_iisPrefEnabled) return;
+  _iisPrefRunning = true;
+  (async () => {
+    try{
+      await _issSleep(3000);
+      if(_workersCache === null){ try{ await ensureWorkersLoaded(); }catch(e){} }
+      for(let guard = 0; guard < 400; guard++){
+        const b = currentBatchId;
+        if(!b) break;
+        if(document.hidden){ await _issSleep(5000); continue; }
+        const rank = s => s.status === 'active' ? 0 : s.status === 'waiting' ? 1 : 2;
+        const cand = Object.values(_slotsByInvoice)
+          .filter(s => s.invoice && (s.status === 'active' || s.status === 'waiting') && !s.packVerified && !_iis[_iisKey(b, s.invoice)] && (_iisPrefFail[_iisKey(b, s.invoice)] || 0) < 2)
+          .sort((x, y) => rank(x) - rank(y));
+        if(!cand.length) break;
+        const inv = cand[0].invoice;
+        const ok = await _iisFetch(b, inv);
+        if(!ok) _iisPrefFail[_iisKey(b, inv)] = (_iisPrefFail[_iisKey(b, inv)] || 0) + 1;
+        await _issSleep(ok ? 1500 : 5000);
+      }
+    }catch(e){ /* 미리받기는 보조 기능 — 실패해도 팝업 열 때 다시 받음 */ }
+    finally{ _iisPrefRunning = false; }
+  })();
+}
+// 지금 열린 팝업의 SKU 목록을 뒤에서 최신으로 받아와 갱신(입력 중인 값 유지)
+async function _iisRefreshOpen(b, invoice, delayMs){
+  const key = _iisKey(b, invoice);
+  const seq = ++_iisModalReqSeq;
+  _iisRefreshing = key;
+  try{
+    if(delayMs) await _issSleep(delayMs);
+    if(seq !== _iisModalReqSeq) return;
+    let ok = await _iisFetch(b, invoice);
+    // ★ 최종검사 반영 — 더 나중 요청이 생겼어도, 아직 "불러오는 중"이면 받아온 목록을 바로 보여줌
+    if(ok && seq !== _iisModalReqSeq && _issItemsLoading && _issueModalInvoice === invoice && currentBatchId === b && _iis[key]){
+      _iisApply(_iis[key].items); _issItemsLoading = false; _issItemsFailed = false; _issRerender();
+    }
+    if(!ok && seq === _iisModalReqSeq){
+      await _issSleep(2500 + Math.floor(Math.random() * 1500));
+      if(seq !== _iisModalReqSeq) return;
+      ok = await _iisFetch(b, invoice);
+    }
+    if(seq !== _iisModalReqSeq || _issueModalInvoice !== invoice || currentBatchId !== b) return;
+    const c = _iis[key];
+    if(c){ _iisApply(c.items); _issItemsLoading = false; _issItemsFailed = false; } // 미리받기가 먼저 채웠어도 사용
+    else { _issItemsLoading = false; _issItemsFailed = true; }
+    _issRerender();
+  } finally {
+    if(seq === _iisModalReqSeq) _iisRefreshing = null;
+  }
+}
+function openIssueModal(invoice){
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
+  const b = currentBatchId;
+  const c = _iis[_iisKey(b, invoice)];
   _issueModalInvoice = invoice;
-  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${(slot.issues||[]).length}건`;
-  document.getElementById('issueModalBody').innerHTML = `<div class="issue-modal-empty">불러오는 중...</div>`;
+  _iisApply(c ? c.items : []);
+  _issItemsLoading = !c;
+  _issItemsFailed = false;
+  _issLastSig = '';
+  document.getElementById('issueModalBody').innerHTML = '';
   document.getElementById('issueModalOverlay').classList.add('open');
-  // ★ 2026-09-24 수정(속도, 핵심) — 예전엔 ensureBatchItemsLoaded()로 배치 전체
-  //   36개 고객사의 전체 상품 목록(getBatch, 매우 무거운 호출)을 통째로 불러온
-  //   뒤, 그중 이 고객사(invoice) 것만 골라 SKU 선택 목록을 만들었음. 그런데
-  //   바로 아래에서 어차피 getInvoiceItemStatus로 "이 고객사"의 SKU별
-  //   바코드/상품명/필요수량을 따로 또 불러오고 있어서, 사실상 같은 정보를 두
-  //   번(하나는 배치 전체 규모로 무겁게, 하나는 이 고객사만 가볍게) 가져오고
-  //   있었음. ensureBatchItemsLoaded() 호출을 없애고, 아래 getInvoiceItemStatus
-  //   결과 하나로 SKU 선택 목록(barcode/sku/name/필요수량)과 스캔·이슈 상태를
-  //   동시에 채움 — 슬롯 클릭 시 더 이상 배치 전체를 불러올 필요가 없어짐.
-  //   (작업자 목록은 여전히 필요하므로 ensureWorkersLoaded()만 유지 — 이건
-  //   원래도 가볍고 캐싱돼 있어서 문제였던 적 없음)
-  await ensureWorkersLoaded();
-  // ★ 2026-07-24 신규 — "어떤 SKU가 부족한지 모르겠다"는 피드백: SKU별 스캔 상태를
-  //   따로 조회해서, 목록에서 미완료 SKU를 바로 찾을 수 있게 함.
-  _invoiceItemStatusByBarcode = {};
-  try{
-    // ★ 2026-09-24 신규(진단용, 임시) — Apps Script Executions 화면의 로그가
-    //   이 프로젝트에서 안 떠서, 서버가 응답에 실어 보내는 diag를 브라우저
-    //   콘솔(F12 → Console 탭)에 직접 찍음. 확인 끝나면 지워도 되고 당장은
-    //   그냥 둬도 동작에는 영향 없음.
-    const _clientT0 = performance.now();
-    const statusRes = await gasQueryWithRetry('getInvoiceItemStatus', { batchId: currentBatchId, invoice });
-    const _clientMs = Math.round(performance.now() - _clientT0);
-    if(Array.isArray(statusRes.diag)){
-      console.log('%c[진단] invoice=' + invoice + ' 클라이언트 왕복 총 ' + _clientMs + 'ms (서버 내부 단계별 아래)', 'font-weight:bold;color:#0a7;');
-      statusRes.diag.forEach(line => console.log('  ' + line));
-    }
-    if(statusRes.ok && Array.isArray(statusRes.items)){
-      // ★ 2026-07-29 긴급 수정 — 바코드만으로 캐싱하면, 같은 바코드에 서로 다른
-      //   SKU가 걸려있는 경우(어제 발견된 사고 케이스와 동일 원인) 하나가 다른
-      //   하나를 덮어써서 잘못된 진행률이 표시될 수 있었음. 바코드+SKU 조합으로 키 변경.
-      statusRes.items.forEach(it => { _invoiceItemStatusByBarcode[String(it.barcode)+'|'+String(it.sku)] = it; });
-    }
-  }catch(e){ /* 상태 조회 실패해도 목록 자체는 그대로 보여줌(수량 표시만 안 나옴) */ }
-  renderIssueModalBody();
+  renderIssueModalBody(); // ★ 즉시 그림(서버 기다리지 않음)
+  try{ document.getElementById('issueModalBody').scrollTop = 0; }catch(e){}
+  if(!c || (Date.now() - c.at) > 5000) _iisRefreshOpen(b, invoice);
+  else ++_iisModalReqSeq; // 이전 팝업용 늦은 응답이 이 팝업을 덮지 않게
+  if(_workersCache === null){
+    _issWorkersFailed = false;
+    ensureWorkersLoaded().then(() => { if(_workersCache === null) _issWorkersFailed = true; if(_issueModalInvoice === invoice) _issRerender(); });
+  }
+  if(!_iisPrefEnabled){ _iisPrefEnabled = true; _iisSchedulePrefetch(); }
 }
+let _issWorkersFailed = false;
+
+// ── 화면 다시 그릴 때 입력 중인 값/열린 수정창/포커스/스크롤 그대로 유지 ──
+function _issCapture(){
+  const body = document.getElementById('issueModalBody');
+  if(!body || !body.firstChild) return null;
+  const g = id => document.getElementById(id);
+  const st = { scroll: body.scrollTop, vals: {}, edits: {}, focus: null, focusEdit: null, sel: null, skuScroll: 0 };
+  ['newIssueSkuSearch','newIssueSku','newIssueReason','newIssueQty','newIssueWorker','newIssueWorkerManual','newIssueNote'].forEach(id => {
+    const e = g(id); if(e) st.vals[id] = e.value;
+  });
+  const skuSel = g('newIssueSku'); if(skuSel) st.skuScroll = skuSel.scrollTop;
+  body.querySelectorAll('.issue-edit-form').forEach(f => {
+    if(f.style.display === 'none') return;
+    const idx = f.dataset.idx, iid = f.dataset.issueId;
+    const r = g('issueEditReason-' + idx), q = g('issueEditQty-' + idx), n = g('issueEditNote-' + idx);
+    st.edits[iid] = { reason: r ? r.value : '', qty: q ? q.value : '', note: n ? n.value : '' };
+  });
+  const a = document.activeElement;
+  if(a && body.contains(a) && a.id){
+    const m = a.id.match(/^issueEdit(Reason|Qty|Note)-(\d+)$/);
+    if(m){
+      const f = g('issueEditForm-' + m[2]);
+      if(f) st.focusEdit = { iid: f.dataset.issueId, field: m[1] };
+    } else st.focus = a.id;
+    try{ if(a.tagName === 'INPUT' && a.type === 'text') st.sel = [a.selectionStart, a.selectionEnd]; }catch(e){}
+  }
+  return st;
+}
+function _issRestore(st){
+  if(!st) return;
+  const g = id => document.getElementById(id);
+  const body = document.getElementById('issueModalBody');
+  if(st.vals.newIssueSkuSearch){
+    const s = g('newIssueSkuSearch'); if(s){ s.value = st.vals.newIssueSkuSearch; filterNewIssueSkuOptions(s.value); }
+  }
+  const setSel = (id, v) => { const e = g(id); if(!e || v == null) return; if(Array.from(e.options).some(o => o.value === v)) e.value = v; };
+  setSel('newIssueSku', st.vals.newIssueSku);
+  setSel('newIssueReason', st.vals.newIssueReason);
+  setSel('newIssueWorker', st.vals.newIssueWorker);
+  ['newIssueQty','newIssueWorkerManual','newIssueNote'].forEach(id => { const e = g(id); if(e && st.vals[id] != null) e.value = st.vals[id]; });
+  const wSel = g('newIssueWorker'), wMan = g('newIssueWorkerManual');
+  if(wSel && wMan) wMan.style.display = (wSel.value === '__manual__') ? 'block' : 'none';
+  const skuSel = g('newIssueSku'); if(skuSel) skuSel.scrollTop = st.skuScroll || 0;
+  let focusEl = null;
+  if(body){
+    body.querySelectorAll('.issue-edit-form').forEach(f => {
+      const v = st.edits[f.dataset.issueId];
+      if(!v) return;
+      const idx = f.dataset.idx;
+      f.style.display = 'flex';
+      const btn = body.querySelector(`.issue-modal-edit-btn[data-idx="${idx}"]`); if(btn) btn.style.display = 'none';
+      const r = g('issueEditReason-' + idx), q = g('issueEditQty-' + idx), n = g('issueEditNote-' + idx);
+      if(r) r.value = v.reason; if(q) q.value = v.qty; if(n) n.value = v.note;
+      if(st.focusEdit && st.focusEdit.iid === f.dataset.issueId) focusEl = g('issueEdit' + st.focusEdit.field + '-' + idx);
+    });
+    body.scrollTop = st.scroll || 0;
+  }
+  if(!focusEl && st.focus) focusEl = g(st.focus);
+  if(focusEl){
+    try{ focusEl.focus({ preventScroll: true }); }catch(e){ try{ focusEl.focus(); }catch(e2){} }
+    try{ if(st.sel && focusEl.tagName === 'INPUT' && focusEl.type === 'text') focusEl.setSelectionRange(st.sel[0], st.sel[1]); }catch(e){}
+    if(body) body.scrollTop = st.scroll || 0;
+  }
+}
+// ★ 리뷰 반영 — 한글 입력 조합 중이거나 드롭다운(사유·작업자)이 열린 상태에서는 화면을 다시 그리지 않고
+//   조합이 끝나거나 드롭다운에서 나올 때 한 번 그림(글자 깨짐·드롭다운 닫힘 방지). 직접 누른 동작은 즉시.
+let _issComposing = false, _issDeferred = false, _issDeferredAt = 0;
+document.addEventListener('compositionstart', () => { _issComposing = true; }, true);
+document.addEventListener('compositionend', () => { _issComposing = false; if(_issDeferred) setTimeout(() => _issRerender(), 0); }, true);
+document.addEventListener('focusout', () => { _issComposing = false; if(_issDeferred) setTimeout(() => _issRerender(), 0); }, true);
+function _issBusyTyping(){
+  const a = document.activeElement, body = document.getElementById('issueModalBody');
+  if(!a || !body || !body.contains(a)) return false;
+  if(_issComposing) return true;
+  return a.tagName === 'SELECT' && !a.hasAttribute('size'); // 펼쳐지는 드롭다운
+}
+function _issRerender(force){
+  if(!_issueModalInvoice) return;
+  if(!force && _issBusyTyping()){ if(!_issDeferred) _issDeferredAt = Date.now(); _issDeferred = true; return; }
+  if(force) _issComposing = false;
+  _issDeferred = false;
+  const st = _issCapture();
+  renderIssueModalBody();
+  _issRestore(st);
+}
+function _issRerenderIf(invoice, batchId){
+  if(_issueModalInvoice === invoice && (!batchId || batchId === currentBatchId)) _issRerender();
+}
+
+// ── 화면에 보일 이슈 목록 = 서버 값 + 저장 중/저장됨/실패 표시 ──
+function _issEffective(invoice){
+  const slot = _slotsByInvoice[invoice];
+  const b = currentBatchId;
+  const base = ((slot && slot.issues) || []).map(i => Object.assign({}, i));
+  const out = [];
+  base.forEach(i => {
+    const d = _issPend.dels[i.issueId];
+    if(d && d.batchId === b){ if(d.st === 'saved') return; i._del = d; }
+    const e = _issPend.edits[i.issueId];
+    if(e && e.batchId === b){ i._edit = e; if(e.st !== 'fail'){ i.reason = e.reason; i.qty = e.qty; i.note = e.note; } }
+    out.push(i);
+  });
+  const ids = new Set(base.map(i => String(i.issueId)));
+  _issPend.adds.forEach(a => {
+    if(a.batchId !== b || a.invoice !== invoice) return;
+    if(a.issueId && ids.has(String(a.issueId))) return; // 서버 목록에 이미 들어옴 — 한 번만 보이게
+    out.push(Object.assign({}, a.payload, { issueId: a.issueId || a.tmpId, time: a.timeStr, _add: a }));
+  });
+  return out;
+}
+function _issPendHtml(kind, p){
+  const label = kind === 'add' ? '등록' : kind === 'edit' ? '수정' : '삭제';
+  const key = kind === 'add' ? p.tmpId : p.issueId;
+  if(p.st === 'saving'){
+    const sec = Math.max(0, Math.floor((Date.now() - p.at) / 1000));
+    return `<div class="iss-pend saving">⏳ ${label} 저장 중…${p.tries > 1 ? ` (재시도 ${p.tries - 1})` : ''} · 다른 작업 계속하셔도 됩니다 <span class="iss-pend-sec" data-at="${p.at}">${sec >= 3 ? `· ${sec}s` : ''}</span></div>`;
+  }
+  if(p.st === 'saved') return `<div class="iss-pend saved">✓ ${label} 저장됨</div>`;
+  const hint = kind === 'add' ? '아직 등록되지 않았습니다.' : kind === 'edit' ? '이전 값 그대로입니다.' : '삭제되지 않았습니다.';
+  return `<div class="iss-pend fail">⚠ ${label} 실패 — ${hint}<br><span class="iss-pend-err">${_issEsc(_issErrText(p.err))}</span>
+    <div class="iss-pend-actions"><button class="iss-pend-retry" data-kind="${kind}" data-key="${_issEsc(key)}">↻ 다시 시도</button><button class="iss-pend-dismiss" data-kind="${kind}" data-key="${_issEsc(key)}">닫기</button></div></div>`;
+}
+function _issErrText(e){
+  const s = String(e || '알 수 없는 오류');
+  if(/qty exceeds/i.test(s)) return '필요수량 초과: ' + s;
+  if(/server_busy|lock|timed out|too many/i.test(s)) return '서버가 바쁩니다. 잠시 후 다시 시도하세요. (' + s + ')';
+  return s;
+}
+function _issViewSig(invoice){
+  try{
+    return JSON.stringify(_issEffective(invoice).map(i => [i.issueId, i.reason, i.qty, i.note,
+      i._add ? i._add.st : '', i._edit ? i._edit.st : '', i._del ? i._del.st : ''])) + '|' + _issItemsLoading + _issItemsFailed + '|' + Object.keys(_invoiceItemStatusByBarcode).length + '|' + (_workersCache ? _workersCache.length : -1);
+  }catch(e){ return String(Math.random()); }
+}
+
 function renderIssueModalBody(){
   const invoice = _issueModalInvoice;
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
-  // ★ 2026-08-18 수정 — 예전엔 여기 별도로 라벨을 하드코딩해뒀는데, 위
-  //   ISSUE_REASON_OPTS(사유 등록 드롭다운)를 고쳐도 여긴 안 따라와서
-  //   "MISS · 스캔누락"만 뜨고 "(실제 출고됨)"이 빠진 채 표시되는 문제가
-  //   있었음(영업팀이 실제로 출고 안 된 것으로 오해할 수 있음). 사유 목록을
-  //   하나로 합쳐서, 앞으로는 ISSUE_REASON_OPTS만 고치면 둘 다 같이 반영됨.
+  // ★ 2026-08-18 수정 — 사유 라벨은 ISSUE_REASON_OPTS 하나로 통일
   const reasonLabel = {}; ISSUE_REASON_OPTS.forEach(r => reasonLabel[r.v] = r.label);
-  // ★ 2026-09-24 신규(작업자 요청) — 이슈가 많이 쌓인 고객사(예: 22건)는 등록된
-  //   순서(스캔한 순서) 그대로 나열돼서, 아래 "+ 새 이슈 등록" SKU 목록(알파벳순)과
-  //   순서가 달라 작업자가 원하는 제품을 찾기 어려웠음. 아래 새 이슈 등록 목록과
-  //   동일한 기준(SKU 알파벳순, localeCompare)으로 통일 — 수정/삭제는 idx가 아니라
-  //   issueId로 동작하므로 정렬 순서를 바꿔도 안전함.
-  const issues = (slot.issues || []).slice().sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
-  const rowsHtml = issues.length ? issues.map((i, idx) => `
-    <div class="issue-modal-row" id="issueRow-${idx}">
+  // ★ 2026-09-24 신규 — SKU 알파벳순(아래 새 이슈 등록 목록과 동일). 수정/삭제는 issueId 기준.
+  const issues = _issEffective(invoice).sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
+  const rowsHtml = issues.length ? issues.map((i, idx) => {
+    const p = i._add || i._edit || i._del;
+    const kind = i._add ? 'add' : i._del ? 'del' : i._edit ? 'edit' : '';
+    // 저장 중인 등록/삭제 줄은 수정 버튼을 잠시 숨김(서버 번호가 아직 없거나 지워지는 중)
+    const canEdit = !i._add && !(i._del && i._del.st !== 'fail') && !(i._edit && i._edit.st === 'saving');
+    const rowCls = 'issue-modal-row' + (i._add && i._add.st !== 'fail' ? ' iss-row-pending' : '') + (i._add && i._add.st === 'fail' ? ' iss-row-fail' : '') + (i._del && i._del.st === 'saving' ? ' iss-row-deleting' : '');
+    // ★ 수정 실패는 위 _issEffective에서 이미 서버 값(이전 값)으로 되돌려 보여줌
+    const pendHtml = p ? _issPendHtml(kind, p) : '';
+    return `
+    <div class="${rowCls}" id="issueRow-${idx}" data-issue-id="${_issEsc(i.issueId)}">
       <div class="issue-modal-row-top">
-        <span class="issue-modal-reason">${reasonLabel[i.reason] || i.reason}</span>
+        <span class="issue-modal-reason">${_issEsc(reasonLabel[i.reason] || i.reason)}</span>
         <span class="issue-modal-qty">${Number(i.qty).toLocaleString()}pcs</span>
       </div>
-      <div class="issue-modal-name">${i.name || i.sku || ''}</div>
-      <div class="issue-modal-meta">SKU #${i.sku || '-'} · 바코드 ${i.barcode || '-'} · ${i.worker || '-'} · ${(i.time||'').slice(5,16)}</div>
-      ${i.note ? `<div class="issue-modal-note">"${i.note}"</div>` : ''}
-      <button class="issue-modal-edit-btn" data-idx="${idx}">✎ 수정</button>
-      <div class="issue-edit-form" id="issueEditForm-${idx}" style="display:none">
+      <div class="issue-modal-name">${_issEsc(i.name || i.sku || '')}</div>
+      <div class="issue-modal-meta">SKU #${_issEsc(i.sku || '-')} · 바코드 ${_issEsc(i.barcode || '-')} · ${_issEsc(i.worker || '-')} · ${_issEsc((i.time||'').slice(5,16))}</div>
+      ${i.note ? `<div class="issue-modal-note">"${_issEsc(i.note)}"</div>` : ''}
+      ${pendHtml}
+      ${canEdit ? `<button class="issue-modal-edit-btn" data-idx="${idx}">✎ 수정</button>
+      <div class="issue-edit-form" id="issueEditForm-${idx}" data-idx="${idx}" data-issue-id="${_issEsc(i.issueId)}" style="display:none">
         <select id="issueEditReason-${idx}">
           ${ISSUE_REASON_OPTS.map(r => `<option value="${r.v}" ${r.v===i.reason?'selected':''}>${r.label}</option>`).join('')}
         </select>
         <input type="number" id="issueEditQty-${idx}" min="1" value="${i.qty}" placeholder="수량">
-        <input type="text" id="issueEditNote-${idx}" value="${String(i.note||'').replace(/"/g,'&quot;')}" placeholder="메모(선택)">
+        <input type="text" id="issueEditNote-${idx}" value="${_issEsc(i.note||'')}" placeholder="메모(선택)">
         <div class="issue-edit-actions">
           <button class="issue-edit-cancel" data-idx="${idx}">닫기</button>
-          <button class="issue-edit-save" data-idx="${idx}" data-issue-id="${i.issueId}">저장</button>
+          <button class="issue-edit-save" data-idx="${idx}" data-issue-id="${_issEsc(i.issueId)}">저장</button>
         </div>
-        <button class="issue-edit-delete" data-idx="${idx}" data-issue-id="${i.issueId}">🗑 이 이슈 전체 취소(삭제)</button>
-      </div>
-    </div>`).join('') : `<div class="issue-modal-empty">등록된 이슈 없음</div>`;
+        <button class="issue-edit-delete" data-idx="${idx}" data-issue-id="${_issEsc(i.issueId)}">🗑 이 이슈 전체 취소(삭제)</button>
+      </div>` : ''}
+    </div>`;
+  }).join('') : `<div class="issue-modal-empty">등록된 이슈 없음</div>`;
 
-  // ★ 2026-07-23 신규 — "+ 새 이슈 등록" 폼: 스캔 시점이 아니어도(예: 나중에 실물
-  //   확인하다 유통기한 지난 걸 발견) TV에서 바로 이슈를 등록할 수 있게 함.
-  // ★ 2026-07-24 수정 — SKU가 200개까지도 있어서 하나하나 찾기 어렵다는 피드백:
-  //   (1) 표시 순서를 "SKU 먼저" + SKU 알파벳순 정렬로 바꾸고
-  //   (2) 옆에 검색창을 추가해서 SKU/상품명/바코드로 실시간 필터링되게 함.
-  // ★ 2026-07-29 긴급 수정 — BatchItems 원본에 같은 SKU가 여러 줄(분할입고 등)로
-  //   나뉘어 있으면, 예전엔 병합 없이 그대로 나열해서 후보 목록에 같은 상품이
-  //   두 번(또는 그 이상) 중복으로 뜨는 버그가 있었음. 바코드+SKU가 같은 줄은
-  //   수량을 합산해서 하나로 병합한 뒤에 정렬함.
-  // ★ 2026-09-24 수정(속도) — 예전엔 이 병합을 위해 배치 전체를 불러온
-  //   _batchItemsCache에서 다시 골라냈는데, 위에서 이미 호출한
-  //   getInvoiceItemStatus 결과(_invoiceItemStatusByBarcode)가 barcode+SKU
-  //   기준으로 이미 병합·집계까지 끝난 값이라 별도 병합이 필요 없음 — 바로 사용.
+  // ★ 2026-07-23/24/29, 09-24 — "+ 새 이슈 등록" 폼(SKU 먼저·알파벳순·검색, barcode+SKU 병합 결과 사용)
   _newIssueItemsSorted = Object.values(_invoiceItemStatusByBarcode)
     .map(it => Object.assign({}, it, { req_qty: it.reqQty }))
     .sort((a, b) => String(a.sku || '').localeCompare(String(b.sku || '')));
+  const skuOptions = _issItemsLoading
+    ? '<option value="" disabled>⏳ 상품 목록 불러오는 중…</option>'
+    : (_issItemsFailed && !_newIssueItemsSorted.length)
+      ? '<option value="" disabled>상품 목록을 불러오지 못했습니다 — 아래 "다시 불러오기"</option>'
+      : renderSkuOptionsHtml(_newIssueItemsSorted);
+  const itemsBlocked = _issItemsLoading || (_issItemsFailed && !_newIssueItemsSorted.length);
   const newFormHtml = `
     <div class="issue-new-form">
       <div class="issue-new-form-title">+ 새 이슈 등록</div>
@@ -1435,7 +1661,8 @@ function renderIssueModalBody(){
           <label>상품 (SKU)</label>
           <input type="text" id="newIssueSkuSearch" placeholder="🔍 SKU 검색..." style="width:55%; padding:6px 10px; font-size:13px; background:var(--surface); border:1px solid var(--border2); border-radius:8px; color:var(--text);">
         </div>
-        <select id="newIssueSku" size="9" style="height:auto; font-size:15px;">${renderSkuOptionsHtml(_newIssueItemsSorted)}</select>
+        <select id="newIssueSku" size="9" style="height:auto; font-size:15px;">${skuOptions}</select>
+        ${(_issItemsFailed && !_newIssueItemsSorted.length) ? '<button class="iss-items-retry" id="issItemsRetry">↻ 상품 목록 다시 불러오기</button>' : ''}
       </div>
       <div class="issue-new-form-row">
         <div>
@@ -1450,24 +1677,67 @@ function renderIssueModalBody(){
       <div>
         <label>작업자(발견자)</label>
         <select id="newIssueWorker" onchange="document.getElementById('newIssueWorkerManual').style.display = (this.value==='__manual__') ? 'block' : 'none';">${(_workersCache && _workersCache.length)
-          ? _workersCache.map(w => `<option value="${w.name}">${w.name}</option>`).join('')
-          : '<option value="">등록된 작업자 없음</option>'}<option value="__manual__">✎ 명단에 없음 — 직접 입력</option></select>
+          ? _workersCache.map(w => `<option value="${_issEsc(w.name)}">${_issEsc(w.name)}</option>`).join('')
+          : (_workersCache === null && !_issWorkersFailed ? '<option value="">⏳ 작업자 명단 불러오는 중…</option>' : '<option value="">등록된 작업자 없음</option>')}<option value="__manual__">✎ 명단에 없음 — 직접 입력</option></select>
         <input type="text" id="newIssueWorkerManual" placeholder="이름 직접 입력" style="display:none; margin-top:8px;">
       </div>
       <div>
         <label>메모(선택)</label>
         <input type="text" id="newIssueNote" placeholder="예: 검수 중 발견, 유통기한 2026-06-01">
       </div>
-      <button class="issue-new-form-submit" id="newIssueSubmitBtn">⚠ 이슈 등록</button>
+      <button class="issue-new-form-submit" id="newIssueSubmitBtn"${itemsBlocked ? ' disabled' : ''}>${_issItemsLoading ? '⏳ 상품 목록 불러오는 중…' : '⚠ 이슈 등록'}</button>
     </div>`;
 
-  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${issues.length}건`;
+  const shown = issues.filter(i => !(i._del && i._del.st === 'saving') && !(i._add && i._add.st === 'fail')).length;
+  document.getElementById('issueModalTitle').textContent = `${slot.customer} · 이슈 ${shown}건`;
   document.getElementById('issueModalBody').innerHTML = rowsHtml + newFormHtml;
+  _issLastSig = _issViewSig(invoice);
 }
-async function submitNewIssueFromBoard(){
+
+// ── 저장 보내기(자동 재시도) ──
+function _issIsRetriable(res){
+  const e = String((res && res.error) || '');
+  if(/GAS_URL|qty|required|batch_deleted|whole number|not found|no issues|exceeds|정수/i.test(e)) return false;
+  return true; // 네트워크 끊김·20초 초과·server_busy·잠금 대기 초과 등
+}
+async function _issSend(op, data, p){
+  const delays = [2000, 5000, 10000]; // 총 2분 안 — 서버의 2분 중복방지 안에서만 재시도
+  let res;
+  for(let t = 0; ; t++){
+    p.tries = t + 1;
+    if(t > 0) _issRerenderIf(p.invoice, p.batchId);
+    try{ res = await gasCall(op, data); }catch(e){ res = { ok:false, error:String(e) }; }
+    if(res && res.ok) return res;
+    if(!_issIsRetriable(res) || t >= delays.length) return res || { ok:false, error:'알 수 없는 오류' };
+    await _issSleep(delays[t] + Math.floor(Math.random() * 1000));
+  }
+}
+let _issPollTimer = null;
+function _issPollSoon(){
+  clearTimeout(_issPollTimer);
+  _issPollTimer = setTimeout(() => { try{ pollOnce(); }catch(e){} }, 400);
+}
+function _iisAfterSave(b, invoice){
+  // 서버의 SKU 상태 캐시가 6초라서 7초 뒤에 최신 값을 다시 받음(열려 있을 때만)
+  const c = _iis[_iisKey(b, invoice)]; if(c) c.at = 0;
+  if(_issueModalInvoice === invoice && currentBatchId === b) _iisRefreshOpen(b, invoice, 7000);
+}
+function _issSavingCount(){
+  let n = _issPend.adds.filter(a => a.st === 'saving').length;
+  Object.values(_issPend.edits).forEach(e => { if(e.st === 'saving') n++; });
+  Object.values(_issPend.dels).forEach(d => { if(d.st === 'saving') n++; });
+  return n;
+}
+window.addEventListener('beforeunload', e => {
+  if(_issSavingCount() > 0){ e.preventDefault(); e.returnValue = ''; return ''; }
+});
+
+function submitNewIssueFromBoard(){
   const invoice = _issueModalInvoice;
   const slot = _slotsByInvoice[invoice];
   if(!slot) return;
+  if(_issItemsLoading) return;
+  if(Date.now() - _issLastSubmitAt < 1200) return; // ★ 리뷰 반영 — 두 번 누름 무시(경고창 안 뜨게)
   const skuSel = document.getElementById('newIssueSku');
   const opt = skuSel.options[skuSel.selectedIndex];
   const barcode = skuSel.value;
@@ -1481,34 +1751,188 @@ async function submitNewIssueFromBoard(){
     : workerSel.trim();
   const note = document.getElementById('newIssueNote').value.trim();
 
-  if(!barcode){ alert('상품을 선택하세요'); return; }
+  if(!barcode || (opt && opt.disabled)){ alert('상품을 선택하세요'); return; }
   if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
   if(!worker){ alert('작업자(발견자)를 입력해주세요'); return; }
 
-  const btn = document.getElementById('newIssueSubmitBtn');
-  btn.disabled = true; btn.textContent = '등록 중...';
-  const res = await gasCall('logIssue', {
-    batchId: currentBatchId, worker: worker,
-    barcode: barcode, sku: sku, name: name,
-    invoice: invoice, customer: slot.customer,
-    reason: reason, qty: qty, note: note,
-  });
+  const a = {
+    tmpId: 'tmp-' + Date.now() + '-' + (++_issSeq), batchId: currentBatchId, invoice,
+    payload: { batchId: currentBatchId, worker, barcode, sku, name, invoice, customer: slot.customer, reason, qty, note },
+    st: 'saving', at: Date.now(), tries: 0, err: '',
+    knownIds: (slot.issues || []).map(i => String(i.issueId)),
+    timeStr: (() => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; })(),
+  };
+  _issPend.adds.push(a);
+  _issLastSubmitAt = Date.now();
+  // ★ 같은 내용을 또 누르는 실수 방지 — 수량·메모·검색칸을 바로 비움(작업자·사유는 다음 등록 편하게 유지)
+  ['newIssueQty','newIssueNote','newIssueSkuSearch'].forEach(id => { const e = document.getElementById(id); if(e) e.value = ''; });
+  _issRerender(true);
+  showIssueToast('⏳ 이슈 저장 중… 다른 작업 계속하셔도 됩니다', 'warn');
+  _issRunAdd(a);
+}
+let _issLastSubmitAt = 0;
+async function _issRunAdd(a){
+  a.st = 'saving'; a.err = ''; a.at = Date.now();
+  _issRerenderIf(a.invoice, a.batchId);
+  let res = await _issSend('logIssue', a.payload, a);
+  if(!_issPend.adds.includes(a)) return; // 그 사이 닫기(지우기)됨
+  if(!res.ok && a.tries > 1){
+    // ★ 리뷰 반영 — 재시도 중 "필요수량 초과" 등은 첫 시도가 실제로 저장돼서일 수 있음 → 보드 최신값으로 먼저 확인
+    try{ await pollOnce(); }catch(e){}
+    if(!_issPend.adds.includes(a)) return;
+    const m = _issFindLanded(a);
+    if(m) res = { ok: true, issueId: m, duplicate: true };
+  }
   if(res.ok){
-    // ★ 2026-08-21 긴급 신규 — 근본 원인 수정: 예전엔 등록 성공해도 아무 알림이
-    //   없어서, 작업자가 "등록이 안 됐나?"하고 헷갈려 같은 내용을 처음부터 다시
-    //   반복 입력하는 사고가 실제로 발생함(같은 이슈가 짧은 시간에 2~3번 중복
-    //   등록됨). 이제 성공 시 눈에 띄는 초록색 알림을 잠깐 띄워서 명확히 알려줌.
-    //   (서버 쪽에도 이중 안전장치로 최근 2분 내 완전 동일 이슈는 자동으로
-    //   걸러내도록 별도 추가함 — logIssue 참고)
-    showIssueToast(res.duplicate ? '이미 등록된 이슈입니다 (중복 방지됨)' : '✓ 이슈가 등록되었습니다', res.duplicate ? 'warn' : 'ok');
-    await pollOnce();
-    if(_issueModalInvoice) renderIssueModalBody();
+    a.st = 'saved'; a.issueId = res.issueId ? String(res.issueId) : ''; a.doneAt = Date.now();
+    // 첫 시도에서 "중복"이면 2분 안에 같은 이슈가 이미 있었던 것(원래 안내 유지). 재시도 후 중복은 우리 첫 시도가 저장된 것 — 정상.
+    if(res.duplicate && a.tries <= 1) showIssueToast('이미 등록된 이슈입니다 (중복 방지됨)', 'warn');
+    else showIssueToast('✓ 이슈가 저장되었습니다', 'ok');
+    _iisAfterSave(a.batchId, a.invoice);
+    _issPollSoon();
   } else {
-    btn.disabled = false; btn.textContent = '⚠ 이슈 등록';
-    alert('등록 실패: ' + (res.error || '알 수 없는 오류'));
+    a.st = 'fail'; a.err = res.error || '알 수 없는 오류';
+    showIssueToast('⚠ 이슈 저장 실패 — 슬롯 팝업에서 "다시 시도"를 눌러주세요', 'err');
+  }
+  _issRerenderIf(a.invoice, a.batchId);
+}
+
+// ★ 2026-07-22 신규 — "✎ 수정": 사유/수량/메모를 그 자리에서 고쳐서 저장.
+async function saveIssueEdit(issueId, idx){
+  const reason = document.getElementById(`issueEditReason-${idx}`).value;
+  const qty = parseInt(document.getElementById(`issueEditQty-${idx}`).value, 10);
+  const note = document.getElementById(`issueEditNote-${idx}`).value.trim();
+  if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
+  const prev = _issPend.edits[issueId];
+  if(prev && prev.st === 'saving'){ showIssueToast('앞의 수정이 아직 저장 중입니다. 잠시 후 다시 눌러주세요', 'warn'); return; }
+  const e = { batchId: currentBatchId, invoice: _issueModalInvoice, issueId, reason, qty, note, st: 'saving', at: Date.now(), tries: 0, err: '' };
+  _issPend.edits[issueId] = e;
+  const f = document.getElementById(`issueEditForm-${idx}`); if(f) f.style.display = 'none'; // 다시 그릴 때 수정창이 다시 열리지 않게
+  _issRerender(true);
+  _issRunEdit(e);
+}
+async function _issRunEdit(e){
+  e.st = 'saving'; e.err = ''; e.at = Date.now();
+  _issRerenderIf(e.invoice, e.batchId);
+  const res = await _issSend('editIssue', { issueId: e.issueId, reason: e.reason, qty: e.qty, note: e.note }, e);
+  if(_issPend.edits[e.issueId] !== e) return;
+  if(res.ok){ e.st = 'saved'; e.doneAt = Date.now(); showIssueToast('✓ 수정이 저장되었습니다', 'ok'); _iisAfterSave(e.batchId, e.invoice); _issPollSoon(); }
+  else { e.st = 'fail'; e.err = res.error || '알 수 없는 오류'; showIssueToast('⚠ 수정 저장 실패 — 슬롯 팝업에서 "다시 시도"를 눌러주세요', 'err'); }
+  _issRerenderIf(e.invoice, e.batchId);
+}
+
+// ★ 2026-07-22 신규 — "🗑 이 이슈 전체 취소(삭제)"
+async function deleteIssueFromBoard(issueId, idx){
+  if(!confirm('이 이슈를 완전히 취소하시겠습니까?\n다시 이 고객사의 필요수량에 포함되어 완료 처리되지 않은 상태로 돌아갑니다.\n(수량/사유만 고치려면 "닫기"를 누르고 값을 수정한 뒤 저장하세요)')) return;
+  const prev = _issPend.dels[issueId];
+  if(prev && prev.st === 'saving') return;
+  const d = { batchId: currentBatchId, invoice: _issueModalInvoice, issueId, st: 'saving', at: Date.now(), tries: 0, err: '' };
+  _issPend.dels[issueId] = d;
+  const f = document.getElementById(`issueEditForm-${idx}`); if(f) f.style.display = 'none';
+  _issRerender(true);
+  _issRunDel(d);
+}
+async function _issRunDel(d){
+  d.st = 'saving'; d.err = ''; d.at = Date.now();
+  _issRerenderIf(d.invoice, d.batchId);
+  const res = await _issSend('undoIssue', { issueId: d.issueId }, d);
+  if(_issPend.dels[d.issueId] !== d) return;
+  if(res.ok){
+    d.st = 'saved'; d.doneAt = Date.now();
+    const e = _issPend.edits[d.issueId]; if(e && e.st !== 'saving') delete _issPend.edits[d.issueId];
+    showIssueToast('✓ 이슈가 취소(삭제)되었습니다', 'ok'); _iisAfterSave(d.batchId, d.invoice); _issPollSoon();
+  } else { d.st = 'fail'; d.err = res.error || '알 수 없는 오류'; showIssueToast('⚠ 삭제 실패 — 슬롯 팝업에서 "다시 시도"를 눌러주세요', 'err'); }
+  _issRerenderIf(d.invoice, d.batchId);
+}
+// 실패 줄의 "다시 시도"/"닫기"
+function _issPendAction(kind, key, retry){
+  if(kind === 'add'){
+    const a = _issPend.adds.find(x => x.tmpId === key); if(!a) return;
+    if(!retry){ _issPend.adds = _issPend.adds.filter(x => x !== a); _issRerender(true); return; }
+    if(a.st !== 'fail') return;
+    // 재시도 전에: 사실은 서버에 저장됐는데 응답만 못 받은 경우(보드 목록에 이미 들어옴)면 다시 보내지 않음
+    const m = _issFindLanded(a);
+    if(m){ a.st = 'saved'; a.issueId = m; a.doneAt = Date.now(); _issRerender(); showIssueToast('✓ 이미 저장되어 있었습니다', 'ok'); return; }
+    _issRunAdd(a);
+  } else if(kind === 'edit'){
+    const e = _issPend.edits[key]; if(!e) return;
+    if(!retry){ delete _issPend.edits[key]; _issRerender(true); return; }
+    if(e.st === 'fail') _issRunEdit(e);
+  } else if(kind === 'del'){
+    const d = _issPend.dels[key]; if(!d) return;
+    if(!retry){ delete _issPend.dels[key]; _issRerender(true); return; }
+    if(d.st === 'fail') _issRunDel(d);
   }
 }
-// ★ 2026-08-21 신규 — 이슈 등록 성공/중복 알림용 간단 토스트
+// 실패로 표시된 등록이 실제로는 서버에 들어갔는지(등록 전에 없던 같은 내용의 이슈가 새로 생겼는지)
+function _issFindLanded(a){
+  if(a.batchId !== currentBatchId) return '';
+  const s = _slotsByInvoice[a.invoice]; if(!s) return '';
+  const known = new Set(a.knownIds || []);
+  const claimed = new Set(_issPend.adds.filter(x => x !== a && x.issueId).map(x => String(x.issueId)));
+  const p = a.payload;
+  const hit = (s.issues || []).find(i => !known.has(String(i.issueId)) && !claimed.has(String(i.issueId)) &&
+    String(i.barcode || '') === String(p.barcode || '') && String(i.reason || '') === String(p.reason || '') &&
+    Number(i.qty) === Number(p.qty) && String(i.worker || '') === String(p.worker || ''));
+  return hit ? String(hit.issueId) : '';
+}
+// 보드 폴링 때마다: 서버 값이 따라온 표시는 정리(최대 90초 유지), 열린 팝업은 바뀐 게 있을 때만 다시 그림
+function _issAfterPoll(){
+  const now = Date.now(), b = currentBatchId;
+  const slotOf = inv => _slotsByInvoice[inv];
+  _issPend.adds = _issPend.adds.filter(a => {
+    if(a.st === 'fail' && a.batchId === b){
+      const m = _issFindLanded(a);
+      if(m){ a.st = 'saved'; a.issueId = m; a.doneAt = now; }
+    }
+    if(a.st !== 'saved') return true;
+    if(a.batchId === b){
+      const s = slotOf(a.invoice);
+      if(s && a.issueId && (s.issues || []).some(i => String(i.issueId) === String(a.issueId))) return false;
+    }
+    return now - (a.doneAt || now) < 90000;
+  });
+  Object.keys(_issPend.edits).forEach(k => {
+    const e = _issPend.edits[k]; if(e.st !== 'saved') return;
+    let done = now - (e.doneAt || now) >= 90000;
+    if(!done && e.batchId === b){
+      const s = slotOf(e.invoice);
+      const i = s && (s.issues || []).find(x => String(x.issueId) === String(k));
+      if(!i || (String(i.reason) === String(e.reason) && Number(i.qty) === Number(e.qty) && String(i.note || '') === String(e.note || ''))) done = true;
+    }
+    if(done) delete _issPend.edits[k];
+  });
+  Object.keys(_issPend.dels).forEach(k => {
+    const d = _issPend.dels[k]; if(d.st !== 'saved') return;
+    let done = now - (d.doneAt || now) >= 90000;
+    if(!done && d.batchId === b){
+      const s = slotOf(d.invoice);
+      if(s && !(s.issues || []).some(x => String(x.issueId) === String(k))) done = true;
+    }
+    if(done) delete _issPend.dels[k];
+  });
+  _iisSchedulePrefetch();
+  const inv = _issueModalInvoice;
+  if(inv && _slotsByInvoice[inv]){
+    const key = _iisKey(b, inv), c = _iis[key];
+    if(c && c.sig !== _slotSig(_slotsByInvoice[inv]) && _iisRefreshing !== key && (now - c.at) > 5000) _iisRefreshOpen(b, inv);
+    if(_issViewSig(inv) !== _issLastSig) _issRerender();
+  }
+}
+// 저장 중 경과 초 표시만 그 자리에서 갱신(화면 전체를 다시 그리지 않음)
+setInterval(() => {
+  try{
+    if(!_issueModalInvoice) return;
+    // ★ 최종검사 반영 — 드롭다운에 포커스가 남아 있어도 3초 넘게 미루지 않음(저장됨/실패 표시가 늦지 않게)
+    if(_issDeferred && Date.now() - _issDeferredAt > 3000){ _issRerender(true); return; }
+    document.querySelectorAll('#issueModalBody .iss-pend-sec').forEach(el => {
+      const sec = Math.floor((Date.now() - Number(el.dataset.at)) / 1000);
+      el.textContent = sec >= 3 ? '· ' + sec + 's' : '';
+    });
+  }catch(e){}
+}, 1000);
+
+// ★ 2026-08-21 신규 — 이슈 등록 성공/중복 알림용 간단 토스트 (11-05: 실패용 빨강 'err' 추가)
 function showIssueToast(msg, type){
   let t = document.getElementById('issueToast');
   if(!t){
@@ -1518,9 +1942,10 @@ function showIssueToast(msg, type){
     document.body.appendChild(t);
   }
   t.textContent = msg;
-  t.style.background = type === 'warn' ? '#3a2a10' : '#0f2e1a';
-  t.style.border = type === 'warn' ? '1px solid #d97706' : '1px solid #22c55e';
-  t.style.color = type === 'warn' ? '#fbbf24' : '#4ade80';
+  const pal = type === 'err' ? ['#3a1016', '#ef4444', '#fca5a5'] : type === 'warn' ? ['#3a2a10', '#d97706', '#fbbf24'] : ['#0f2e1a', '#22c55e', '#4ade80'];
+  t.style.background = pal[0];
+  t.style.border = '1px solid ' + pal[1];
+  t.style.color = pal[2];
   requestAnimationFrame(() => {
     t.style.opacity = '1';
     t.style.transform = 'translateX(-50%) translateY(0)';
@@ -1529,54 +1954,15 @@ function showIssueToast(msg, type){
   t._hideTimer = setTimeout(() => {
     t.style.opacity = '0';
     t.style.transform = 'translateX(-50%) translateY(20px)';
-  }, 2600);
+  }, type === 'err' ? 6000 : 2600);
 }
 function closeIssueModal(){
   document.getElementById('issueModalOverlay').classList.remove('open');
   _issueModalInvoice = null;
+  ++_iisModalReqSeq; // 닫힌 팝업용 늦은 응답은 무시
+  _iisRefreshing = null;
 }
 let _issueModalInvoice = null; // ★ 2026-07-22 신규: 지금 열려있는 이슈 모달이 어느 고객사(invoice) 것인지
-
-// ★ 2026-07-22 신규 — "✎ 수정": 잘못 입력한 이슈를 취소하는 게 아니라
-//   사유/수량/메모를 그 자리에서 직접 고쳐서 저장. 저장하면 그 차이만큼
-//   고객사의 완료 판정 기준(필요수량)도 자동으로 다시 계산됨.
-async function saveIssueEdit(issueId, idx){
-  const reason = document.getElementById(`issueEditReason-${idx}`).value;
-  const qty = parseInt(document.getElementById(`issueEditQty-${idx}`).value, 10);
-  const note = document.getElementById(`issueEditNote-${idx}`).value.trim();
-  if(!qty || qty < 1){ alert('수량을 정확히 입력해주세요'); return; }
-  const saveBtn = document.querySelector(`.issue-edit-save[data-idx="${idx}"]`);
-  saveBtn.disabled = true;
-  saveBtn.textContent = '저장 중...';
-  const res = await gasCall('editIssue', { issueId, reason, qty, note });
-  if(res.ok){
-    await pollOnce(); // 최신 상태(완료 판정 등) 즉시 반영
-    if(_issueModalInvoice) renderIssueModalBody(); // 모달도 수정된 값으로 다시 그림
-  } else {
-    saveBtn.disabled = false;
-    saveBtn.textContent = '저장';
-    alert('수정 실패: ' + (res.error || '알 수 없는 오류'));
-  }
-}
-
-// ★ 2026-07-22 신규 — "🗑 이 이슈 전체 취소(삭제)": 값을 고치는 게 아니라
-//   이 이슈 자체를 완전히 없던 일로 만듦. 취소하면 그 수량만큼 다시 고객사의
-//   필요수량에 포함되어(완료 판정에서 다시 빠짐), 현황판이 정확한 상태로 갱신됨.
-async function deleteIssueFromBoard(issueId, idx){
-  if(!confirm('이 이슈를 완전히 취소하시겠습니까?\n다시 이 고객사의 필요수량에 포함되어 완료 처리되지 않은 상태로 돌아갑니다.\n(수량/사유만 고치려면 "닫기"를 누르고 값을 수정한 뒤 저장하세요)')) return;
-  const delBtn = document.querySelector(`.issue-edit-delete[data-idx="${idx}"]`);
-  delBtn.disabled = true;
-  delBtn.textContent = '취소하는 중...';
-  const res = await gasCall('undoIssue', { issueId });
-  if(res.ok){
-    await pollOnce(); // 최신 상태 즉시 반영
-    if(_issueModalInvoice) renderIssueModalBody(); // 모달도 최신 목록으로 다시 그림(이 건은 빠짐)
-  } else {
-    delBtn.disabled = false;
-    delBtn.textContent = '🗑 이 이슈 전체 취소(삭제)';
-    alert('취소 실패: ' + (res.error || '알 수 없는 오류'));
-  }
-}
 
 /* ═══════════════════════════════════════════════════════════
  * ★ 2026-08-24 신규 — 패킹 검증 모달(오출고 방지 핵심 기능)
@@ -1978,6 +2364,13 @@ document.addEventListener('click', e => {
   if(deleteBtn){ deleteIssueFromBoard(deleteBtn.dataset.issueId, deleteBtn.dataset.idx); return; }
   const newIssueBtn = e.target.closest('#newIssueSubmitBtn');
   if(newIssueBtn){ submitNewIssueFromBoard(); return; }
+  // ★ 2026-11-05 신규 — 저장 실패 줄의 "다시 시도"/"닫기", 상품 목록 다시 불러오기
+  const pendBtn = e.target.closest('.iss-pend-retry, .iss-pend-dismiss');
+  if(pendBtn){ _issPendAction(pendBtn.dataset.kind, pendBtn.dataset.key, pendBtn.classList.contains('iss-pend-retry')); return; }
+  if(e.target.closest('#issItemsRetry')){
+    if(_issueModalInvoice){ _issItemsFailed = false; _issItemsLoading = !_iis[_iisKey(currentBatchId, _issueModalInvoice)]; _issRerender(); _iisRefreshOpen(currentBatchId, _issueModalInvoice); }
+    return;
+  }
   if(e.target.id === 'issueModalOverlay') closeIssueModal();
 });
 
@@ -2017,6 +2410,7 @@ function renderBoard(slots, fromPoll){
     }
     _slotsByInvoice[s.invoice] = s;
   });
+  if(fromPoll){ try{ _issAfterPoll(); }catch(eIss){ console.warn('issue overlay sync skipped:', eIss); } } // ★ 2026-11-05 신규 — 이슈 즉시반영 정리·미리받기
   if(!slots || slots.length === 0){
     board.innerHTML = `<div class="empty-state"><h2>오늘의 배치를 기다리는 중...</h2><p>슬롯이 배정되면 여기 자동으로 표시됩니다</p></div>`;
     return;
