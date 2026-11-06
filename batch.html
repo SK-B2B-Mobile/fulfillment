@@ -1927,7 +1927,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
           <div class="scan-input-wrap">
             <span class="scan-icon">▤</span>
-            <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus inputmode="none"><!-- ★ 2026-11-06 — 스캐너 입력은 그대로 받고 화면 키패드만 안 뜨게(손으로 칠 땐 "바코드 수동 입력") -->
+            <input id="scanInput" placeholder="바코드 스캔..." autocomplete="off" autofocus><!-- ★ 2026-11-06 v29 — inputmode="none" 되돌림: 현장 스캐너가 키패드(입력기)를 통해 글자를 보내서, 키패드를 끄면 바코드가 빈칸으로 들어왔음(Unknown barcode (empty)) -->
           </div>
 
           <div id="scanResult"></div>
