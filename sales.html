@@ -3736,7 +3736,7 @@ function renderBoxQtySection(order){
     const sumTxt = sv.pal ? (sv.pal + ' Pallet' + (sv.pal===1?'':'s') + ' · ' + _putkBoxText_(vRows, sv.legacyBox ? sv.box : 0)) : _putkSummary2_(sv.box, sv.pal);
     return `${head}<div class="dims-panel" id="boxqty-panel">
       <div class="putk-vh"><span class="putk-sum">${sumTxt}${sv.dims.length ? ' · Total ' + _putkLbs_(wt) : ''}</span>
-        <button class="edit-pencil-btn" type="button" onclick="putkEdit('${inv}')">✏️ Edit</button></div>
+        <span style="display:flex; gap:8px;">${(sv.pal > 0 || sv.box > 0) ? `<button class="edit-pencil-btn" type="button" onclick="printMergedPalletLabel()">🏷️ Print Label</button>` : ''}<button class="edit-pencil-btn" type="button" onclick="putkEdit('${inv}')">✏️ Edit</button></span></div>
       ${!sv.pal ? `<div class="putk-vrow box"><span class="i">📦</span><span>Boxes (earlier entry)</span><span class="w">${sv.box}</span><span></span></div>` : ''}
       ${rows.join('') || '<div class="putk-none">No pallets entered.</div>'}
       ${sv.legacy ? '<div class="putk-note">⚠ Pallet sizes were not recorded for this order (count only). Click Edit to add L × W × H and weight.</div>' : ''}
@@ -4169,8 +4169,19 @@ function printMergedPalletLabel(order){
   order = order || CURRENT_ORDER;
   if (!order){ alert('No order is open.'); return; }
   const isPallet = order.method === 'TRUCKING' || order.method === 'TK';
-  const shipVia = isPallet ? 'TK' : 'UPS';
-  const labelKind = isPallet ? 'PALLET' : 'BOX';
+  let shipVia = isPallet ? 'TK' : 'UPS';
+  let labelKind = isPallet ? 'PALLET' : 'BOX';
+  // ★ 2026-11-06 신규(현장 — "PU&TK만 라벨 출력 버튼이 없다") — PU&TK는 디멘션을 Jobs 전용 칸(팔렛 목록)에 따로
+  //   저장해서 order.dims가 비어 있음 → 팔렛 수만큼 "PALLET n/N" 라벨(팔렛 없이 박스 수만 있던 예전 입력은 "BOX n/N").
+  const isPuTk = String(order.method || '').trim().toUpperCase() === 'PU & TK';
+  if (isPuTk){
+    let sv = null; try{ sv = _putkSaved_(order); }catch(eSv){ sv = null; }
+    const pal = sv ? sv.pal : 0, box = sv ? sv.box : 0;
+    if (!pal && !box){ alert('No pallets saved yet — enter pallets before printing a label.'); return; }
+    shipVia = 'PU&TK';
+    labelKind = pal > 0 ? 'PALLET' : 'BOX';
+    order = Object.assign({}, order, { dims: Array.from({ length: pal > 0 ? pal : box }, () => ({})), dimsGroupMembers: null, dimsLinkedTo: '' });
+  }
 
   // 대표든 포함오더든 order.dims엔 항상 실제(대표) 디멘션이 들어있고
   // order.dimsGroupMembers엔 이 팔렛에 함께 실린 오더 전체 명단이 들어있음
