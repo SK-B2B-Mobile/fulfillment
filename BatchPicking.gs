@@ -1698,7 +1698,8 @@ function showPackingMovedTiming() {
   const v = String(PropertiesService.getScriptProperties().getProperty('pmTiming') || '(아직 3초 넘은 기록 없음)');
   const t = '=== 완료 버튼 저장(setPackingMoved) 3초 넘은 실행 — 구간 끝난 시각(초, 누적) ===\n' +
     'lock=저장 순서 기다림 끝 · read=고객사 행 찾기 · pv=2차 검증 상태 재계산(verified 만) · write=칸 쓰기 · bump=버전 표시 · unlock=잠금 해제 · insp=Jobs 검수 결과 쓰기 · queue=Firestore 대기열 · end=끝\n' +
-    '(v38) insp 안: i.pre=미완료 사전확인 · i.bc=고객사 정보 · i.iss=이슈 · i.items=상품줄 · i.scan=스캔 합산 · i.find=Jobs 인보이스 줄 찾기 · i.cur=Jobs 현재 값 · i.save=검수 결과 저장 끝\n' + v;
+    '(v38) insp 안: i.pre=미완료 사전확인 · i.bc=고객사 정보 · i.iss=이슈 · i.items=상품줄 · i.scan=스캔 합산 · i.find=Jobs 인보이스 줄 찾기 · i.cur=Jobs 현재 값 · i.save=검수 결과 저장 끝\n' +
+    '(v39) i.skip=같은 결과라 계산 건너뜀(이슈 변화 없음 + Jobs 값 동일)\n' + v;
   Logger.log(t);
   return t;
 }
@@ -3399,7 +3400,85 @@ function _syncInspScanned_(batchId, invoice, round) {
   Object.keys(byK).forEach(k => { scanned += Math.max(0, byK[k]); });
   return scanned;
 }
+/* ═══════════════════════════════════════════════════════════
+ * ★ 2026-11-06 v39 (로드맵 3단계 — 검수 결과 쓰기 빠르게, 결과는 즉시 유지)
+ *   v38 측정: 완료 버튼 저장의 insp 구간 5~10초 = 고객사(1~2s)+이슈(~2s)+상품줄(~3s)+스캔합산(~2s)+Jobs 줄 찾기(1.5~2.6s).
+ *   그런데 대부분은 "이미 Jobs에 같은 값이 있어서 쓸 것이 없는" 반복 계산이었음(예: IN00492203 3번 모두 i.save=0).
+ *   A) 반복 계산 건너뛰기: 마지막으로 확인한 Jobs 값을 인보이스별로 기억(6시간). 다음 일반 호출(force 아님) 때
+ *      ①그 사이 이슈가 하나도 안 바뀌었고(배치 사본 'il' 버전 동일) ②Jobs 그 줄의 값이 기억한 값과 같으면
+ *      → 결과가 달라질 수 없으므로 계산 전체를 건너뜀. (완료 판정은 되돌리지 않는 규칙이라 스캔이 늘어도 값은 같음.
+ *      값을 바꾸는 이슈 등록/수정/취소·관리자 복구는 force 호출 → 언제나 전체 계산.)
+ *      하나라도 다르거나 확인 실패 → 예전과 똑같이 전체 계산.
+ *   B) Jobs 줄 위치 기억: 인보이스가 Jobs 몇 번째 줄인지 기억하고, 그 줄의 인보이스 칸이 그대로면 바로 씀.
+ *      줄이 바뀌었거나(정렬·삭제) 처음이면 예전처럼 인보이스 열 전체에서 찾음.
+ *   스위치: 스크립트 속성 INSP_FAST_OFF=1 이면 A·B 모두 끄고 v38과 똑같이 동작.
+ * ═══════════════════════════════════════════════════════════ */
+function _inspFastOn_() {
+  try { return PropertiesService.getScriptProperties().getProperty('INSP_FAST_OFF') !== '1'; } catch (e) { return false; }
+}
+function _inspMemoKey_(batchId, invoice, round) { return 'insMemo1_' + String(batchId) + '_' + String(invoice).trim() + '_' + (round ? Number(round) : 0); }
+function _inspJobsRowKey_(invoice) { return 'insJobsRow1_' + String(invoice).trim(); }
+// 이슈가 바뀌면 달라지는 표시(배치 사본 'il' 버전). 사본 스위치가 꺼져 있거나 캐시 장애면 '' → 기억 사용 안 함(안전)
+function _inspIlSig_(batchId) {
+  try {
+    if (typeof bsVerNow_ !== 'function' || typeof bsOn_ !== 'function' || !bsOn_('il')) return '';
+    const v = bsVerNow_('il', batchId) || {};
+    const keys = Object.keys(v).sort();
+    if (!keys.length) return '';
+    const sig = keys.map(function (k) { return k + '=' + v[k]; }).join('&');
+    return sig.indexOf('=x') >= 0 ? '' : sig; // 'x' = 이번엔 믿지 않는 버전
+  } catch (e) { return ''; }
+}
+// Jobs에서 이 줄의 인보이스 칸이 이 인보이스(또는 그 분할 줄)인지
+function _inspRowMatches_(cellText, invoice, savedText) {
+  const t = String(cellText || '').trim(), inv = String(invoice).trim();
+  if (!t) return false;
+  if (savedText) return t === String(savedText).trim();
+  return t === inv;
+}
+// 기억된 줄을 한 번에 읽기(인보이스 칸 + Inspection 칸) — 맞으면 {row, val}, 아니면 null
+function _inspReadRememberedRow_(jobsSheet, invoice) {
+  try {
+    const c = CacheService.getScriptCache();
+    const raw = c.get(_inspJobsRowKey_(invoice));
+    if (!raw) return null;
+    const m = JSON.parse(raw);
+    const row = Number(m && m.row);
+    if (!(row >= 2) || row > jobsSheet.getLastRow()) return null;
+    const vals = jobsSheet.getRange(row, 1, 1, 19).getValues()[0];
+    if (!_inspRowMatches_(vals[0], invoice, m.text)) return null;
+    return { row: row, val: String(vals[18] || '').trim(), text: String(vals[0] || '').trim() };
+  } catch (e) { return null; }
+}
+function _inspRememberRow_(invoice, row, text) {
+  // 검토 반영 — 분할 주문(IN.._1 등)으로 찾은 줄은 기억하지 않음(나중에 정확히 같은 인보이스 줄이 생기면 그쪽을 써야 하므로 매번 예전처럼 찾음)
+  if (String(text || '').trim() !== String(invoice).trim()) return;
+  try { CacheService.getScriptCache().put(_inspJobsRowKey_(invoice), JSON.stringify({ row: row, text: String(text || '').trim() }), 21600); } catch (e) { /* 무시 */ }
+}
+function _inspRememberResult_(batchId, invoice, round, val, ilSig, row) {
+  if (!ilSig || !val) return;
+  // 검토 반영 — 10분만 기억(배치 사본이 10분마다 다시 만들어지는 주기와 같음): 혹시 이슈 버전 표시가 빠진 수정이 있어도 최대 10분 뒤엔 예전처럼 다시 계산
+  try { CacheService.getScriptCache().put(_inspMemoKey_(batchId, invoice, round), JSON.stringify({ v: val, il: ilSig, row: row }), 600); } catch (e) { /* 무시 */ }
+}
+function _inspForgetResult_(batchId, invoice, round) {
+  try { CacheService.getScriptCache().remove(_inspMemoKey_(batchId, invoice, round)); } catch (e) { /* 무시 */ }
+}
+
 function _syncInspCore_(batchId, invoice, worker, force, round) {
+  // ★ v39 A — 반복 계산 건너뛰기(일반 호출만). 이슈 버전은 계산 '전'에 먼저 잡아 둠(그 사이 바뀌면 다음 번에 다시 계산되게).
+  const _fast = _inspFastOn_();
+  const _ilSig = _fast ? _inspIlSig_(batchId) : '';
+  if (_fast && !force && _ilSig) {
+    try {
+      const raw = CacheService.getScriptCache().get(_inspMemoKey_(batchId, invoice, round));
+      const memo = raw ? JSON.parse(raw) : null;
+      if (memo && memo.v && memo.il === _ilSig) {
+        const js = ss_().getSheetByName(JOBS_SHEET);
+        const rr = js ? _inspReadRememberedRow_(js, invoice) : null;
+        if (rr && rr.row === Number(memo.row) && rr.val === memo.v) { _pmMark_('i.skip'); return; } // 결과가 같을 수밖에 없음 → 건너뜀
+      }
+    } catch (eMemo) { /* 확인 실패 → 아래 전체 계산 */ }
+  }
   // 1) 이 인보이스의 총 필요수량(BatchCustomers) 찾기
   // ★ v33 — 배치 사본에서 이 배치 줄만(꺼져 있으면 예전처럼 시트 전체 — 결과 동일). 측정: 오더 완료 순간 이 읽기 포함 13초
   const bcRows = _bsR_('bc', batchId, 12); // ★ 2026-08-07: TakenOut(12번째) 포함
@@ -3530,8 +3609,10 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   if (!jobsSheet) return;
   const jobsLast = jobsSheet.getLastRow();
   if (jobsLast < 2) return;
-  const jobsInvoiceCol = jobsSheet.getRange(2, 1, jobsLast - 1, 1).getValues();
-  let jobsRow = -1;
+  // ★ v39 B — 기억한 줄이 그대로면 인보이스 열 전체(약 3천 줄)를 읽지 않음
+  const _rr = _fast ? _inspReadRememberedRow_(jobsSheet, invoice) : null;
+  const jobsInvoiceCol = _rr ? [] : jobsSheet.getRange(2, 1, jobsLast - 1, 1).getValues();
+  let jobsRow = _rr ? _rr.row : -1;
   for (let i = 0; i < jobsInvoiceCol.length; i++) {
     if (String(jobsInvoiceCol[i][0]).trim() === String(invoice).trim()) { jobsRow = i + 2; break; }
   }
@@ -3544,7 +3625,7 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   //   2026-09-10 수정), 대표가 아닌 줄을 골라버리면 currentVal이 항상
   //   "🔗 ..."가 되어 매번 불필요하게 재저장을 시도하게 됨. 그래서 여기서도
   //   똑같이 분할번호가 가장 작은(=대표) 줄을 우선으로 찾음.
-  if (jobsRow === -1) {
+  if (jobsRow === -1 && !_rr) {
     const prefix = String(invoice).trim() + '_';
     let bestSuffix = Infinity;
     for (let i = 0; i < jobsInvoiceCol.length; i++) {
@@ -3557,8 +3638,9 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   }
   _pmMark_('i.find'); // ★ v38 측정 — Jobs 인보이스 열 읽기 + 줄 찾기
   if (jobsRow === -1) return; // fulfillment 대시보드에 없는 인보이스(예: 오더 관리 시스템에 등록 안 된 경우)는 그냥 넘어감
+  if (_fast && !_rr) { try { _inspRememberRow_(invoice, jobsRow, jobsInvoiceCol[jobsRow - 2][0]); } catch (eRm) { /* 무시 */ } }
 
-  const currentVal = String(jobsSheet.getRange(jobsRow, 19).getValue() || '').trim();
+  const currentVal = _rr ? _rr.val : String(jobsSheet.getRange(jobsRow, 19).getValue() || '').trim();
   _pmMark_('i.cur'); // ★ v38 측정
   const shouldBePass = isComplete && issues.length === 0;
   const shouldBeIssues = isComplete && issues.length > 0; // 완료는 됐지만 그 안에 이슈가 섞여 있으면 PASS 대신 ISSUES로
@@ -3567,13 +3649,29 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   //   담당자(Inspector) 이름만 고쳐야 하는 강제 재동기화(forceSyncInspection) 때도
   //   똑같이 걸려서 아예 아무것도 안 써지는 사고가 있었음(상태는 그대로인데
   //   담당자만 잘못돼 있던 경우). force=true면 문구가 같아도 무조건 다시 씀.
+  // ★ v39 — 쓰기 전에 기억을 지우고(쓰는 도중 실패해도 옛 기억으로 건너뛰지 않게), 끝난 뒤 '확인된 값'만 기억
+  let _expected = '', _wrote = false;
   if (shouldBePass && (force || currentVal !== '✓ PASS')) {
+    if (_fast) _inspForgetResult_(batchId, invoice, round);
     saveInspection({ invoice: invoice, pass: true, issues: [], inspector: worker || '', inspEndAt: new Date().toISOString() });
+    _expected = '✓ PASS'; _wrote = true;
   } else if (shouldBeIssues) {
     const expectedVal = '⚠ ISSUES(' + issues.length + ')';
     if (force || currentVal !== expectedVal) {
+      if (_fast) _inspForgetResult_(batchId, invoice, round);
       saveInspection({ invoice: invoice, pass: false, issues: issues, inspector: worker || '', inspEndAt: new Date().toISOString() });
+      _wrote = true;
     }
+    _expected = expectedVal;
+  } else if (shouldBePass) {
+    _expected = '✓ PASS';
+  }
+  // 기억은 Jobs 칸을 다시 읽어 실제로 그 값일 때만(다르면 다음 번엔 전체 계산 — 예전과 동일)
+  if (_fast && _expected && _ilSig) {
+    try {
+      const nowVal = _wrote ? String(jobsSheet.getRange(jobsRow, 19).getValue() || '').trim() : currentVal; // 안 썼으면 방금 읽은 값 그대로(추가 읽기 없음)
+      if (nowVal === _expected) _inspRememberResult_(batchId, invoice, round, _expected, _ilSig, jobsRow);
+    } catch (eChk) { /* 무시 — 기억 안 함 */ }
   }
   // isComplete가 false면(아직 덜 채워짐) 아무것도 안 씀 — 이미 PASS/ISSUES로 찍혀있던 걸
   // "미완료"로 되돌리는 것까지는 하지 않음 (검수 결과를 함부로 지우는 위험 방지, 필요하면 매니저가 clearInspection 사용)
