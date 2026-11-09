@@ -959,12 +959,26 @@ async function gasQuery(op, params){
   }
 }
 // ★ 2026-07-22 신규 — 이슈 되돌리기(undoIssue) 등 저장/변경 작업용 POST 호출
+// ★ v5 신규 — 영업 상세조회 사본(salesInvDetail_) 갱신을 저장 응답 뒤에 따로 요청(화면 변화 없음, 기다리지 않음).
+//   실패하면 3초 뒤 한 번 더, 그래도 실패하면 서버의 1분 주기 동기화가 채움.
+function _bgInvMirror_(list){
+  try{
+    (Array.isArray(list) ? list : []).slice(0, 10).forEach(inv => {
+      const v = String(inv || '').trim();
+      if(!v) return;
+      gasCall('syncInvoiceMirror', { invoice: v }).then(r => {
+        if(!r || !r.ok) setTimeout(() => { gasCall('syncInvoiceMirror', { invoice: v }).catch(() => {}); }, 3000);
+      }).catch(() => {});
+    });
+  }catch(e){ /* 무시 */ }
+}
 async function gasCall(op, data){
   if(!GAS_READY) return { ok:false, error:'GAS_URL 미설정' };
   try{
     const fd = new FormData();
     fd.append('op', op);
-    fd.append('data', JSON.stringify(data || {}));
+    // ★ v5 — 완료 버튼 저장은 "영업 상세 사본은 응답 뒤로" 요청(mirrorLater). 서버가 미뤘으면 응답의 mirrorInv 로 곧바로 따로 갱신 요청.
+    fd.append('data', JSON.stringify(op === 'setPackingMoved' ? Object.assign({}, data || {}, { mirrorLater: 1 }) : (data || {})));
     // ★ 2026-07-22 신규: 타임아웃이 없어서 서버 응답이 늦으면 "처리 중..."
     //   상태로 무한정 멈춰있던 문제 수정 — 20초 넘으면 실패로 보고 사용자가
     //   다시 시도할 수 있게 함.
@@ -972,7 +986,9 @@ async function gasCall(op, data){
     const timer = setTimeout(() => controller.abort(), 20000);
     const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd, signal: controller.signal });
     clearTimeout(timer);
-    return await res.json();
+    const out = await res.json();
+    if(op === 'setPackingMoved' && out && out.ok && Array.isArray(out.mirrorInv)) _bgInvMirror_(out.mirrorInv);
+    return out;
   }catch(e){
     console.error('gasCall failed:', op, e);
     const msg = (e && e.name === 'AbortError') ? '서버 응답이 너무 늦어서 중단했습니다(20초 초과). 다시 시도해주세요.' : String(e);
