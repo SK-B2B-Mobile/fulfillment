@@ -2843,6 +2843,19 @@ function noteDeletedFromRes_(res, batchId){
   const er = String(res.error || '');
   if(er === 'batch_deleted' || /batch not found/i.test(er)) handleBatchDeleted_(batchId || (state && state.batchId));
 }
+// ★ v31 신규 — 영업 상세조회 사본(salesInvDetail_) 갱신을 저장 응답 뒤에 따로 요청(작업자는 기다리지 않음, 화면 변화 없음).
+//   sales.html 의 _syncInvoiceMirror_ 와 같은 방식 — 실패하면 3초 뒤 한 번 더, 그래도 실패하면 서버의 1분 주기 동기화가 채움.
+function _bgInvMirror_(list){
+  try{
+    (Array.isArray(list) ? list : []).slice(0, 10).forEach(inv => {
+      const v = String(inv || '').trim();
+      if(!v) return;
+      gasCall('syncInvoiceMirror', { invoice: v }).then(r => {
+        if(!r || !r.ok) setTimeout(() => { gasCall('syncInvoiceMirror', { invoice: v }).catch(() => {}); }, 3000);
+      }).catch(() => {});
+    });
+  }catch(e){ /* 무시 — 사본은 1분 주기 동기화가 채움 */ }
+}
 // ★ 2026-10-27 안정화 — POST에도 시간 제한(25초)을 둠. 예전엔 서버가 응답을 안 주면 영원히 기다릴 수 있었음
 //   (실행 기록에 369초짜리 Timed Out 실행이 확인됨). 시간이 지나면 끊고 호출부(재시도)가 같은 reqId로 다시 시도.
 async function gasCall(op, data){
@@ -2852,11 +2865,13 @@ async function gasCall(op, data){
   try{
     const fd = new FormData();
     fd.append('op', op);
-    fd.append('data', JSON.stringify(data || {}));
+    // ★ v31 — 완료 버튼 저장은 "영업 상세 사본은 응답 뒤로" 요청(mirrorLater). 서버가 미뤘으면 응답의 mirrorInv 를 받아 곧바로 따로 갱신 요청.
+    fd.append('data', JSON.stringify(op === 'setPackingMoved' ? Object.assign({}, data || {}, { mirrorLater: 1 }) : (data || {})));
     if(ctrl) timer = setTimeout(() => ctrl.abort(), 25000);
     const res = await fetch(CONFIG.GAS_URL, ctrl ? { method:'POST', body: fd, signal: ctrl.signal } : { method:'POST', body: fd });
     const out = await res.json();
     if(out && !out.ok && out.error === 'batch_deleted') noteDeletedFromRes_(out, data && data.batchId);
+    if(op === 'setPackingMoved' && out && out.ok && Array.isArray(out.mirrorInv)) _bgInvMirror_(out.mirrorInv);
     return out;
   }catch(e){
     console.error('gasCall failed:', op, e);
