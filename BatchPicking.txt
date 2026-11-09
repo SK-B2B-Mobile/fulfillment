@@ -1679,6 +1679,15 @@ function setPackingMoved(data) {
   return r;
 }
 var __PM_T_ = null;
+// ★ v40 — 완료 버튼(setPackingMoved)에서 검수 결과를 저장할 때, 영업 상세조회 사본(salesInvDetail_) 계산을 응답 '뒤'로 넘기는 목록.
+//   화면(batch·board 새 버전)이 mirrorLater:1 을 보낸 요청에서만 [] 로 켜짐 → saveInspection(Code.gs)이 사본을 직접 만들지 않고
+//   '다시 만들 것' 표시만 한 뒤 여기에 인보이스를 담음 → 응답의 mirrorInv 로 화면에 알려줌 → 화면이 곧바로 syncInvoiceMirror(빠른 방식) 요청.
+//   요청이 실패해도 1분 주기 동기화가 표시된 것을 다시 채움. 예전 화면(mirrorLater 없음)·다른 경로는 예전과 100% 동일.
+//   비상 시 스크립트 속성 INSP_ML_OFF=1 → 예전 방식(저장 안에서 바로 사본 계산).
+var __INSP_ML_ = null;
+function _inspMlOn_() {
+  try { return PropertiesService.getScriptProperties().getProperty('INSP_ML_OFF') !== '1'; } catch (e) { return false; }
+}
 function _pmMark_(k) { try { if (__PM_T_) __PM_T_.seg.push(k + '=' + (Math.round((Date.now() - __PM_T_.t0) / 100) / 10)); } catch (e) { /* 무시 */ } }
 function _pmTimingFlush_(data, r) {
   if (!__PM_T_) return;
@@ -1699,7 +1708,8 @@ function showPackingMovedTiming() {
   const t = '=== 완료 버튼 저장(setPackingMoved) 3초 넘은 실행 — 구간 끝난 시각(초, 누적) ===\n' +
     'lock=저장 순서 기다림 끝 · read=고객사 행 찾기 · pv=2차 검증 상태 재계산(verified 만) · write=칸 쓰기 · bump=버전 표시 · unlock=잠금 해제 · insp=Jobs 검수 결과 쓰기 · queue=Firestore 대기열 · end=끝\n' +
     '(v38) insp 안: i.pre=미완료 사전확인 · i.bc=고객사 정보 · i.iss=이슈 · i.items=상품줄 · i.scan=스캔 합산 · i.find=Jobs 인보이스 줄 찾기 · i.cur=Jobs 현재 값 · i.save=검수 결과 저장 끝\n' +
-    '(v39) i.skip=같은 결과라 계산 건너뜀(이슈 변화 없음 + Jobs 값 동일)\n' + v;
+    '(v39) i.skip=같은 결과라 계산 건너뜀(이슈 변화 없음 + Jobs 값 동일)\n' +
+    '(v40) i.save 안: s.find=Jobs 줄 찾기 · s.write=칸 쓰기 · s.bump=버전 표시 · s.mirror=영업 상세 사본 바로 계산 · s.mirrorL=사본은 응답 뒤로(화면이 바로 요청)\n' + v;
   Logger.log(t);
   return t;
 }
@@ -1820,7 +1830,17 @@ function setPackingMoved_bsCore_(data) {
   //   여러 시트를 통째로 다시 읽는 무거운 함수라 락 밖으로 옮김. TV 현황판에서
   //   슬롯 여러 개가 짧은 시간에 연달아 눌리는 상황(배치 막바지)에 특히 효과가 큼.
   if (syncArgs) {
+    // ★ v40 — 새 화면이 요청했을 때만 사본 계산을 응답 뒤로(위 __INSP_ML_ 설명)
+    const _ml = (data && data.mirrorLater && result && result.ok && _inspMlOn_()) ? [] : null;
+    __INSP_ML_ = _ml;
     try { syncInspectionFromPicking_(syncArgs[0], syncArgs[1], syncArgs[2], false, syncArgs[3]); } catch (eSync) { /* 무시 — 최종 확정 자체는 이미 성공했으므로 */ }
+    finally { __INSP_ML_ = null; }
+    // 검토 반영 — 이 인보이스는 (저장이 없었어도) 항상 넣음: 화면이 응답을 놓쳐 다시 보낸 요청(이때는 보통 저장할 것이 없음)에서도
+    //   사본 갱신 요청이 나가게. 저장된 분할 줄(_1, _2 …)은 그 뒤에.
+    if (_ml && result && result.ok) {
+      const _seen = {};
+      result.mirrorInv = [String(syncArgs[1] || '')].concat(_ml).map(function (x) { return String(x || '').trim(); }).filter(function (x) { if (!x || _seen[x]) return false; _seen[x] = 1; return true; }).slice(0, 10);
+    }
     _pmMark_('insp');
   }
   // ★ 세션A 신규 — 예전엔 이 함수가 salesInvDetail 캐시/미러를 전혀 안
