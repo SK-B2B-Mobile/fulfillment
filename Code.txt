@@ -3016,6 +3016,8 @@ function onEdit(e) {
 /* =====================================================
  * ★ INSPECTION 기능
  * ===================================================== */
+// ★ v40 — saveInspection 단계별 시간 표시(BatchPicking.gs의 _pmMark_ 재사용: 완료 버튼 저장 중일 때만 기록, 그 밖엔 아무 일 없음)
+function _saveInspMark_(k) { try { if (typeof _pmMark_ === 'function') _pmMark_(k); } catch (e) { /* 무시 */ } }
 function saveInspection(data) {
   try {
     var ss      = SpreadsheetApp.openById(SS_ID);
@@ -3037,6 +3039,7 @@ function saveInspection(data) {
         targetRows.push(i + 2);
       }
     }
+    _saveInspMark_('s.find'); // ★ v40 측정(완료 버튼 저장 중일 때만 기록, 동작 동일)
     // ★ 2026-09-10 버그 수정(현장 발견) — 정확히 일치하는 인보이스가 없으면
     //   분할 주문(예: 원래 IN00473862 하나가 부분출고 등의 이유로 Jobs 시트에
     //   IN00473862_1, IN00473862_2 두 줄로 나뉘어 있는 경우)일 수 있음. 이런
@@ -3159,8 +3162,10 @@ function saveInspection(data) {
 
       sheet.getRange(targetRow, 21).setValue(inspEndAt);
     });
+    _saveInspMark_('s.write');
 
     bumpVersion_();
+    _saveInspMark_('s.bump');
     // ★ 세션A 신규 — targetRows에 실제로 쓰여진 모든 인보이스(분할된 경우
     //   대표+멤버 전부 포함)의 상세조회 미러를 갱신. 멤버 행은 위에서 방금
     //   "🔗 대표인보이스" 참조로 바꿔썼을 수 있으므로 반드시 같이 갱신해야
@@ -3170,7 +3175,21 @@ function saveInspection(data) {
     //   있었음 — 여기서 같이 고침.
     try {
       var touchedInvoices = targetRows.map(function (r) { return String(invoiceCol[r - 2][0]).trim(); });
-      syncSalesInvoiceDetailMirror_(touchedInvoices);
+      // ★ v40 — 완료 버튼(새 화면)에서 온 저장이면 사본은 응답 뒤로: '다시 만들 것' 표시(상세 캐시 즉시 무효화) + 목록에 담아
+      //   화면이 응답 직후 syncInvoiceMirror(빠른 방식)로 바로 다시 만듦. 그 요청이 실패해도 1분 주기 동기화가 표시된 것을 채움.
+      //   그 밖의 모든 경로(__INSP_ML_ 없음)는 예전 그대로 여기서 바로 계산. (BatchPicking.gs __INSP_ML_ 참고)
+      var _ml = (typeof __INSP_ML_ !== 'undefined' && Array.isArray(__INSP_ML_) && typeof _markInvMirrorDirty_ === 'function') ? __INSP_ML_ : null;
+      // 검토 반영 — '다시 만들 것' 목록은 다른 저장과 겹치면 서로 지울 수 있어 짧게 잠금 안에서 표시. 잠금을 3초 안에 못 잡으면 예전처럼 바로 계산.
+      var _mlLock = null;
+      if (_ml) { try { _mlLock = LockService.getDocumentLock(); if (!_mlLock.tryLock(3000)) { _mlLock = null; _ml = null; } } catch (eL) { _mlLock = null; _ml = null; } }
+      if (_ml) {
+        try { touchedInvoices.forEach(function (inv) { _markInvMirrorDirty_(inv); _ml.push(inv); }); }
+        finally { try { _mlLock.releaseLock(); } catch (eR) { /* 무시 */ } }
+        _saveInspMark_('s.mirrorL');
+      } else {
+        syncSalesInvoiceDetailMirror_(touchedInvoices);
+        _saveInspMark_('s.mirror');
+      }
     } catch (eMirror) { /* best-effort */ }
     // ★ 세션D 신규 — 분할 주문(split) 그룹을 Firestore groups 컬렉션에
     //   이중쓰기. isSplitFallback이 감지된(=인보이스_1, _2... 형태로 여러 줄에
