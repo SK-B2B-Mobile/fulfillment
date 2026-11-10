@@ -1098,6 +1098,59 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
 .putk-vrow.box{margin-bottom:10px;}
 .putk-vrow.miss{color:var(--amber); background:var(--amber-bg); border-color:#FCD34D;}
 .putk-note{font-size:12px; color:var(--amber); font-weight:600; margin-top:8px;}
+/* ═════════ ★ 2026-11-10 — Bulk Update(관리자 전용, 여러 오더 한 번에 처리) ═════════ */
+.bk-toggle{font-family:var(--sans); font-size:13px; font-weight:800; padding:8px 14px; border-radius:8px; border:1px solid var(--border2); background:var(--surface); color:var(--text); cursor:pointer; white-space:nowrap;}
+.bk-toggle.on{background:var(--navy); color:#fff; border-color:var(--navy);}
+.bk-panel{background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; position:relative;}
+.bk-tools{display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); flex-wrap:wrap;}
+.bk-tools .bk-hint{font-size:12.5px; color:var(--text-dim);}
+.bk-btn{font-family:var(--sans); font-size:12.5px; font-weight:700; padding:7px 12px; border-radius:7px; border:1px solid var(--border2); background:var(--surface); color:var(--text); cursor:pointer; white-space:nowrap;}
+.bk-btn:disabled{opacity:.45; cursor:not-allowed;}
+.bk-btn.green{background:#059669; border-color:#059669; color:#fff;}
+.bk-btn.purple{background:#7C3AED; border-color:#7C3AED; color:#fff;}
+.bk-btn.navy{background:var(--navy); border-color:var(--navy); color:#fff;}
+.bk-chk-lbl{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-dim); cursor:pointer;}
+.bk-scroll{overflow-x:auto;}
+.bk-table{width:100%; min-width:1100px; border-collapse:collapse;}
+.bk-table th{background:var(--navy); color:#fff; font-size:11.5px; font-weight:800; letter-spacing:.04em; text-align:left; padding:10px 10px; white-space:nowrap;}
+.bk-table td{font-size:13px; padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:middle;}
+.bk-table tr.sel td{background:#EFF6FF;}
+.bk-table input[type=checkbox]{width:17px; height:17px; cursor:pointer; accent-color:#2563EB;}
+.bk-inv{font-family:var(--mono); font-weight:800; white-space:nowrap;}
+.bk-sub{font-size:11px; color:var(--text-dim);}
+.bk-tag{display:inline-block; font-family:var(--mono); font-size:11px; font-weight:800; padding:3px 7px; border-radius:5px; white-space:nowrap;}
+.bk-tag.ok{background:var(--green-bg); color:var(--green);}
+.bk-tag.amber{background:var(--amber-bg); color:var(--amber);}
+.bk-tag.red{background:var(--red-bg); color:var(--red);}
+.bk-tag.gray{background:var(--gray-bg); color:var(--text-dim);}
+.bk-tag.purple{background:var(--purple-bg); color:var(--purple);}
+.bk-tag.blue{background:var(--blue-bg); color:#1D4ED8;}
+.bk-bar{position:sticky; bottom:0; display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--navy); color:#fff; flex-wrap:wrap;}
+.bk-bar .bk-count{font-weight:800; font-size:15px; margin-right:auto;}
+.bk-pager{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; font-size:12.5px; color:var(--text-dim);}
+.bk-ov{position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:2000; display:none; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto;}
+.bk-ov.show{display:flex;}
+.bk-modal{background:var(--surface); border-radius:14px; width:min(760px,100%); box-shadow:0 20px 50px rgba(0,0,0,.25); padding:22px 24px;}
+.bk-modal h3{font-size:20px; font-weight:800; margin-bottom:4px;}
+.bk-modal .bk-desc{font-size:13px; color:var(--text-dim); margin-bottom:16px;}
+.bk-form{display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; margin-bottom:12px;}
+.bk-form label{display:block; font-size:12px; font-weight:700; color:var(--text-dim); margin-bottom:5px;}
+.bk-form input{width:100%; font-family:var(--sans); font-size:14px; padding:9px 11px; border:1px solid var(--border2); border-radius:8px; background:var(--surface);}
+.bk-form input[readonly]{background:var(--surface2); color:var(--text-dim);}
+.bk-form .full{grid-column:1 / -1;}
+.bk-opts{display:flex; gap:8px; flex-wrap:wrap; margin:6px 0 12px;}
+.bk-opt{display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:700; padding:7px 10px; border:1px solid var(--border2); border-radius:8px; cursor:pointer; background:var(--surface);}
+.bk-opt input{width:16px; height:16px; accent-color:#2563EB;}
+.bk-plan{max-height:320px; overflow-y:auto; border-top:1px solid var(--border); margin-bottom:14px;}
+.bk-prow{display:grid; grid-template-columns:96px 120px 1fr; gap:10px; align-items:center; padding:8px 2px; border-bottom:1px dashed var(--border); font-size:12.5px;}
+.bk-prow .why{color:var(--text-dim);}
+.bk-foot{display:flex; justify-content:flex-end; gap:10px; align-items:center; flex-wrap:wrap;}
+.bk-foot .bk-err{margin-right:auto; color:var(--red); font-size:12.5px; font-weight:700;}
+.bk-progress{height:8px; background:var(--surface2); border-radius:99px; overflow:hidden; margin:10px 0 14px;}
+.bk-progress > div{height:100%; background:#7C3AED; width:0; transition:width .25s;}
+.bk-note{background:#FFF7ED; border:1px solid #FDBA74; border-radius:10px; padding:10px 12px; font-size:12px; color:#7C2D12; margin:4px 0 14px; line-height:1.55;}
+@media (max-width:700px){ .bk-form{grid-template-columns:1fr;} .bk-prow{grid-template-columns:86px 1fr;} .bk-prow .why{grid-column:1 / -1;} }
+
 </style>
 </head>
 <body>
@@ -1147,7 +1200,7 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-03-putkbox</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-10-bulk</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Packing Progress</div>
       <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">Built by David Kim · 2026</div>
     </div>
@@ -1194,9 +1247,35 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
         <input id="sheet-search-input" placeholder="Search invoice # or customer name..." oninput="onSheetSearch()">
       </div>
       <div class="rep-slot" data-rep-slot style="display:none;"><select class="rep-sel" onchange="setRepFilterTo_(this.value)" aria-label="Sales Rep" title="Filter all 3 tabs by Sales Rep (top dashboards stay warehouse-wide)"></select><span class="rep-sum"></span><button type="button" class="rep-clear" style="display:none;" onclick="setRepFilterTo_('')" title="Show all reps">✕</button></div>
+      <button type="button" class="bk-toggle" id="bulkToggleBtn" style="display:none;" onclick="bulkToggle()" title="Administrators only — update several orders at once">☐ Bulk Update</button>
     </div>
 
-    <div class="table-wrap">
+    <!-- ★ 2026-11-10 — Bulk Update(관리자 전용). 켜면 아래 표 대신 체크칸이 있는 표가 보임 -->
+    <div class="bk-panel" id="bulkPanel" style="display:none;">
+      <div class="bk-tools">
+        <button type="button" class="bk-btn" onclick="bulkSelectPage()">Select all on this page</button>
+        <label class="bk-chk-lbl"><input type="checkbox" id="bulkHideShipped" checked onchange="BULK.page=1; renderBulk_()"> Hide shipped orders</label>
+        <span class="bk-hint">Only the orders you check are saved, one by one, with the normal server rules. Press Bulk Update again to finish.</span>
+      </div>
+      <div class="bk-scroll">
+        <table class="bk-table">
+          <thead><tr>
+            <th style="width:40px;"></th><th>Invoice#</th><th>Customer</th><th>Ship Out</th><th>Method</th><th>2nd Verify</th><th>Sales Confirm</th><th>BOL#</th><th>Shipped</th>
+          </tr></thead>
+          <tbody id="bulkTbody"></tbody>
+        </table>
+      </div>
+      <div class="bk-pager"><span id="bulkPagerSum">–</span><span id="bulkPagerBtns"></span></div>
+      <div class="bk-bar" id="bulkBar" style="display:none;">
+        <span class="bk-count" id="bulkCount">0 selected</span>
+        <button type="button" class="bk-btn green" onclick="bulkOpen('confirm')">💲 Mark Confirmed (Paid)</button>
+        <button type="button" class="bk-btn purple" onclick="bulkOpen('ship')">🚚 Mark Shipped</button>
+        <button type="button" class="bk-btn" onclick="bulkClearSel()">Clear selection</button>
+      </div>
+    </div>
+
+    <div class="table-wrap" id="sheetTableWrap">
+
       <div class="table-scroll">
       <table style="min-width:1500px;">
         <colgroup>
@@ -1353,6 +1432,9 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
       <div class="pager-right" id="ship2-pager-buttons"></div>
     </div>
   </div>
+
+<!-- ★ 2026-11-10 — Bulk Update 확인 창 / 진행 창 -->
+<div class="bk-ov" id="bulkOverlay"><div class="bk-modal" id="bulkModal"></div></div>
 
 </div>
 
@@ -2274,7 +2356,7 @@ function renderShipExpand(idx, silent){
   if (hadFocus){ const q = document.getElementById('dayQ'); if (q){ q.focus(); try { q.setSelectionRange(q.value.length, q.value.length); } catch(e){} } }
 }
 
-function onSheetSearch(){ SHEET_PAGE = 1; renderSheet(); }
+function onSheetSearch(){ SHEET_PAGE = 1; if (typeof BULK !== 'undefined') BULK.page = 1; renderSheet(); }
 function onRowsPerPageChange(){
   SHEET_PAGE_SIZE = parseInt(document.getElementById('rows-per-page').value, 10);
   SHEET_PAGE = 1;
@@ -2400,6 +2482,7 @@ function renderSheet(){
     filtered.length ? `${start+1}–${Math.min(start+SHEET_PAGE_SIZE, filtered.length)} of ${filtered.length}` : '0 of 0';
   renderPager(totalPages);
   renderRepBar_();
+  if (typeof BULK !== 'undefined' && BULK.on) renderBulk_(); // ★ 2026-11-10 — 검색어·담당자 필터를 Bulk 표에도 그대로
 }
 
 function renderPager(totalPages){
@@ -2596,6 +2679,7 @@ function applyTodayResult(res){
   document.getElementById('today-count').textContent = TODAY_JOBS.length + ' orders';
   renderToday();
   renderShipping();
+  if (typeof BULK !== 'undefined' && BULK.on) renderBulk_(); // ★ 2026-11-10
 }
 // ═══════════════════════════════════════════════════════════
 // ★ 2026-10-04 신규 — 다른 직원 화면 즉시 반영(저장 알림 "patch")
@@ -5338,6 +5422,7 @@ function isBusyEditing(){
   const overlay = document.getElementById('detail-overlay');
   if (overlay && overlay.classList.contains('show')) return true;   // 상세 팝업 열림
   if (document.getElementById('dims-rows-editor')) return true;      // 디멘션 입력 중
+  if (typeof BULK !== 'undefined' && (BULK.running || BULK.modalOpen)) return true; // ★ 2026-11-10 — Bulk Update 확인/진행 창
   return false;
 }
 
@@ -5391,6 +5476,365 @@ async function appInit(){
   await Promise.all([loadSheetOverview(), loadToday()]);
   setSync('ok', 'Connected · ' + new Date().toLocaleTimeString('en-US', {hour12:false}));
   startAutoSync();
+  bulkInitAdmin_(); // ★ 2026-11-10 — 관리자 계정이면 Bulk Update 버튼 표시(기다리지 않음)
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ★ 2026-11-10 신규(시뮬레이션 승인) — Bulk Update(관리자 전용, 여러 오더 한 번에 처리)
+   - 관리자 계정(서버 bulkWhoAmI 가 admin:true)에만 "☐ Bulk Update" 버튼이 보임. 평소 화면은 그대로.
+   - 켜면 Sales Sheet Preview 표 대신 체크칸이 있는 표(Order Detail Lookup 목록 데이터 그대로)를 보여줌.
+   - 처리: 확인 창(실제 날짜·사유·옵션 + 오더별 결과 미리 보기) → 서버 bulkOrderAction 을 "한 건씩 차례로" 호출
+     (동시에 보내지 않음 — 서버 부담 최소). 실패한 것만 다시 시도 가능. 시트를 직접 고치지 않음.
+   - 서버도 관리자·규칙(TK BOL#·운송비, 묶인 오더 등)을 다시 검사하므로 화면 미리 보기는 안내용.
+   ═══════════════════════════════════════════════════════════ */
+const BULK = { admin:false, on:false, sel:new Set(), page:1, size:50, running:false, modalOpen:false, action:'', results:{}, list:[], opts:null };
+const BULK_MAX = 50;
+async function bulkInitAdmin_(){
+  const tok = authGetToken();
+  if (!tok) return;
+  let r = null;
+  try { r = await gasPost('bulkWhoAmI', { token: tok }); } catch(e){ r = null; }
+  BULK.admin = !!(r && r.ok && r.admin);
+  const b = document.getElementById('bulkToggleBtn');
+  if (b) b.style.display = BULK.admin ? '' : 'none';
+}
+function _bkMethod_(j){ return String((j && j.method) || '').trim().toUpperCase(); }
+function _bkIsTk_(j){ const m = _bkMethod_(j); return m === 'TK' || m === 'TRUCKING'; }
+function _bkMethodOk_(j){ const m = _bkMethod_(j); return _bkIsTk_(j) || m === 'PU' || m === 'UPS' || m === 'PU & TK'; }
+function _bkConfirmed_(j){ return _bkIsTk_(j) ? !!j.salesConfirmed : !!j.paymentPaid; }
+function _bkNeedsVerify_(j){ return !j.shipped && String(j.packStage || 'none') !== 'verified'; }
+function _bkFind_(inv){ return (TODAY_JOBS || []).find(j => j.invoice === inv) || null; }
+function _bkJobs_(){
+  const el = document.getElementById('sheet-search-input');
+  const q = ((el && el.value) || '').trim().toUpperCase();
+  const hideShipped = !!(document.getElementById('bulkHideShipped') || {}).checked;
+  const list = (TODAY_JOBS || []).filter(o => jobMatchesRep_(o)
+    && (!hideShipped || !o.shipped)
+    && (!q || String(o.invoice).toUpperCase().includes(q) || String(o.remarks || '').toUpperCase().includes(q) || String(o.salesRep || '').toUpperCase().includes(q)));
+  // 오래된(출고일이 지난) 오더부터 — 정리 작업용
+  list.sort((a, b) => String(a.shipDate || '').localeCompare(String(b.shipDate || '')) || String(a.invoice).localeCompare(String(b.invoice)));
+  return list;
+}
+function bulkToggle(){
+  if (!BULK.admin || BULK.running) return;
+  BULK.on = !BULK.on;
+  if (!BULK.on){ BULK.sel.clear(); BULK.results = {}; }
+  BULK.page = 1;
+  const tw = document.getElementById('sheetTableWrap'), bp = document.getElementById('bulkPanel'), bt = document.getElementById('bulkToggleBtn');
+  if (tw) tw.style.display = BULK.on ? 'none' : '';
+  if (bp) bp.style.display = BULK.on ? '' : 'none';
+  if (bt){ bt.classList.toggle('on', BULK.on); bt.textContent = BULK.on ? '☑ Bulk Update' : '☐ Bulk Update'; }
+  if (BULK.on) renderBulk_();
+}
+function _bkVerifyCell_(j){
+  if (j.shipped || String(j.packStage || '') === 'verified') return '<span class="bk-tag ok">✓</span>';
+  if (!j.movedToPacking) return '<span class="bk-tag gray">Not moved</span>';
+  return '<span class="bk-tag amber">Not done</span>';
+}
+function _bkConfirmCell_(j){
+  if (!_bkMethodOk_(j)) return '<span class="bk-sub">—</span>';
+  return _bkConfirmed_(j) ? '<span class="bk-tag ok">CONFIRMED</span>' : '<span class="bk-tag amber">Not confirmed</span>';
+}
+function _bkBolCell_(j){
+  if (!_bkIsTk_(j)) return '<span class="bk-sub">—</span>';
+  if (j.dimsLinkedTo) return '<span class="bk-sub">via ' + _escH_(j.dimsLinkedTo) + '</span>';
+  return j.bol ? '<span class="bk-inv" style="font-weight:600;">' + _escH_(j.bol) + '</span>' : '<span class="bk-tag red">Missing</span>';
+}
+function _bkShipCell_(j){
+  if (j.shipped) return '<span class="bk-tag purple">✓ Shipped</span>' + (j.shippedAt ? '<div class="bk-sub">' + _escH_(String(j.shippedAt).slice(0, 10)) + '</div>' : '');
+  return '<span class="bk-tag gray">Not shipped</span>';
+}
+function renderBulk_(){
+  if (!BULK.on) return;
+  const list = _bkJobs_();
+  BULK.list = list;
+  const pages = Math.max(1, Math.ceil(list.length / BULK.size));
+  if (BULK.page > pages) BULK.page = pages;
+  const start = (BULK.page - 1) * BULK.size;
+  const rows = list.slice(start, start + BULK.size);
+  const tb = document.getElementById('bulkTbody');
+  if (tb){
+    tb.innerHTML = rows.length ? rows.map(j => {
+      const on = BULK.sel.has(j.invoice);
+      const inv = _escH_(j.invoice);
+      return `<tr class="${on ? 'sel' : ''}">
+        <td><input type="checkbox" data-bk-inv="${inv}" ${on ? 'checked' : ''} onchange="bulkCheck(this)"></td>
+        <td><span class="bk-inv">${inv}</span>${j.dimsLinkedTo ? '<div class="bk-sub">🔗 linked to ' + _escH_(j.dimsLinkedTo) + '</div>' : ''}</td>
+        <td>${_escH_(j.remarks || '')}</td>
+        <td class="bk-sub" style="font-family:var(--mono); font-size:12.5px; color:var(--text);">${_escH_(j.shipDate || '-')}</td>
+        <td><span class="badge method ${methodClass(j.method)}">${_escH_(fmtMethodLabel(j.method))}</span></td>
+        <td>${_bkVerifyCell_(j)}</td>
+        <td>${_bkConfirmCell_(j)}</td>
+        <td>${_bkBolCell_(j)}</td>
+        <td>${_bkShipCell_(j)}</td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="9" style="text-align:center; padding:28px; color:var(--text-dim);">No matching orders.</td></tr>';
+  }
+  const sum = document.getElementById('bulkPagerSum');
+  if (sum) sum.textContent = list.length ? `${start + 1}–${Math.min(start + BULK.size, list.length)} of ${list.length}` : '0 of 0';
+  const pb = document.getElementById('bulkPagerBtns');
+  if (pb) pb.innerHTML = pages > 1
+    ? `<button type="button" class="bk-btn" ${BULK.page <= 1 ? 'disabled' : ''} onclick="BULK.page--; renderBulk_()">‹ Prev</button> <span style="margin:0 8px;">Page ${BULK.page} / ${pages}</span> <button type="button" class="bk-btn" ${BULK.page >= pages ? 'disabled' : ''} onclick="BULK.page++; renderBulk_()">Next ›</button>`
+    : '';
+  _bkUpdateBar_();
+}
+function _bkUpdateBar_(){
+  const n = BULK.sel.size;
+  const bar = document.getElementById('bulkBar'), c = document.getElementById('bulkCount');
+  if (bar) bar.style.display = n ? 'flex' : 'none';
+  if (c) c.textContent = n + ' selected' + (n >= BULK_MAX ? ' (max ' + BULK_MAX + ')' : '');
+}
+function bulkCheck(el){
+  const inv = el.getAttribute('data-bk-inv');
+  if (el.checked){
+    if (BULK.sel.size >= BULK_MAX){ el.checked = false; alert('You can process up to ' + BULK_MAX + ' orders at a time.'); return; }
+    BULK.sel.add(inv);
+  } else BULK.sel.delete(inv);
+  const tr = el.closest('tr'); if (tr) tr.classList.toggle('sel', el.checked);
+  _bkUpdateBar_();
+}
+function bulkSelectPage(){
+  const start = (BULK.page - 1) * BULK.size;
+  const rows = (BULK.list || []).slice(start, start + BULK.size);
+  let capped = false;
+  rows.forEach(j => { if (BULK.sel.has(j.invoice)) return; if (BULK.sel.size >= BULK_MAX){ capped = true; return; } BULK.sel.add(j.invoice); });
+  renderBulk_();
+  if (capped) alert('Selected the first ' + BULK_MAX + ' orders (max ' + BULK_MAX + ' at a time).');
+}
+function bulkClearSel(){ BULK.sel.clear(); renderBulk_(); }
+function _bkTodayYmd_(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
+// 화면 미리 보기(서버가 같은 규칙으로 다시 검사함). kind: do | plus | skip | done
+function _bkPlan_(inv, action, o){
+  const j = _bkFind_(inv);
+  if (!j) return { kind:'skip', why:'Not in the current list (archived or removed)' };
+  const m = fmtMethodLabel(j.method);
+  if (j.dimsLinkedTo) return { kind:'skip', why: m + ' · Linked order — select the primary ' + j.dimsLinkedTo };
+  if (!_bkMethodOk_(j)) return { kind:'skip', why:'Method ' + (j.method || 'unknown') + ' is not supported' };
+  if (action === 'ship' && j.shipped) return { kind:'done', why: m + ' · Already shipped' };
+  if (action === 'confirm' && (j.shipped || _bkConfirmed_(j))) return { kind:'done', why: m + ' · Already ' + (j.shipped ? 'shipped' : 'confirmed') };
+  const steps = []; let plus = false;
+  if (!j.movedToPacking){
+    if (!o.move) return { kind:'skip', why: m + ' · Not moved to Packing → check "Mark Moved to Packing too"' };
+    steps.push('Moved'); plus = true;
+  }
+  if (_bkNeedsVerify_(j) || !j.movedToPacking){
+    if (!o.verify) return { kind:'skip', why: m + ' · 2nd verification not complete → check "Pass 2nd verification too"' };
+    steps.push('2nd verify'); plus = true;
+  }
+  if (!_bkConfirmed_(j)){
+    if (action === 'ship' && !o.confirm) return { kind:'skip', why: m + ' · Sales Confirm not done → check "Confirm too"' };
+    steps.push('Confirm'); if (action === 'ship') plus = true;
+  }
+  if (action === 'ship'){
+    if (_bkIsTk_(j) && !j.bol) return { kind:'skip', why: m + ' · BOL# missing → enter BOL# & trucking cost in the order popup first (rule kept)' };
+    if (_bkIsTk_(j) && !_hasBolCost_(j)) return { kind:'skip', why: m + ' · Trucking cost missing → enter it in the order popup first (rule kept)' };
+    steps.push('Shipped');
+  }
+  return { kind: plus ? 'plus' : 'do', why: m + ' · ' + steps.join(' → ') };
+}
+const _BK_TAG = { do:['ok','Process'], plus:['amber','Process +'], skip:['red','Excluded'], done:['gray','Already done'] };
+function bulkOpen(action){
+  if (!BULK.admin || BULK.running || !BULK.sel.size) return;
+  BULK.action = action;
+  BULK.opts = BULK.opts || { date: _bkTodayYmd_(), reason: '', move: false, verify: false, confirm: false };
+  BULK.results = {};
+  BULK.modalOpen = true;
+  _bkRenderConfirm_();
+  document.getElementById('bulkOverlay').classList.add('show');
+}
+function bulkClose(){
+  if (BULK.running) return;
+  BULK.modalOpen = false;
+  document.getElementById('bulkOverlay').classList.remove('show');
+  renderBulk_();
+}
+function _bkReadForm_(){
+  const g = id => document.getElementById(id);
+  if (!g('bkDate')) return;
+  BULK.opts.date = g('bkDate').value;
+  BULK.opts.reason = g('bkReason').value;
+  BULK.opts.move = !!g('bkOptMove').checked;
+  BULK.opts.verify = !!g('bkOptVerify').checked;
+  BULK.opts.confirm = !!(g('bkOptConfirm') && g('bkOptConfirm').checked);
+}
+function bulkFormChanged(){ _bkReadForm_(); _bkRenderPlan_(); }
+function _bkRenderConfirm_(){
+  const a = BULK.action, o = BULK.opts;
+  const isShip = a === 'ship';
+  const n = BULK.sel.size;
+  document.getElementById('bulkModal').innerHTML = `
+    <h3>${isShip ? '🚚 Mark ' + n + ' orders as Shipped' : '💲 Mark ' + n + ' orders as Confirmed (Paid)'}</h3>
+    <div class="bk-desc">Enter the real ${isShip ? 'ship' : 'payment / confirm'} date. Each order is saved one by one with the normal server rules.</div>
+    <div class="bk-form">
+      <div><label>${isShip ? 'Actual ship date' : 'Actual confirm (payment) date'} *</label><input type="date" id="bkDate" value="${_escH_(o.date)}" max="${_bkTodayYmd_()}" onchange="bulkFormChanged()"></div>
+      <div><label>Processed by</label><input type="text" value="${_escH_(authGetName() || '')} (bulk)" readonly></div>
+      <div class="full"><label>Reason (required · saved in the record) *</label><input type="text" id="bkReason" maxlength="200" value="${_escH_(o.reason)}" placeholder="e.g. Not entered by staff — actual shipment already completed" oninput="bulkFormChanged()"></div>
+    </div>
+    <div class="bk-opts">
+      ${isShip ? `<label class="bk-opt"><input type="checkbox" id="bkOptConfirm" ${o.confirm ? 'checked' : ''} onchange="bulkFormChanged()"> Confirm too (if not confirmed)</label>` : ''}
+      <label class="bk-opt"><input type="checkbox" id="bkOptVerify" ${o.verify ? 'checked' : ''} onchange="bulkFormChanged()"> Pass 2nd verification too (if not done)</label>
+      <label class="bk-opt"><input type="checkbox" id="bkOptMove" ${o.move ? 'checked' : ''} onchange="bulkFormChanged()"> Mark Moved to Packing too (if not moved)</label>
+    </div>
+    <div class="bk-plan" id="bkPlan"></div>
+    <div class="bk-foot">
+      <span class="bk-err" id="bkErr"></span>
+      <button type="button" class="bk-btn" onclick="bulkClose()">Cancel</button>
+      <button type="button" class="bk-btn ${isShip ? 'purple' : 'green'}" id="bkGo" onclick="bulkRun()">Process</button>
+    </div>`;
+  _bkRenderPlan_();
+}
+function _bkRenderPlan_(){
+  const a = BULK.action, o = BULK.opts;
+  const invs = Array.from(BULK.sel);
+  let doN = 0;
+  const html = invs.map(inv => {
+    const p = _bkPlan_(inv, a, o);
+    if (p.kind === 'do' || p.kind === 'plus') doN++;
+    const t = _BK_TAG[p.kind];
+    return `<div class="bk-prow"><span><span class="bk-tag ${t[0]}">${t[1]}</span></span><span class="bk-inv">${_escH_(inv)}</span><span class="why">${_escH_(p.why)}</span></div>`;
+  }).join('');
+  const pl = document.getElementById('bkPlan'); if (pl) pl.innerHTML = html;
+  const go = document.getElementById('bkGo'), err = document.getElementById('bkErr');
+  let msg = '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(o.date || '')) msg = 'Enter the actual date.';
+  else if (o.date > _bkTodayYmd_()) msg = 'The date cannot be in the future.';
+  else if (String(o.reason || '').trim().length < 3) msg = 'Enter a reason (3+ characters).';
+  else if (!doN) msg = 'No order can be processed with these options.';
+  if (err) err.textContent = msg;
+  if (go){ go.disabled = !!msg; go.textContent = 'Process ' + doN + (doN === 1 ? ' order' : ' orders'); }
+}
+// 서버 1건 처리 — 여러 단계라 일반 저장(25초)보다 넉넉히 60초. 시간 초과여도 서버는 끝까지 처리하므로 "다시 시도"가 안전(끝난 단계는 건너뜀)
+async function _bkPost_(data){
+  try {
+    const fd = new URLSearchParams({ op:'bulkOrderAction', data: JSON.stringify(data) });
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 60000);
+    const res = await fetch(CONFIG.GAS_URL, { method:'POST', body: fd, signal: ctl.signal });
+    clearTimeout(timer);
+    return await res.json();
+  } catch(e){
+    return { ok:false, error: (e && e.name === 'AbortError') ? 'Timed out (60s) — the server may still finish it. Press "Retry failed" to check.' : String(e && e.message || e) };
+  }
+}
+function _bkApplyLocal_(inv, r){
+  const now = Date.now();
+  const j = _bkFind_(inv);
+  const by = r.by || '', at = r.at || '';
+  if ((r.steps || []).some(s => s === 'moved' || s === 'verify')){
+    const stg = r.packStage || ((r.steps || []).indexOf('verify') >= 0 ? 'verified' : 'taken');
+    const ov = { mp: true, stage: stg, until: now + 420000 };
+    if ((r.steps || []).indexOf('verify') >= 0 && stg === 'verified'){ ov.skipAt = at; ov.skipBy = by; ov.skipReason = '[Bulk] ' + (BULK.opts.reason || ''); }
+    _recentMovedOverrides[inv] = ov;
+    if (j) _applyMovedOv_(j, ov);
+  }
+  const fam = (TODAY_JOBS || []).filter(x => x.invoice === inv || x.dimsLinkedTo === inv); // 대표 + 묶인 오더(서버는 묶인 오더도 대표 값을 보여줌)
+  if ((r.steps || []).indexOf('confirm') >= 0 && (r.isTk === true || r.isTk === false)){
+    if (r.isTk){
+      fam.forEach(j => { j.salesConfirmed = true; j.salesConfirmedAt = (function(m){ return m ? (m[2] + '/' + m[3] + ' 12:00 AM') : String(at); })(/^(\d{4})-(\d{2})-(\d{2})/.exec(String(at))); j.salesConfirmedBy = by; _recentSalesConfirmOverrides[j.invoice] = _confirmOverrideFromJob_(j, 420000); });
+    } else {
+      _recentPaymentOverrides[inv] = { paid: true, until: now + 420000 };
+      [TODAY_JOBS, SHEET_JOBS].forEach(arr => (arr || []).forEach(x => { if (x.invoice === inv || x.dimsLinkedTo === inv) x.paymentPaid = true; }));
+    }
+  }
+  if (r.shipped && r.ok){
+    fam.concat(fam.length ? [] : [{ invoice: inv }]).forEach(x => { _recentShippedOverrides[x.invoice] = { shipped: true, shippedAt: r.shippedAt, shippedBy: r.shippedBy, until: now + 420000 }; });
+    [TODAY_JOBS, SHEET_JOBS].forEach(arr => (arr || []).forEach(x => { if (x.invoice === inv || x.dimsLinkedTo === inv){ x.shipped = true; x.shippedAt = r.shippedAt; x.shippedBy = r.shippedBy; if (!r.isTk) x.paymentPaid = true; } }));
+  }
+}
+async function bulkRun(onlyFailed){
+  if (BULK.running) return;
+  _bkReadForm_();
+  const a = BULK.action, o = BULK.opts;
+  const invs = Array.from(BULK.sel);
+  const todo = invs.filter(inv => {
+    if (onlyFailed) return BULK.results[inv] && BULK.results[inv].st === 'fail';
+    const p = _bkPlan_(inv, a, o);
+    if (p.kind === 'skip' || p.kind === 'done'){ BULK.results[inv] = { st: p.kind, msg: p.why }; return false; }
+    return true;
+  });
+  if (!todo.length) return;
+  if (!onlyFailed && !confirm(`${a === 'ship' ? 'Mark as SHIPPED' : 'Mark as CONFIRMED'}: ${todo.length} order(s)\nDate: ${o.date}\nReason: ${o.reason}\n\nProceed?`)) return;
+  BULK.running = true;
+  todo.forEach(inv => { BULK.results[inv] = { st:'wait', msg:'Waiting' }; });
+  _bkRenderProgress_();
+  const okList = [];
+  for (let i = 0; i < todo.length; i++){
+    const inv = todo[i];
+    BULK.results[inv] = { st:'run', msg:'Saving…' };
+    _bkRenderProgress_();
+    let r = await _bkPost_({ token: authGetToken(), invoice: inv, action: a, date: o.date, reason: o.reason, alsoMove: o.move, alsoVerify: o.verify, alsoConfirm: o.confirm });
+    if (r && !r.ok && /too many|busy|lock|failed to fetch|network/i.test(String(r.error || ''))){
+      await new Promise(res => setTimeout(res, 1500));
+      r = await _bkPost_({ token: authGetToken(), invoice: inv, action: a, date: o.date, reason: o.reason, alsoMove: o.move, alsoVerify: o.verify, alsoConfirm: o.confirm });
+    }
+    if (r && r.ok){
+      if (r.unchanged) BULK.results[inv] = { st:'done', msg: 'Already ' + (r.note ? r.note.replace(/^already /, '') : 'done') };
+      else {
+        const lbl = { moved:'Moved', verify:'2nd verify', confirm:'Confirm', ship:'Shipped' };
+        BULK.results[inv] = { st:'ok', msg: (r.steps || []).map(s => lbl[s] || s).join(' → ') + ' · ' + o.date + ' · ' + (r.by || '') };
+        _bkApplyLocal_(inv, r);
+        okList.push({ inv: inv, r: r });
+      }
+    } else {
+      const part = (r && r.steps && r.steps.length) ? ' (done before stop: ' + r.steps.join(', ') + ')' : '';
+      BULK.results[inv] = { st:'fail', msg: String((r && r.error) || 'Unknown error') + part };
+      if (r && r.steps && r.steps.length) _bkApplyLocal_(inv, Object.assign({}, r, { shipped:false }));
+    }
+    _bkRenderProgress_();
+  }
+  BULK.running = false;
+  try { renderToday(); renderShipping(); } catch(e){}
+  _bkRenderProgress_();
+  _bkAfterSync_(okList); // 다른 직원 화면·상세 팝업 갱신(뒤에서 한 건씩)
+}
+async function _bkAfterSync_(list){
+  for (const it of list){
+    const steps = it.r.steps || [];
+    try {
+      if (steps.indexOf('moved') >= 0 || steps.indexOf('verify') >= 0) await gasPost('publishTodayPatch', { invoice: it.inv, kind: 'moved' });
+      if (steps.indexOf('confirm') >= 0) await gasPost('publishTodayPatch', { invoice: it.inv, kind: it.r.isTk ? 'conf' : 'pay' });
+      if (steps.indexOf('ship') >= 0) await gasPost('publishTodayPatch', { invoice: it.inv, kind: 'ship' });
+      if (!it.r.isTk) await gasPost('syncInvoiceMirror', { invoice: it.inv });
+    } catch(e){ /* 실패해도 1분 주기 갱신으로 반영됨 */ }
+  }
+}
+function _bkRenderProgress_(){
+  const invs = Array.from(BULK.sel);
+  const act = invs.filter(inv => BULK.results[inv] && ['wait','run','ok','fail'].indexOf(BULK.results[inv].st) >= 0);
+  const fin = act.filter(inv => ['ok','fail'].indexOf(BULK.results[inv].st) >= 0).length;
+  const fails = invs.filter(inv => BULK.results[inv] && BULK.results[inv].st === 'fail').length;
+  const okN = invs.filter(inv => BULK.results[inv] && BULK.results[inv].st === 'ok').length;
+  const pct = act.length ? Math.round(fin / act.length * 100) : 100;
+  const T = { ok:['ok','✓ Done'], fail:['red','✗ Failed'], run:['blue','… Saving'], wait:['gray','Waiting'], skip:['red','Excluded'], done:['gray','Already done'] };
+  const order = { run:0, wait:1, fail:2, ok:3, done:4, skip:5 };
+  const rows = invs.slice().sort((x, y) => (order[(BULK.results[x] || {}).st] || 9) - (order[(BULK.results[y] || {}).st] || 9)).map(inv => {
+    const r = BULK.results[inv] || { st:'skip', msg:'' };
+    const t = T[r.st] || T.skip;
+    return `<div class="bk-prow"><span><span class="bk-tag ${t[0]}">${t[1]}</span></span><span class="bk-inv">${_escH_(inv)}</span><span class="why">${_escH_(r.msg || '')}</span></div>`;
+  }).join('');
+  const title = BULK.running
+    ? `${BULK.action === 'ship' ? 'Shipping' : 'Confirming'}… ${fin} / ${act.length}`
+    : `Finished — ${okN} done${fails ? ', ' + fails + ' failed' : ''}`;
+  document.getElementById('bulkModal').innerHTML = `
+    <h3>${_escH_(title)}</h3>
+    <div class="bk-progress"><div style="width:${pct}%"></div></div>
+    <div class="bk-plan">${rows}</div>
+    <div class="bk-note">• The sheet is not edited by hand — every save goes through the server one by one, with the same records as normal saves.<br>
+      • Dates are saved as the actual date you entered; who/why is kept in the BulkLog sheet.<br>
+      • Other screens update within about a minute.</div>
+    <div class="bk-foot">
+      ${(!BULK.running && fails) ? '<button type="button" class="bk-btn navy" onclick="bulkRun(true)">Retry failed (' + fails + ')</button>' : ''}
+      <button type="button" class="bk-btn" ${BULK.running ? 'disabled' : ''} onclick="bulkFinish()">${BULK.running ? 'Please wait…' : 'Close'}</button>
+    </div>`;
+}
+function bulkFinish(){
+  if (BULK.running) return;
+  // 성공·이미 완료된 오더는 선택에서 빼고, 실패·제외된 것만 남겨 바로 다시 볼 수 있게 함
+  Array.from(BULK.sel).forEach(inv => { const r = BULK.results[inv]; if (r && (r.st === 'ok' || r.st === 'done')) BULK.sel.delete(inv); });
+  BULK.results = {};
+  bulkClose();
+  setTimeout(() => { try { autoSync(true); } catch(e){} }, 300); // 창이 열린 동안 멈춰 있던 목록 갱신을 바로 한 번
 }
 
 /* ============== ★ 2026-10-02 신규 — 접속 제한(로그인) ==============
