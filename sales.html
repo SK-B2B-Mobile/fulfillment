@@ -1163,6 +1163,8 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
 .bk-opt.dis{opacity:.45; cursor:not-allowed; background:var(--surface2);}
 .bk-opt.dis input{cursor:not-allowed;}
 .bk-nn{font-weight:600; color:var(--text-dim);}
+body.bk-pad{padding-bottom:74px;}
+.bk-table th input[type=checkbox]{width:17px; height:17px; cursor:pointer; accent-color:#60A5FA;}
 
 </style>
 </head>
@@ -1213,7 +1215,7 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-10-bulk3</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-10-bulk4</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Packing Progress</div>
       <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">Built by David Kim · 2026</div>
     </div>
@@ -1266,20 +1268,20 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
     <!-- ★ 2026-11-10 — Bulk Update(관리자 전용). 켜면 아래 표 대신 체크칸이 있는 표가 보임 -->
     <div class="bk-panel" id="bulkPanel" style="display:none;">
       <div class="bk-tools">
-        <button type="button" class="bk-btn" onclick="bulkSelectPage()">Select all on this page</button>
+        <button type="button" class="bk-btn" id="bulkSelPageBtn" onclick="bulkSelectPage()">Select all on this page</button>
         <label class="bk-chk-lbl"><input type="checkbox" id="bulkHideShipped" checked onchange="BULK.page=1; renderBulk_()"> Hide shipped orders</label>
         <span class="bk-hint">Only the orders you check are saved, one by one, with the normal server rules. Press Bulk Update again to finish.</span>
       </div>
       <div class="bk-scroll">
         <table class="bk-table">
           <thead><tr>
-            <th style="width:40px;"></th><th>Invoice#</th><th>Customer</th><th>Ship Out</th><th>Method</th><th>2nd Verify</th><th>Sales Confirm</th><th>BOL#</th><th>Shipped</th>
+            <th style="width:40px;"><input type="checkbox" id="bulkHeadCb" onchange="bulkSelectPage()" title="Select / deselect all on this page"></th><th>Invoice#</th><th>Customer</th><th>Ship Out</th><th>Method</th><th>2nd Verify</th><th>Sales Confirm</th><th>BOL#</th><th>Shipped</th>
           </tr></thead>
           <tbody id="bulkTbody"></tbody>
         </table>
       </div>
       <div class="bk-pager"><span id="bulkPagerSum">–</span><span id="bulkPagerBtns"></span></div>
-      <div class="bk-bar" id="bulkBar" style="display:none;">
+      <div class="bk-bar bk-bar2" id="bulkBar" style="display:none;">
         <span class="bk-count" id="bulkCount">0 selected</span>
         <button type="button" class="bk-btn purple big" onclick="bulkOpen('ship')" title="Goods have left — records Shipped (and Sales Confirm if needed)">🚚 Mark Shipped</button>
         <button type="button" class="bk-btn green-o" onclick="bulkOpen('confirm')" title="Payment confirmed but the goods have NOT left yet">💲 Confirm only (not shipped yet)</button>
@@ -5593,6 +5595,9 @@ function renderBulk_(){
     }).join('') : '<tr><td colspan="9" style="text-align:center; padding:28px; color:var(--text-dim);">No matching orders.</td></tr>';
   }
   const sum = document.getElementById('bulkPagerSum');
+  const allSel = _bkPageAllSel_();
+  const sb = document.getElementById('bulkSelPageBtn'); if (sb) sb.textContent = allSel ? 'Deselect all on this page' : 'Select all on this page';
+  const hc = document.getElementById('bulkHeadCb'); if (hc){ const anySel = rows.some(j => BULK.sel.has(j.invoice)); hc.checked = allSel; hc.indeterminate = !allSel && anySel; }
   if (sum) sum.textContent = list.length ? `${start + 1}–${Math.min(start + BULK.size, list.length)} of ${list.length}` : '0 of 0';
   const pb = document.getElementById('bulkPagerBtns');
   if (pb) pb.innerHTML = pages > 1
@@ -5608,6 +5613,8 @@ function _bkUpdateBar_(){
     if (bar) bar.style.display = (n && BULK.on) ? 'flex' : 'none';
     if (c) c.textContent = txt;
   });
+  // 아래 고정 막대가 마지막 줄을 가리지 않게 화면 아래 여백
+  document.body.classList.toggle('bk-pad', !!(n && BULK.on));
 }
 function bulkCheck(el){
   const inv = el.getAttribute('data-bk-inv');
@@ -5616,11 +5623,17 @@ function bulkCheck(el){
     BULK.sel.add(inv);
   } else BULK.sel.delete(inv);
   document.querySelectorAll('input[data-bk-inv="' + (window.CSS && CSS.escape ? CSS.escape(inv) : inv) + '"]').forEach(x => { x.checked = el.checked; const row = x.closest('tr, .today-row'); if (row) row.classList.toggle('sel', el.checked); });
+  const allSel = _bkPageAllSel_(), anySel = _bkPageRows_().some(j => BULK.sel.has(j.invoice));
+  const sb = document.getElementById('bulkSelPageBtn'); if (sb) sb.textContent = allSel ? 'Deselect all on this page' : 'Select all on this page';
+  const hc = document.getElementById('bulkHeadCb'); if (hc){ hc.checked = allSel; hc.indeterminate = !allSel && anySel; }
   _bkUpdateBar_();
 }
+function _bkPageRows_(){ const start = (BULK.page - 1) * BULK.size; return (BULK.list || []).slice(start, start + BULK.size); }
+function _bkPageAllSel_(){ const rows = _bkPageRows_(); return rows.length > 0 && rows.every(j => BULK.sel.has(j.invoice)); }
+// ★ 같은 버튼(또는 표 머리글 체크칸)으로 선택·해제 — 이 페이지가 모두 선택돼 있으면 해제
 function bulkSelectPage(){
-  const start = (BULK.page - 1) * BULK.size;
-  const rows = (BULK.list || []).slice(start, start + BULK.size);
+  const rows = _bkPageRows_();
+  if (_bkPageAllSel_()){ rows.forEach(j => BULK.sel.delete(j.invoice)); renderBulk_(); try { renderToday(); } catch(e){} return; }
   let capped = false;
   rows.forEach(j => { if (BULK.sel.has(j.invoice)) return; if (BULK.sel.size >= BULK_MAX){ capped = true; return; } BULK.sel.add(j.invoice); });
   renderBulk_();
