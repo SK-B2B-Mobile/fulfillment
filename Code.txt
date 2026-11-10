@@ -1424,6 +1424,10 @@ function updatePaymentStatus(data) {
         if (bcRow) moved = !!bc.getRange(bcRow, 12).getValue(); // L열: TakenOut
       } catch (e) { /* best-effort */ }
     }
+    // ★ 2026-11-10 버그 수정 — 화면·출고·2차검증과 같은 기준(배치 기록 + 수동 표시 + 디멘션 저장 + 2차검증 통과)으로 이동 여부 판단.
+    //   예전엔 배치 기록·수동 표시만 봐서, 디멘션으로 이동 완료된 UPS/PU 오더의 Sales Confirm 이 "패킹존 이동 미완료"로 거절되고
+    //   화면이 CONFIRMED → 원래대로 되돌아갔음(11-09 IN00487297 등).
+    if (!moved) { try { moved = !!_packStateForInvoice_(invoice, false, false).mp; } catch (eMv) { /* 아래에서 거절 */ } }
     if (!moved) return { ok: false, error: '패킹존 이동이 완료되지 않은 오더는 결제 상태를 입력할 수 없습니다' };
     // ★ 2026-10-07 — 이미 출고(Shipped)된 오더는 Sales Confirm을 해제할 수 없음(나간 오더). 출고를 먼저 취소(Undo)해야 함.
     if (!paid) {
@@ -7427,7 +7431,7 @@ function bulkOrderAction(data) {
   const action = String((data && data.action) || '').trim();
   const date = String((data && data.date) || '').trim();
   const reason = String((data && data.reason) || '').trim().replace(/\s+/g, ' ').slice(0, 200);
-  const o = { move: !!(data && data.alsoMove), verify: !!(data && data.alsoVerify), confirm: !!(data && data.alsoConfirm) };
+  const o = { move: !!(data && data.alsoMove), verify: !!(data && data.alsoVerify), confirm: !!(data && data.alsoConfirm), correct: !!(data && data.correct) };
   if (!invoice) return { ok: false, error: 'invoice required' };
   if (action !== 'confirm' && action !== 'ship') return { ok: false, error: 'bad action' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: 'actual date required' };
@@ -7449,7 +7453,7 @@ function bulkOrderAction(data) {
       if (sCur) res.isTk = sCur.isTk;
       if (steps.length && sh) { try { const f = _bulkState_(sh, invoice); if (!f.error) { res.isTk = f.isTk; res.movedToPacking = f.mp; res.packStage = f.stage; res.confirmed = f.isTk ? f.conf : f.paid; } } catch (eF) { /* 무시 */ } }
     }
-    _bulkLog_([nowLocal_(), info.name || info.id || '', invoice, action, date, reason, steps.join(' > '), ok ? ((extra && extra.unchanged) ? 'unchanged' : 'ok') : ('FAIL: ' + error)]);
+    _bulkLog_([nowLocal_(), info.name || info.id || '', invoice, action + (o.correct ? ' (correct)' : ''), date, reason, steps.join(' > '), ok ? ((extra && extra.unchanged) ? 'unchanged' : (steps.some(function (x) { return /^re/.test(x); }) ? 'corrected' : 'ok')) : ('FAIL: ' + error)]);
     return res;
   };
   try {
@@ -7463,15 +7467,19 @@ function bulkOrderAction(data) {
     if (linkedTo) return done(false, 'Linked order — use primary invoice ' + linkedTo);
     if (!s.insp) return done(false, 'Not inspected yet');
     const confirmedNow = function () { return s.isTk ? s.conf : s.paid; };
-    if (action === 'ship' && s.shipped) return done(true, '', { unchanged: true, note: 'already shipped' });
-    if (action === 'confirm' && confirmedNow()) return done(true, '', { unchanged: true, note: 'already confirmed' });
-    if (action === 'confirm' && s.shipped) return done(true, '', { unchanged: true, note: 'already shipped' });
+    // ★ 2026-11-10 — "Correct existing records"(o.correct): 이미 컨펌/출고된 오더도 입력한 실제 날짜·처리자로 다시 기록(Undo 불필요)
+    if (!o.correct) {
+      if (action === 'ship' && s.shipped) return done(true, '', { unchanged: true, note: 'already shipped' });
+      if (action === 'confirm' && confirmedNow()) return done(true, '', { unchanged: true, note: 'already confirmed' });
+      if (action === 'confirm' && s.shipped) return done(true, '', { unchanged: true, note: 'already shipped' });
+    }
+    const wasShipped = s.shipped;
 
     // TK 출고는 BOL#·운송비가 먼저 있어야 함(setShippedStatus 규칙) — 앞 단계(컨펌 등)를 해 놓고 마지막에 막히지 않게 미리 확인
     if (action === 'ship' && s.isTk && !s.bolOk) return done(false, 'BOL# missing — enter BOL# & trucking cost in the order popup first');
     if (action === 'ship' && s.isTk && !s.costOk) return done(false, 'Trucking cost missing — enter it in the order popup first');
     let r;
-    if (!s.mp) {
+    if (!s.mp && !wasShipped) {
       if (!o.move) return done(false, 'Not moved to Packing');
       r = setManualPackingMoved({ invoice: invoice, moved: true, by: by });
       if (!r || !r.ok) return done(false, 'Moved to Packing failed: ' + ((r && r.error) || 'unknown'));
@@ -7480,7 +7488,7 @@ function bulkOrderAction(data) {
       if (s.error) return done(false, s.error);
       sCur = s;
     }
-    if (s.stage !== 'verified') {
+    if (s.stage !== 'verified' && !wasShipped) {   // 이미 출고된 오더 바로잡기는 앞 단계(이동·2차검증)를 다시 요구하지 않음
       if (!o.verify) return done(false, '2nd verification not complete');
       r = setVerifySkip({ invoice: invoice, skip: true, by: by, reason: '[Bulk] ' + reason });
       if (!r || !r.ok) return done(false, '2nd verification failed: ' + ((r && r.error) || 'unknown'));
@@ -7491,7 +7499,7 @@ function bulkOrderAction(data) {
       __BULK_AT_ = at;
       try { r = s.isTk ? setSalesConfirm({ invoice: invoice, confirmed: true, by: by }) : updatePaymentStatus({ invoice: invoice, paid: true, by: by }); }
       finally { __BULK_AT_ = ''; }
-      // updatePaymentStatus 는 '이동'을 배치 기록·수동 표시로만 봄(디멘션만 있는 오더는 거절) → 옵션이 켜져 있으면 수동 표시 후 1번 더
+      // (안전망) 결제 저장이 '이동 미완료'로 거절하면 → 옵션이 켜져 있을 때 수동 표시 후 1번 더 (v42부터 디멘션 이동도 인정하므로 드묾)
       if (!s.isTk && r && !r.ok && /패킹존 이동/.test(String(r.error || '')) && o.move && steps.indexOf('moved') < 0) {
         const rm = setManualPackingMoved({ invoice: invoice, moved: true, by: by });
         if (rm && rm.ok) {
@@ -7504,14 +7512,27 @@ function bulkOrderAction(data) {
       if (!r || !r.ok) return done(false, 'Sales Confirm failed: ' + ((r && r.error) || 'unknown'));
       steps.push('confirm');
     }
+    // 이미 컨펌된 기록 다시 저장 — Confirm 바로잡기이거나, 출고 바로잡기에서 "Confirm too"도 체크했을 때만
+    //   (출고 날짜만 고칠 때 영업이 실제로 컨펌한 날짜·사람이 지워지지 않게). 출고 바로잡기는 출고를 먼저 → 실패 시 컨펌 기록은 그대로.
+    const reconfirmNeeded = o.correct && steps.indexOf('confirm') < 0 && (action === 'confirm' || o.confirm);
+    const doReconfirm = function () {
+      __BULK_AT_ = at;
+      try { r = s.isTk ? setSalesConfirm({ invoice: invoice, confirmed: true, by: by }) : updatePaymentStatus({ invoice: invoice, paid: true, by: by }); }
+      finally { __BULK_AT_ = ''; }
+      if (!r || !r.ok) return 'Sales Confirm correction failed: ' + ((r && r.error) || 'unknown');
+      steps.push('reconfirm');
+      return '';
+    };
+    if (reconfirmNeeded && action === 'confirm') { const er = doReconfirm(); if (er) return done(false, er); }
     let shipOut = null;
     if (action === 'ship') {
       __BULK_AT_ = at;
       try { r = setShippedStatus({ invoice: invoice, shipped: true, by: by }); }
       finally { __BULK_AT_ = ''; }
-      if (!r || !r.ok) return done(false, 'Mark Shipped failed: ' + ((r && r.error) || 'unknown'));
-      steps.push('ship');
+      if (!r || !r.ok) return done(false, (wasShipped ? 'Shipped correction failed: ' : 'Mark Shipped failed: ') + ((r && r.error) || 'unknown'));
+      steps.push(wasShipped ? 'reship' : 'ship');
       shipOut = { shipped: true, shippedAt: r.shippedAt, shippedBy: r.shippedBy };
+      if (reconfirmNeeded) { const er = doReconfirm(); if (er) return done(false, er); }
     }
     const fin = _bulkState_(sh, invoice);
     return done(true, '', {
