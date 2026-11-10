@@ -1158,6 +1158,11 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
 #screen-lookup.bk-on .today-row.sel{background:#EFF6FF;}
 .bk-bar2{position:fixed; left:0; right:0; bottom:0; z-index:1500; box-shadow:0 -6px 18px rgba(0,0,0,.15);}
 .lookup-top .bk-toggle{flex-shrink:0;}
+.bk-btn.big{font-size:14.5px; padding:10px 18px;}
+.bk-btn.green-o{background:#fff; color:#047857; border-color:#6EE7B7; font-size:12px;}
+.bk-opt.dis{opacity:.45; cursor:not-allowed; background:var(--surface2);}
+.bk-opt.dis input{cursor:not-allowed;}
+.bk-nn{font-weight:600; color:var(--text-dim);}
 
 </style>
 </head>
@@ -1208,7 +1213,7 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
   <div class="tb-left">
     <div class="tb-logo">SK</div>
     <div>
-      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-10-bulk2</span></div>
+      <div class="tb-title">Sales Lookup <span class="ui-ver">UI 2026-11-10-bulk3</span></div>
       <div class="tb-sub">Fulfillment Status &amp; Packing Progress</div>
       <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">Built by David Kim · 2026</div>
     </div>
@@ -1276,8 +1281,8 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
       <div class="bk-pager"><span id="bulkPagerSum">–</span><span id="bulkPagerBtns"></span></div>
       <div class="bk-bar" id="bulkBar" style="display:none;">
         <span class="bk-count" id="bulkCount">0 selected</span>
-        <button type="button" class="bk-btn green" onclick="bulkOpen('confirm')">💲 Mark Confirmed (Paid)</button>
-        <button type="button" class="bk-btn purple" onclick="bulkOpen('ship')">🚚 Mark Shipped</button>
+        <button type="button" class="bk-btn purple big" onclick="bulkOpen('ship')" title="Goods have left — records Shipped (and Sales Confirm if needed)">🚚 Mark Shipped</button>
+        <button type="button" class="bk-btn green-o" onclick="bulkOpen('confirm')" title="Payment confirmed but the goods have NOT left yet">💲 Confirm only (not shipped yet)</button>
         <button type="button" class="bk-btn" onclick="bulkClearSel()">Clear selection</button>
       </div>
     </div>
@@ -1384,8 +1389,8 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
       </div>
       <div class="bk-bar bk-bar2" id="bulkBar2" style="display:none;">
         <span class="bk-count" id="bulkCount2">0 selected</span>
-        <button type="button" class="bk-btn green" onclick="bulkOpen('confirm')">💲 Mark Confirmed (Paid)</button>
-        <button type="button" class="bk-btn purple" onclick="bulkOpen('ship')">🚚 Mark Shipped</button>
+        <button type="button" class="bk-btn purple big" onclick="bulkOpen('ship')" title="Goods have left — records Shipped (and Sales Confirm if needed)">🚚 Mark Shipped</button>
+        <button type="button" class="bk-btn green-o" onclick="bulkOpen('confirm')" title="Payment confirmed but the goods have NOT left yet">💲 Confirm only (not shipped yet)</button>
         <button type="button" class="bk-btn" onclick="bulkClearSel()">Clear selection</button>
       </div>
     </div>
@@ -5678,6 +5683,7 @@ function bulkOpen(action){
   BULK.action = action;
   BULK.opts = BULK.opts || { date: _bkTodayYmd_(), reason: '', move: false, verify: false, confirm: false, correct: false };
   BULK.opts.correct = false; // 덮어쓰기는 매번 직접 켜야 함(실수 방지)
+  if (action === 'ship') BULK.opts.confirm = true; // 출고 정리는 대부분 컨펌도 같이 — 기본 체크(필요 없는 경우는 자동으로 잠김)
   BULK.results = {};
   BULK.modalOpen = true;
   _bkRenderConfirm_();
@@ -5707,7 +5713,7 @@ function _bkRenderConfirm_(){
   const isShip = a === 'ship';
   const n = BULK.sel.size;
   document.getElementById('bulkModal').innerHTML = `
-    <h3>${isShip ? '🚚 Mark ' + n + ' orders as Shipped' : '💲 Mark ' + n + ' orders as Confirmed (Paid)'}</h3>
+    <h3>${isShip ? '🚚 Mark ' + n + (n === 1 ? ' order' : ' orders') + ' as Shipped' : '💲 Confirm only — ' + n + (n === 1 ? ' order' : ' orders') + ' (not shipped yet)'}</h3>
     <div class="bk-desc">Enter the real ${isShip ? 'ship' : 'payment / confirm'} date. Each order is saved one by one with the normal server rules.</div>
     <div class="bk-form">
       <div><label>${isShip ? 'Actual ship date' : 'Actual confirm (payment) date'} *</label><input type="date" id="bkDate" value="${_escH_(o.date)}" max="${_bkTodayYmd_()}" onchange="bulkFormChanged()"></div>
@@ -5715,10 +5721,10 @@ function _bkRenderConfirm_(){
       <div class="full"><label>Reason (required · saved in the record) *</label><input type="text" id="bkReason" maxlength="200" value="${_escH_(o.reason)}" placeholder="e.g. Not entered by staff — actual shipment already completed" oninput="bulkFormChanged()"></div>
     </div>
     <div class="bk-opts">
-      ${isShip ? `<label class="bk-opt"><input type="checkbox" id="bkOptConfirm" ${o.confirm ? 'checked' : ''} onchange="bulkFormChanged()"> Confirm too (if not confirmed · with Correct: re-save confirm too)</label>` : ''}
-      <label class="bk-opt"><input type="checkbox" id="bkOptVerify" ${o.verify ? 'checked' : ''} onchange="bulkFormChanged()"> Pass 2nd verification too (if not done)</label>
-      <label class="bk-opt"><input type="checkbox" id="bkOptMove" ${o.move ? 'checked' : ''} onchange="bulkFormChanged()"> Mark Moved to Packing too (if not moved)</label>
-      <label class="bk-opt bk-opt-fix"><input type="checkbox" id="bkOptCorrect" ${o.correct ? 'checked' : ''} onchange="bulkFormChanged()"> Correct existing records — re-save already ${isShip ? 'confirmed / shipped' : 'confirmed'} orders with this date</label>
+      ${isShip ? `<label class="bk-opt"><input type="checkbox" id="bkOptConfirm" ${o.confirm ? 'checked' : ''} onchange="bulkFormChanged()"> Confirm too (if not confirmed · with Correct: re-save confirm too) <span class="bk-nn" style="display:none">· not needed</span></label>` : ''}
+      <label class="bk-opt"><input type="checkbox" id="bkOptVerify" ${o.verify ? 'checked' : ''} onchange="bulkFormChanged()"> Pass 2nd verification too (if not done) <span class="bk-nn" style="display:none">· not needed</span></label>
+      <label class="bk-opt"><input type="checkbox" id="bkOptMove" ${o.move ? 'checked' : ''} onchange="bulkFormChanged()"> Mark Moved to Packing too (if not moved) <span class="bk-nn" style="display:none">· not needed</span></label>
+      <label class="bk-opt bk-opt-fix"><input type="checkbox" id="bkOptCorrect" ${o.correct ? 'checked' : ''} onchange="bulkFormChanged()"> Correct existing records — re-save already ${isShip ? 'confirmed / shipped' : 'confirmed'} orders with this date <span class="bk-nn" style="display:none">· not needed</span></label>
     </div>
     <div class="bk-plan" id="bkPlan"></div>
     <div class="bk-foot">
@@ -5728,7 +5734,38 @@ function _bkRenderConfirm_(){
     </div>`;
   _bkRenderPlan_();
 }
+// ★ 선택한 오더 중 그 단계가 "필요한" 오더가 하나도 없으면 옵션을 잠금(회색 + 체크 해제) — 헷갈림 방지
+function _bkNeeds_(){
+  const a = BULK.action, o = BULK.opts;
+  const n = { move:false, verify:false, confirm:false, correct:false };
+  Array.from(BULK.sel).forEach(inv => {
+    const j = _bkFind_(inv);
+    if (!j || j.dimsLinkedTo || !_bkMethodOk_(j)) return;
+    const conf = _bkConfirmed_(j);
+    const done = j.shipped || (a === 'confirm' && conf);
+    if (done){ n.correct = true; if (a === 'ship' && (!conf || o.correct)) n.confirm = true; return; }
+    if (!j.movedToPacking) n.move = true;
+    if (!j.movedToPacking || _bkNeedsVerify_(j)) n.verify = true;
+    if (a === 'ship' && (!conf || o.correct)) n.confirm = true;
+    if (a === 'ship' && conf) n.correct = true;  // 컨펌 기록 다시 저장 가능
+  });
+  return n;
+}
+function _bkSyncOpts_(){
+  const n = _bkNeeds_();
+  const map = { bkOptMove:'move', bkOptVerify:'verify', bkOptConfirm:'confirm', bkOptCorrect:'correct' };
+  Object.keys(map).forEach(id => {
+    const el = document.getElementById(id); if (!el) return;
+    const need = n[map[id]];
+    el.disabled = !need;
+    if (!need) el.checked = false;
+    const lb = el.closest('.bk-opt'); if (lb){ lb.classList.toggle('dis', !need); lb.title = need ? '' : 'Not needed — every selected order already has this step'; }
+    const tag = lb && lb.querySelector('.bk-nn'); if (tag) tag.style.display = need ? 'none' : '';
+  });
+  _bkReadForm_();
+}
 function _bkRenderPlan_(){
+  _bkSyncOpts_();
   const a = BULK.action, o = BULK.opts;
   const invs = Array.from(BULK.sel);
   let doN = 0;
