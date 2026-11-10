@@ -1022,6 +1022,9 @@ function doPost_core_(e) {
   if (op === 'setBolNumber') return json_(setBolNumber(data));
   // ★ 2026-10-03 신규 — Sales Confirm(영업 컨펌) 체크
   if (op === 'setSalesConfirm') return json_(setSalesConfirm(data));
+  // ★ 2026-11-10 신규 — sales.html 관리자 전용 '여러 오더 한 번에 처리'(Bulk Update). 오더 1건씩, 서버 규칙 그대로
+  if (op === 'bulkWhoAmI') return json_(bulkWhoAmI_(data));
+  if (op === 'bulkOrderAction') return json_(bulkOrderAction(data));
   // ★ 2026-10-03 신규 — 'PU & TK' 전용 전체 박스 수량 입력
   if (op === 'setPuTkBoxQty') return json_(setPuTkBoxQty(data));
 
@@ -1442,7 +1445,7 @@ function updatePaymentStatus(data) {
     mark('lock');
     try {
       const statusVal = paid ? 'paid' : 'unpaid';
-      const atVal = nowLocal_();
+      const atVal = __BULK_AT_ || nowLocal_(); // ★ 2026-11-10 — 관리자 일괄 처리(bulkOrderAction)일 때만 실제 결제 확인일
       const colList = [iStatus, iAt, iBy].filter(Boolean);
       const minC = Math.min.apply(null, colList);
       const maxC = Math.max.apply(null, colList);
@@ -5010,7 +5013,7 @@ function setShippedStatus(data) {
     mark('lock');
     let shippedAtOut = '';
     try {
-      shippedAtOut = shipped ? batchNow_() : '';
+      shippedAtOut = shipped ? (__BULK_AT_ || batchNow_()) : ''; // ★ 2026-11-10 — 관리자 일괄 처리일 때만 실제 출고일
       _writeRowCells_(sh, ctx.row, [
         { col: cols.iShipped, value: shipped },
         { col: cols.iAt, value: shippedAtOut, text: true }, // 텍스트 서식 고정 — Date로 자동 변환 방지(정렬 일관성)
@@ -5850,7 +5853,7 @@ function setSalesConfirm(data) {
     let undoneByOut = '';
     let wasUndoneOut = false;
     try {
-      const now = batchNow_();
+      const now = (confirmed && __BULK_AT_) ? __BULK_AT_ : batchNow_(); // ★ 2026-11-10 — 관리자 일괄 처리일 때만 실제 컨펌일(취소 기록은 항상 지금 시각)
       confirmedAtRaw = confirmed ? now : '';
       // 락을 얻은 "이후"의 최신 값을 기준으로 이력(취소 기록)을 다룸
       const segRange = sh.getRange(row, minC, 1, maxC - minC + 1);
@@ -7348,5 +7351,176 @@ function undoBulkArchive() {
     return { ok: true, restored: restored };
   } finally {
     lock.releaseLock();
+  }
+}
+
+/* =====================================================================
+ * ★ 2026-11-10 신규(시뮬레이션 승인) — sales.html "Bulk Update"(관리자 전용, 여러 오더 한 번에 처리)
+ *   배경: 11-09 오피스에서 Jobs 시트에 다른 행 값을 복사해 붙여 넣어 결제·출고 기록이 틀어진 일 →
+ *   시트를 직접 고치지 않고, 웹에서 고른 오더만 "기존 서버 함수 그대로" 1건씩 처리(규칙·기록·미러 무효화 동일).
+ *   - 관리자 판정: 스크립트 속성 BULK_ADMINS(로그인 ID, 쉼표로 여러 명).
+ *     속성이 없으면 Users 시트 Department 가 정확히 'Admin' 인 계정만.
+ *   - 처리 순서(필요한 것만, 체크한 옵션이 있을 때만): 패킹 이동 표시 → 2차 검증 통과 → Sales Confirm → Shipped.
+ *     각 단계는 setManualPackingMoved / setVerifySkip / setSalesConfirm(TK)·updatePaymentStatus(PU·UPS·PU&TK) /
+ *     setShippedStatus 를 그대로 호출 → 서버 안전장치(TK는 BOL#·운송비 필수, 묶인 오더는 대표에서만 등)는 그대로 적용됨.
+ *   - 컨펌/출고 시각은 관리자가 입력한 "실제 날짜 00:00:00", 처리자는 "이름 (bulk)", 사유와 결과는 BulkLog 시트에 남김.
+ *   - 이미 끝난 단계는 건너뜀 → 같은 요청이 두 번 가도(시간 초과 후 다시 시도) 결과가 같음.
+ * ===================================================================== */
+var __BULK_AT_ = '';
+function _bulkAdminOk_(info) {
+  if (!info) return false;
+  let raw = '';
+  try { raw = String(PropertiesService.getScriptProperties().getProperty('BULK_ADMINS') || ''); } catch (e) { raw = ''; }
+  const list = raw.split(/[,;\n]/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+  const id = String(info.id || '').trim().toLowerCase(), name = String(info.name || '').trim().toLowerCase();
+  if (list.length) return !!id && list.indexOf(id) >= 0;   // 로그인 ID 로만(같은 이름의 다른 계정 차단)
+  return String(info.dept || '').trim().toLowerCase() === 'admin'; // 속성이 없으면 Department 가 정확히 'Admin' 인 계정만
+}
+function bulkWhoAmI_(data) {
+  const info = validateSession_(data && data.token);
+  if (!info) return { ok: false, error: 'session expired' };
+  return { ok: true, admin: _bulkAdminOk_(info), name: info.name || info.id || '' };
+}
+function _bulkTruthy_(v) { return v === true || /^(true|y|yes|1)$/i.test(String(v === null || v === undefined ? '' : v).trim()); }
+function _bulkState_(sh, invoice) {
+  const ctx = _readJobRowFast_(sh, invoice);
+  if (ctx.error) return { error: ctx.error };
+  const H = ctx.headers.map(function (h) { return String(h).trim().toLowerCase(); });
+  const v = function (n) { const i = H.indexOf(n); return i >= 0 ? ctx.rowVals[i] : ''; };
+  const method = String(v('trucking') || '').trim().toUpperCase();
+  const isTk = (method === 'TK' || method === 'TRUCKING');
+  const manualOn = !!v('packingmovedmanual');
+  const skipOn = !!v('verifyskipped');
+  const st = _packStateForInvoice_(invoice, manualOn, skipOn);
+  return {
+    method: method, isTk: isTk,
+    insp: String(v('inspection') || '').trim(),
+    mp: !!st.mp, stage: st.stage,
+    bolOk: (function () { try { const ib = _scanBolCol_(ctx.headers); return !!(ib && _bolText_(ctx.rowVals[ib - 1])); } catch (e) { return true; } })(),
+    costOk: (function () { try { const ex = _scanBolExtraCols_(ctx.headers); const c = ex.iCost ? _parseBolCost_(ctx.rowVals[ex.iCost - 1]) : null; return !(c === null || isNaN(c)); } catch (e) { return true; } })(),
+    paid: String(v('paymentstatus') || '').trim().toLowerCase() === 'paid',
+    conf: _bulkTruthy_(v('salesconfirmed')),
+    shipped: _bulkTruthy_(v('shipped'))
+  };
+}
+function _bulkSafeCell_(s) { s = String(s === null || s === undefined ? '' : s); return /^[=+\-@]/.test(s) ? "'" + s : s; }
+function _bulkLog_(row) {
+  try {
+    const ss = ss_();
+    let sh = ss.getSheetByName('BulkLog');
+    if (!sh) {
+      try {
+        sh = ss.insertSheet('BulkLog');
+        sh.getRange(1, 1, 1, 8).setValues([['LoggedAt', 'By', 'Invoice', 'Action', 'ActualDate', 'Reason', 'Steps', 'Result']]);
+        sh.setFrozenRows(1);
+      } catch (eNew) { sh = ss.getSheetByName('BulkLog'); if (!sh) throw eNew; } // 동시에 처음 만들 때 — 이미 생긴 시트 사용
+    }
+    sh.appendRow(row.map(_bulkSafeCell_));
+  } catch (e) { /* 기록 실패는 처리 결과에 영향 없음 */ }
+}
+function bulkOrderAction(data) {
+  const T0 = Date.now();
+  const info = validateSession_(data && data.token);
+  if (!info) return { ok: false, error: 'session expired — please log in again' };
+  if (!_bulkAdminOk_(info)) return { ok: false, error: 'Bulk Update is for administrators only' };
+  const invoice = String((data && data.invoice) || '').trim();
+  const action = String((data && data.action) || '').trim();
+  const date = String((data && data.date) || '').trim();
+  const reason = String((data && data.reason) || '').trim().replace(/\s+/g, ' ').slice(0, 200);
+  const o = { move: !!(data && data.alsoMove), verify: !!(data && data.alsoVerify), confirm: !!(data && data.alsoConfirm) };
+  if (!invoice) return { ok: false, error: 'invoice required' };
+  if (action !== 'confirm' && action !== 'ship') return { ok: false, error: 'bad action' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: 'actual date required' };
+  { const dt = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)));
+    if (dt.getFullYear() !== Number(date.slice(0, 4)) || dt.getMonth() !== Number(date.slice(5, 7)) - 1 || dt.getDate() !== Number(date.slice(8, 10))) return { ok: false, error: 'invalid date' }; }
+  const today = fmtDate_(new Date(), scriptTz_(), 'yyyy-MM-dd');
+  if (date > today) return { ok: false, error: 'date cannot be in the future' };
+  if (date < '2025-01-01') return { ok: false, error: 'date is too old' };
+  if (reason.length < 3) return { ok: false, error: 'reason required' };
+  const by = String(info.name || info.id || 'admin').trim() + ' (bulk)';
+  const at = date + ' 00:00:00';
+  const steps = [];
+  let sh = null, sCur = null;
+  const done = function (ok, error, extra) {
+    const res = Object.assign({ ok: ok, invoice: invoice, steps: steps, ms: Date.now() - T0, by: by, at: at }, extra || {});
+    if (!ok) {
+      res.error = error;
+      // 일부 단계만 끝나고 멈춘 경우 — 화면이 서버에 실제로 저장된 상태만 보여주도록 지금 상태를 같이 돌려줌
+      if (sCur) res.isTk = sCur.isTk;
+      if (steps.length && sh) { try { const f = _bulkState_(sh, invoice); if (!f.error) { res.isTk = f.isTk; res.movedToPacking = f.mp; res.packStage = f.stage; res.confirmed = f.isTk ? f.conf : f.paid; } } catch (eF) { /* 무시 */ } }
+    }
+    _bulkLog_([nowLocal_(), info.name || info.id || '', invoice, action, date, reason, steps.join(' > '), ok ? ((extra && extra.unchanged) ? 'unchanged' : 'ok') : ('FAIL: ' + error)]);
+    return res;
+  };
+  try {
+    sh = SHEET_();
+    let s = _bulkState_(sh, invoice);
+    if (s.error) return done(false, s.error);
+    sCur = s;
+    if (!s.isTk && !_isNonTkShipMethod_(s.method)) return done(false, 'Method ' + (s.method || 'unknown') + ' is not supported');
+    let linkedTo = '';
+    try { linkedTo = (buildDimLinksMap_().childToPrimary || {})[invoice] || ''; } catch (eL) { linkedTo = ''; }
+    if (linkedTo) return done(false, 'Linked order — use primary invoice ' + linkedTo);
+    if (!s.insp) return done(false, 'Not inspected yet');
+    const confirmedNow = function () { return s.isTk ? s.conf : s.paid; };
+    if (action === 'ship' && s.shipped) return done(true, '', { unchanged: true, note: 'already shipped' });
+    if (action === 'confirm' && confirmedNow()) return done(true, '', { unchanged: true, note: 'already confirmed' });
+    if (action === 'confirm' && s.shipped) return done(true, '', { unchanged: true, note: 'already shipped' });
+
+    // TK 출고는 BOL#·운송비가 먼저 있어야 함(setShippedStatus 규칙) — 앞 단계(컨펌 등)를 해 놓고 마지막에 막히지 않게 미리 확인
+    if (action === 'ship' && s.isTk && !s.bolOk) return done(false, 'BOL# missing — enter BOL# & trucking cost in the order popup first');
+    if (action === 'ship' && s.isTk && !s.costOk) return done(false, 'Trucking cost missing — enter it in the order popup first');
+    let r;
+    if (!s.mp) {
+      if (!o.move) return done(false, 'Not moved to Packing');
+      r = setManualPackingMoved({ invoice: invoice, moved: true, by: by });
+      if (!r || !r.ok) return done(false, 'Moved to Packing failed: ' + ((r && r.error) || 'unknown'));
+      steps.push('moved');
+      s = _bulkState_(sh, invoice);
+      if (s.error) return done(false, s.error);
+      sCur = s;
+    }
+    if (s.stage !== 'verified') {
+      if (!o.verify) return done(false, '2nd verification not complete');
+      r = setVerifySkip({ invoice: invoice, skip: true, by: by, reason: '[Bulk] ' + reason });
+      if (!r || !r.ok) return done(false, '2nd verification failed: ' + ((r && r.error) || 'unknown'));
+      steps.push('verify');
+    }
+    if (!confirmedNow()) {
+      if (action === 'ship' && !o.confirm) return done(false, 'Sales Confirm not done');
+      __BULK_AT_ = at;
+      try { r = s.isTk ? setSalesConfirm({ invoice: invoice, confirmed: true, by: by }) : updatePaymentStatus({ invoice: invoice, paid: true, by: by }); }
+      finally { __BULK_AT_ = ''; }
+      // updatePaymentStatus 는 '이동'을 배치 기록·수동 표시로만 봄(디멘션만 있는 오더는 거절) → 옵션이 켜져 있으면 수동 표시 후 1번 더
+      if (!s.isTk && r && !r.ok && /패킹존 이동/.test(String(r.error || '')) && o.move && steps.indexOf('moved') < 0) {
+        const rm = setManualPackingMoved({ invoice: invoice, moved: true, by: by });
+        if (rm && rm.ok) {
+          steps.push('moved');
+          __BULK_AT_ = at;
+          try { r = updatePaymentStatus({ invoice: invoice, paid: true, by: by }); } finally { __BULK_AT_ = ''; }
+        }
+      }
+      if (!s.isTk && r && !r.ok && /패킹존 이동/.test(String(r.error || ''))) r = { ok: false, error: 'Not moved to Packing (batch record) — check "Mark Moved to Packing too"' };
+      if (!r || !r.ok) return done(false, 'Sales Confirm failed: ' + ((r && r.error) || 'unknown'));
+      steps.push('confirm');
+    }
+    let shipOut = null;
+    if (action === 'ship') {
+      __BULK_AT_ = at;
+      try { r = setShippedStatus({ invoice: invoice, shipped: true, by: by }); }
+      finally { __BULK_AT_ = ''; }
+      if (!r || !r.ok) return done(false, 'Mark Shipped failed: ' + ((r && r.error) || 'unknown'));
+      steps.push('ship');
+      shipOut = { shipped: true, shippedAt: r.shippedAt, shippedBy: r.shippedBy };
+    }
+    const fin = _bulkState_(sh, invoice);
+    return done(true, '', {
+      isTk: s.isTk,
+      movedToPacking: fin.error ? true : fin.mp, packStage: fin.error ? 'verified' : fin.stage,
+      confirmed: true, shipped: !!shipOut, shippedAt: shipOut ? shipOut.shippedAt : '', shippedBy: shipOut ? shipOut.shippedBy : ''
+    });
+  } catch (e) {
+    __BULK_AT_ = '';
+    return done(false, String(e && e.message || e));
   }
 }
