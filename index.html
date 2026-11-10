@@ -1,6 +1,126 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+/* ★ 2026-11-10 - 서버 조회 쌓임 방지(gasGuard). 화면 모양·기능 변화 없음.
+ *   문제(11-09 17:13~, 11-10 07:14): 구글 시트가 몇 분 멈추면 화면이 20~25초 뒤 기다림을 끊는데,
+ *   Apps Script 쪽 실행은 끝까지 돌고 있는 상태에서 다음 조회(폴링)·JSONP 대체 요청을 또 보내
+ *   같은 조회가 서버에 수십 개씩 쌓임 → 멈춤이 풀린 뒤에도 20분 넘게 먹통.
+ *   해결: Apps Script 로 가는 '읽기(get·list·ver…)' 요청만, 같은 요청은 서버에서 실제로 끝날 때까지
+ *   한 번에 1개만 보내고(그동안 온 같은 요청은 1개로 묶어 바로 뒤에 1번만 보냄), 화면이 기다림을 끊어도
+ *   진짜 요청은 끝까지 추적(최대 6분). 저장(POST)·다른 주소는 전혀 건드리지 않음.
+ *   비상 시: 주소 끝에 ?gg=off 를 붙이거나 localStorage 'sk_gasguard_off'='1' → 예전과 100% 동일.
+ */
+(function(){
+  try{
+    if (window.__GG) return;
+    var OFF = false;
+    try{ OFF = /[?&]gg=off\b/.test(location.search) || localStorage.getItem('sk_gasguard_off') === '1'; }catch(e){}
+    var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+    var HOST = 'https://script.google.com/macros/';
+    var READ_OP = /^(get|list|ver$|check|search|lookup|load)/i;
+    var HARD_CAP_MS = 330000;   // Apps Script 최대 실행 6분 안쪽
+    var slots = {};             // key -> { running: Promise<Response>|null, queued: Promise<Response>|null }
+    var stats = { started: 0, joined: 0, queued: 0, skippedJsonp: 0 };
+
+    function parse(url){
+      try{
+        var u = new URL(String(url), location.href);
+        if (String(u.href).indexOf(HOST) !== 0) return null;
+        var op = u.searchParams.get('op') || '';
+        if (!op || !READ_OP.test(op)) return null;
+        var keys = []; u.searchParams.forEach(function(v, k){ if (k !== 't' && k !== '_ts' && k !== 'callback' && k !== '_') keys.push(k + '=' + v); });
+        keys.sort();
+        return u.origin + u.pathname + '?' + keys.join('&');
+      }catch(e){ return null; }
+    }
+    function isGet(init){ var m = init && init.method ? String(init.method).toUpperCase() : 'GET'; return m === 'GET'; }
+
+    function startReal(key, input, init){
+      var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var opts = {}; if (init) { for (var k in init) { if (k !== 'signal') opts[k] = init[k]; } }
+      if (ctrl) opts.signal = ctrl.signal;
+      var cap = setTimeout(function(){ try{ if (ctrl) ctrl.abort(); }catch(e){} }, HARD_CAP_MS);
+      stats.started++;
+      var p = nativeFetch(input, opts);
+      var s = slots[key];
+      var done = function(){ clearTimeout(cap); if (s.running === p) s.running = null; };
+      p.then(done, done);
+      s.running = p;
+      return p;
+    }
+
+    // 화면(호출한 쪽)의 기다림 끊기(signal)는 그 화면에만 적용 - 진짜 요청은 계속 추적
+    function forCaller(p, init){
+      var sig = init && init.signal;
+      var cloned = p.then(function(r){ return r.clone(); });
+      if (!sig) return cloned;
+      return new Promise(function(res, rej){
+        var abortErr = function(){ try{ return new DOMException('The user aborted a request.', 'AbortError'); }catch(e){ var er = new Error('AbortError'); er.name = 'AbortError'; return er; } };
+        if (sig.aborted) { rej(abortErr()); return; }
+        var onAbort = function(){ rej(abortErr()); };
+        sig.addEventListener('abort', onAbort);
+        cloned.then(function(r){ sig.removeEventListener('abort', onAbort); res(r); }, function(e){ sig.removeEventListener('abort', onAbort); rej(e); });
+      });
+    }
+
+    function guardedFetch(input, init){
+      var url = (typeof input === 'string') ? input : (input && input.url);
+      var key = (!OFF && nativeFetch && isGet(init) && !(input && typeof input !== 'string' && input.method && String(input.method).toUpperCase() !== 'GET')) ? parse(url) : null;
+      if (!key) return nativeFetch(input, init);
+      var s = slots[key] || (slots[key] = { running: null, queued: null });
+      if (!s.running){
+        return forCaller(startReal(key, input, init), init);
+      }
+      if (!s.queued){
+        stats.queued++;
+        var prev = s.running;
+        s.queued = prev.then(function(){}, function(){}).then(function(){
+          s.queued = null;
+          return s.running ? s.running : startReal(key, input, init);
+        });
+      } else {
+        stats.joined++;
+      }
+      return forCaller(s.queued, init);
+    }
+
+    // JSONP(스크립트 태그) 조회도 같은 요청이 서버에서 도는 동안은 겹쳐 보내지 않음:
+    //   앞 요청이 끝날 때까지 기다렸다가(최대 waitMs) 보냄 - 못 기다리면 예전 JSONP 시간 초과와 같은 실패로 끝냄.
+    function jsonp(url, waitMs, starter){
+      var key = OFF ? null : parse(url);
+      if (!key) return starter();
+      var s = slots[key] || (slots[key] = { running: null, queued: null });
+      var idle = function(){ return !s.running && !s.queued && !s.jsonpBusy; };
+      var go = function(){
+        s.jsonpBusy = true; stats.jsonpRun = (stats.jsonpRun || 0) + 1;
+        var p = Promise.resolve().then(starter);
+        var fin = function(){ s.jsonpBusy = false; };
+        p.then(fin, fin);
+        return p;
+      };
+      if (idle()) return go();
+      stats.skippedJsonp++;
+      return new Promise(function(res, rej){
+        var t0 = Date.now(), limit = Math.max(1000, Number(waitMs) || 15000);
+        (function tick(){
+          if (idle()) { go().then(res, rej); return; }
+          if (Date.now() - t0 >= limit) { rej(new Error('jsonp timeout (server busy - previous request still running)')); return; }
+          setTimeout(tick, 250);
+        })();
+      });
+    }
+
+    window.__GG = {
+      off: OFF,
+      jsonp: jsonp,
+      busy: function(url){ if (OFF) return false; var key = parse(url); return !!(key && slots[key] && (slots[key].running || slots[key].queued)); },
+      stats: function(){ var running = 0; for (var k in slots) if (slots[k].running) running++; return { running: running, started: stats.started, queued: stats.queued, joined: stats.joined, jsonpWaited: stats.skippedJsonp, jsonpRun: stats.jsonpRun || 0 }; }
+    };
+    if (!OFF && nativeFetch) window.fetch = guardedFetch;
+  }catch(e){ /* 실패하면 예전 방식 그대로 */ }
+})();
+</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>StyleKorean B2B Fulfillment — v2.1</title>
@@ -1077,7 +1197,9 @@ function __revPace_(d, key, isCur){
       }
       return {ok:false,remain};
     }
-    function jsonpGet(url, timeoutMs){
+    // ★ 2026-11-10 — 같은 조회가 서버에서 아직 도는 중이면 겹쳐 보내지 않음(gasGuard, 맨 위 스크립트 참고)
+    function jsonpGet(url, timeoutMs){ if (window.__GG && window.__GG.jsonp) return window.__GG.jsonp(url, timeoutMs || 15000, function(){ return jsonpGetRaw_(url, timeoutMs); }); return jsonpGetRaw_(url, timeoutMs); }
+    function jsonpGetRaw_(url, timeoutMs){
       return new Promise((res, rej) => {
         const cbName = '__jsonp_' + (++_jsonpCounter) + '_' + Date.now();
         const timer = setTimeout(() => { cleanup(); rej(new Error('jsonp timeout')); }, timeoutMs || 15000);
