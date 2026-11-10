@@ -935,6 +935,20 @@ thead th, thead th.new-col{background:var(--navy); color:#FFFFFF; border-bottom:
 .ship-bottom{flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:6px;}
 .ship-mini{flex-wrap:wrap; row-gap:4px; min-height:20px;}
 .ship-clear-text{min-height:20px; display:flex; align-items:center;}
+/* ═════════ ★ 2026-11-09 — 5칸: shipped·missing 배지를 건수 줄 오른쪽에 나란히(아래 줄로 넘어가 칸이 높아지던 것 해결) + 칸 높이 줄임 ═════════
+   ① 이름 + 날짜 ② 건수 + (✓ shipped · ⚠ missing) ③ TK·UPS·PU·Other — 5칸 모두 3줄, 폭은 그대로. 아주 좁은 화면에서만 배지가 줄바꿈. */
+.ship-card{gap:4px; padding:7px 14px;}
+.ship-bottom{gap:4px;}
+.ship-line{display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:20px; row-gap:4px;}
+.ship-badges{display:inline-flex; align-items:center; gap:5px; justify-content:flex-end; margin-left:auto;}
+.ship-mini{min-height:18px;}
+/* 배지는 항상 건수 줄 같은 자리: 실제로 안 들어갈 때만(작은 모니터·확대 화면) 단계적으로 — ① 글자 조금 작게 ② 'shipped'·'missing' 글자만 숨김(숫자·색·아이콘 그대로, 마우스 올리면 전체 글자) ③ 휴대폰처럼 그래도 안 되면 그때만 아래 줄. (fitShipBadges_ 가 칸마다 재서 고름) */
+.ship-line{flex-wrap:nowrap;}
+.ship-badges{flex-wrap:nowrap; white-space:nowrap;}
+.ship-line.fit1 .ship-shipped-badge, .ship-line.fit1 .ship-miss-badge, .ship-line.fit2 .ship-shipped-badge, .ship-line.fit2 .ship-miss-badge{font-size:9.5px; padding:1px 4px;}
+.ship-line.fit1 .ship-badges, .ship-line.fit2 .ship-badges{gap:3px;}
+.ship-line.fit2 .bw{display:none;}
+.ship-line.fit3{flex-wrap:wrap;} .ship-line.fit3 .bw{display:none;}
 
 /* ═════════ ★ 2026-11-02 — PU&TK 팔렛 디멘션 입력 ═════════ */
 .putk-tag{font-family:var(--mono); font-size:10.5px; font-weight:800; padding:3px 7px; border-radius:5px; background:#FCE7F3; color:#BE185D; border:1px solid #F9A8D4; margin-left:10px;}
@@ -1921,24 +1935,47 @@ function shipCardHtml_(d, idx){
   return `<div class="ship-card" id="shipCard${idx}" onclick="toggleShipCard(${idx})">
     <div class="ship-top"><span class="ship-day-label">${d.label}</span><span class="ship-date">${d.sub}</span></div>
     <div class="ship-bottom">
-      <span class="ship-count-wrap"><span class="ship-count">${openN}</span><span class="ship-count-unit">open</span></span>
+      <div class="ship-line"><span class="ship-count-wrap"><span class="ship-count">${openN}</span><span class="ship-count-unit">open</span></span>${(shippedN>0||missing>0)?'<span class="ship-badges">'+(shippedN>0?'<span class="ship-shipped-badge" title="'+shippedN+' shipped">✓ '+shippedN+'<span class="bw"> shipped</span></span>':'')+(missing>0?'<span class="ship-miss-badge" title="'+missing+' missing dimensions">⚠ '+missing+'<span class="bw"> missing</span></span>':'')+'</span>':''}</div>
       <div class="ship-mini">
         <span class="grp tk"><span class="mlabel">TK</span><span class="mnum">${openG.tk.length}</span></span>
         <span class="grp ups"><span class="mlabel">UPS</span><span class="mnum">${openG.ups.length}</span></span>
         <span class="grp pu"><span class="mlabel">PU</span><span class="mnum">${openG.pu.length}</span></span>
         ${openG.other.length>0 ? `<span class="grp other"><span class="mlabel">Other</span><span class="mnum">${openG.other.length}</span></span>` : ''}
-        ${shippedN>0?'<span class="ship-shipped-badge">✓ '+shippedN+' shipped</span>':''}
-        ${missing>0?'<span class="ship-miss-badge">⚠ '+missing+' missing</span>':''}
       </div>
     </div>
   </div>`;
 }
 
+// ★ 2026-11-09 — 5칸 배지(✓ shipped · ⚠ missing)가 건수 줄에 다 들어가는지 칸마다 재서, 안 들어갈 때만 단계(fit1~3)를 올림
+function fitShipBadges_(){
+  document.querySelectorAll('#shipRow .ship-line').forEach(function(line){
+    if (!line.querySelector('.ship-badges')) return;
+    if (!line.clientWidth) return; // 탭이 숨겨져 있어 잴 수 없음 → 보일 때(아래 ResizeObserver) 다시 잼
+    line.classList.remove('fit1','fit2','fit3');
+    for (let lv = 1; lv <= 3 && line.scrollWidth > line.clientWidth + 1; lv++){
+      line.classList.remove('fit1','fit2','fit3'); line.classList.add('fit' + lv);
+    }
+  });
+}
+(function(){
+  let t = null;
+  window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(function(){ try { fitShipBadges_(); } catch(e) {} }, 120); });
+  try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ try { fitShipBadges_(); } catch(e) {} }); } catch(e) {}
+  // 검토 반영 — 숨겨진 탭에서 다시 그려진 뒤 보이게 될 때·스크롤바가 생기고 없어질 때·확대/축소 때도 다시 잼(칸 폭이 바뀌면 자동)
+  try {
+    if (window.ResizeObserver){
+      let raf = 0;
+      const startRo = function(){ const row = document.getElementById('shipRow'); if (!row) return false; new ResizeObserver(function(){ if (raf) cancelAnimationFrame(raf); raf = requestAnimationFrame(function(){ raf = 0; try { fitShipBadges_(); } catch(e) {} }); }).observe(row); return true; };
+      if (!startRo()) document.addEventListener('DOMContentLoaded', startRo);
+    }
+  } catch(e) {}
+})();
 function renderShipRow(jobs){
   const row = document.getElementById('shipRow');
   if (!row) return;
   SHIP_DAY_DATA = buildShipDayData(jobs);
   row.innerHTML = SHIP_DAY_DATA.map((d,i)=>shipCardHtml_(d,i)).join('');
+  try { fitShipBadges_(); } catch(eF) { /* 실패해도 기본 표시 그대로 */ }
   // 데이터가 새로고침돼도 펼쳐놓은 카드가 있으면 다시 펼쳐서 보여줌(닫히는 깜빡임 방지)
   if (SHIP_OPEN_IDX !== null) renderShipExpand(SHIP_OPEN_IDX, true);
 }
