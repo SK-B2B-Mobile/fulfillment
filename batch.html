@@ -1351,6 +1351,13 @@ nav{position:relative; z-index:1;}
 #icBar .ic-btn{border:1px solid currentColor;background:transparent;color:inherit;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer;}
 #icBar .ic-x{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;padding:4px 6px;}
 #icBar .ic-btn:focus-visible,#icBar .ic-x:focus-visible{outline:2px solid #fff;outline-offset:2px;}
+
+/* ★ 2026-11-10 — 슬롯 카드 SKU / PCS 두 줄 정렬(현황판과 같은 규칙). 좁으면 JS가 모든 카드를 함께 줄임 */
+.slot-meta.slot-mr{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; column-gap:.35em; row-gap:1px; align-items:baseline; white-space:nowrap; font-variant-numeric:tabular-nums; overflow:hidden; gap:1px .35em;}
+.slot-mr .mr-l{font-size:.85em; letter-spacing:.05em; opacity:.75;}
+.slot-mr .mr-d{text-align:right;}
+.slot-mr .mr-s{opacity:.55;}
+.slot-mr .mr-t{text-align:left;}
 </style>
 </head>
 <body>
@@ -4409,7 +4416,7 @@ async function continueOpenBatch(batchId, viewOnly){
   state.batchId = res.batch.batchId;
   state.sumFile = { meta:{}, items: res.sumItems || [] };
   state.custFiles = (res.customers || []).map(c => ({
-    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+    meta: { invoice_no:c.invoice, customer:cleanCust_(c.customer), ship_date:c.shipDate, ship_via:c.shipVia },
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
     _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
@@ -4552,7 +4559,7 @@ function applyBatchPayload(res, opts){
   state.batchTotalQty = res.batch.totalQty != null ? res.batch.totalQty : null; // ★ 2026-08-11
   state.sumFile = { meta:{}, items: res.sumItems || [] };
   state.custFiles = (res.customers || []).map(c => ({
-    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+    meta: { invoice_no:c.invoice, customer:cleanCust_(c.customer), ship_date:c.shipDate, ship_via:c.shipVia },
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
     _fromRestore: true, // ★ 2026-07-24 신규: 복원된 데이터임을 표시 (새로 업로드 시자동 정리용)
@@ -4823,6 +4830,29 @@ function setupDropZone(dropId, inputId, isMulti, onFiles){
 // 브라우저에서 직접 파싱하지 않고 로컬 서버(run_app.py)로 전송.
 // run_app.py 없이 file://로 열면 데모 데이터만 사용 가능.
 // ═══════════════════════════════════════════════════════════
+
+/* ★ 2026-11-10 — 고객명 끝에 붙어 오는 "Ship Via: PU" 등 제거(오더 PDF 양식이 바뀌어 고객명에 같이 읽혀 들어옴).
+   끝에 붙은 "Ship Via: …"(짧은 배송방법 글자)만 지움. 지우고 나서 비면 원래 값 그대로. */
+function cleanCust_(s){
+  const t = String(s == null ? '' : s);
+  const c = t.replace(/\s*\bShip\s*Via\s*:?\s*[A-Za-z0-9&\/\.\-\s]{0,24}$/i, '').trim();
+  return c || t.trim();
+}
+/* ★ 2026-11-10 — SKU / PCS 두 줄(숫자 오른쪽 맞춤, "/" 세로 정렬). 화면이 좁아 한 줄에 안 들어가면 모든 카드를 같은 크기로 함께 줄임(줄바꿈 없음). */
+function fitMetaRows_(rows, minPx){
+  rows = Array.prototype.slice.call(rows || []);
+  if(!rows.length) return;
+  rows.forEach(r => { r.style.fontSize = ''; });
+  const base = parseFloat(getComputedStyle(rows[0]).fontSize) || 16;
+  let scale = 1;
+  rows.forEach(r => { const have = r.clientWidth, need = r.scrollWidth; if(have > 0 && need > have + 0.5) scale = Math.min(scale, have / need); });
+  if(scale < 1){ const px = Math.max(minPx || 9, Math.floor(base * scale * 0.98 * 2) / 2); rows.forEach(r => { r.style.fontSize = px + 'px'; }); }
+}
+
+function _fitSlotMeta_(){ try { fitMetaRows_(document.querySelectorAll('.slot-meta.slot-mr'), 8.5); } catch(e){} }
+(function(){ let _t=null; const refit=()=>{ clearTimeout(_t); _t=setTimeout(_fitSlotMeta_, 120); }; window.addEventListener('resize', refit); try{ if(document.fonts && document.fonts.ready) document.fonts.ready.then(refit); }catch(e){}
+  // 숨겨진 탭에서 그려졌다가 탭을 열 때(폭 0 → 실제 폭)도 다시 맞춤
+  try { if(typeof ResizeObserver === 'function'){ const ro = new ResizeObserver(refit); const go = () => ['slotsLarge','slotsSmall','slotsManual'].forEach(id => { const el = document.getElementById(id); if(el) ro.observe(el); }); if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go(); } } catch(e){} })();
 async function parsePDFViaServer(file, kind){
   const formData = new FormData();
   formData.append('pdf', file);
@@ -4834,6 +4864,7 @@ async function parsePDFViaServer(file, kind){
   }
   const data = await resp.json();
   if(data.error) throw new Error(data.error);
+  if(data && data.meta && data.meta.customer) data.meta.customer = cleanCust_(data.meta.customer); // ★ 2026-11-10 — 새로 올리는 배치는 고객명 자체를 깨끗하게 저장
   return data; // {items:[...], meta:{...}}
 }
 
@@ -5732,7 +5763,7 @@ async function fetchOccupiedSlots(){
         const n = Number(o.slotNum);
         if(isNaN(n)) return;
         state.occupiedSlots.add(n);
-        state.occupiedSlotDetail[n] = { batchId: o.batchId, batchDate: o.batchDate, customer: o.customer };
+        state.occupiedSlotDetail[n] = { batchId: o.batchId, batchDate: o.batchDate, customer: cleanCust_(o.customer) };
       });
     }
   }catch(e){ console.warn('점유 슬롯 조회 실패:', e); }
@@ -6100,7 +6131,7 @@ async function applyBatchStructureResult_(res, batchId, silent, fromMirror){
 
   state.sumFile = { meta:{}, items: newSumItems };
   state.custFiles = newCustomers.map(c => ({
-    meta: { invoice_no:c.invoice, customer:c.customer, ship_date:c.shipDate, ship_via:c.shipVia },
+    meta: { invoice_no:c.invoice, customer:cleanCust_(c.customer), ship_date:c.shipDate, ship_via:c.shipVia },
     items: c.items || [],
     totalQty: c.totalQty, totalSkus: c.totalSku,
   }));
@@ -6333,9 +6364,9 @@ function renderSlots(){
         </div>
       </div>
       <div class="slot-co">${cf.meta.customer}</div>
-      <div class="slot-meta">
-        <span class="slot-sku">SKU ${sp.doneSku}/${sp.totalSku}</span>
-        <span class="slot-qty">${p.done.toLocaleString()}/${p.need.toLocaleString()} pcs</span>
+      <div class="slot-meta slot-mr">
+        <span class="mr-l">SKU</span><span class="mr-d">${Number(sp.doneSku||0).toLocaleString()}</span><span class="mr-s">/</span><span class="mr-t">${Number(sp.totalSku||0).toLocaleString()}</span>
+        <span class="mr-l">PCS</span><span class="mr-d">${p.done.toLocaleString()}</span><span class="mr-s">/</span><span class="mr-t">${p.need.toLocaleString()}</span>
       </div>
       <div class="slot-meta">
         <span class="slot-invoice">${cf.meta.invoice_no}</span>
@@ -6360,6 +6391,7 @@ function renderSlots(){
 
   largeEl.innerHTML = state.slots.filter(s => s.num<=16).map(slotHtml).join('');
   smallEl.innerHTML = state.slots.filter(s => s.num>16 && s.num<=30).map(slotHtml).join('');
+  setTimeout(_fitSlotMeta_, 0); // ★ 2026-11-10 — SKU/PCS 줄 맞춤(그린 뒤)
 
   // ★ 임시 배정 구역 (30번 밖 수동 지정 슬롯)
   const manualSlots = state.slots.filter(s => !(Number(s.num) >= 1 && Number(s.num) <= 30) && s.assignedTo);
