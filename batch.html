@@ -1277,6 +1277,16 @@ nav{position:relative; z-index:1;}
 .as-sumchip.warn{border-color:var(--amber); color:var(--amber); background:var(--amber-bg);}
 .as-sumchip.warn b{color:var(--amber);}
 .as-list{max-height:52vh; overflow-y:auto; border-top:1px solid var(--border2);}
+/* ★ v34 — 배정 수정 창 품목 검색 */
+.as-search{position:relative; margin-bottom:6px;}
+.as-search input{width:100%; box-sizing:border-box; background:var(--surface2); border:1.5px solid #8B5CF6; border-radius:9px; color:var(--text); font-family:var(--mono); font-size:14px; font-weight:700; padding:10px 40px 10px 36px; outline:none;}
+.as-search input::placeholder{font-family:var(--sans); font-weight:500; font-size:12.5px; color:var(--text-dim);}
+.as-search-ic{position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:14px; opacity:0.8; pointer-events:none;}
+.as-search-clr{position:absolute; right:6px; top:50%; transform:translateY(-50%); border:none; background:var(--surface3); color:var(--text-dim); border-radius:6px; width:30px; height:30px; cursor:pointer; font-size:13px; display:none;}
+.as-search.has .as-search-clr{display:block;}
+.as-scount{font-size:11px; color:var(--text-dim); margin:0 2px 8px; min-height:15px;}
+.as-scount b{color:#C4B0FF; font-family:var(--mono);}
+.as-sku mark{background:#8B5CF6; color:#fff; border-radius:3px; padding:0 1px;}
 .as-sku{padding:10px 2px; border-bottom:1px solid var(--border2);}
 .as-sku-top{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;}
 .as-sku-code{font-family:var(--mono); font-size:12px; font-weight:700;}
@@ -2542,6 +2552,11 @@ document.addEventListener('DOMContentLoaded', function(){
     <div class="as-info">Shows everything scanned for this order, no matter who scanned it. Tap a tag to re-split that item between numbers — changes are saved straight to the Google Sheet.</div>
     <div class="as-unitrow"><span class="as-unit-lbl">Unit</span><span class="as-unit" id="asUnit">Box</span><span class="as-order" id="asOrder"></span></div>
     <div class="as-sumrow" id="asSumRow"></div>
+    <!-- ★ 2026-11-11 v34 — 품목 검색(바코드 끝자리 3~4자리·SKU·상품명). 화면에 이미 있는 목록에서만 거름(저장 방식 변화 없음) -->
+    <div class="as-search" id="asSearchBox"><span class="as-search-ic">🔍</span>
+      <input id="asSearch" type="text" inputmode="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search barcode (last 3–4 digits), SKU or name" aria-label="Search items">
+      <button type="button" class="as-search-clr" onclick="asSearchClear_()" title="Clear search" aria-label="Clear search">✕</button></div>
+    <div class="as-scount" id="asSearchCount"></div>
     <div class="as-list" id="asList"></div>
     <div class="modal-actions" style="justify-content:space-between;">
       <button class="btn btn-ghost btn-sm" onclick="asOpenMove()" title="Move every item in one box/pallet to another number in one step">📦↔️📦 Move Whole Box/Pallet</button>
@@ -10327,9 +10342,61 @@ function openAssignModal(ctx){
     return;
   }
   _asCtx = ctx;
+  try{ const si = document.getElementById('asSearch'); if(si) si.value = ''; }catch(eS){} // ★ v34 — 새로 열면 검색 비움(자동 커서 없음 — 휴대폰 키보드가 갑자기 뜨지 않게)
   renderAssignModal_();
   document.getElementById('assignModal').classList.add('open');
 }
+// ★ v34 — 품목 검색. 숫자만 입력: 바코드 끝자리 일치가 먼저(1), 중간 포함(2). 그 외: SKU(3)·상품명(4)·바코드(2) 포함. 0 = 안 맞음.
+function _asSearchQ_(){ try{ return String((document.getElementById('asSearch') || {}).value || '').trim(); }catch(e){ return ''; } }
+function _asMatchRank_(l, q){
+  if(!q) return 9;
+  const bc = String(l.barcode == null ? '' : l.barcode), sku = String(l.sku == null ? '' : l.sku), nm = String(l.name == null ? '' : l.name);
+  const d = q.replace(/\s+/g, '');
+  if(/^\d+$/.test(d)){
+    if(bc.endsWith(d)) return 1;
+    if(bc.indexOf(d) >= 0) return 2;
+    // 앞자리 0 차이(스캐너가 0을 붙이거나 빼는 경우) — 전체 바코드를 찍었을 때만
+    if(d.length >= 8 && bc.replace(/^0+/, '') === d.replace(/^0+/, '')) return 1;
+    if(sku.indexOf(d) >= 0) return 3;
+    return 0;
+  }
+  const ql = q.toLowerCase();
+  if(sku.toLowerCase().indexOf(ql) >= 0) return 3;
+  if(nm.toLowerCase().indexOf(ql) >= 0) return 4;
+  if(bc.toLowerCase().indexOf(ql) >= 0) return 2;
+  return 0;
+}
+function _asHl_(text, q, endOnly){
+  const t = String(text == null ? '' : text);
+  if(!q) return _asEsc_(t);
+  if(endOnly){
+    if(t.endsWith(q)) return _asEsc_(t.slice(0, t.length - q.length)) + '<mark>' + _asEsc_(q) + '</mark>';
+  }
+  const i = t.toLowerCase().indexOf(q.toLowerCase());
+  if(i < 0) return _asEsc_(t);
+  return _asEsc_(t.slice(0, i)) + '<mark>' + _asEsc_(t.slice(i, i + q.length)) + '</mark>' + _asEsc_(t.slice(i + q.length));
+}
+function asSearchClear_(){
+  const si = document.getElementById('asSearch'); if(si) si.value = '';
+  renderAssignModal_();
+}
+(function(){
+  const si = document.getElementById('asSearch');
+  if(!si) return;
+  si.addEventListener('input', function(){ renderAssignModal_(); });
+  si.addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){ if(si.value){ e.preventDefault(); e.stopPropagation(); asSearchClear_(); } return; }
+    if(e.key !== 'Enter') return;
+    e.preventDefault();
+    // 결과가 1건이면(또는 스캐너로 바코드 전체를 찍어 정확히 같은 품목이 있으면) 바로 그 품목의 번호 수정 창
+    const vis = window.__asVisible || [];
+    const q = _asSearchQ_().replace(/\s+/g, '');
+    let pick = null;
+    if(vis.length === 1) pick = vis[0];
+    else if(q.length >= 8){ const ex = vis.filter(bc => String(bc).replace(/^0+/, '') === q.replace(/^0+/, '')); if(ex.length === 1) pick = ex[0]; }
+    if(pick != null) openAssignSku(pick);
+  });
+})();
 function renderAssignModal_(){
   const ctx = _asCtx; if(!ctx) return;
   const I = _asInfo_(ctx); const st = I.st; if(!st) return;
@@ -10350,17 +10417,29 @@ function renderAssignModal_(){
   document.getElementById('asSumRow').innerHTML =
     nums.map(n => `<span class="as-sumchip">${label} ${n} · <b>${agg[n].q.toLocaleString()}</b> pcs · ${agg[n].sku} SKU</span>`).join('') +
     (unTotal > 0 ? `<span class="as-sumchip warn">Unassigned · <b>${unTotal.toLocaleString()}</b> pcs</span>` : '');
-  const listHtml = items.filter(it => it.g.total > 0).map(it => {
+  // ★ v34 — 검색어가 있으면 맞는 품목만(바코드 끝자리 일치 먼저), 없으면 예전 그대로 전체
+  const _q = _asSearchQ_();
+  const _qd = _q.replace(/\s+/g, ''), _qNum = /^\d+$/.test(_qd);
+  try{ document.getElementById('asSearchBox').classList.toggle('has', !!_q); }catch(eB){}
+  const _shown = items.filter(it => it.g.total > 0);
+  const _vis = _shown.map((it, i) => ({ it: it, r: _asMatchRank_(it.l, _q), i: i })).filter(x => x.r > 0);
+  if(_q) _vis.sort((a, b) => a.r - b.r || a.i - b.i);
+  window.__asVisible = _vis.map(x => x.it.l.barcode);
+  try{
+    document.getElementById('asSearchCount').innerHTML = !_q ? ''
+      : (_vis.length ? `Showing <b>${_vis.length}</b> of ${_shown.length} items` : `No item matches “${_asEsc_(_q)}” — check the digits, or clear the search ✕`);
+  }catch(eC){}
+  const listHtml = _vis.map(x => x.it).map(it => {
     const l = it.l, g = it.g;
     const tags = g.rows.map(r => `<button type="button" class="as-tag" data-bc="${_asEsc_(l.barcode)}" onclick="openAssignSku(this.dataset.bc)">${label} ${r.n} · ${r.q.toLocaleString()}</button>`).join('') +
       (g.un > 0 ? `<button type="button" class="as-tag un" data-bc="${_asEsc_(l.barcode)}" onclick="openAssignSku(this.dataset.bc)">⚠ Unassigned ${g.un.toLocaleString()}</button>` : '');
     return `<div class="as-sku">
-      <div class="as-sku-top"><span class="as-sku-code">${_asEsc_(l.sku)}</span><span class="as-sku-bc">${_asEsc_(l.barcode)}</span></div>
-      <div class="as-sku-name">${_asEsc_(l.name)}</div>
+      <div class="as-sku-top"><span class="as-sku-code">${_asHl_(l.sku, _qNum ? _qd : _q, false)}</span><span class="as-sku-bc">${_asHl_(l.barcode, _qNum ? _qd : _q, _qNum)}</span></div>
+      <div class="as-sku-name">${_qNum ? _asEsc_(l.name) : _asHl_(l.name, _q, false)}</div>
       <div class="as-sku-bottom"><div class="as-tags">${tags}</div><span class="as-qty${g.un > 0 ? ' un' : ''}">${g.total.toLocaleString()}/${(Number(l.effectiveReq) || 0).toLocaleString()}</span></div>
     </div>`;
   }).join('');
-  document.getElementById('asList').innerHTML = (listHtml || '<div class="as-none">Nothing has been scanned for this order yet.</div>') +
+  document.getElementById('asList').innerHTML = (listHtml || (_q && _shown.length ? '<div class="as-none">No match.</div>' : '<div class="as-none">Nothing has been scanned for this order yet.</div>')) +
     (hidden > 0 && listHtml ? `<div class="as-hidden-note">${hidden} SKU(s) not scanned yet are not shown.</div>` : '');
 }
 function openAssignSkuFor(ctx, bc){
