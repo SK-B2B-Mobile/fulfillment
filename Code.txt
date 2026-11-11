@@ -3039,11 +3039,21 @@ function saveInspection(data) {
       } catch(e) { return String(isoStr); }
     }
 
-    var invoiceCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    // ★ 2026-11-10 속도 — 완료 버튼 검수 저장(_syncInspCore_)이 방금 Jobs 인보이스 열 전체를 읽어서 "정확히 1줄"임을 확인한 경우,
+    //   그 줄 번호를 알려줌(__INSP_ROW_HINT_). 그 줄의 인보이스 칸을 1칸만 다시 읽어 같으면 열 전체(약 3천 줄)를 또 읽지 않음.
+    //   칸이 다르거나(줄이 밀림) 힌트가 없으면 예전과 똑같이 열 전체에서 찾음. 웹 화면 요청(doPost)에서는 힌트가 생기지 않음.
+    var invoiceCol = null;
     var targetRows = [];
-    for (var i = 0; i < invoiceCol.length; i++) {
-      if (String(invoiceCol[i][0]).trim() === String(data.invoice).trim()) {
-        targetRows.push(i + 2);
+    var _rh = (typeof __INSP_ROW_HINT_ !== 'undefined') ? __INSP_ROW_HINT_ : null;
+    if (_rh && String(_rh.inv).trim() === String(data.invoice).trim() && Number(_rh.row) >= 2 && Number(_rh.row) <= lastRow) {
+      try { if (String(sheet.getRange(Number(_rh.row), 1).getValue()).trim() === String(data.invoice).trim()) targetRows = [Number(_rh.row)]; } catch (eRh) { targetRows = []; }
+    }
+    if (!targetRows.length) {
+      invoiceCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < invoiceCol.length; i++) {
+        if (String(invoiceCol[i][0]).trim() === String(data.invoice).trim()) {
+          targetRows.push(i + 2);
+        }
       }
     }
     _saveInspMark_('s.find'); // ★ v40 측정(완료 버튼 저장 중일 때만 기록, 동작 동일)
@@ -3058,7 +3068,7 @@ function saveInspection(data) {
     //   부풀려 보여서(예: 78건이 _1/_2에 각각 찍혀 영업팀이 156건으로 착각)
     //   실제 출고/청구 판단에 혼동을 줄 수 있음(2026-09-10 현장 발견).
     var isSplitFallback = false;
-    if (targetRows.length === 0) {
+    if (targetRows.length === 0 && invoiceCol) {
       var prefix = String(data.invoice).trim() + '_';
       for (var i = 0; i < invoiceCol.length; i++) {
         if (String(invoiceCol[i][0]).trim().indexOf(prefix) === 0) {
@@ -3181,7 +3191,7 @@ function saveInspection(data) {
     //   결과가 최대 30초간 예전 값(pending 등)으로 보일 수 있었던 잠복 버그가
     //   있었음 — 여기서 같이 고침.
     try {
-      var touchedInvoices = targetRows.map(function (r) { return String(invoiceCol[r - 2][0]).trim(); });
+      var touchedInvoices = targetRows.map(function (r) { return invoiceCol ? String(invoiceCol[r - 2][0]).trim() : String(data.invoice).trim(); });
       // ★ v40 — 완료 버튼(새 화면)에서 온 저장이면 사본은 응답 뒤로: '다시 만들 것' 표시(상세 캐시 즉시 무효화) + 목록에 담아
       //   화면이 응답 직후 syncInvoiceMirror(빠른 방식)로 바로 다시 만듦. 그 요청이 실패해도 1분 주기 동기화가 표시된 것을 채움.
       //   그 밖의 모든 경로(__INSP_ML_ 없음)는 예전 그대로 여기서 바로 계산. (BatchPicking.gs __INSP_ML_ 참고)
