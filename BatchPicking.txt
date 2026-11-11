@@ -1685,6 +1685,9 @@ var __PM_T_ = null;
 //   요청이 실패해도 1분 주기 동기화가 표시된 것을 다시 채움. 예전 화면(mirrorLater 없음)·다른 경로는 예전과 100% 동일.
 //   비상 시 스크립트 속성 INSP_ML_OFF=1 → 예전 방식(저장 안에서 바로 사본 계산).
 var __INSP_ML_ = null;
+// ★ 2026-11-10 v41 속도 — _syncInspCore_ 가 Jobs 에서 이 인보이스가 '정확히 1줄'임을 방금 확인했을 때만 그 줄 번호를 saveInspection(Code.gs)에 알려줌.
+//   saveInspection 은 그 칸을 1칸만 다시 읽어 맞으면 인보이스 열 전체를 또 읽지 않음(s.find 약 2초 절약). 호출이 끝나면 항상 비움.
+var __INSP_ROW_HINT_ = null;
 function _inspMlOn_() {
   try { return PropertiesService.getScriptProperties().getProperty('INSP_ML_OFF') !== '1'; } catch (e) { return false; }
 }
@@ -1909,10 +1912,20 @@ function setPackingMoved_bsCore_(data) {
  * ================================================================================ */
 function getInvoiceBatchItemsCached_(batchId, invoice) {
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'biLines_v1_' + batchId + '_' + invoice;
+  // ★ 2026-11-10 v41 속도(완료 버튼 i.items 2~3초) — 상품줄(필요수량)은 배치를 만든 뒤 거의 안 바뀌는데 30초만 기억해서
+  //   완료 버튼을 누를 땐 대부분 다시 읽었음. 배치 사본 'bi' 바뀜 표시(버전)를 같이 저장하고 10분 기억:
+  //   꺼낼 때 지금 버전과 같을 때만 사용 — 상품줄·스캔·이슈가 바뀌면(clearInvoiceCache_ 등이 버전을 올림) 자동으로 새로 읽음 → 사본과 같은 최신성.
+  //   인보이스당 키 1개(버전이 바뀌면 같은 키를 덮어씀 → 캐시 항목이 늘지 않음).
+  //   버전을 못 믿는 경우(사본 꺼짐·캐시 장애 = '' 또는 'x')는 예전 그대로(30초, 예전 키).
+  const _biSig = (typeof _inspSigOf_ === 'function') ? _inspSigOf_('bi', batchId) : '';
+  const cacheKey = _biSig ? ('biLines_v2_' + batchId + '_' + invoice) : ('biLines_v1_' + batchId + '_' + invoice);
   const cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시)
   if (cached) {
-    try { return JSON.parse(cached); } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
+    try {
+      const o = JSON.parse(cached);
+      if (!_biSig) return o;                                    // 예전 방식(30초)
+      if (o && o.s === _biSig && Array.isArray(o.l)) return o.l; // 버전 같음 → 그대로
+    } catch (e) { /* 캐시 파싱 실패 시 새로 조회 */ }
   }
   const lines = [];
   // ★ v33 (2026-11-02 속도) — 배치 사본(BatchSnap)에서 이 배치 줄만 읽음(꺼져 있으면 예전처럼 시트 전체 — 결과 동일). 측정: 캐시 없을 때 2.6~2.7초
@@ -1922,8 +1935,8 @@ function getInvoiceBatchItemsCached_(batchId, invoice) {
     lines.push({ sku: String(r[2]), name: String(r[3]), barcode: String(r[4]), reqQty: Number(r[5]) || 0 });
   });
   try {
-    const payload = JSON.stringify(lines);
-    _cachePutChunked_(cache, cacheKey, payload, 30); // ★ 2026-09-25 신규 — 95000자류 가드 제거(청크 캐시)
+    const payload = JSON.stringify(_biSig ? { s: _biSig, l: lines } : lines);
+    _cachePutChunked_(cache, cacheKey, payload, _biSig ? 600 : 30); // ★ v41 — 버전 확인 방식이면 10분(v39 이슈 기억과 같은 상한)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
   return lines;
 }
@@ -1958,6 +1971,7 @@ function clearInvoiceCache_(batchId, invoice) {
     const cache = CacheService.getScriptCache();
     // ★ 2026-09-25 수정 — 청크 캐시로 바뀌면서 무효화 대상도 메타 키로 변경(_cacheGetChunked_ 참고)
     cache.remove('biLines_v1_' + batchId + '_' + invoice + '_meta');
+    cache.remove('biLines_v2_' + batchId + '_' + invoice + '_meta'); // ★ v41 — 버전 확인으로도 걸러지지만 같이 지움(이중 안전)
     cache.remove('ilIssues_v1_' + batchId + '_' + invoice + '_meta');
   } catch (e) { /* 무시 */ }
   // ★ 2026-10-29 v24 — Firestore 방식이면 그 인보이스 문서의 필요수량·이슈를 다음 읽기 때 새로 가져오게 표시(시트 방식이면 아무것도 안 함)
@@ -3439,6 +3453,18 @@ function _inspFastOn_() {
 function _inspMemoKey_(batchId, invoice, round) { return 'insMemo1_' + String(batchId) + '_' + String(invoice).trim() + '_' + (round ? Number(round) : 0); }
 function _inspJobsRowKey_(invoice) { return 'insJobsRow1_' + String(invoice).trim(); }
 // 이슈가 바뀌면 달라지는 표시(배치 사본 'il' 버전). 사본 스위치가 꺼져 있거나 캐시 장애면 '' → 기억 사용 안 함(안전)
+// ★ v41 — 'bi' 등 다른 사본에도 같은 방식. 키에 넣으므로 짧게(MD5 → 22자). 못 믿으면 ''
+function _inspSigOf_(kind, batchId) {
+  try {
+    if (typeof bsVerNow_ !== 'function' || typeof bsOn_ !== 'function' || !bsOn_(kind)) return '';
+    const v = bsVerNow_(kind, batchId) || {};
+    const keys = Object.keys(v).sort();
+    if (!keys.length) return '';
+    const sig = keys.map(function (k) { return k + '=' + v[k]; }).join('&');
+    if (sig.indexOf('=x') >= 0) return '';
+    return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sig)).replace(/=+$/, '');
+  } catch (e) { return ''; }
+}
 function _inspIlSig_(batchId) {
   try {
     if (typeof bsVerNow_ !== 'function' || typeof bsOn_ !== 'function' || !bsOn_('il')) return '';
@@ -3633,9 +3659,11 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   const _rr = _fast ? _inspReadRememberedRow_(jobsSheet, invoice) : null;
   const jobsInvoiceCol = _rr ? [] : jobsSheet.getRange(2, 1, jobsLast - 1, 1).getValues();
   let jobsRow = _rr ? _rr.row : -1;
+  let _exactN = 0; // ★ v41 — 정확히 같은 인보이스 줄 개수(1줄일 때만 saveInspection 에 줄 번호 힌트)
   for (let i = 0; i < jobsInvoiceCol.length; i++) {
-    if (String(jobsInvoiceCol[i][0]).trim() === String(invoice).trim()) { jobsRow = i + 2; break; }
+    if (String(jobsInvoiceCol[i][0]).trim() === String(invoice).trim()) { if (jobsRow === -1) jobsRow = i + 2; _exactN++; }
   }
+  const _rowHint = (!_rr && _exactN === 1) ? { row: jobsRow, inv: String(invoice).trim() } : null;
   // ★ 2026-09-10 버그 수정(현장 발견) — saveInspection과 동일한 이유. 정확히
   //   일치하는 인보이스가 없으면 분할 주문(IN00473862_1, _2 등)일 수 있으니
   //   "인보이스_"로 시작하는 행도 찾아봄. 여기서는 "이미 같은 값이면 저장
@@ -3673,13 +3701,17 @@ function _syncInspCore_(batchId, invoice, worker, force, round) {
   let _expected = '', _wrote = false;
   if (shouldBePass && (force || currentVal !== '✓ PASS')) {
     if (_fast) _inspForgetResult_(batchId, invoice, round);
-    saveInspection({ invoice: invoice, pass: true, issues: [], inspector: worker || '', inspEndAt: new Date().toISOString() });
+    __INSP_ROW_HINT_ = _rowHint;
+    try { saveInspection({ invoice: invoice, pass: true, issues: [], inspector: worker || '', inspEndAt: new Date().toISOString() }); }
+    finally { __INSP_ROW_HINT_ = null; }
     _expected = '✓ PASS'; _wrote = true;
   } else if (shouldBeIssues) {
     const expectedVal = '⚠ ISSUES(' + issues.length + ')';
     if (force || currentVal !== expectedVal) {
       if (_fast) _inspForgetResult_(batchId, invoice, round);
-      saveInspection({ invoice: invoice, pass: false, issues: issues, inspector: worker || '', inspEndAt: new Date().toISOString() });
+      __INSP_ROW_HINT_ = _rowHint;
+      try { saveInspection({ invoice: invoice, pass: false, issues: issues, inspector: worker || '', inspEndAt: new Date().toISOString() }); }
+      finally { __INSP_ROW_HINT_ = null; }
       _wrote = true;
     }
     _expected = expectedVal;
