@@ -2723,7 +2723,7 @@ document.addEventListener('DOMContentLoaded', function(){
      ═══════════════════════════════════════════════════════════ -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, doc, onSnapshot, setDoc, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, doc, onSnapshot, setDoc, increment, serverTimestamp, collection, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyBG4HmlCg4CoJPoCbOi-ZE6wQwY2u88XeA",
@@ -2845,6 +2845,31 @@ document.addEventListener('DOMContentLoaded', function(){
       return onSnapshot(doc(db, 'storeMeta', 'config'), (snap) => { if(snap.exists()) onUpdate(snap.data()); }, (err) => {
         console.warn('[storeMeta] 구독 실패(Firestore 규칙 확인 필요) — 서버 응답으로 계속 판단:', err);
       });
+    };
+
+    /* ★ 2026-11-12 v35(로드맵 5단계) — 작업자 접속 표시(Active 점·중복 선택 경고)를 Firestore 로.
+     *   예전: 기기마다 1분에 Apps Script 요청 4번(pingScanWorker·pingWorkerPresenceBatch 쓰기 2번 + 조회 2번),
+     *         쓰기는 매번 시트(ScanWorkerHeartbeat·WorkerPresence)에 씀 → 서버 대기열·시트 부담.
+     *   지금: 기기마다 문서 하나(mirror/presence_<기기ID>)를 1분마다 고쳐 쓰고, 모든 기기가 그 문서들을 실시간 구독.
+     *         Apps Script·시트를 전혀 거치지 않음. 표시 규칙(180초·60초)은 예전과 같음.
+     *   어떤 이유로든 실패하면 예전 방식(Apps Script)으로 자동으로 돌아감 — 아래 _presence* 함수 참고. */
+    window._presencePut = function(deviceId, body){
+      return setDoc(doc(db, 'mirror', 'presence_' + String(deviceId)), Object.assign({}, body, { kind: 'presence', deviceId: String(deviceId), at: serverTimestamp() }));
+    };
+    window._presenceDelete = function(deviceId){ return deleteDoc(doc(db, 'mirror', 'presence_' + String(deviceId))); };
+    window._presenceSubscribe = function(onUpdate, onError){
+      return onSnapshot(query(collection(db, 'mirror'), where('kind', '==', 'presence')), { includeMetadataChanges: false }, (snap) => {
+        const out = [];
+        snap.forEach(d => {
+          const x = d.data() || {};
+          let atMs = null;
+          try{ if(x.at && typeof x.at.toMillis === 'function') atMs = x.at.toMillis(); }catch(e){ atMs = null; }
+          out.push({ deviceId: String(x.deviceId || ''), workers: (x.workers && typeof x.workers === 'object') ? x.workers : {},
+                     scanBatchId: String(x.scanBatchId || ''), scanWorker: String(x.scanWorker || ''),
+                     atMs: atMs, clientAt: Number(x.clientAt) || 0, pending: !!(d.metadata && d.metadata.hasPendingWrites) });
+        });
+        onUpdate(out);
+      }, (err) => { console.warn('[presence] 구독 실패 — 예전 방식(Apps Script)으로 계속:', err); if(onError) onError(err); });
     };
 
     console.log('✅ Firestore 미러 연결 준비 완료 (batch.html)');
@@ -3732,6 +3757,10 @@ async function doLogin(name){
 //   빠져 있었음). 이제 로그아웃 확정 시 4개 화면 전부 worker=''로 서버에 즉시
 //   보고(best-effort, 실패해도 로그아웃 자체는 그대로 진행)한 뒤 새로고침함.
 async function pingWorkerLogoutClear_(){
+  if(_presenceFsOn_()){ // ★ v35 — Firestore 문서를 비움(최대 2초만 기다림 — 실패해도 로그아웃은 그대로)
+    try{ _presenceLoggedOut_ = true; await Promise.race([ _presenceWriteNow_(true), new Promise(r => setTimeout(r, 2000)) ]); }catch(e){}
+    return;
+  }
   if(!GAS_READY) return;
   try{
     await gasCall('pingWorkerPresenceBatch', {
@@ -12719,15 +12748,17 @@ async function pollActivePickers(){
 // ═══════════════════════════════════════════════════════════
 
 async function pingScanWorkerHeartbeat(){
+  if(_presenceFsOn_()){ _presenceWriteSoon_(); return; } // ★ v35 — Firestore 접속 표시(아래 설명). 시트·Apps Script 안 거침
   if(!GAS_READY || !state.batchId) return;
   try{ await gasCall('pingScanWorker', { batchId: state.batchId, deviceId: DEVICE_ID, worker: state.currentWorker || '' }); }
   catch(e){ /* 하트비트 실패는 조용히 무시 — 다음 주기에 다시 시도됨 */ }
 }
 async function pollActiveScanWorkers(){
+  if(_presenceFsOn_()) return; // ★ v35 — 실시간 구독이 대신함
   if(!GAS_READY || !state.batchId) return;
   try{
     const res = await gasQuery('getActiveScanWorkers', { batchId: state.batchId });
-    if(!res.ok) return;
+    if(!res.ok || _presenceFsOn_()) return; // ★ v35 — 기다리는 사이 실시간 구독이 켜졌으면 옛 값으로 덮지 않음
     _activeScanWorkers = res.active || {};
     // 열려있는 동안은 populateWorkerSelect 안 건드림(이미 내부에서 그렇게 처리됨)
     populateWorkerSelect();
@@ -12759,7 +12790,7 @@ setInterval(() => { if(!document.hidden) pollActiveScanWorkers(); }, 50000); // 
 // 않도록, 기기 중복선택 감지용 60초보다 여유를 둔 값.
 // ═══════════════════════════════════════════════════════════
 async function pingWorkerPresenceAll(){
-  if(!GAS_READY) return;
+  if(!GAS_READY && !_presenceFsOn_()) return;
   // ★ v21 — 모아둔 스캔 속도 기록을 같이 보냄(저장 확인되면 지우고, 실패하면 다음 하트비트에 다시)
   let tmSend = null;
   // Firestore 쓰기를 줄이려고 30건 이상 모였거나 가장 오래된 기록이 3분 넘었을 때만 보냄(기기당 최대 3분에 1번 정도)
@@ -12776,7 +12807,12 @@ async function pingWorkerPresenceAll(){
       ]
     };
     if(tmSend && tmSend.length) body._tm = tmSend;
-    res = await gasCall('pingWorkerPresenceBatch', body);
+    if(_presenceFsOn_()){
+      _presenceWriteSoon_(); // ★ v35 — 접속 표시는 Firestore 로(시트 안 씀)
+      if(tmSend && tmSend.length && GAS_READY){ body.entries = []; res = await gasCall('pingWorkerPresenceBatch', body); } // 스캔 속도 기록이 모였을 때만 서버로(시트 쓰기 없음 — entries 비움)
+    } else {
+      res = await gasCall('pingWorkerPresenceBatch', body);
+    }
   }catch(e){ /* 하트비트 실패는 조용히 무시 — 다음 주기에 다시 시도됨 */ }
   try{
     if(tmSend && tmSend.length){
@@ -12795,10 +12831,11 @@ function pingWorkerPresenceNow(){ pingWorkerPresenceAll(); }
 
 let _globalActiveWorkers = {};
 async function pollActiveWorkersGlobal(){
+  if(_presenceFsOn_()) return; // ★ v35 — 실시간 구독이 대신함
   if(!GAS_READY) return;
   try{
     const res = await gasQuery('getActiveWorkersGlobal', {});
-    if(!res || !res.ok) return;
+    if(!res || !res.ok || _presenceFsOn_()) return; // ★ v35 — 기다리는 사이 실시간 구독이 켜졌으면 옛 값으로 덮지 않음
     _globalActiveWorkers = res.active || {};
     if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers();
     // ★ 2026-09-25 신규 — 로그인 화면(#loginOverlay)이 지금 보이는 중이면, 각 이름
@@ -12813,6 +12850,130 @@ async function pollActiveWorkersGlobal(){
 //   덜 중요한 화면이라 이 정도 여유는 체감상 거의 차이 없음.
 setInterval(() => { if(!document.hidden) pingWorkerPresenceAll(); }, 60000); // ★ 2026-09-03 재수정 — 45초→60초
 setInterval(() => { if(!document.hidden) pollActiveWorkersGlobal(); }, 50000); // ★ 2026-09-03 재수정 — 35초→50초
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-11-12 v35 신규(로드맵 5단계) — 작업자 접속 표시를 Firestore 로
+//   기기마다 mirror/presence_<기기ID> 문서 하나: { workers:{화면:이름}, scanBatchId, scanWorker, clientAt, at(서버 시각) }
+//   - 쓰기: 예전 하트비트 시점 그대로(1분마다 + 이름·배치가 바뀔 때) — 여러 번 겹치면 0.4초 안에 한 번으로 묶음.
+//   - 읽기: 모든 기기의 문서를 실시간 구독 → 예전과 같은 규칙으로 계산
+//       · 전역 Active(로그인 화면·Workers 탭): 4개 화면 중 하나라도 이름이 있고 마지막 신호가 180초 이내
+//       · 03 중복 선택 경고: 같은 배치(scanBatchId)에서 그 이름(scanWorker)의 마지막 신호가 60초 이내
+//   - 시각은 서버 시각(at) 기준 — 기기 시계가 틀려도 판정이 흔들리지 않게, 내 문서로 서버와의 시차를 잼.
+//   - 구독이 안 되거나(규칙·네트워크) 쓰기가 거부되면 즉시 예전 방식(Apps Script·시트)으로 자동 복귀.
+// ═══════════════════════════════════════════════════════════
+var PRESENCE_GLOBAL_MS_ = 180000;  // 서버 WORKER_PRESENCE_THRESHOLD_MS 와 같은 값
+var PRESENCE_SCAN_MS_ = 60000;     // 서버 getActiveScanWorkers 와 같은 값
+// ★ var(let 아님) — 이 함수들은 파일 앞쪽 부팅 코드(pollActiveWorkersGlobal 등)에서 먼저 불리므로, let 이면 '초기화 전 참조(TDZ)' 오류로 화면 전체가 멈춤(2026-08-25 사고와 같은 종류)
+var _presenceSub_ = null, _presenceLive_ = false, _presenceFail_ = false, _presenceLoggedOut_ = false;
+var _presencePermFail_ = false, _presencePaused_ = false, _presenceCleaned_ = false;
+var _presenceDocs_ = [], _presenceOffset_ = 0, _presenceLastSent_ = 0, _presenceTimer_ = null, _presenceSig_ = '';
+function _presenceFsOn_(){ return _presenceLive_ && !_presenceFail_; }
+function _presenceBody_(cleared){
+  return {
+    workers: cleared ? { scan_sort: '', standalone_scan: '', pack_verify: '', standalone_pack_verify: '' } : {
+      scan_sort:              state.currentWorker || '',
+      standalone_scan:        (typeof currentSsWorker === 'function' ? currentSsWorker() : '') || '',
+      pack_verify:            (typeof currentPvWorker === 'function' ? currentPvWorker() : '') || '',
+      standalone_pack_verify: (typeof currentPsvWorker === 'function' ? currentPsvWorker() : '') || '',
+    },
+    scanBatchId: cleared ? '' : String(state.batchId || ''),
+    scanWorker: cleared ? '' : String(state.currentWorker || ''),
+    clientAt: Date.now(),
+  };
+}
+function _presenceFallback_(why){
+  if(_presenceFail_) return;
+  // 규칙 거부가 아닌 일시 오류(네트워크 등)면 예전 방식으로 잠시 돌렸다가 60초 뒤 다시 연결 시도
+  const permanent = /permission|unauth/i.test(String(why || ''));
+  if(!permanent) setTimeout(() => { if(_presenceFail_ && !_presencePermFail_){ _presenceFail_ = false; _presenceLive_ = false; _presenceSig_ = ''; _presenceStart_(); } }, 60000);
+  else _presencePermFail_ = true;
+  _presenceFail_ = true;
+  console.warn('[presence] 예전 방식(Apps Script)으로 돌아감:', why);
+  try{ if(_presenceSub_) _presenceSub_(); }catch(e){}
+  _presenceSub_ = null;
+  // 바로 예전 방식으로 한 번 알리고 조회(다음 주기를 기다리지 않게)
+  try{ pingScanWorkerHeartbeat(); pingWorkerPresenceAll(); pollActiveScanWorkers(); pollActiveWorkersGlobal(); }catch(e){}
+}
+async function _presenceWriteNow_(cleared){
+  if(_presenceFail_ || typeof window._presencePut !== 'function') return;
+  if(_presenceLoggedOut_ && !cleared) return; // 로그아웃 중에는 다시 채우지 않음
+  const body = _presenceBody_(!!cleared);
+  _presenceLastSent_ = body.clientAt;
+  try{ await window._presencePut(DEVICE_ID, body); }
+  catch(e){
+    const code = String((e && e.code) || '');
+    if(/permission|unauth/i.test(code)) _presenceFallback_(code); // 규칙이 막음 → 예전 방식
+    // 네트워크 일시 오류는 무시 — Firestore 가 자체적으로 다시 보내고, 1분 뒤 다음 신호
+  }
+}
+function _presenceWriteSoon_(){
+  if(_presenceTimer_) return;
+  _presenceTimer_ = setTimeout(() => { _presenceTimer_ = null; _presenceWriteNow_(false); }, 400);
+}
+// 받은 문서들로 예전과 같은 두 표(전역 Active · 이 배치 중복 선택)를 계산하고, 바뀌었을 때만 화면을 다시 그림
+function _presenceRecompute_(){
+  if(!_presenceFsOn_()) return;
+  const now = Date.now() + _presenceOffset_; // 서버 시각 기준 '지금'
+  const glob = {}, scan = {};
+  _presenceDocs_.forEach(d => {
+    let ts = d.atMs;
+    if(d.pending || ts === null){ ts = (d.deviceId === DEVICE_ID) ? now : null; } // 내 문서가 아직 서버 확인 전이면 '지금'
+    if(ts === null || isNaN(ts)) return;
+    const age = now - ts;
+    if(age <= PRESENCE_GLOBAL_MS_){
+      Object.keys(d.workers || {}).forEach(k => { const w = String(d.workers[k] || '').trim(); if(w) glob[w] = true; });
+    }
+    const sw = String(d.scanWorker || '').trim();
+    if(sw && state.batchId && d.scanBatchId === String(state.batchId) && age <= PRESENCE_SCAN_MS_){
+      (scan[sw] = scan[sw] || []).push(d.deviceId);
+    }
+  });
+  Object.keys(scan).forEach(k => scan[k].sort());
+  const sig = JSON.stringify([Object.keys(glob).sort(), scan]);
+  if(sig === _presenceSig_) return;
+  _presenceSig_ = sig;
+  _globalActiveWorkers = glob;
+  _activeScanWorkers = scan;
+  try{ populateWorkerSelect(); }catch(e){}
+  try{ if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers(); }catch(e){}
+  try{ const _lo = document.getElementById('loginOverlay'); if(_lo && _lo.style.display === 'flex') renderLoginWorkerGrid(); }catch(e){}
+}
+function _presenceStart_(){
+  if(_presenceSub_ || _presenceFail_ || _presencePaused_) return;
+  if(typeof window._presenceSubscribe !== 'function' || typeof window._presencePut !== 'function') return; // Firestore 준비 전 — 잠시 뒤 다시
+  try{
+    _presenceSub_ = window._presenceSubscribe((docs) => {
+      _presenceDocs_ = docs || [];
+      // 서버 시차: 내 문서가 서버에 저장된 시각(at) − 내가 보낸 시각(clientAt). 비정상 값(±1시간 초과)은 무시
+      const mine = _presenceDocs_.find(d => d.deviceId === DEVICE_ID && !d.pending && d.atMs !== null && d.clientAt);
+      if(mine && Math.abs(mine.atMs - mine.clientAt) < 3600000) _presenceOffset_ = mine.atMs - mine.clientAt;
+      if(!_presenceLive_){ _presenceLive_ = true; _presenceWriteNow_(false); } // 처음 연결되면 바로 내 신호부터
+      _presenceRecompute_();
+      // 정리: 3일 넘게 신호 없는 기기 문서(브라우저 데이터 삭제 등으로 생긴 옛 기기)는 이 페이지에서 한 번만 지움 — 구독 읽기 양이 계속 늘지 않게
+      if(!_presenceCleaned_ && typeof window._presenceDelete === 'function'){
+        _presenceCleaned_ = true;
+        const nowS = Date.now() + _presenceOffset_;
+        _presenceDocs_.filter(d => d.deviceId && d.deviceId !== DEVICE_ID && d.atMs !== null && !d.pending && (nowS - d.atMs) > 3 * 24 * 3600 * 1000)
+          .slice(0, 20).forEach(d => { try{ window._presenceDelete(d.deviceId).catch(() => {}); }catch(e){} });
+      }
+    }, (err) => _presenceFallback_(String((err && err.code) || err)));
+  }catch(e){ _presenceFallback_(String(e && e.message || e)); }
+}
+// Firestore 모듈은 늦게 준비되므로 1초 간격으로 최대 30번 시도(그동안은 예전 방식 그대로)
+(function(){ let n = 0; const t = setInterval(() => { n++; _presenceStart_(); if(_presenceSub_ || _presenceFail_ || n >= 30) clearInterval(t); }, 1000); })();
+// 화면이 가려지면(다른 앱·화면 꺼짐) 구독을 잠시 끊어 Firestore 읽기를 줄임(예전 폴링도 가려지면 멈췄음). 다시 보이면 바로 다시 구독
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){
+    if(_presenceSub_ && _presenceFsOn_()){ _presencePaused_ = true; try{ _presenceSub_(); }catch(e){} _presenceSub_ = null; }
+  } else if(_presencePaused_){
+    _presencePaused_ = false; _presenceSig_ = ''; _presenceStart_(); _presenceWriteSoon_();
+  }
+});
+// 신호가 끊긴 기기는 시간이 지나면 꺼져야 하므로(새 문서가 안 와도) 15초마다 다시 계산
+setInterval(() => { if(_presenceFsOn_()) _presenceRecompute_(); }, 15000);
+// 배치를 바꾸면 03 중복 선택 표를 그 배치 기준으로 즉시 다시 계산
+var _presenceBatchSeen_ = null;
+setInterval(() => { if(_presenceFsOn_() && state.batchId !== _presenceBatchSeen_){ _presenceBatchSeen_ = state.batchId; _presenceSig_ = ''; _presenceRecompute_(); } }, 2000);
 
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
 function isWorkerBusyElsewhere(name){
