@@ -122,6 +122,8 @@
 })();
 </script>
 <meta charset="UTF-8">
+<!-- ★ 2026-11-12 v36 — 이 화면의 버전 표시(새 버전 자동 반영이 이 값을 비교함). batch.html 을 고칠 때마다 반드시 바꿀 것. -->
+<meta name="sk-build" content="v36-1112">
 <!-- ★ 2026-08-04 수정 — 요청: 스캔 태블릿에서 화면을 손가락으로 확대해서 보고 싶은데
      user-scalable=no + maximum-scale=1.0 때문에 핀치줌이 원천 차단돼 있었음.
      제한을 풀어서 두 손가락으로 자유롭게 확대/축소(원래 크기로 복귀)할 수 있게 함. -->
@@ -2396,7 +2398,7 @@ document.addEventListener('DOMContentLoaded', function(){
       <div class="eyebrow">Manager · Team</div>
       <h2 class="h-page">작업자 관리</h2>
       <p class="sub">작업자 추가·이름 수정. 이 명단이 스캔 화면 선택 목록에 노출됩니다. (피킹·분류·검수는 고정 역할이 아니라 그때그때 배정되는 작업이라 역할 구분을 없앴습니다)<br>
-      <span style="color:var(--text-dim2)">Status는 사람이 켜고 끄는 값이 아니라, 02/03/04/Pack Verify 화면 중 어디서든 그 이름이 실제로 선택되어 있으면 자동으로 Active, 120초 넘게 신호가 없으면 자동으로 Off로 표시됩니다. 퇴사·이탈한 작업자는 delete로 삭제하세요.</span></p>
+      <span style="color:var(--text-dim2)">Status는 사람이 켜고 끄는 값이 아니라, 02/03/04/Pack Verify 화면 중 어디서든 그 이름이 실제로 선택되어 있으면 자동으로 Active, 3분 넘게 신호가 없으면 자동으로 Off로 표시됩니다. App Version은 그 기기의 화면 버전입니다(새 버전은 작업이 끝난 안전한 순간에 자동 적용). 퇴사·이탈한 작업자는 delete로 삭제하세요.</span></p>
 
       <div class="row" style="margin-bottom:12px;">
         <button class="btn btn-primary btn-sm" id="btnAddWorker">+ 작업자 추가</button>
@@ -2408,7 +2410,8 @@ document.addEventListener('DOMContentLoaded', function(){
             <tr>
               <th style="width:60px">Init.</th>
               <th>Name</th>
-              <th style="width:130px" title="지금(120초 이내) 어느 화면에서든 실제로 이 이름으로 작업 중인지 자동 표시됩니다">Status</th>
+              <th style="width:130px" title="지금(3분 이내) 어느 화면에서든 실제로 이 이름으로 작업 중인지 자동 표시됩니다">Status</th>
+              <th style="width:210px" title="그 사람이 쓰는 기기의 화면 버전. 초록 ✓ = 최신, 주황 = 예전 화면(작업이 끝나는 순간 자동으로 최신으로 바뀜)">App Version</th>
               <th style="width:180px"></th>
             </tr>
           </thead>
@@ -2723,7 +2726,7 @@ document.addEventListener('DOMContentLoaded', function(){
      ═══════════════════════════════════════════════════════════ -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getFirestore, doc, onSnapshot, setDoc, increment, serverTimestamp, collection, query, where, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, doc, onSnapshot, setDoc, increment, serverTimestamp, collection, query, where, deleteDoc, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyBG4HmlCg4CoJPoCbOi-ZE6wQwY2u88XeA",
@@ -2856,6 +2859,7 @@ document.addEventListener('DOMContentLoaded', function(){
     window._presencePut = function(deviceId, body){
       return setDoc(doc(db, 'mirror', 'presence_' + String(deviceId)), Object.assign({}, body, { kind: 'presence', deviceId: String(deviceId), at: serverTimestamp() }));
     };
+    window._fsWaitPending = function(){ return waitForPendingWrites(db); }; // ★ v36 — 새 버전 자동 반영 직전, Firestore 로 보내는 중인 것이 끝날 때까지(최대 3초)
     window._presenceDelete = function(deviceId){ return deleteDoc(doc(db, 'mirror', 'presence_' + String(deviceId))); };
     window._presenceSubscribe = function(onUpdate, onError){
       return onSnapshot(query(collection(db, 'mirror'), where('kind', '==', 'presence')), { includeMetadataChanges: false }, (snap) => {
@@ -2865,7 +2869,7 @@ document.addEventListener('DOMContentLoaded', function(){
           let atMs = null;
           try{ if(x.at && typeof x.at.toMillis === 'function') atMs = x.at.toMillis(); }catch(e){ atMs = null; }
           out.push({ deviceId: String(x.deviceId || ''), workers: (x.workers && typeof x.workers === 'object') ? x.workers : {},
-                     scanBatchId: String(x.scanBatchId || ''), scanWorker: String(x.scanWorker || ''),
+                     scanBatchId: String(x.scanBatchId || ''), scanWorker: String(x.scanWorker || ''), build: String(x.build || ''), upd: String(x.upd || ''),
                      atMs: atMs, clientAt: Number(x.clientAt) || 0, pending: !!(d.metadata && d.metadata.hasPendingWrites) });
         });
         onUpdate(out);
@@ -4764,8 +4768,10 @@ async function restoreBatchFromServer(){
   //   (기기 독립), 캐시로 이미 화면 이동을 했다면 항상 그 화면을 그대로 유지함.
   if(!navigatedFromCache) gotoView('v-slots');
 }
-document.addEventListener('DOMContentLoaded', restoreBatchFromServer);
-if(document.readyState !== 'loading') restoreBatchFromServer();
+// ★ v36 — 부팅 복원이 끝난 시각을 남김(새 버전 자동 반영 뒤 '보던 화면'으로 돌려놓을 때 이 뒤에 이동 — 복원이 화면을 다시 바꾸지 않게)
+function _bootRestoreRun_(){ let p; try{ p = restoreBatchFromServer(); }catch(e){ p = null; } Promise.resolve(p).catch(() => {}).then(() => { window.__bootRestoreDone = Date.now(); }); }
+document.addEventListener('DOMContentLoaded', _bootRestoreRun_);
+if(document.readyState !== 'loading') _bootRestoreRun_();
 
 // ═══════════════════════════════════════════════════════════
 // Demo data
@@ -12866,6 +12872,7 @@ var PRESENCE_SCAN_MS_ = 60000;     // 서버 getActiveScanWorkers 와 같은 값
 // ★ var(let 아님) — 이 함수들은 파일 앞쪽 부팅 코드(pollActiveWorkersGlobal 등)에서 먼저 불리므로, let 이면 '초기화 전 참조(TDZ)' 오류로 화면 전체가 멈춤(2026-08-25 사고와 같은 종류)
 var _presenceSub_ = null, _presenceLive_ = false, _presenceFail_ = false, _presenceLoggedOut_ = false;
 var _presencePermFail_ = false, _presencePaused_ = false, _presenceCleaned_ = false;
+var _globalWorkerVers_ = {}; // ★ v36
 var _presenceDocs_ = [], _presenceOffset_ = 0, _presenceLastSent_ = 0, _presenceTimer_ = null, _presenceSig_ = '';
 function _presenceFsOn_(){ return _presenceLive_ && !_presenceFail_; }
 function _presenceBody_(cleared){
@@ -12878,6 +12885,8 @@ function _presenceBody_(cleared){
     },
     scanBatchId: cleared ? '' : String(state.batchId || ''),
     scanWorker: cleared ? '' : String(state.currentWorker || ''),
+    build: String((typeof APP_BUILD !== 'undefined' && APP_BUILD) || ''), // ★ v36 — Workers 탭 기기별 버전
+    upd: (typeof _upd_ !== 'undefined' && _upd_.target) ? 'waiting' : '',  // ★ v36 — 새 버전 적용 대기 중
     clientAt: Date.now(),
   };
 }
@@ -12914,14 +12923,14 @@ function _presenceWriteSoon_(){
 function _presenceRecompute_(){
   if(!_presenceFsOn_()) return;
   const now = Date.now() + _presenceOffset_; // 서버 시각 기준 '지금'
-  const glob = {}, scan = {};
+  const glob = {}, scan = {}, vers = {}; // ★ v36 — vers: 이름 → { b: 버전, u: 대기, t: 시각 }(가장 최근 신호 기준)
   _presenceDocs_.forEach(d => {
     let ts = d.atMs;
     if(d.pending || ts === null){ ts = (d.deviceId === DEVICE_ID) ? now : null; } // 내 문서가 아직 서버 확인 전이면 '지금'
     if(ts === null || isNaN(ts)) return;
     const age = now - ts;
     if(age <= PRESENCE_GLOBAL_MS_){
-      Object.keys(d.workers || {}).forEach(k => { const w = String(d.workers[k] || '').trim(); if(w) glob[w] = true; });
+      Object.keys(d.workers || {}).forEach(k => { const w = String(d.workers[k] || '').trim(); if(w){ glob[w] = true; if(!vers[w] || ts > vers[w].t) vers[w] = { b: d.build || '', u: d.upd || '', t: ts }; } });
     }
     const sw = String(d.scanWorker || '').trim();
     if(sw && state.batchId && d.scanBatchId === String(state.batchId) && age <= PRESENCE_SCAN_MS_){
@@ -12929,10 +12938,12 @@ function _presenceRecompute_(){
     }
   });
   Object.keys(scan).forEach(k => scan[k].sort());
-  const sig = JSON.stringify([Object.keys(glob).sort(), scan]);
+  const _vs = Object.keys(vers).sort().map(k => k + '=' + vers[k].b + '/' + vers[k].u);
+  const sig = JSON.stringify([Object.keys(glob).sort(), scan, _vs]);
   if(sig === _presenceSig_) return;
   _presenceSig_ = sig;
   _globalActiveWorkers = glob;
+  _globalWorkerVers_ = vers;
   _activeScanWorkers = scan;
   try{ populateWorkerSelect(); }catch(e){}
   try{ if(document.getElementById('v-workers') && document.getElementById('v-workers').classList.contains('active')) renderWorkers(); }catch(e){}
@@ -12975,6 +12986,307 @@ setInterval(() => { if(_presenceFsOn_()) _presenceRecompute_(); }, 15000);
 var _presenceBatchSeen_ = null;
 setInterval(() => { if(_presenceFsOn_() && state.batchId !== _presenceBatchSeen_){ _presenceBatchSeen_ = state.batchId; _presenceSig_ = ''; _presenceRecompute_(); } }, 2000);
 
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-11-12 v36 신규 — 새 버전 자동 반영(시뮬레이션 "batch_시뮬레이션_새버전_자동반영" 그대로)
+//   문제(11-12): 배포해도 기기마다 새로고침하기 전까지 예전 화면이 하루 종일 돌았음(v35 접속 표시가 Off 로 보인 원인).
+//   방식: 화면이 켜져 있는 동안 2분마다 GitHub 의 batch.html 에서 버전 표시(<meta name="sk-build">)만 확인
+//         (Apps Script·시트·Firestore 를 전혀 쓰지 않음). 다르면 "New version ready" 띠를 보여 주고,
+//         안전한 순간에만 10초 카운트다운 뒤 새로고침 → 로그인·배치·각 화면 작업자 이름은 원래대로(저장돼 있음), 보던 화면으로 되돌아감.
+//   안전한 순간 = 서버 저장 중인 요청 없음 + 저장 중·실패한 스캔/완료 버튼 없음 + 열린(확정 전) 오더 없음 + 피킹 진행 중 아님
+//                 + 팝업 없음 + 30초 동안 스캔·터치 없음. 카운트다운 중 스캔·터치하면 즉시 취소.
+//   되돌리기: 예전 batch.html 을 다시 올리면 같은 방법으로 모든 기기가 자동으로 그 화면으로 돌아감.
+// ═══════════════════════════════════════════════════════════
+function _bnum_(b){ const m = /^v(\d+)/.exec(String(b || '')); return m ? Number(m[1]) : 35; } // 버전 표시가 없으면 v35
+function _newestBuildNum_(){ // 지금 알려진 가장 새 버전(내 화면·GitHub 중) — 내 화면이 옛 버전이어도 새 기기를 '옛'으로 칠하지 않게
+  let n = _bnum_(APP_BUILD);
+  try{ if(_upd_.target && _upd_.target !== '(none)') n = Math.max(n, _bnum_(_upd_.target)); }catch(e){}
+  return n;
+}
+function escapeHtmlV36_(x){ return String(x == null ? '' : x).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+var APP_BUILD = (function(){ try{ const m = document.querySelector('meta[name="sk-build"]'); return m ? String(m.getAttribute('content') || '').trim() : ''; }catch(e){ return ''; } })();
+var UPD_CHECK_MS_ = 120000, UPD_IDLE_MS_ = 30000, UPD_COUNT_S_ = 10, UPD_SNOOZE_MS_ = 300000;
+var UPD_TRY_KEY_ = 'sk_upd_try', UPD_RESTORE_KEY_ = 'sk_upd_restore';
+var _upd_ = { target: '', snoozeUntil: 0, lastAct: Date.now(), cdTimer: null, cdLeft: 0, checking: false, lastCheck: 0, going: false, shown: '' };
+var _updBusyN_ = 0; // 지금 서버로 보내는 중인 저장(gasCall·gasCallWithRetry) 개수 — 0 일 때만 새로고침
+
+// 저장 요청 개수 세기(동작은 그대로 — 감싸기만). 재시도 사이 기다리는 동안도 '저장 중'으로 봄
+(function(){
+  try{
+    const g0 = gasCall, r0 = gasCallWithRetry;
+    gasCall = async function(op, data){ _updBusyN_++; try{ return await g0(op, data); } finally{ _updBusyN_--; } };
+    gasCallWithRetry = async function(op, data, n){ _updBusyN_++; try{ return await r0(op, data, n); } finally{ _updBusyN_--; } };
+  }catch(e){ console.warn('[update] 저장 요청 세기 준비 실패 — 자동 반영은 꺼짐:', e); _upd_.disabled = true; }
+})();
+
+// 새로고침 사이에 남길 작은 기록(시도 횟수·보던 화면). sessionStorage 가 안 되는 브라우저면 localStorage, 그것도 안 되면 이 페이지 메모리
+var _updMem_ = {};
+function _sessGet_(k){
+  try{ const v = sessionStorage.getItem(k); return v != null ? JSON.parse(v) : null; }catch(e){} // sessionStorage 가 되면 그것만 봄
+  try{ const v = localStorage.getItem(k); if(v != null) return JSON.parse(v); }catch(e){}
+  return (k in _updMem_) ? _updMem_[k] : null;
+}
+function _sessSet_(k, v){
+  _updMem_[k] = v;
+  let ok = false;
+  try{ if(v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, JSON.stringify(v)); ok = true; }catch(e){}
+  try{ if(v == null || !ok) { if(v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } }catch(e){}
+}
+var UPD_LAST_KEY_ = 'sk_upd_last'; // 마지막으로 적용한 업데이트 { from, to, at } — GitHub 반영 중 옛 사본이 와도 되돌아가지 않게
+
+// 스캔(키 입력)·터치가 있으면 '작업 중' — 카운트다운 중이면 취소
+function _updOnActivity_(e){
+  try{
+    const bn = document.getElementById('updBanner');
+    if(e && e.target && bn && bn.contains(e.target)) return; // 띠의 버튼 누름은 작업으로 안 봄
+  }catch(x){}
+  _upd_.lastAct = Date.now();
+  if(_upd_.cdTimer){ _updCancelCountdown_(); }
+}
+['keydown', 'pointerdown', 'touchstart', 'input'].forEach(t => { try{ document.addEventListener(t, _updOnActivity_, true); }catch(e){} });
+// 새로고침을 시작한 뒤(최대 몇 초)에는 스캔·터치를 막음 — 그 사이 스캔이 들어와 저장 도중 페이지가 바뀌어 사라지는 일이 없게
+function _updBlockInput_(e){
+  if(!_upd_.going) return;
+  try{ e.preventDefault(); }catch(x){}
+  try{ e.stopImmediatePropagation(); }catch(x){}
+  _upd_.blockedInput = true;
+  _upd_.lastAct = Date.now(); // 막힌 입력도 '작업 중'으로 침(포기한 뒤 곧바로 다시 카운트다운하지 않게)
+}
+['keydown', 'keypress', 'keyup', 'input', 'beforeinput', 'paste', 'pointerdown', 'mousedown', 'touchstart', 'click'].forEach(t => { try{ window.addEventListener(t, _updBlockInput_, true); }catch(e){} });
+function _updLockScreen_(on){
+  let el = document.getElementById('updLock');
+  if(!on){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'updLock';
+    el.style.cssText = 'position:fixed; inset:0; z-index:2147483000; background:rgba(10,14,26,0.82); display:flex; align-items:center; justify-content:center; color:#E7ECF5; font:700 18px/1.5 Inter,-apple-system,sans-serif; text-align:center; padding:24px;';
+    el.innerHTML = '<div>⏳ Updating…<div style="font-size:13px; font-weight:500; opacity:.8; margin-top:6px">Please wait a few seconds. Do not scan.</div></div>';
+    document.body.appendChild(el);
+  }
+  try{ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(e){}
+}
+
+// 지금 새로고침하면 안 되는 이유(없으면 '')
+function _updUnsafeWhy_(){
+  try{
+    if(_updBusyN_ > 0) return 'saving';
+    try{ if(typeof _psvHasUnsaved_ === 'function' && _psvHasUnsaved_()) return 'saving'; }catch(e){ return 'saving'; }
+    try{ if(_ic.prints && _ic.prints.length) return 'print'; }catch(e){ return 'print'; } // 저장은 됐지만 아직 안 뽑은 패킹 슬립(🖨 Print slip)
+    try{ if(__parsingLock) return 'parsing'; }catch(e){} // PDF 서버 파싱 중(최대 1분)
+    try{ // 배치 생성 진행 중(최대 5분 — 오류로 버튼이 그대로 멈춰 있어도 영영 막히지 않게)
+      const sb = document.getElementById('startBatchBtn');
+      if(sb && sb.disabled && /생성 중/.test(sb.textContent || '')){ if(!_upd_.creatingSince) _upd_.creatingSince = Date.now(); if(Date.now() - _upd_.creatingSince < 300000) return 'creating'; }
+      else _upd_.creatingSince = 0;
+    }catch(e){}
+    try{ if(_pvScanBusy || _pvScanQueue.length || _ssScanBusy || _ssScanQueue.length || _psvScanBusy || _psvScanQueue.length) return 'saving'; }catch(e){ return 'saving'; }
+    if(document.querySelector('[id^="saveFailBanner_"]')) return 'saveFail';
+    if(state.bootSyncPending) return 'boot';
+    if(state.pickTimerRunning) return 'picking';
+    // 열린(확정 전) 오더 — 그 화면을 보고 있을 때만(다른 화면으로 옮겨 두고 잊은 오더 때문에 영영 안 바뀌는 일이 없게. 저장은 위에서 따로 확인함)
+    const _av = (document.querySelector('.view.active') || {}).id || '';
+    try{ if(_av === 'v-standalone-scan' && _ssInvoice) return 'order'; }catch(e){ return 'order'; }
+    try{ if(_av === 'v-pack' && _pvInvoice && !(state.packVerifiedInvoices && state.packVerifiedInvoices.has(_pvInvoice))) return 'order'; }catch(e){ return 'order'; }
+    try{ if(_av === 'v-pack-standalone' && _psvInvoice && !(typeof _psvIsVerified_ === 'function' && _psvIsVerified_(_psvInvoice))) return 'order'; }catch(e){ return 'order'; }
+    // 로그인 만료가 가까우면(30분 이내·이미 지남) 새로고침 = 로그인 화면이 됨 → 30분 넘게 아무도 안 쓴 기기에서만
+    try{
+      const ag = document.getElementById('authGate');
+      const gateShown = ag && getComputedStyle(ag).display !== 'none' && !ag.classList.contains('hidden');
+      if(!gateShown){
+        const exp = Number(localStorage.getItem(AUTH_EXPIRES_KEY) || 0);
+        if(exp && exp - Date.now() < 30 * 60000 && Date.now() - _upd_.lastAct < 30 * 60000) return 'login';
+      }
+    }catch(e){}
+    // 팝업: 화면의 모든 팝업 종류(.modal-bg · 비밀번호/부서 창 · 이슈 추후 등록 · 배치 완료 화면) 중 하나라도 보이면 기다림
+    const pops = document.querySelectorAll('.modal-bg, .pwm-overlay, .retro-issue-overlay, .complete-overlay, #pickLogModal, #orderDoneOverlay');
+    for(let i = 0; i < pops.length; i++){
+      const cs = getComputedStyle(pops[i]);
+      if(cs.display !== 'none' && cs.visibility !== 'hidden') return 'popup';
+    }
+    try{ if(window.__pendingVariantChoice) { const vp = document.querySelector('.variant-pick-card'); if(vp && vp.offsetParent !== null) return 'popup'; } }catch(e){}
+    if(Date.now() - _upd_.lastAct < UPD_IDLE_MS_) return 'active';
+    return '';
+  }catch(e){ return 'error'; }
+}
+
+// 화면 위쪽 띠(① 대기 · ② 카운트다운 · ③ 적용 완료)
+function _updBanner_(kind, html){
+  let bn = document.getElementById('updBanner');
+  if(!kind){ if(bn) bn.remove(); _upd_.shown = ''; return; }
+  if(!bn){
+    bn = document.createElement('div');
+    bn.id = 'updBanner';
+    const host = document.querySelector('main') || document.body;
+    host.insertBefore(bn, host.firstChild);
+  }
+  const C = { wait: ['rgba(59,130,246,.14)', 'rgba(59,130,246,.5)', '#cfe0ff'],
+              go:   ['rgba(245,158,11,.14)', 'rgba(245,158,11,.6)', '#ffe2b0'],
+              done: ['rgba(16,185,129,.14)', 'rgba(16,185,129,.55)', '#bff3dc'] }[kind];
+  bn.style.cssText = 'position:sticky; top:0; z-index:350; margin:8px 12px 0; border-radius:10px; padding:9px 12px; font-size:13px; line-height:1.45; display:flex; gap:9px; align-items:flex-start;'
+    + 'background:' + C[0] + '; border:1px solid ' + C[1] + '; color:' + C[2] + '; backdrop-filter:blur(6px);';
+  bn.innerHTML = html;
+  _upd_.shown = kind;
+}
+function _updShowWait_(){
+  if(_upd_.shown === 'wait') return;
+  _updBanner_('wait', '<div>🔄</div><div><b>New version ready.</b><br>It will apply automatically after you finish this order. Keep working.</div>');
+}
+function _updShowCount_(){
+  _updBanner_('go', '<div>⏱</div><div><b>Updating in <span id="updCount">' + _upd_.cdLeft + '</span>s…</b><br>All scans saved. Your login, batch and screen stay the same.<br>'
+    + '<button type="button" id="updNowBtn" style="margin:6px 6px 0 0; padding:5px 12px; border-radius:7px; border:none; background:#F59E0B; color:#111; font-weight:700; font-size:12px; cursor:pointer;">Update now</button>'
+    + '<button type="button" id="updLaterBtn" style="margin:6px 0 0; padding:5px 12px; border-radius:7px; border:1px solid #6b7280; background:none; color:#ddd; font-weight:600; font-size:12px; cursor:pointer;">Later (5 min)</button></div>');
+  const nb = document.getElementById('updNowBtn'), lb = document.getElementById('updLaterBtn');
+  if(nb) nb.onclick = () => _updGo_();
+  if(lb) lb.onclick = () => { _updCancelCountdown_(); _upd_.snoozeUntil = Date.now() + UPD_SNOOZE_MS_; };
+}
+function _updCancelCountdown_(){
+  if(_upd_.cdTimer){ clearInterval(_upd_.cdTimer); _upd_.cdTimer = null; }
+  if(_upd_.target && !_upd_.going){ _upd_.shown = ''; _updShowWait_(); }
+}
+function _updStartCountdown_(){
+  if(_upd_.cdTimer || _upd_.going) return;
+  _upd_.cdLeft = UPD_COUNT_S_;
+  _updShowCount_();
+  _upd_.cdTimer = setInterval(() => {
+    if(_updUnsafeWhy_() && _updUnsafeWhy_() !== 'active'){ _updCancelCountdown_(); return; } // 그 사이 저장·오더·팝업이 생기면 취소
+    _upd_.cdLeft--;
+    const c = document.getElementById('updCount'); if(c) c.textContent = String(Math.max(0, _upd_.cdLeft));
+    if(_upd_.cdLeft <= 0){ clearInterval(_upd_.cdTimer); _upd_.cdTimer = null; _updGo_(); }
+  }, 1000);
+}
+async function _updGo_(){
+  if(_upd_.going || !_upd_.target) return;
+  const why0 = _updUnsafeWhy_();
+  if(why0 && why0 !== 'active'){ _updCancelCountdown_(); return; } // 버튼을 누른 순간이라도 저장 중·오더 진행 중이면 안 함
+  _upd_.going = true; _upd_.blockedInput = false;
+  if(_upd_.cdTimer){ clearInterval(_upd_.cdTimer); _upd_.cdTimer = null; }
+  _updLockScreen_(true); // 이 순간부터 스캔·터치 막음
+  // 포기: 막은 것을 풀고 5분 뒤에 다시. 그 사이 막힌 스캔이 있었으면 다시 스캔하라고 분명히 알림
+  const giveUp = (why) => {
+    if(!_upd_.going) return;
+    console.warn('[update] 이번엔 적용 안 함:', why);
+    _upd_.going = false; _updLockScreen_(false);
+    _upd_.snoozeUntil = Date.now() + UPD_SNOOZE_MS_;
+    _updCancelCountdown_();
+    if(_upd_.blockedInput){
+      _upd_.blockedInput = false;
+      try{ showSaveFailureBanner('⚠️ Last scan was NOT taken — scan it again', 'The screen was updating at that moment, so that scan was ignored. Please scan the same item again.'); }catch(e){}
+    }
+  };
+  try{
+    // 0.8초: 방금 들어온 스캔의 자동 입력 처리(0.3초 타이머 등)가 먼저 끝나 저장이 시작되게 기다린 뒤 다시 확인
+    await new Promise(r => setTimeout(r, 800));
+    // Firestore 로 보내는 중인 것(스캔 미리보기·접속 표시 등)이 있으면 최대 3초 기다림
+    try{ if(typeof window._fsWaitPending === 'function') await Promise.race([ window._fsWaitPending(), new Promise(r => setTimeout(r, 3000)) ]); }catch(e){}
+    const why1 = _updUnsafeWhy_();
+    if(why1 && why1 !== 'active'){ giveUp(why1); return; }
+    const u = new URL(location.href);
+    u.searchParams.set('v', _upd_.target === '(none)' ? 'legacy' + Date.now().toString(36) : _upd_.target); // 주소가 바뀌어야 기기·GitHub 의 옛 사본을 안 씀
+    // 새 화면을 먼저 받아 봄(최대 15초) — 못 받으면(네트워크 끊김·느림) 지금 화면을 그대로 두고 포기. 받으면 바로 열리므로 잠금 시간이 짧음
+    try{
+      const ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      const tm = setTimeout(() => { try{ if(ctl) ctl.abort(); }catch(e){} }, 15000);
+      const r = await fetch(u.toString(), ctl ? { cache: 'no-cache', credentials: 'same-origin', signal: ctl.signal } : { cache: 'no-cache', credentials: 'same-origin' });
+      clearTimeout(tm);
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      await r.text();
+    }catch(eF){ giveUp('new page not reachable: ' + (eF && eF.message || eF)); return; }
+    if(!_upd_.going) return;
+    let view = '';
+    try{ const v = document.querySelector('.view.active'); view = v ? v.id : ''; }catch(e){ view = ''; }
+    _sessSet_(UPD_RESTORE_KEY_, { view: view, at: Date.now() });
+    const t = _sessGet_(UPD_TRY_KEY_);
+    _sessSet_(UPD_TRY_KEY_, { target: _upd_.target, n: (t && t.target === _upd_.target ? (t.n || 0) : 0) + 1, at: Date.now(), from: APP_BUILD });
+    location.replace(u.toString());
+    // 그래도 20초 안에 안 열리면: 이동을 취소(window.stop)한 뒤에 풀어 줌 — 풀린 뒤 스캔한 것이 이동 때문에 사라지지 않게
+    setTimeout(() => { if(_upd_.going){ try{ window.stop(); }catch(e){} giveUp('navigation timeout'); } }, 20000);
+  }catch(e){
+    giveUp(String(e && e.message || e));
+  }
+}
+
+function _updClearTarget_(){
+  if(!_upd_.target) return;
+  _upd_.target = '';
+  if(_upd_.cdTimer){ clearInterval(_upd_.cdTimer); _upd_.cdTimer = null; }
+  _updBanner_('');
+  try{ _presenceWriteSoon_(); }catch(e){}
+}
+// GitHub 의 batch.html 에서 버전 표시만 읽음
+async function _updCheck_(){
+  if(_upd_.disabled || _upd_.checking || _upd_.going || document.hidden || !APP_BUILD) return;
+  _upd_.checking = true; _upd_.lastCheck = Date.now();
+  try{
+    // 'no-cache' = 바뀌지 않았으면 서버가 "그대로"(304)만 답함 → 파일을 다시 받지 않아 데이터 거의 안 씀
+    const r = await fetch(location.pathname, { cache: 'no-cache', credentials: 'same-origin' });
+    if(!r.ok) return;
+    const txt = await r.text();
+    if(txt.length < 100000 || txt.indexOf('sk_device_id') < 0) return; // 진짜 batch.html 이 아니면(오류 화면 등) 무시
+    const m = /<meta\s+name=["']sk-build["']\s+content=["']([^"']+)["']/i.exec(txt);
+    const remote = m ? String(m[1]).trim() : '(none)'; // 버전 표시가 없음 = v35 이전 화면으로 되돌린 것
+    if(!remote || remote === APP_BUILD){ _updClearTarget_(); return; }
+    // 방금 이 버전으로 새로고침했는데 옛 사본이 왔던 경우(GitHub 반영 지연) — 15분 안에 2번 넘게는 다시 안 함
+    const t = _sessGet_(UPD_TRY_KEY_);
+    if(t && t.target === remote && (t.n || 0) >= 2 && Date.now() - (t.at || 0) < 15 * 60000){ _updClearTarget_(); return; }
+    // 방금 업데이트한 그 이전 버전이 다시 보이면(GitHub 이 아직 옛 사본을 주는 중) 15분 동안은 되돌아가지 않음
+    const last = _sessGet_(UPD_LAST_KEY_);
+    if(last && last.from === remote && last.to === APP_BUILD && Date.now() - (last.at || 0) < 15 * 60000){ _updClearTarget_(); return; }
+    if(_upd_.target !== remote){
+      _upd_.target = remote;
+      _upd_.shown = '';
+      _updShowWait_();
+      try{ _presenceWriteSoon_(); }catch(e){}
+      console.log('[update] 새 버전 발견:', APP_BUILD, '→', remote);
+    }
+  }catch(e){ /* 네트워크 오류 — 다음 확인 때 다시 */ }
+  finally{ _upd_.checking = false; }
+}
+// 2초마다: 새 버전이 있고 화면이 보이며 안전하면 카운트다운
+setInterval(() => {
+  if(!_upd_.target || _upd_.going || _upd_.cdTimer || document.hidden) return;
+  if(Date.now() < _upd_.snoozeUntil){ _updShowWait_(); return; }
+  if(_updUnsafeWhy_()) { _updShowWait_(); return; }
+  _updStartCountdown_();
+}, 2000);
+setInterval(() => { if(!document.hidden) _updCheck_(); }, UPD_CHECK_MS_);
+setTimeout(() => { _updCheck_(); }, 20000); // 화면을 연 뒤 20초 뒤 첫 확인(부팅 복원과 겹치지 않게)
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){ if(_upd_.cdTimer) _updCancelCountdown_(); return; }
+  if(Date.now() - _upd_.lastCheck > 60000) _updCheck_(); // 화면이 다시 켜지면 바로 확인
+});
+
+// ③ 새로고침 직후: 성공 표시 + 보던 화면으로 되돌림
+(function(){
+  try{
+    const t = _sessGet_(UPD_TRY_KEY_);
+    if(t && t.target && t.target === APP_BUILD){
+      _sessSet_(UPD_TRY_KEY_, null);
+      _sessSet_(UPD_LAST_KEY_, { from: t.from || '', to: APP_BUILD, at: Date.now() });
+      setTimeout(() => {
+        _updBanner_('done', '<div>✅</div><div><b>Updated to the new version.</b></div>');
+        setTimeout(() => { if(_upd_.shown === 'done') _updBanner_(''); }, 5000);
+      }, 300);
+    }
+    const rs = _sessGet_(UPD_RESTORE_KEY_);
+    _sessSet_(UPD_RESTORE_KEY_, null);
+    if(!rs || !rs.view || Date.now() - (rs.at || 0) > 120000) return;
+    if(rs.view === 'v-batch' || rs.view === 'v-slots') return; // 01 은 진입 확인 절차가 있고, 02 는 부팅이 알아서 보여 줌
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if(Date.now() - t0 > 60000){ clearInterval(iv); return; }
+      if(!window.__bootRestoreDone || state.bootSyncPending) return;
+      const lo = document.getElementById('loginOverlay');
+      if(lo && lo.style.display === 'flex') return; // 로그인 확인 중
+      const ag = document.getElementById('authGate');
+      if(ag && !ag.classList.contains('hidden') && getComputedStyle(ag).display !== 'none') return; // 로그인 화면
+      clearInterval(iv);
+      if(Date.now() - _upd_.lastAct < 3000 && Date.now() - t0 > 3000) return; // 그새 작업자가 직접 움직였으면 건드리지 않음
+      const target = document.getElementById(rs.view);
+      const navBtn = document.querySelector('nav button[data-view="' + (rs.view === 'v-pack' || rs.view === 'v-pack-standalone' ? 'v-pack-choose' : rs.view) + '"]');
+      if(!target || (navBtn && navBtn.disabled)) return;
+      setTimeout(() => { try{ gotoView(rs.view); }catch(e){} }, 300);
+    }, 500);
+  }catch(e){}
+})();
+
 // ★ 이 이름이 "나 말고 다른 기기"에서 지금 쓰이고 있는지
 function isWorkerBusyElsewhere(name){
   const devices = _activeScanWorkers[name] || [];
@@ -12997,7 +13309,7 @@ function updatePickWorkerDot(){
 function renderWorkers(){
   const el = document.getElementById('workersBody');
   if(state.workers.length === 0){
-    el.innerHTML = '<tr><td colspan="4" class="empty-log" style="border:none">작업자 없음. + 버튼으로 추가하세요.</td></tr>';
+    el.innerHTML = '<tr><td colspan="5" class="empty-log" style="border:none">작업자 없음. + 버튼으로 추가하세요.</td></tr>';
     return;
   }
   el.innerHTML = state.workers.map(w => {
@@ -13007,10 +13319,21 @@ function renderWorkers(){
     //   값(_globalActiveWorkers)임. "재직 상태" 같은 별도 수동 필드는 없앰 —
     //   퇴사·이탈한 작업자는 delete 버튼으로 명단에서 바로 삭제하는 것으로 충분.
     const isWorking = !!_globalActiveWorkers[w.name];
+    // ★ v36 — 이 사람이 쓰는 기기의 화면 버전(Active 일 때만). 신호에 버전이 없으면 v35(버전 표시 이전 화면)
+    let verHtml = '<span style="color:var(--text-dim2)">—</span>';
+    if(isWorking){
+      const v = (typeof _globalWorkerVers_ !== 'undefined' && _globalWorkerVers_[w.name]) || null;
+      const b = v ? (String(v.b || '').split('-')[0] || 'v35') : '';
+      if(!v) verHtml = '<span style="color:var(--text-dim2)">?</span>';
+      else if(v.b && _bnum_(v.b) >= _newestBuildNum_()) verHtml = '<span style="color:var(--green)">' + escapeHtmlV36_(b) + ' ✓</span>';
+      else if(v.u) verHtml = '<span style="color:var(--amber); font-weight:600">' + escapeHtmlV36_(b) + ' · update waiting</span>';
+      else verHtml = '<span style="color:var(--amber); font-weight:600">' + escapeHtmlV36_(b) + '</span>';
+    }
     return `<tr>
       <td><div class="worker-avatar" style="width:28px; height:28px; font-size:9px">${initial}</div></td>
       <td><b>${w.name}</b></td>
       <td>${isWorking ? '<span style="color:var(--green)">● Active</span>' : '<span style="color:var(--text-dim2)">○ Off</span>'}</td>
+      <td style="font-family:var(--mono); font-size:12px">${verHtml}</td>
       <td>
         <button class="mini-btn" data-edit="${w.id}">edit</button>
         <button class="mini-btn danger" data-del="${w.id}">delete</button>
