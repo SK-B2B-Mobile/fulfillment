@@ -1494,12 +1494,14 @@ body.bk-pad{padding-bottom:74px;}
       //   동적으로 구독/해제해야 하는 salesInvDetail_{invoice} 같은 경우에만
       //   이 반환값(unsubscribe 함수)을 실제로 사용함.
       return onSnapshot(ref, (snap) => {
-        if(!snap.exists()) return;
+        if(!snap.exists()){ try{ (window._mirrorNoData = window._mirrorNoData || {})[docPath] = true; }catch(eN){} return; } // ★ v9 — 문서 없음 → 첫 화면은 기다리지 않고 직접 조회
         try{
           const payload = JSON.parse(snap.data().data);
+          try{ if(window._mirrorNoData) delete window._mirrorNoData[docPath]; }catch(eN){}
           onUpdate(payload);
         }catch(e){ console.error('[mirror] JSON 파싱 실패 (' + docPath + '):', e); }
       }, (err) => {
+        try{ (window._mirrorNoData = window._mirrorNoData || {})[docPath] = true; }catch(eN){} // ★ v9 — 구독 오류(권한 등) → 기다리지 않고 직접 조회
         console.error('[mirror] onSnapshot 에러 (' + docPath + '):', err);
       });
     };
@@ -1551,6 +1553,7 @@ function _waitForMirrorInit(tries){
     return;
   }
   if(tries > 100){ // 약 5초 기다려도 안 뜨면 예전 방식(Apps Script 직접 폴링)으로 계속
+    _MIRROR_GAVE_UP = true;
     console.warn('⚠ Firestore 미러 연결 실패 — 기존 방식(Apps Script 직접 폴링)으로 계속 동작합니다');
     return;
   }
@@ -1562,12 +1565,36 @@ _waitForMirrorInit();
 // "데이터 가져오기" 부분만 감싈 래퍼. 미러 캐시가 아직 안 채워졌으면
 // (null) 자동으로 Apps Script 직접 호출로 대체됨 — 나머지 로직(응답을
 // 어떻게 화면에 반영하는지)은 100% 그대로.
+// ★ 2026-11-13 v9(속도 — 로드맵 6-4) — 페이지를 열 때(appInit) 미러 첫 값이 도착하기 전(보통 1초 안)에 바로 Apps Script 를 직접 불러
+//   Jobs 시트 전체를 읽는 무거운 계산(7~23초)이 사람 수(약 18명)만큼 매번 일어났음 → 시트가 막혀 다른 저장·조회가 몇 분씩 밀린 원인 중 하나.
+//   이제 미러 연결 중이면 첫 값을 최대 6초까지 기다렸다가 그 값을 씀(미러 값은 1분 동기화가 매 분 갱신 — 평소 화면과 같은 값).
+//   6초 안에 안 오거나 미러 연결 자체가 실패하면 예전처럼 직접 조회(화면이 비는 일 없음).
+var _MIRROR_GAVE_UP = false;
+//   미러 값이 실패 표시(ok:false — 서버 계산이 그 회차에 실패)면 쓰지 않고 직접 조회. 문서가 없거나 구독 오류면 기다리지 않음.
+const _MIRROR_DOC_ = { overview: 'sales_overview', today: 'sales_todayList' };
+function _mirrorGood_(key){ const v = _mirrorCache[key]; return (FIRESTORE_MIRROR_OK && v && v.ok !== false) ? v : null; }
+async function _awaitMirrorFirst_(key){
+  const t0 = Date.now();
+  while(Date.now() - t0 < 6000){
+    const v = _mirrorGood_(key);
+    if(v) return v;
+    if(_MIRROR_GAVE_UP) return null;
+    if(_mirrorCache[key] && _mirrorCache[key].ok === false) return null; // 미러에 실패 값 → 바로 직접 조회
+    try{ if(window._mirrorNoData && window._mirrorNoData[_MIRROR_DOC_[key]]) return null; }catch(eN){}
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return _mirrorGood_(key);
+}
 async function getSalesOverviewData_(){
-  if(FIRESTORE_MIRROR_OK && _mirrorCache.overview) return _mirrorCache.overview;
+  if(_mirrorGood_('overview')) return _mirrorCache.overview;
+  const m = await _awaitMirrorFirst_('overview');
+  if(m) return m;
   return await gasGet({ op:'getSalesOverview' });
 }
 async function getSalesTodayListData_(){
-  if(FIRESTORE_MIRROR_OK && _mirrorCache.today) return _mirrorCache.today;
+  if(_mirrorGood_('today')) return _mirrorCache.today;
+  const m = await _awaitMirrorFirst_('today');
+  if(m) return m;
   return await gasGet({ op:'getSalesTodayList' });
 }
 
