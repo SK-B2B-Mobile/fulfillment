@@ -473,13 +473,29 @@ function doGet(e) {
   const t0 = Date.now();
   const op = (e && e.parameter && e.parameter.op || '').toString();
   __cb__ = String(((e && e.parameter) || {}).callback || '');
+  let _out = null;
   try {
-    return doGet_core_(e);
+    _out = doGet_core_(e);
+    return _out;
   } catch (err) {
-    return json_(_errJson_(err));
+    _out = json_(_errJson_(err));
+    return _out;
   } finally {
-    _noteSlowReq_('GET', op, Date.now() - t0);
+    const _ms = Date.now() - t0;
+    _noteSlowReq_('GET', op + (_ms >= 5000 ? _slowReqTag_(_out) : ''), _ms);
   }
+}
+/* ★ 2026-11-13 v47 — 느린 요청(5초 이상)이 실패로 끝났는지 표시. 잠금 대기 초과(다른 저장이 문서 잠금을 오래 쥠)는 '⛔잠금대기실패', 그 밖의 실패는 '⚠실패'.
+ *   5초 미만 요청은 확인하지 않음(평소 비용 0). 응답 앞부분 400자만 봄. */
+function _slowReqTag_(out) {
+  try {
+    if (!out || typeof out.getContent !== 'function') return '';
+    const c = String(out.getContent() || '').slice(0, 400);
+    const _fail = /^\s*(?:[\w$.]+\(\s*)?\{\s*"ok"\s*:\s*false/.test(c); // 응답 맨 앞의 ok:false 만(JSONP 감싸기 허용) — 목록 안의 항목별 ok:false 는 제외
+    if (_fail && /server_busy|Lock timeout|잠금/i.test(c)) return ' ⛔잠금대기실패';
+    if (_fail) return ' ⚠실패';
+  } catch (e) { /* 무시 */ }
+  return '';
 }
 function doGet_core_(e) {
   const op = (e && e.parameter && e.parameter.op || '').toString();
@@ -816,12 +832,16 @@ function doPost(e) {
   let op0 = '';
   try { op0 = String((e && e.parameter && e.parameter.op) || ''); } catch (e0) {}
   __cb__ = '';
+  let _out = null;
   try {
-    return doPost_core_(e);
+    _out = doPost_core_(e);
+    return _out;
   } catch (err) {
-    return json_(_errJson_(err));
+    _out = json_(_errJson_(err));
+    return _out;
   } finally {
-    _noteSlowReq_('POST', op0, Date.now() - t0);
+    const _ms = Date.now() - t0;
+    _noteSlowReq_('POST', op0 + (_ms >= 5000 ? _slowReqTag_(_out) : ''), _ms); // ★ v47 — 실패 표시
   }
 }
 function doPost_core_(e) {
@@ -2983,6 +3003,9 @@ function onEdit(e) {
     var col   = e.range.getColumn();
 
     if (row <= 1) return;
+    // ★ 2026-11-13 v47 — 사람이 Jobs 시트를 직접 고치면(onEdit 은 사람의 편집에만 옴) 데이터 버전을 바꿔
+    //   목록(listJobs)·매출 요약·sales 캐시가 바로 새로 읽게 함(v46·v47 에서 캐시를 길게 쓰므로 보완).
+    try { if (sheet.getName() === JOBS_SHEET) bumpVersionLite_(); } catch (eBv) { /* 무시 */ }
 
     var isStartTime = (col === 10);
     var isEndTime   = (col === 11);
@@ -4260,7 +4283,19 @@ function getRevenueSummary() {
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'revenueSummary_v1';
     const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
-    if (_cached) return JSON.parse(_cached);
+    // ★ 2026-11-13 v47(속도 — 로드맵 6-4) — 예전엔 30초마다 Jobs 시트 + 보관 파일 Jobs 전체를 다시 읽었음(한 번에 7~10초, 매니저 화면을 열 때마다).
+    //   이제 listJobs 와 같은 방식: 캐시에 '읽기 시작 시점의 데이터 버전'을 붙여 두고, 버전이 같으면 최대 10분 재사용.
+    //   금액·상태·출고일·피커를 바꾸는 저장은 모두 버전을 바꾸므로 바로 새로 계산. 저장 직후 10초 안에 읽은 값은 30초만 보관(예전과 같음).
+    //   (형식: 버전|만든시각|내용) 만든 지 30초 안이면 버전이 달라도 씀 — 예전(30초 캐시)과 같은 최소 보관(바쁠 때 매 요청 재계산 방지).
+    if (_cached) {
+      const _p = _cached.split('|', 2);
+      const _b2 = _p.length === 2 ? _p[0].length + 1 + _p[1].length : -1;
+      const _age = Date.now() - (Number(_p[1]) || 0);
+      if (_b2 > 0 && _cached.charAt(_b2) === '|' && (_p[0] === String(getVersion_()) || (_age >= 0 && _age < 30000))) {
+        try { return JSON.parse(_cached.substring(_b2 + 1)); } catch (eP) { /* 새로 계산 */ }
+      }
+    }
+    const _verAtStart = String(getVersion_());
 
     const tz = scriptTz_();
     const summary = {};
@@ -4352,8 +4387,9 @@ function getRevenueSummary() {
 
     const _result = { ok: true, summary: summary };
     try {
-      const _payload = JSON.stringify(_result);
-      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 30); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
+      const _payload = _verAtStart + '|' + Date.now() + '|' + JSON.stringify(_result); // ★ v47 — 버전·만든 시각을 앞에
+      const _verAge = Date.now() - (Number(_verAtStart) || 0);
+      _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, (_verAge >= 0 && _verAge < 10000) ? 30 : 600); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
 
