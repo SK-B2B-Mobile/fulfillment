@@ -822,20 +822,24 @@ let _scanFastCache = null;
 // 사고가 실제로 발생함(batch.html의 정확한 값과 TV 화면이 크게 어긋났음).
 // 이제 slots가 배치ID로 한 번 더 감싸져 있으므로(slots.<batchId>.<슬롯번호>),
 // 반드시 현재 배치의 하위 맵만 읽어서 다른 배치의 증분이 섞이지 않게 함.
+// ★ 2026-11-13 v9 긴급 수정 — 예전엔 정본(미러에서 받은 슬롯 목록)을 '그 자리에서' 고쳐서(s.scanned += 보정치),
+//   화면을 다시 그릴 때마다(스캔이 들어올 때마다 여러 번) 보정치가 계속 '또' 더해졌음 → 막대가 끝까지 찼다가,
+//   정본이 새로 도착하면(1분 안팎) 원래 값으로 돌아가는 현상(11-13 15:17 실측: 실제 120 인데 TV 147·144·141·138).
+//   이제 슬롯을 복사해서 그 복사본에만 더함 → 정본은 그대로, 몇 번을 다시 그려도 '정본 + 보정치 한 번'.
 function _applyFastScanDelta_(slots){
   if(!_scanFastCache || !slots || !slots.length) return slots;
   const deltas = (_scanFastCache.slots && _scanFastCache.slots[String(currentBatchId || '')]) || {};
-  slots.forEach(s => {
-    const d = Number(deltas[String(s.slotNum)]) || 0;
-    if(d <= 0) return;
-    if(typeof s.scanned !== 'number' || typeof s.effectiveTotal !== 'number') return;
-    const boosted = Math.min(s.effectiveTotal, s.scanned + d);
-    if(boosted > s.scanned){
-      s.scanned = boosted;
-      if(s.status === 'waiting') s.status = 'active'; // done 승격은 절대 안 함(위 설명 참고)
-    }
+  return slots.map(s0 => {
+    const d = Number(deltas[String(s0.slotNum)]) || 0;
+    if(d <= 0) return s0;
+    if(typeof s0.scanned !== 'number' || typeof s0.effectiveTotal !== 'number') return s0;
+    const boosted = Math.min(s0.effectiveTotal, s0.scanned + d);
+    if(boosted <= s0.scanned) return s0;
+    const s = Object.assign({}, s0); // 복사본만 고침
+    s.scanned = boosted;
+    if(s.status === 'waiting') s.status = 'active'; // done 승격은 절대 안 함(위 설명 참고)
+    return s;
   });
-  return slots;
 }
 
 function _waitForMirrorInit(tries){
