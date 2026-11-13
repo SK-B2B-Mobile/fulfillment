@@ -444,7 +444,7 @@ function whoAmI_(data) {
  *     이제 항상 JSON({ok:false,error:'server_busy'|메시지})으로 응답.
  *  2) JSONP 콜백 이름을 전역(__cb__)에 두어 json_()가 실제로 읽을 수 있게 함. 예전엔 doGet 안의 지역 변수라
  *     json_()가 못 봐서 JSONP 응답이 항상 일반 JSON으로 나가 대체 요청이 늘 실패했음.
- *  3) 5초 넘게 걸린 요청은 어떤 op가 느렸는지 스크립트 속성(reqSlowLog, 최근 40건)에 기록 — showReqSlowLog() 실행으로 확인. */
+ *  3) 5초 넘게 걸린 요청은 어떤 op가 느렸는지 스크립트 속성(reqSlowLog, 최근 40건 → v46: 최대 150건·시작~끝 시각)에 기록 — showReqSlowLog() 실행으로 확인. */
 var __cb__ = '';
 function _errJson_(err) {
   const msg = String(err && err.message || err);
@@ -456,8 +456,12 @@ function _noteSlowReq_(kind, op, ms) {
     if (ms < 5000) return;
     const pr = PropertiesService.getScriptProperties();
     const arr = String(pr.getProperty('reqSlowLog') || '').split('\n').filter(Boolean);
-    arr.push(fmtDate_(new Date(), scriptTz_(), 'MM-dd HH:mm:ss') + ' ' + kind + ' ' + op + ' ' + Math.round(ms / 100) / 10 + 's');
-    pr.setProperty('reqSlowLog', arr.slice(-40).join('\n'));
+    // ★ 2026-11-13 v46 — 시작 시각도 같이(시트가 막힌 구간에 어떤 요청이 언제부터 돌았는지 맞춰 보기 위해), 최대 150건·8KB(예전 40건 — 바쁜 아침엔 20분도 안 돼 밀려났음)
+    const _tz = scriptTz_(), _end = new Date();
+    arr.push(fmtDate_(new Date(_end.getTime() - ms), _tz, 'MM-dd HH:mm:ss') + '~' + fmtDate_(_end, _tz, 'HH:mm:ss') + ' ' + kind + ' ' + op + ' ' + Math.round(ms / 100) / 10 + 's');
+    let _keep = arr.slice(-150);
+    while (_keep.length > 1 && _keep.join('\n').length > 8000) _keep = _keep.slice(Math.ceil(_keep.length / 10)); // 속성 한 칸 한도(9KB) 안으로 — 오래된 것부터 버림
+    pr.setProperty('reqSlowLog', _keep.join('\n'));
   } catch (e) { /* 기록 실패는 무시 */ }
 }
 function showReqSlowLog() {
@@ -504,11 +508,20 @@ function doGet_core_(e) {
     //   즉시 반영됨(자기 자신의 쓰기 → 캐시 삭제 → 자신의 다음 조회는 새 데이터).
     const cache = CacheService.getScriptCache();
     const cacheKey = 'listJobs_cache_v1';
+    // ★ 2026-11-13 v46(속도 — 로드맵 6-4) — index.html 이 켜진 데스크톱 약 7대가 각자 30초마다 이 목록을 부름 → 캐시가 8초라
+    //   1분에 여러 번 Jobs 시트 전체(약 3,600줄 × 53열)를 다시 읽어 시트를 막았음(11-13 아침 다른 저장이 몇 분씩 밀린 원인 중 하나).
+    //   sales 목록과 같은 방식으로 바꿈: 캐시에 '읽기 시작 시점의 데이터 버전'을 붙여 두고, 지금 버전과 같을 때만 씀(최대 60초).
+    //   Jobs 를 바꾸는 저장(upsert·검수·삭제·보관·디멘션·패킹 이동 등)은 모두 버전을 바꾸므로 그 즉시 새로 읽음(예전과 같은 즉시 반영).
+    //   저장 직전에 읽기 시작한 계산이 캐시를 늦게 써도, 버전이 달라 무시됨(옛 값으로 되돌아가지 않음).
     let out;
     let cached = _cacheGetChunked_(cache, cacheKey); // ★ 2026-09-25 신규 — 95000자류 가드 버그 일괄 수정(청크 캐시). Jobs가 늘어나 payload가 100KB를 넘어도 이제 항상 정상 캐싱됨
-    if (cached) {
-      try { out = JSON.parse(cached); } catch (e) { out = null; }
-    }
+    const _ljParse = function (raw) {
+      if (!raw) return null;
+      const bar = raw.indexOf('|');
+      if (bar <= 0 || raw.substring(0, bar) !== String(getVersion_())) return null; // 다른 버전(그 사이 저장이 있었음) 또는 예전 형식 → 새로 읽음
+      try { return JSON.parse(raw.substring(bar + 1)); } catch (e) { return null; }
+    };
+    out = _ljParse(cached);
     // ★ 2026-10-27 안정화(실측: listJobs 9~34초) — 캐시가 비는 순간 여러 기기가 동시에 Jobs 시트 전체를 각자 다시 읽던 것을,
     //   먼저 계산 중인 요청이 있으면(표식 _calc, 최대 40초) 그 결과가 캐시에 올라올 때까지 기다렸다가 받도록 함(안전망: 시간 초과/실패 시 직접 계산).
     if (!out) {
@@ -518,8 +531,7 @@ function doGet_core_(e) {
           const tEnd = Date.now() + 15000;
           while (Date.now() < tEnd && !out) {
             Utilities.sleep(500);
-            const c2 = _cacheGetChunked_(cache, cacheKey);
-            if (c2) { try { out = JSON.parse(c2); } catch (eP) { out = null; } }
+            out = _ljParse(_cacheGetChunked_(cache, cacheKey));
             if (!out && !cache.get(_lk)) break;
           }
         }
@@ -529,11 +541,15 @@ function doGet_core_(e) {
       let _mine = false;
       try { cache.put(cacheKey + '_calc', '1', 40); _mine = true; } catch (eL) { /* 무시 */ }
       try {
+        const _verAtStart = String(getVersion_()); // 읽기 '전' 버전 — 읽는 중에 저장이 있으면 이 캐시는 쓰이지 않음
         out = listJobs_textSafe_();
         out.pickers = getPickers_();
         out.pickerColors = getPickerColors_();
         out.ver = getVersion_();
-        try { _cachePutChunked_(cache, cacheKey, JSON.stringify(out), 8); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
+        // 저장 직후 10초 안(버전은 바뀌었지만 그 저장의 시트 쓰기가 아직 다 반영 안 됐을 수 있는 짧은 순간)에 읽은 값은 예전처럼 8초만 보관 — 혹시 옛 줄을 읽었어도 60초 동안 남지 않게
+        const _verAge = Date.now() - (Number(_verAtStart) || 0);
+        const _ttl = (_verAge >= 0 && _verAge < 10000) ? 8 : 60;
+        try { _cachePutChunked_(cache, cacheKey, _verAtStart + '|' + JSON.stringify(out), _ttl); } catch (e) { /* 캐시 실패해도 정상 응답은 계속 진행 */ }
       } finally {
         if (_mine) { try { cache.remove(cacheKey + '_calc'); } catch (eR) { /* 무시 */ } }
       }
@@ -875,6 +891,7 @@ function doPost_core_(e) {
     if (typeof pc === 'string') { try { pc = JSON.parse(pc); } catch (_) { pc = {}; } }
     if (!pc || typeof pc !== 'object') pc = {};
     setPickerColors_(pc);
+    try { bumpVersionLite_(); } catch (eC) { /* ★ v46 — 작업자 명단·색 저장도 목록 캐시가 바로 새로 읽게(버전 갱신 + 목록 캐시 지움) */ }
     return json_({ ok: true });
   }
 
@@ -3506,6 +3523,7 @@ function clearInspection(data) {
     cell.setBackground(null);
     cell.setFontColor(null);
     cell.setFontWeight('normal');
+    try { SpreadsheetApp.flush(); bumpVersionLite_(); } catch (eB) { /* ★ v46 — 검수 지우기도 목록·sales 캐시가 바로 새로 읽게(예전엔 버전을 안 바꿔 최대 8초 → v46 캐시 60초가 되기 전에 보완) */ }
     return ContentService.createTextOutput(
       JSON.stringify({ ok: true })
     ).setMimeType(ContentService.MimeType.JSON);
@@ -5603,6 +5621,30 @@ function _colLetterA1_(n) {
  * Jobs 시트 전체를 한 번 읽어 메모리에서 컬럼을 잘라 씀. 다른 곳(저장 등)에서는 예전처럼 필요한 컬럼만 직접 읽음.
  * 저장(bumpVersion*)이 일어나면 메모를 비움. 블록 읽기가 실패하거나 요청한 행/컬럼이 더 크면 예전 방식으로 대체. */
 var __JOBS_BLOCK = null, __JOBS_BLOCK_ON = 0;
+/* ★ 2026-11-11 v45 속도 — sales 목록 두 가지(overview·todayList)를 한 실행에서 같이 만들 때(1분 판매 미러·getSalesOverviewAndToday),
+ *   보조표(패킹이동·디멘션·출고·BOL·컨펌·담당자)를 두 번씩 만들던 것을 한 번만 만들어 같이 씀(실측: 판매 미러 37~74초 중 중복 5~10초).
+ *   두 목록은 이미 같은 Jobs 블록(같은 시점의 시트 값)을 같이 쓰므로, 보조표도 같은 시점 값을 쓰면 서로 더 잘 맞음.
+ *   켜는 곳: syncSalesMirrors(FirestoreSync)·getSalesOverviewAndToday 만. 저장(bumpVersion*)이 일어나면 즉시 비움. 돌려줄 때는 복사본. */
+var __SALES_MAP_MEMO_ = null;
+//   재사용 조건: 같은 Jobs 블록(같은 객체)일 때만 — 이 실행에서 저장(bumpVersion_·bumpVersionLite_)이 있으면 블록이 버려져(__JOBS_BLOCK=null) 자동으로 새로 만듦.
+//   (다른 실행의 저장은 이 실행의 Jobs 블록에도 반영되지 않으므로, 보조표만 새로 읽으면 오히려 두 값이 서로 다른 시점이 됨)
+//   (bumpVersion_ 본문은 BatchPicking 의 빠른 경로가 내용을 읽어 쓰므로 일부러 건드리지 않음)
+function _salesMapMemo_(name, fn) {
+  if (!__SALES_MAP_MEMO_ || !__JOBS_BLOCK_ON) return fn();
+  const m = __SALES_MAP_MEMO_[name];
+  if (m && m.blk && m.blk === __JOBS_BLOCK) return _salesMapCopy_(m.val); // 같은 블록(같은 시점의 시트 값)일 때만
+  const val = fn();
+  __SALES_MAP_MEMO_[name] = { blk: __JOBS_BLOCK, val: val };
+  return _salesMapCopy_(val);
+}
+function _salesMapCopy_(v) {
+  if (v === null || typeof v !== 'object') return v;
+  if (Object.prototype.toString.call(v) === '[object Date]') return new Date(v.getTime());
+  if (Array.isArray(v)) return v.map(_salesMapCopy_);
+  const o = {};
+  Object.keys(v).forEach(function (k) { o[k] = _salesMapCopy_(v[k]); });
+  return o;
+}
 // 헤더 행 읽기 메모(블록 모드에서만, 같은 시트 객체 + 같은 컬럼 수일 때만 재사용 — 컬럼이 추가되면 컬럼 수가 달라져 자동으로 다시 읽음)
 var __HDR_ROW = null;
 function _hdrRow_(sh, lastCol) {
@@ -6437,20 +6479,20 @@ function getSalesTodayList_impl_() {
     const puTkPalVals = iPuTkPal_ ? _jobsCol_(sh, iPuTkPal_, lastRow - 1) : null;
     _prof_('td_cols');
 
-    const movedMap = buildMovedToPackingMap_();
+    const movedMap = _salesMapMemo_('moved', buildMovedToPackingMap_);
     _prof_('td_moved');
-    const dimsMap = buildDimsExistsMap_();
+    const dimsMap = _salesMapMemo_('dims', buildDimsExistsMap_);
     _prof_('td_dims');
     const packStageMap = buildPackStageMap_(); // ★ 2026-08-24 신규 — 4단계 패킹 상태(none/moved/taken/verified)
     const verifySkipMap = buildVerifySkipMap_(); // ★ 2026-10-09 — 2차 검증 통과 처리 정보(누가/언제)
     _prof_('td_pack');
-    const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+    const shippedMap = _salesMapMemo_('shipped', buildShippedMap_); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
     _prof_('td_shipped');
-    const bolInfoMap = buildBolInfoMap_(); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
+    const bolInfoMap = _salesMapMemo_('bol', buildBolInfoMap_); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
     _prof_('td_bol');
-    const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+    const confirmMap = _salesMapMemo_('conf', buildSalesConfirmMap_); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
     _prof_('td_conf');
-    const repMap_ = getSalesRepMap_(); // ★ 2026-10-08 신규 — Sales Rep(null이면 필드 생략)
+    const repMap_ = _salesMapMemo_('rep', getSalesRepMap_); // ★ 2026-10-08 신규 — Sales Rep(null이면 필드 생략)
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
     //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦.
@@ -6640,17 +6682,17 @@ function getSalesOverview_impl_() {
     const puTkPalVals = iPuTkPal_ ? _jobsCol_(sh, iPuTkPal_, n) : null;
     _prof_('ov_cols');
 
-    const movedMap = buildMovedToPackingMap_();
+    const movedMap = _salesMapMemo_('moved', buildMovedToPackingMap_);
     _prof_('ov_moved');
-    const dimsMap = buildDimsExistsMap_();
+    const dimsMap = _salesMapMemo_('dims', buildDimsExistsMap_);
     _prof_('ov_dims');
-    const shippedMap = buildShippedMap_(); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
+    const shippedMap = _salesMapMemo_('shipped', buildShippedMap_); // ★ 2026-10-02 신규 — TK 출고 상태(Shipping Status 탭)
     _prof_('ov_shipped');
-    const bolInfoMap = buildBolInfoMap_(); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
+    const bolInfoMap = _salesMapMemo_('bol', buildBolInfoMap_); // ★ 2026-10-05 — BOL 번호 + 트럭킹 비용(Shipping Status 탭)
     _prof_('ov_bol');
-    const confirmMap = buildSalesConfirmMap_(); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
+    const confirmMap = _salesMapMemo_('conf', buildSalesConfirmMap_); // ★ 2026-10-03 신규 — Sales Confirm(Shipping Status 탭)
     _prof_('ov_conf');
-    const repMap_ = getSalesRepMap_(); // ★ 2026-10-08 신규 — Sales Rep(null이면 필드 생략)
+    const repMap_ = _salesMapMemo_('rep', getSalesRepMap_); // ★ 2026-10-08 신규 — Sales Rep(null이면 필드 생략)
 
     // ★ 2026-10-02 신규(현장 요청) — "🔗 +N" 클릭 시 묶인 오더 팝업에 고객명을
     //   같이 보여주기 위해, 인보이스→고객명(Remarks) 맵을 미리 한 번만 만듦
@@ -6792,6 +6834,7 @@ function getSalesOverview_impl_() {
 //   줄임. 기존 두 함수는 그대로 남겨둠(다른 곳에서 개별로 계속 씀).
 function getSalesOverviewAndToday() {
   __JOBS_BLOCK_ON++; // ★ 두 계산이 같은 Jobs 블록 읽기를 공유(시트 호출 절약)
+  const _memoOwner = !__SALES_MAP_MEMO_; if (_memoOwner) __SALES_MAP_MEMO_ = {}; // ★ v45 — 보조표도 한 번만
   try {
     const overviewRes = getSalesOverview();
     const todayRes = getSalesTodayList();
@@ -6799,6 +6842,7 @@ function getSalesOverviewAndToday() {
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
+    if (_memoOwner) __SALES_MAP_MEMO_ = null;
     __JOBS_BLOCK_ON--; if (!__JOBS_BLOCK_ON) { __JOBS_BLOCK = null; __HDR_ROW = null; }
   }
 }
