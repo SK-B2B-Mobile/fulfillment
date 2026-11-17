@@ -1474,14 +1474,37 @@ function removeStandaloneOrdersBulk_bsCore_(data) {
  * batchId 없이 호출하면 → 오늘자 진행중(active) 배치 자동 탐색
  * (새로고침해도 이어서 작업 가능하게 하는 핵심 op)
  * ============================================================ */
-function getBatch(batchId) {
+function getBatch(batchId, noCache) { // ★ v45 — noCache===true: 1분 동기화의 배치 상세 미러 전용(6초 화면 캐시를 읽지 않고 항상 새로 계산). 화면 호출은 예전 그대로
+  // ★ 2026-11-17 v48 — 10초 넘게 걸리면 단계별 시간을 기록(11-17 09:24 화면 요청 1건 97.7초 — 로그가 없어 원인 미상). 동작은 그대로. 확인: showGetBatchSlowLog
+  const __gbT = { t0: Date.now(), seg: [] };
+  const __gbMark = function (k) { try { __gbT.seg.push(k + '=' + Math.round((Date.now() - __gbT.t0) / 100) / 10); } catch (eM) { /* 무시 */ } };
+  try { return getBatch_core_(batchId, noCache, __gbMark); }
+  finally { try { _gbNoteSlow_(batchId, noCache, __gbT); } catch (eS) { /* 기록 실패는 무시 */ } }
+}
+function _gbNoteSlow_(batchId, noCache, t) {
+  const ms = Date.now() - t.t0;
+  if (ms < 10000) return;
+  const pr = PropertiesService.getScriptProperties();
+  const arr = String(pr.getProperty('getBatchSlowLog') || '').split('\n').filter(Boolean);
+  arr.push(batchNow_() + ' getBatch ' + (batchId || '(오늘)') + (noCache === true ? ' [동기화]' : ' [화면]') + ' ' + Math.round(ms / 100) / 10 + 's | ' + t.seg.join(' '));
+  let keep = arr.slice(-30);
+  while (keep.length > 1 && keep.join('\n').length > 8000) keep = keep.slice(1);
+  pr.setProperty('getBatchSlowLog', keep.join('\n'));
+}
+function showGetBatchSlowLog() {
+  const v = String(PropertiesService.getScriptProperties().getProperty('getBatchSlowLog') || '(10초 넘게 걸린 getBatch 기록 없음)');
+  Logger.log('단계(초, 시작부터 누적): cache=화면 캐시 확인 · row=배치 행 찾기 · bc=고객사 사본 · bi=품목 사본 · put=캐시 저장\n' + v);
+  return v;
+}
+function getBatch_core_(batchId, noCache, __gbMark) {
   try {
     // ★ 2026-08-19 신규(긴급) — getSlotProgress/getOpenBatches와 동일한 이유.
     //   getActiveBatch가 매 폴링마다 이 함수를 호출하고, batch.html의
     //   ensureBatchItemsLoaded도 이슈 모달 열 때마다 호출함. 6초 캐시로 완화.
     const _cache = CacheService.getScriptCache();
     const _cacheKey = 'getBatch_v1_' + (batchId || '_today_');
-    const _cached = _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
+    const _cached = (noCache === true) ? null : _cacheGetChunked_(_cache, _cacheKey); // ★ 2026-09-25 신규 — 95000자 가드 버그 일괄 수정(청크 캐시)
+    __gbMark('cache');
     if (_cached) return JSON.parse(_cached);
 
     const bSh = batchesSheet_();
@@ -1511,12 +1534,14 @@ function getBatch(batchId) {
     }
 
     const bRow = bSh.getRange(row, 1, 1, 7).getValues()[0];
+    __gbMark('row');
     const batch = {
       batchId: bRow[0], date: bRow[1], status: bRow[2],
       totalSku: bRow[3], totalQty: bRow[4], createdAt: bRow[5], completedAt: bRow[6]
     };
 
     const _bs_bcRows = _bsR_('bc', resolvedId, 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    __gbMark('bc');
     const bcLast = _bs_bcRows.length + 1;
     let customers = [];
     if (bcLast >= 2) {
@@ -1536,6 +1561,7 @@ function getBatch(batchId) {
     }
 
     const _bs_biRows = _bsR_('bi', resolvedId, 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    __gbMark('bi');
     const biLast = _bs_biRows.length + 1;
     let sumItems = [], custItemsMap = {};
     if (biLast >= 2) {
@@ -1557,6 +1583,7 @@ function getBatch(batchId) {
       const _payload = JSON.stringify(_result);
       _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 6); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
+    __gbMark('put');
     return _result;
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -1732,6 +1759,7 @@ function setPackingMoved_bsCore_(data) {
   let syncArgs = null; // ★ 2026-09-03 — 락 밖에서 처리(logScan과 동일한 이유)
   let mirrorInvoice = null; // ★ 세션A 신규 — 락 밖에서 상세조회 미러 갱신하기 위해 스코프 확장
   let packingDocForFirestore = null; // ★ 세션C 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
+  let _alreadyVerified = false, _alreadyAt = ''; // ★ 2026-11-17 v48
   try {
     const batchId = data.batchId, invoice = data.invoice;
     mirrorInvoice = invoice;
@@ -1782,6 +1810,17 @@ function setPackingMoved_bsCore_(data) {
         if (batchId === STANDALONE_BATCH_ID) {
           syncArgs = [batchId, invoice, data.worker || '', 1];
         }
+      } else if (String(_klm[2] == null ? '' : _klm[2]).trim() !== '') {
+        // ★ 2026-11-17 v48 — 이미 2차 검증완료(M 칸에 시각 있음)인 오더를 또 확정(다른 PC·옛 화면·두 번 누름):
+        //   처음 검증 시각을 지우지 않고 그대로 둠(예전엔 지금 시각으로 덮어씀). 응답은 성공 + alreadyVerified → 화면은 예전처럼 슬립 자동 인쇄.
+        //   아래 공통 처리(사본·버전·미러 표시)는 그대로 거침 — 혹시 화면 쪽 값이 옛것이었다면 이번에 다시 새로 고쳐지게.
+        _alreadyVerified = true;
+        const _m0 = _klm[2];
+        _alreadyAt = (Object.prototype.toString.call(_m0) === '[object Date]') ? fmtDate_(_m0, batchTz_(), 'yyyy-MM-dd HH:mm:ss') : String(_m0);
+        _mOut = _alreadyAt;
+        if (batchId === STANDALONE_BATCH_ID) {
+          syncArgs = [batchId, invoice, data.worker || '', 2]; // 예전과 같은 Jobs 검수 동기화(같은 값 — 결과 동일)
+        }
       } else { // 'verified' — 최종 2차 검증완료(주황). 반드시 파랑(물리적 이동)부터.
         // ★ 2026-10-23 — 단독 오더는 sales.html 디멘션 저장/수동 표시로 "Moved to Packing"이 된 경우 L(파랑)이 비어 있을 수 있음 → 같은 기준이면 통과.
         if (!_L && !_movedBySalesSignals_(invoice)) {
@@ -1817,11 +1856,12 @@ function setPackingMoved_bsCore_(data) {
     if (!found) return { ok: false, error: '해당 고객사 행을 찾지 못했습니다' };
     _pmMark_('write');
 
+    _bsD_('bc', batchId); // ★ v30 — 배치 사본: 패킹존 이동 칸 바뀜 / ★ v46 — bumpVersion_ 보다 먼저(그쪽이 오류로 끝나도 사본·열린 배치 검수 집계 번호는 반드시 바뀌게)
     bumpVersion_();
-    _bsD_('bc', batchId); // ★ v30 — 배치 사본: 패킹존 이동 칸 바뀜
     bumpBatchVer_(batchId); // ★ v28 — 패킹존 이동(핑크·파랑·주황) 변경 → TV 슬롯 색이 다음 동기화에 바로
     _markInvMirrorDirty_(invoice); // ★ 2026-10-28 — 인보이스 상세 미러 재계산은 응답 뒤 1분 주기 동기화가 처리(캐시는 즉시 무효화). 락 안에서 표시만(캐시 1회, 가벼움).
     result = { ok: true, stage: stage, moved: stage !== 'none' };
+    if (_alreadyVerified) { result.alreadyVerified = true; result.verifiedAt = _alreadyAt; } // ★ v48
     _pmMark_('bump');
   } catch (e) {
     result = { ok: false, error: String(e && e.message || e) };
@@ -2011,7 +2051,9 @@ function getPackScanRowsCached_(batchId) {
   const plLast = pl.getLastRow();
   const rows = [];
   if (plLast >= 2) {
-    pl.getRange(2, 1, plLast - 1, 13).getValues().forEach(r => {
+    // ★ 2026-11-11 v42 속도 — 1분 동기화가 열린 배치마다(4개) PackScanLog 전체를 따로 읽던 것을, 동기화 한 번에 1번만 읽게(_vals_ 사이클 메모).
+    //   동기화 밖(화면 요청 등)에서는 _vals_ 가 예전과 똑같이 바로 읽음 → 결과 동일. 행이 추가되면 키(행 수)가 달라져 새로 읽음.
+    _vals_(pl, plLast - 1, 13).forEach(r => {
       if (String(r[0]) !== String(batchId)) return;
       // ★ v24 — 시각은 'yyyy-MM-dd HH:mm:ss' 로 통일(시트가 Date 로 돌려주면 String() 이 긴 영어 날짜가 되어 화면 이력 표시·정렬이 깨졌음)
       rows.push([
@@ -5283,7 +5325,9 @@ function getSlotProgressCore_(batchId) {
     //   캐시(_buildBatchAggregates_)에서 가져오도록 변경. 필터링 조건(undone/pass
     //   판정, ADJ 상쇄, 분할입고 합산 등)은 아래에 있던 것과 완전히 동일 —
     //   합성 데이터로 신구 로직 결과가 정확히 일치함을 검증했음.
+    const __spT0 = Date.now(), __spP = []; const __spM = k => __spP.push(k + '=' + ((Date.now() - __spT0) / 1000).toFixed(1)); // ★ v42 측정(3초 넘으면 로그)
     const _aggr = _buildBatchAggregates_(batchId);
+    __spM('aggr');
     const scannedByKey = _aggr.scannedByKey; // "invoice|barcode|sku"
     const issueQtyByInvoice = _aggr.issueQtyByInvoice;
     const issueQtyByKey = _aggr.issueQtyByKey; // "invoice|barcode|sku"
@@ -5360,6 +5404,7 @@ function getSlotProgressCore_(batchId) {
       Object.keys(packReqByInvBarcode).forEach(k => { _invs[k.slice(0, k.lastIndexOf('|'))] = true; });
       Object.assign(packedByInvBarcode, ssPackedForBatch_(batchId, Object.keys(_invs)) || {});
     }
+    __spM('pack');
     const packIssueByInvBarcode = {}; // 검수 단계 이슈 반영(같은 바코드 기준으로 재집계)
     if (ilLast >= 2) {
       _bs_ilRows.forEach(r => {
@@ -5456,7 +5501,10 @@ function getSlotProgressCore_(batchId) {
     //   여기 얹은 이유: 완료 판정에 필요한 계산이 바로 위에서 이미 끝났으므로
     //   따로 다시 계산할 필요가 없음. 다만 이 API는 TV가 8초, batch.html이 5초마다
     //   부르므로, "완료된 슬롯 목록이 지난번과 같으면 즉시 빠져나가기"로 막아둠.
+    __spM('slots');
     maybeSyncBatchJobsDone_(batchId, slots);
+    __spM('jobsDone');
+    if (Date.now() - __spT0 > 3000) Logger.log('[slotProgressTiming] ' + batchId + ' ' + __spP.join(' '));
     const _result = { ok: true, slots: slots, doneCount: doneCount, totalCount: slots.length };
     // ★ 2026-08-19 신규 — 위 캐시 조회와 짝을 이루는 저장. 6초 후 자동 만료.
     // ★ 2026-09-24 수정(핵심) — 95000자 미만일 때만 저장하던 걸 청크 저장으로
@@ -5803,6 +5851,27 @@ function getOpenBatches() {
   try { if (r && r.ok) r.deletedBatchIds = Object.keys(_deletedBatchMap_()); } catch (e) {}
   return r;
 }
+// ★ v47 — 열린 배치 목록 '계산 중' 표시(캐시). 값 = 실행ID|시작시각. 확인과 기록만 스크립트 잠금 안에서(최대 2초 대기, 수 밀리초 사용).
+//   반환: 'mine'(내가 계산) · 'other'(다른 실행이 계산 중) · 'nolock'(잠금을 못 잡음).
+var OB_COMPUTING_KEY_ = 'obComputing_v1';
+var OB_COMPUTING_STALE_MS_ = 25000;
+function _obClaimCompute_(cache, runId) {
+  const lock = LockService.getScriptLock();
+  let got = false;
+  try { got = lock.tryLock(2000); } catch (e) { got = false; }
+  if (!got) return 'nolock';
+  try {
+    const cur = String(cache.get(OB_COMPUTING_KEY_) || '');
+    const at = Number(cur.split('|')[1]) || 0;
+    if (cur && cur.split('|')[0] !== runId && (Date.now() - at) < OB_COMPUTING_STALE_MS_) return 'other';
+    cache.put(OB_COMPUTING_KEY_, runId + '|' + Date.now(), 60);
+    return 'mine';
+  } catch (e) {
+    return 'nolock';
+  } finally {
+    try { lock.releaseLock(); } catch (eR) { /* 무시 */ }
+  }
+}
 function getOpenBatchesCore_() {
   try {
     // ★ 2026-08-19 신규(긴급) — getSlotProgress와 동일한 이유. "다른 배치"
@@ -5824,23 +5893,30 @@ function getOpenBatchesCore_() {
     //   확인해서 그대로 씀(중복 계산 방지). 락 획득 자체가 실패해도(드묾)
     //   그냥 기존처럼 직접 계산해서 응답은 항상 보장됨 — 이 안전장치가 실패해도
     //   기능 자체가 죽지는 않음.
-    const _lock = LockService.getScriptLock();
-    let _gotLock = false;
-    try { _gotLock = _lock.tryLock(8000); } catch (eLock) { _gotLock = false; }
-    if (!_gotLock) {
-      const _cachedAfterWait = _cacheGetChunked_(_cache, _cacheKey);
-      if (_cachedAfterWait) return JSON.parse(_cachedAfterWait);
-      // 락도 못 얻고 캐시도 여전히 비어있으면(드묾) — 안전하게 계속 진행해서
-      // 아래에서 직접 계산함(중복 계산이 생길 수 있어도, 응답을 아예 못 주는
-      // 것보다는 훨씬 나음).
+    // ★ 2026-11-13 v47(로드맵 6-4) — '동시에 한 곳만 계산'은 그대로, 방법만 바꿈.
+    //   예전: 계산하는 내내(3~20초) 프로젝트 공용 스크립트 잠금을 쥠 → 그동안 1분 동기화의 겹침 확인(최대 3초 대기)·스캔 시트 옮기기(flush) 관문·
+    //   세대 번호 올리기 등 같은 잠금을 쓰는 일이 줄줄이 기다리거나 건너뜀(11-13 08:07 guard=1.7s 등).
+    //   지금: 잠금은 '내가 계산 중' 표시를 확인·기록하는 순간(수 밀리초)에만 쥠. 계산은 잠금 밖에서.
+    //   다른 곳이 계산 중이거나 잠금을 잠깐 못 잡으면 0.3초마다 결과(캐시)를 확인하며 최대 8초 기다림 → 결과가 오면 그대로 씀(중복 계산 없음).
+    //   표시가 25초 넘게 오래됐거나(계산하던 실행이 멈춤), 8초 안에 결과가 안 오면 직접 계산(예전과 같은 안전한 쪽 — 응답은 항상 보장).
+    const _myRun = Utilities.getUuid();
+    const _until = Date.now() + 8000; // 예전 잠금 대기(8초)와 같게 — 화면 요청 제한시간(20초) 안에 들어오게
+    let _mine = false;
+    for (;;) {
+      const _c = _obClaimCompute_(_cache, _myRun);
+      if (_c === 'mine') { _mine = true; break; }
+      Utilities.sleep(300);
+      const _cw = _cacheGetChunked_(_cache, _cacheKey);
+      if (_cw) return JSON.parse(_cw);
+      if (Date.now() > _until) break;
     }
     try {
-      // 락을 기다리는 사이 다른 요청이 이미 캐시를 채웠을 수 있으니 한 번 더 확인
+      // 기다리는 사이 다른 실행이 이미 캐시를 채웠을 수 있으니 한 번 더 확인
       const _cachedInsideLock = _cacheGetChunked_(_cache, _cacheKey);
       if (_cachedInsideLock) return JSON.parse(_cachedInsideLock);
       return _computeOpenBatches_(_cache, _cacheKey);
     } finally {
-      if (_gotLock) { try { _lock.releaseLock(); } catch (eRelease) { /* 무시 */ } }
+      if (_mine) { try { if (String(_cache.get(OB_COMPUTING_KEY_) || '').split('|')[0] === _myRun) _cache.remove(OB_COMPUTING_KEY_); } catch (eRel) { /* 25초 뒤 저절로 오래된 표시가 됨 */ } }
     }
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -5883,7 +5959,102 @@ function setBatchHiddenFlag(data) {
   }
 }
 
+// ★ v46 — 예전 BatchCustomers 전체 집계와 같은 결과(그 배치 고객사 줄 수·M열 채워진 수·M열 가장 늦은 시각)를 ids 배치만 채워 넣음.
+//   (줄이 하나도 없는 배치는 예전처럼 비워 둠 = 예전과 같은 판정)
+function _obVerAgg_(rowsArr, needSet, out) {
+  const agg = {};
+  rowsArr.forEach(r2 => {
+    const bid = String(r2[0] || '').trim();
+    if (!bid || !needSet[bid]) return;
+    if (!agg[bid]) agg[bid] = { total: 0, verified: 0, lastMs: 0 };
+    const info = agg[bid];
+    info.total++;
+    const v = r2[12]; // M열: PackVerified
+    if (v) {
+      info.verified++;
+      const ms = parseBatchTs_(v);
+      if (!isNaN(ms) && ms > info.lastMs) info.lastMs = ms;
+    }
+  });
+  Object.keys(agg).forEach(k => { out[k] = agg[k]; });
+  return agg;
+}
+function _obVerifiedInfoFull_(ids, out) { // 예전 방식(시트 전체) — 사본이 꺼져 있거나, 배치가 많거나, 무슨 오류든 있을 때
+  const bc = bcustSheetSafe_();
+  const bcLast = bc.getLastRow();
+  if (bcLast < 2) return {};
+  const need = {}; ids.forEach(id => { need[id] = true; });
+  // 실행 중 메모(_vals_) 대신 지금 시트를 직접 읽음 — 같은 1분 주기 안의 앞선 읽기 값을 새 번호와 함께 저장하는 일이 없게
+  return _obVerAgg_(bc.getRange(2, 1, bcLast - 1, 13).getValues(), need, out);
+}
+function _obVerifiedInfo_(ids, out) {
+  if (!ids.length) return;
+  let canUse = false;
+  try { canUse = (typeof bsOn_ === 'function') && bsOn_('bc') && (typeof bsGet_ === 'function') && (typeof bsNewVer_ === 'function'); } catch (e) { canUse = false; }
+  if (!canUse) { _obVerifiedInfoFull_(ids, out); return; }
+  const tmp = {};
+  try {
+    const C = CacheService.getScriptCache();
+    // 1) 번호를 '읽기 전에' 확보. 없는 번호는 한 번에 만들어 둠(배치마다 따로 만들면 배치 수만큼 캐시 호출)
+    const keys = ['bsVA_bc'];
+    ids.forEach(id => { keys.push('bsV_bc_' + id, 'obVI_v1_' + id); });
+    const got = {};
+    for (let i = 0; i < keys.length; i += 90) { const part = C.getAll(keys.slice(i, i + 90)) || {}; Object.keys(part).forEach(k => { got[k] = part[k]; }); }
+    const mkv = {};
+    if (!got['bsVA_bc']) mkv['bsVA_bc'] = 'n' + bsNewVer_();
+    ids.forEach(id => { if (!got['bsV_bc_' + id]) mkv['bsV_bc_' + id] = 'n' + bsNewVer_(); });
+    const fresh = {}; // 이번에 만든 번호 → 이 배치는 저장해 둔 값이 없으므로 새로 읽음(만든 번호로 저장은 해도 됨: 읽기보다 먼저 만듦)
+    if (Object.keys(mkv).length) {
+      let okPut = true;
+      try { const mk = Object.keys(mkv); for (let i = 0; i < mk.length; i += 90) { const o = {}; mk.slice(i, i + 90).forEach(k => { o[k] = mkv[k]; }); C.putAll(o, 21600); } } catch (eP) { okPut = false; }
+      Object.keys(mkv).forEach(k => { got[k] = okPut ? mkv[k] : ('x' + bsNewVer_()); fresh[k] = true; try { if (okPut && typeof __BS_CREATED !== 'undefined') __BS_CREATED[mkv[k]] = Date.now(); } catch (eC) { /* 무시 */ } });
+    }
+    const need = [], sig = {};
+    const va = got['bsVA_bc'];
+    ids.forEach(id => {
+      const vb = got['bsV_bc_' + id];
+      if (!va || !vb || va.charAt(0) === 'x' || vb.charAt(0) === 'x') { need.push(id); return; } // 캐시 장애 → 저장·재사용 안 함
+      const s0 = va + '|' + vb;
+      sig[id] = s0;
+      if (!fresh['bsVA_bc'] && !fresh['bsV_bc_' + id]) {
+        const raw = got['obVI_v1_' + id];
+        if (raw) {
+          try {
+            const o = JSON.parse(raw);
+            if (o && o.s === s0) { if (o.t > 0) tmp[id] = { total: o.t, verified: o.v, lastMs: o.l }; return; }
+          } catch (eJ) { /* 새로 읽음 */ }
+        }
+      }
+      need.push(id);
+    });
+    if (need.length) {
+      const needSet = {}; need.forEach(id => { needSet[id] = true; });
+      // 2) 읽기: 8개 이하면 배치 사본(번호로 관리되는 사본 — 실행 중 메모 안 씀), 넘거나 사본이 실패하면 시트를 직접 전체
+      let rowsArr = null;
+      if (need.length <= 8) {
+        try { let acc = []; for (let i = 0; i < need.length; i++) { const r = bsGet_('bc', need[i]); if (!r) { acc = null; break; } acc = acc.concat(r); } rowsArr = acc; } catch (eG) { rowsArr = null; }
+      }
+      let agg;
+      if (rowsArr) agg = _obVerAgg_(rowsArr, needSet, tmp);
+      else agg = _obVerifiedInfoFull_(need, tmp);
+      const put = {};
+      need.forEach(id => {
+        if (!sig[id]) return;
+        const a = agg[id] || { total: 0, verified: 0, lastMs: 0 };
+        put['obVI_v1_' + id] = JSON.stringify({ s: sig[id], t: a.total, v: a.verified, l: a.lastMs });
+      });
+      try { const pk = Object.keys(put); for (let i = 0; i < pk.length; i += 90) { const o = {}; pk.slice(i, i + 90).forEach(k => { o[k] = put[k]; }); C.putAll(o, 600); } } catch (eS) { /* 저장 실패 = 다음에 새로 읽음 */ }
+    }
+  } catch (e) {
+    // 무슨 오류든(캐시 장애 등) → 예전 방식으로 처음부터(반쯤 채운 값은 버림 — 검수 대기 배치가 목록에서 빠지는 일 없게)
+    _obVerifiedInfoFull_(ids, out);
+    return;
+  }
+  Object.keys(tmp).forEach(k => { out[k] = tmp[k]; });
+}
+
 function _computeOpenBatches_(_cache, _cacheKey) {
+  const __obT0 = Date.now(), __obP = []; const __obM = k => __obP.push(k + '=' + ((Date.now() - __obT0) / 1000).toFixed(1)); // ★ v42 측정(3초 넘으면 로그)
   try {
     // ★ 2026-09-28 신규 — H열(HiddenFromList)을 같이 읽기 위해 batchesSheetSafe_()로
     //   바꾸고 범위를 7열→8열로 넓힘. 이 컬럼이 TRUE인 배치는 화면 목록에서만
@@ -5908,27 +6079,22 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     //   있었음(실제로 이 문제가 발생해서 TV에서 지난 배치를 못 찾는 일이 있었음).
     //   최종 기준: 전부 보라(PackVerified)가 된 뒤부터 1시간. 하나라도 아직
     //   검증 전이면(파랑에 머물러 있어도) 시간과 무관하게 계속 보임.
+    __obM('batches');
+    // ★ 2026-11-12 v46(로드맵 4단계) — '2차 검수 끝났는지'(BatchCustomers M열) 집계를 시트 전체 읽기 대신 배치별로.
+    //   필요한 건 '완료(completed)' 배치뿐(아래 forEach 에서 그 배치에만 씀). 배치마다 결과를 BatchCustomers 변경 번호(bsV_bc_<배치>·bsVA_bc)와
+    //   함께 저장해 두고, 번호가 그대로면 재사용 · 바뀌었거나 없으면 그 배치만 배치 사본(BatchSnap)으로 다시 읽음.
+    //   M열을 쓰는 곳(setPackingMoved)·손수정·줄 추가/삭제는 모두 이 번호를 바꿈(v44 진행 숫자와 같은 근거). 사본이 꺼져 있으면 예전처럼 시트 전체.
+    //   실측(11-12 14:02): 시트 전체 읽기 포함 2.2초 → 대부분 캐시 1번.
     const verifiedInfo = {}; // batchId -> { total, verified, lastMs }
     try {
-      const bc = bcustSheetSafe_();
-      const bcLast = bc.getLastRow();
-      if (bcLast >= 2) {
-        const bcRows = _vals_(bc, bcLast - 1, 13);
-        bcRows.forEach(r2 => {
-          const bid = String(r2[0] || '').trim();
-          if (!bid) return;
-          if (!verifiedInfo[bid]) verifiedInfo[bid] = { total: 0, verified: 0, lastMs: 0 };
-          const info = verifiedInfo[bid];
-          info.total++;
-          const v = r2[12]; // M열: PackVerified
-          if (v) {
-            info.verified++;
-            const ms = parseBatchTs_(v);
-            if (!isNaN(ms) && ms > info.lastMs) info.lastMs = ms;
-          }
-        });
-      }
+      const _cIds = [], _cSeen = {};
+      rows.forEach(r => {
+        const _h = r[7]; if (_h === true || String(_h).trim().toUpperCase() === 'TRUE') return; // 숨긴 배치는 어차피 목록에서 빠짐
+        if (String(r[2] || '') === 'completed') { const id = String(r[0] || '').trim(); if (id && !_cSeen[id]) { _cSeen[id] = true; _cIds.push(id); } }
+      });
+      _obVerifiedInfo_(_cIds, verifiedInfo);
     } catch (e) { /* 집계 실패해도 목록 조회는 계속 */ }
+    __obM('bcAll');
     // ★ 2026-08-05 신규(매니저 요청) — 예전엔 status==='completed'면 무조건
     //   목록에서 제외했음. 그런데 batch.html이 스캔 100% 완료 시 자동으로
     //   completeBatch를 호출하는 순간, 배치가 "미완료 목록"에서 바로 사라지면서
@@ -6018,23 +6184,66 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     });
     if (!open.length) return { ok: true, batches: [] };
 
+    // ★ 2026-11-11 v44(속도·정확성 유지) — 배치별 진행 숫자 재사용. 그 배치의 '변경 번호'가 모두 그대로일 때만 직전 숫자를 씀:
+    //   bVer_(스캔·이동·슬롯·검증 때마다 바뀜) + 배치 사본 번호(IssueLog·BatchItems·BatchCustomers, 손수정 포함) + 스캔 저장소 설정·세대.
+    //   하나라도 바뀌었거나, 번호가 없거나, 배치 사본이 꺼져 있으면 예전처럼 새로 계산 → 숫자가 늦게 보이는 일 없음.
+    //   배치 목록(어떤 배치가 열려 있는지)은 매번 시트로 새로 판단(위). 실측: 5개 배치 매번 다시 읽기 8~60초 → 바뀐 배치만.
+    const _obParts = {}, _obSig = {};
+    try {
+      const _canReuse = (typeof bsOn_ === 'function') && bsOn_('il') && bsOn_('bi') && bsOn_('bc');
+      if (_canReuse) {
+        let _extra = '';
+        // 스캔이 Firestore 방식('fs')일 때만 재사용 — 시트 방식·전환 중('drain')은 예전처럼 매번 계산(시트 손수정이 번호를 안 바꾸는 경로가 있음)
+        try { const _cf = (typeof ssCfg_ === 'function') ? ssCfg_() : {}; if (_cf['03'] === 'fs') _extra = 'fs:' + ((typeof ssEpochIn_ === 'function') ? ssEpochIn_(_cf, 3) : '') + ':' + ((typeof ss3Gen_ === 'function') ? ss3Gen_() : ''); } catch (eX) { _extra = ''; }
+        if (_extra) {
+          const _ids = open.map(b => String(b.batchId)).filter(id => id !== STANDALONE_BATCH_ID);
+          let _keys = ['bsVA_il', 'bsVA_bi', 'bsVA_bc', 'ss3VerAll'];
+          _ids.forEach(id => { _keys = _keys.concat(['bVer_' + id, 'bsV_il_' + id, 'bsV_bi_' + id, 'bsV_bc_' + id, 'obPart_v1_' + id]); });
+          const _got = CacheService.getScriptCache().getAll(_keys) || {};
+          // ss3VerAll = 스캔 시트 핵심 칸 손수정(세대 변경) 때마다 바뀌는 번호(캐시, 실행 중에도 최신). 없으면 만들고 이번엔 재사용 안 함
+          if (!_got.ss3VerAll) { try { if (typeof ss3BumpVerAll_ === 'function') ss3BumpVerAll_(); } catch (eA) { /* 무시 */ } _ids.length = 0; }
+          const _all = [_got.bsVA_il, _got.bsVA_bi, _got.bsVA_bc, _got.ss3VerAll];
+          _ids.forEach(id => {
+            let _vs = _all.concat([_got['bVer_' + id], _got['bsV_il_' + id], _got['bsV_bi_' + id], _got['bsV_bc_' + id]]);
+            if (_vs.some(v => !v)) { // 번호가 없음(캐시 밀림 등) → 지금 만들고(계산 '전') 이번엔 새로 계산
+              try {
+                const _vi = bsVerNow_('il', id), _vb = bsVerNow_('bi', id), _vc = bsVerNow_('bc', id);
+                _vs = [_vi.a, _vb.a, _vc.a, _got.ss3VerAll, (typeof _batchVerNow_ === 'function') ? _batchVerNow_(id) : '', _vi.b, _vb.b, _vc.b];
+              } catch (eV) { return; }
+            }
+            if (_vs.some(v => !v || String(v).charAt(0) === 'x')) return; // 캐시 장애 → 재사용·저장 안 함
+            const sig = _vs.join('|') + '|' + _extra;
+            _obSig[id] = sig;
+            const raw = _got['obPart_v1_' + id];
+            if (raw) { try { const o = JSON.parse(raw); if (o && o.s === sig) _obParts[id] = o; } catch (eP) { /* 새로 계산 */ } }
+          });
+        }
+      }
+    } catch (eR) { Object.keys(_obParts).forEach(k => delete _obParts[k]); Object.keys(_obSig).forEach(k => delete _obSig[k]); }
+    const needIds = {};
+    open.forEach(b => { if (!_obParts[String(b.batchId)]) needIds[String(b.batchId)] = true; });
+    const _needList = Object.keys(needIds);
+    __obM('reuse(' + (open.length - _needList.length) + ')');
+
     // 배치별 대략적인 진행률(통과 스캔 수량 합계) 계산 — 얼마나 진행됐는지 매니저가 판단할 수 있게
     // ★ v26 — Step 03 Firestore 방식이면 열린 배치마다 문서에서(배치 수만큼 쿼리), 아니면 예전처럼 ScanLog 전체
     let _fs3Rows = null;
     if (typeof ss3IsFs_ === 'function' && ss3IsFs_()) {
       _fs3Rows = [];
       open.forEach(b => {
+        if (!needIds[String(b.batchId)]) return; // ★ v44 — 바뀌지 않은 배치는 다시 읽지 않음
         if (String(b.batchId) === STANDALONE_BATCH_ID) { // 단독 오더는 시트 방식 그대로(이 배치 행만 시트에서)
           const _sl0 = scanlogSheet_(); const _l0 = _sl0.getLastRow();
           if (_l0 >= 2) _vals_(_sl0, _l0 - 1, 12).forEach(r => { if (String(r[0]) === STANDALONE_BATCH_ID) _fs3Rows.push(r); });
           return;
         }
         let _rb = null;
-        try { _rb = ss3RowsForBatch_(b.batchId); } catch (eRb) { _rb = null; } // 한 배치 읽기 실패로 목록 전체가 비지 않게 — 그 배치만 시트 값
+        try { _rb = ss3RowsForBatch_(b.batchId, !!_obSig[String(b.batchId)]); } catch (eRb) { _rb = null; } // ★ v44 — 숫자를 저장할 배치는 실행 내 메모 없이 새로 읽음(번호보다 먼저 읽은 행이 섞이지 않게) // 한 배치 읽기 실패로 목록 전체가 비지 않게 — 그 배치만 시트 값
         if (!_rb) { const _sl1 = scanlogSheet_(); const _l1 = _sl1.getLastRow(); _rb = _l1 >= 2 ? _vals_(_sl1, _l1 - 1, 12).filter(r => String(r[0]) === String(b.batchId)) : []; }
         _rb.forEach(r => _fs3Rows.push(r));
       });
     }
+    __obM('scanRows(' + open.length + ')');
     const sl = _fs3Rows ? null : scanlogSheet_();
     const slLast = _fs3Rows ? _fs3Rows.length + 1 : sl.getLastRow();
     const passByBatch = {};
@@ -6042,9 +6251,9 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     //   스캔량 집계(오늘 다른 함수들과 동일한 원칙 — 초과분은 그 줄 자체 몫만 인정)
     const scannedByKey = {};
     if (slLast >= 2) {
-      (_fs3Rows || _vals_(sl, slLast - 1, 12)).forEach(r => {
+      (_fs3Rows || (_needList.length ? _vals_(sl, slLast - 1, 12) : [])).forEach(r => {
         const bid = String(r[0]);
-        if (!openIds[bid]) return;
+        if (!needIds[bid]) return;
         if (r[10] === 'undone') return;
         if (r[9] !== 'pass') return;
         const qty = Number(r[11]) || 1;
@@ -6059,13 +6268,14 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     // ★ 2026-08-03 신규 — 요청: "이어서 작업하기" 목록에서 고객사 몇 건 중 몇 건
     //   완료, SKU 몇 건 중 몇 건 완료인지 한눈에 보이게. BatchItems(필요수량 줄)
     //   + IssueLog(이슈 수량) + 위 scannedByKey로 계산.
-    const _bs_ilRows = _bsRM_('il', Object.keys(openIds), 13); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    __obM('scanAgg');
+    const _bs_ilRows = (_needList.length ? _bsRM_('il', _needList, 13) : []); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
     const ilLast = _bs_ilRows.length + 1;
     const issueByKey = {};
     if (ilLast >= 2) {
       _bs_ilRows.forEach(r => {
         const bid = String(r[0]);
-        if (!openIds[bid]) return;
+        if (!needIds[bid]) return;
         if (r[12] === 'undone') return;
         const qty = Number(r[10]) || 0;
         const key = bid + '|' + r[7] + '|' + normBarcode_(r[4]) + '|' + String(r[5]); // ★ 2026-08-05: normBarcode_ 적용
@@ -6073,14 +6283,15 @@ function _computeOpenBatches_(_cache, _cacheKey) {
       });
     }
 
-    const _bs_biRows = _bsRM_('bi', Object.keys(openIds), 7); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    __obM('il');
+    const _bs_biRows = (_needList.length ? _bsRM_('bi', _needList, 7) : []); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
     const biLast = _bs_biRows.length + 1;
     const skuLinesByKey = {}; // "batchId|invoice|barcode|sku" -> reqQty(합산)
     const linesByInvoiceKey = {}; // "batchId|invoice" -> [key,...] (고객사별 완료판정용)
     if (biLast >= 2) {
       _bs_biRows.forEach(r => {
         const bid = String(r[0]);
-        if (!openIds[bid]) return;
+        if (!needIds[bid]) return;
         const inv = r[1];
         if (!inv) return; // 총량 행(Invoice 빈값) 제외 — 고객사 행만 집계
         const key = bid + '|' + inv + '|' + normBarcode_(r[4]) + '|' + String(r[2]); // ★ 2026-08-05: normBarcode_ 적용
@@ -6105,13 +6316,14 @@ function _computeOpenBatches_(_cache, _cacheKey) {
     });
 
     // 고객사 단위 완료 개수 (그 고객사 소속 모든 SKU줄이 다 채워졌는지)
-    const _bs_bcRows = _bsRM_('bc', Object.keys(openIds), 6); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
+    __obM('bi');
+    const _bs_bcRows = (_needList.length ? _bsRM_('bc', _needList, 6) : []); // ★ v30 — 배치 사본(BatchSnap.gs). 꺼져 있으면 예전처럼 시트 전체
     const bcLast = _bs_bcRows.length + 1;
     const doneCustByBatch = {}, totalCustByBatch = {};
     if (bcLast >= 2) {
       _bs_bcRows.forEach(r => {
         const bid = String(r[0]);
-        if (!openIds[bid]) return;
+        if (!needIds[bid]) return;
         const inv = String(r[1]);
         totalCustByBatch[bid] = (totalCustByBatch[bid] || 0) + 1;
         const ik = bid + '|' + inv;
@@ -6132,6 +6344,19 @@ function _computeOpenBatches_(_cache, _cacheKey) {
       b.totalCustomers = totalCustByBatch[b.batchId] || 0;
       b.doneCustomers = doneCustByBatch[b.batchId] || 0;
     });
+    // ★ v44 — 재사용한 배치는 직전 숫자로, 새로 계산한 배치는 숫자를 번호와 함께 저장(10분 — 그 안에도 번호가 바뀌면 바로 새로 계산)
+    try {
+      const _put = {};
+      open.forEach(b => {
+        const id = String(b.batchId), p = _obParts[id];
+        if (p) {
+          b.scannedPass = p.sp; b.doneSku = p.ds; b.totalSkuActual = p.tsb || b.totalSku; b.totalCustomers = p.tc; b.doneCustomers = p.dc;
+        } else if (_obSig[id]) {
+          _put['obPart_v1_' + id] = JSON.stringify({ s: _obSig[id], sp: b.scannedPass, ds: b.doneSku, tsb: totalSkuByBatch[b.batchId] || 0, tc: b.totalCustomers, dc: b.doneCustomers });
+        }
+      });
+      if (Object.keys(_put).length) CacheService.getScriptCache().putAll(_put, 600);
+    } catch (eS) { /* 저장 실패 = 다음에 새로 계산 */ }
 
     // ★ 2026-09-11 버그 수정(현장 발견) — createdAt이 시트에 따라 실제 Date
     //   객체로 저장돼 있으면 String(dateObj)가 "Thu Aug 25 2026 10:32:15..."처럼
@@ -6163,6 +6388,8 @@ function _computeOpenBatches_(_cache, _cacheKey) {
       //   전혀 영향 없음 — 실제로 "전환"을 누르는 순간에는 항상 getBatch/
       //   getScanState로 100% 최신 데이터를 다시 받아오므로(안전장치 그대로
       //   유지) 여기서는 순수하게 "목록 훑어보기" 속도만 좌우함.
+      __obM('end');
+      if (Date.now() - __obT0 > 3000) Logger.log('[openBatchesTiming] ' + __obP.join(' '));
       _cachePutChunked_(CacheService.getScriptCache(), _cacheKey, _payload, 60); // ★ 2026-09-25 신규 — 95000자 가드 제거(청크 캐시)
     } catch (eCache) { /* 캐시 저장 실패해도 정상 응답은 그대로 나감 */ }
     return _result;
@@ -8773,9 +9000,11 @@ function syncBatchJobsDone(batchId, slots) {
     const hhmm = fmtHHmm_(now), iso = fmtLocalISO_(now);
 
     let completed = 0;
+    const found = {}; // ★ v43 — Jobs에서 실제로 찾은 인보이스(완료됨/지금 완료/사람 배정)만 '처리됨'으로 기억
     for (let i = 0; i < n; i++) {
       const inv = String(invCol[i][0] || '').trim();
       if (!inv || !doneInv[inv]) continue;
+      found[inv] = true;
 
       const st = String(statusCol[i][0] || '').trim().toLowerCase();
       // 안전장치 ③: 이미 완료면 다시 쓰지 않음
@@ -8799,7 +9028,7 @@ function syncBatchJobsDone(batchId, slots) {
       completed++;
     }
     if (completed) { bumpVersion_(); Logger.log('syncBatchJobsDone: ' + completed + '건 완료 처리 (' + batchId + ')'); }
-    return { ok: true, completed: completed };
+    return { ok: true, completed: completed, handled: Object.keys(found) };
   } catch (e) {
     Logger.log('syncBatchJobsDone 오류: ' + String(e && e.message || e));
     return { ok: false, error: String(e && e.message || e) };
@@ -8827,8 +9056,39 @@ function maybeSyncBatchJobsDone_(batchId, slots) {
     if (cache.get(key) === sig) return;      // 변화 없음 → 아무것도 안 함
     cache.put(key, sig, 900);                 // 15분 유지
     if (!doneList.length) return;
-    syncBatchJobsDone(batchId, slots);
+    // ★ 2026-11-11 v43(속도·핵심) — 실측: 위 캐시가 자주 밀려나서(대형 청크 캐시 압박) 오래된 배치도
+    //   매번 Jobs 시트 4개 열을 다시 읽음 → 1회 10~17초(11-11 아침 [slotProgressTiming] jobsDone).
+    //   이미 처리한 인보이스 목록을 스크립트 속성에 배치별로 기억해 두고, '새로 완료된' 인보이스가
+    //   있을 때만 실제 동기화. 처리 결과(어느 행을 completed로 쓰는지)는 예전과 동일.
+    const pKey = JOBSYNC_HANDLED_PREFIX_ + String(batchId);
+    let props = null, handled = {};
+    try {
+      props = PropertiesService.getScriptProperties();
+      const raw = props.getProperty(pKey);
+      if (raw) { const o = JSON.parse(raw); (o && o.inv ? String(o.inv).split(',') : []).forEach(x => { if (x) handled[x] = true; }); }
+    } catch (e) { handled = {}; }
+    if (!doneList.some(x => !handled[x])) return;  // 새로 완료된 인보이스 없음 → 시트 접근 0회
+    const res = syncBatchJobsDone(batchId, slots);
+    if (props && res && res.ok && res.handled && res.handled.length) {
+      res.handled.forEach(x => { handled[x] = true; });  // Jobs 행을 못 찾은 인보이스는 기억하지 않음 → 다음에 다시 시도
+      const val = JSON.stringify({ t: Date.now(), inv: Object.keys(handled).join(',') });
+      try { if (val.length < 8500) props.setProperty(pKey, val); } catch (e) {}
+      if (Math.random() < 0.05) _pruneJobsyncHandled_(props);
+    }
   } catch (e) { /* 자동 처리 실패가 화면 조회를 막으면 안 되므로 조용히 무시 */ }
+}
+const JOBSYNC_HANDLED_PREFIX_ = 'jobsyncH_';
+// 15일 지난 배치 기록 정리(열린 배치 기준 14일 + 여유 1일). 다른 속성은 절대 건드리지 않음.
+function _pruneJobsyncHandled_(props) {
+  try {
+    const cut = Date.now() - 15 * 24 * 3600 * 1000;
+    const all = props.getProperties();
+    Object.keys(all).forEach(k => {
+      if (k.indexOf(JOBSYNC_HANDLED_PREFIX_) !== 0) return;
+      let o = null; try { o = JSON.parse(all[k] || '{}'); } catch (e) {}
+      if (!o || !o.t || o.t < cut) { try { props.deleteProperty(k); } catch (e) {} }
+    });
+  } catch (e) {}
 }
 
 /* ---------------------------------------------------------------------
