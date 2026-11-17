@@ -123,7 +123,7 @@
 </script>
 <meta charset="UTF-8">
 <!-- ★ 2026-11-12 v36 — 이 화면의 버전 표시(새 버전 자동 반영이 이 값을 비교함). batch.html 을 고칠 때마다 반드시 바꿀 것. -->
-<meta name="sk-build" content="v36-1112">
+<meta name="sk-build" content="v37-1117">
 <!-- ★ 2026-08-04 수정 — 요청: 스캔 태블릿에서 화면을 손가락으로 확대해서 보고 싶은데
      user-scalable=no + maximum-scale=1.0 때문에 핀치줌이 원천 차단돼 있었음.
      제한을 풀어서 두 손가락으로 자유롭게 확대/축소(원래 크기로 복귀)할 수 있게 함. -->
@@ -4491,6 +4491,7 @@ async function continueOpenBatch(batchId, viewOnly){
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
     if(c.packVerified) state.packVerifiedInvoices.add(c.invoice); // ★ 2026-08-24 신규: 보라(최종 검증완료) 상태도 같이 복원
   });
+  _pvAddLocalOnly_(res.batch && res.batch.batchId, state.packVerifiedInvoices); // ★ v37 — 새로고침·배치 열기 때도 방금 저장 성공한 검증 유지
   // ★ 2026-09-23 긴급 수정 — applyBatchPayload와 동일한 이유 (아래 주석 참고).
   _lastTrustedSlotDataAt = Date.now();
 
@@ -4624,6 +4625,7 @@ function applyBatchPayload(res, opts){
     if(c.takenOut) state.takenOutInvoices.add(c.invoice); // ★ 2026-08-07 신규: 파랑 상태도 같이 복원
     if(c.packVerified) state.packVerifiedInvoices.add(c.invoice); // ★ 2026-08-24 신규: 보라(최종 검증완료) 상태도 같이 복원
   });
+  _pvAddLocalOnly_(res.batch && res.batch.batchId, state.packVerifiedInvoices); // ★ v37 — 새로고침·배치 열기 때도 방금 저장 성공한 검증 유지
   // ★ 2026-09-23 긴급 수정 — 캐시 부팅(fromCache:true)이 아니라 서버가 방금 확정해준
   //   진짜 데이터일 때만 "최신 슬롯 데이터 확인 시각"을 갱신. 이게 있어야 곧바로 이어지는
   //   Firestore 미러 구독(subscribeBatchStructMirror_)의 최초 푸시가, 최대 1분 지연될 수
@@ -6206,6 +6208,7 @@ async function applyBatchStructureResult_(res, batchId, silent, fromMirror){
   state.movedToPackingInvoices.forEach(inv => { if(_pendingPackToggle[inv]) nextMoved.add(inv); });
   state.movedToPackingInvoices = nextMoved;
   state.takenOutInvoices = nextTaken;
+  _pvKeepLocal_(batchId, nextVerified); // ★ v37 — 이 기기가 방금 저장 성공한 검증은 옛 값으로 지워지지 않게
   state.packVerifiedInvoices = nextVerified;
   // ★ 2026-08-24 신규 — Pack Verify 탭이 열려있는 상태에서 구조가 갱신됐으면
   //   드롭다운(파랑 오더 목록)도 최신으로 다시 채움
@@ -8595,6 +8598,41 @@ document.getElementById('logSearchInput').addEventListener('input', (e) => {
 // localStorage 키도 다르고, 화면 색도(보라) 다름. 절대 서로 안 섞이게 하는 게 목적.
 // ═══════════════════════════════════════════════════════════
 let _pvInvoice = null;
+// ★ 2026-11-17 v37 — 이 기기에서 2차 검증 저장에 '성공'한 오더 기억(배치별·12분).
+//   [왜] 11-17 IN00492508: 10:08 저장 성공·슬립 인쇄까지 됐는데, 그 뒤 서버/미러에서 받은 옛 값(최대 10분)이 검증 목록을 통째로 바꿔
+//        화면이 '미완료'로 돌아감 → Confirm 을 또 누름 → 슬립 재인쇄. 이제 이 기기가 저장 성공한 오더는 12분 동안 옛 값이 와도 '완료' 유지
+//        (서버 쪽 사본·미러는 최대 10분 안에 반드시 새로 맞춰지는 구조). 서버가 한 번 '완료'를 보내 따라잡으면 90초 뒤부터는 서버 값을 그대로 따름
+//        → 다른 기기에서 검증을 되돌린 경우, 이 기기에 늦게 보이는 시간은 최대 약 90초(서버가 아직 못 따라잡은 동안은 최대 12분).
+var PV_LOCAL_KEEP_MS = 12 * 60 * 1000; // var(호이스팅) — 부팅 중 일찍 불려도 안전
+var _pvLocalVerified = (function(){ try{ return JSON.parse(localStorage.getItem('sk_pv_local_v1') || '{}') || {}; }catch(e){ return {}; } })(); // invoice → { bid, at, okAt(서버가 처음 '완료'를 보낸 시각) } — 새로고침해도 유지
+function _pvSaveLocal_(){ try{ localStorage.setItem('sk_pv_local_v1', JSON.stringify(_pvLocalVerified)); }catch(e){} }
+var PV_CAUGHT_UP_GRACE_MS = 90 * 1000; // 서버가 따라잡은 뒤에도 1분 미러(계산 시작이 저장 전) 옛 값이 한 번 더 올 수 있는 시간
+function _pvRememberVerified_(bid, inv){ if(bid && inv){ _pvLocalVerified[String(inv)] = { bid: String(bid), at: Date.now() }; _pvSaveLocal_(); } }
+function _pvForgetVerified_(inv){ delete _pvLocalVerified[String(inv)]; _pvSaveLocal_(); }
+// 배치를 열거나 새로고침해서 복원할 때(추가만 하는 경로): 기억한 검증을 더하기만(서버가 따라잡았는지 판단은 하지 않음)
+function _pvAddLocalOnly_(bid, set){
+  try{
+    if(!_pvLocalVerified || !set) return;
+    const now = Date.now();
+    Object.keys(_pvLocalVerified).forEach(inv => { const e = _pvLocalVerified[inv]; if(e && e.bid === String(bid || '') && now - e.at <= PV_LOCAL_KEEP_MS && !(e.okAt && now - e.okAt > PV_CAUGHT_UP_GRACE_MS)) set.add(inv); /* 서버가 따라잡은 지 90초 지난 기억은 더하지 않음(되돌림 가리지 않게) */ });
+  }catch(e){}
+}
+function _pvKeepLocal_(bid, set){
+  try{
+    if(!_pvLocalVerified) return;
+    const now = Date.now(); let changed = false;
+    Object.keys(_pvLocalVerified).forEach(inv => {
+      const e = _pvLocalVerified[inv];
+      if(!e || now - e.at > PV_LOCAL_KEEP_MS){ delete _pvLocalVerified[inv]; changed = true; return; }
+      if(e.bid !== String(bid || '') || !set) return;
+      if(set.has(inv)){ if(!e.okAt){ e.okAt = now; changed = true; } return; } // 서버도 '완료'를 보냄 = 서버가 따라잡음
+      // 서버가 한 번 '완료'를 보낸 뒤 90초가 지나서도 '미완료'면 → 진짜로 풀린 것(다른 기기에서 되돌림 등) → 서버 값을 따름
+      if(e.okAt && now - e.okAt > PV_CAUGHT_UP_GRACE_MS){ delete _pvLocalVerified[inv]; changed = true; return; }
+      set.add(inv);
+    });
+    if(changed) _pvSaveLocal_();
+  }catch(e){}
+}
 let _pvState = null;
 // ★ 2026-09-04 신규(현장 요청) — 박스/팔렛 배정. 오더 바뀔 때마다 1/1로 초기화됨(onPvInvoiceChange).
 let _pvCurrentBox = 1;
@@ -11822,7 +11860,8 @@ async function completePvVerify(){
   _icStart_({ kind: 'pv', inv, bid, what: 'Final verification (2nd)',
     run: () => gasCallWithRetry('setPackingMoved', { batchId: bid, invoice: inv, stage: 'verified' }),
     beforeRetry: () => { if(_pvInvoice === inv && state.batchId === bid) _icLockPanel_('pv'); },
-    onOk: async () => {
+    onOk: async (res) => {
+      _pvRememberVerified_(bid, inv); // ★ v37 — 저장 성공(이미 완료였던 경우 포함) → 12분 동안 옛 값이 와도 '완료' 유지
       if(state.batchId !== bid){ _icAddPrint_('pv', inv, bid); return; } // 다른 배치를 보고 있음 → 인쇄 대기로 남김(조용히 사라지지 않게)
       state.packVerifiedInvoices.add(inv); // 확정 표시는 저장 성공 뒤에만
       try { populatePvInvoiceSelect(); } catch(e){}
@@ -11830,7 +11869,8 @@ async function completePvVerify(){
         try { await refreshPvState(); } catch(e){} // 지금 화면 상태가 이 오더 것인지 새로 받아서 확인(다른 오더 내용으로 인쇄되지 않게)
       }
       if(_pvInvoice === inv && state.batchId === bid && _pvState && _pvState.__inv === inv){
-        showPvMsg('🟣 Final Verification (2nd) complete — saved', 'ok');
+        if(res && res.alreadyVerified) showPvMsg('✅ Already verified' + (res.verifiedAt ? ' (first at ' + String(res.verifiedAt).slice(11, 16) + ')' : '') + ' — slip reprinted', 'ok'); // ★ v37 — 서버가 처음 검증 시각을 보존
+        else showPvMsg('🟣 Final Verification (2nd) complete — saved', 'ok');
         const b = document.getElementById('pvCompleteBtn'); if(b){ b.disabled = true; b.textContent = '✅ Already Verified (100% Scanned)'; }
         const i = document.getElementById('pvScanInput'); if(i){ i.disabled = true; i.placeholder = 'This order is already verified'; }
         const f = document.getElementById('pvForceBtn'); if(f){ f.disabled = true; f.textContent = '✅ Already Confirmed'; }
@@ -11872,6 +11912,7 @@ async function _forcePvCompleteCore_(){
   }
   const res = await gasCallWithRetry('setPackingMoved', { batchId: state.batchId, invoice: _pvInvoice, stage: 'verified', force: true });
   if(res.ok){
+    _pvRememberVerified_(state.batchId, _pvInvoice); // ★ v37
     showPvMsg('⚠ Manager force confirm — all remaining quantity recorded as confirmed', 'ok');
     state.packVerifiedInvoices.add(_pvInvoice);
     _pvForceVerified = true; // ★ 2026-08-24 신규 — 슬립 판정 및 화면 잠금에 사용
