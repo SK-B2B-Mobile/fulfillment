@@ -688,21 +688,32 @@ function bcustSheet_()    { return ensureBatchSheet_(BCUST_SHEET,    ['BatchId',
 //   위 headers 배열을 바꿔도 기존 시트엔 11번째 컬럼(MovedToPacking)이 자동으로
 //   안 생김(ensureBatchSheet_는 신규 생성 시에만 헤더를 씀). 그래서 실제 사용
 //   시점에 헤더가 비어있으면 한 번만 채워주는 안전장치.
+var __BC_HDR_OK_ = false; // ★ v49 — 이번 실행에서 BatchCustomers 헤더 점검을 이미 했는지
 function bcustSheetSafe_() {
   if (__SYNC_MEMO && __SYNC_MEMO.sheets['__bcustSafe']) return __SYNC_MEMO.sheets['__bcustSafe']; // ★ 동기화 중엔 헤더 점검(getRange 3~4회)을 사이클당 1번만
   const bc = bcustSheet_();
-  if (!bc.getRange(1, 11).getValue()) bc.getRange(1, 11).setValue('MovedToPacking');
-  if (!bc.getRange(1, 12).getValue()) bc.getRange(1, 12).setValue('TakenOut'); // ★ 2026-08-04 신규 — 출고팀이 실제로 가져간 시각(파란색 상태)
+  // ★ 2026-11-17 v49(속도) — K~N 헤더 칸 점검(예전: 칸마다 따로 4번 읽기 = 시트 호출 4번, 이 함수를 부르는 모든 요청마다)을
+  //   '한 번에 1번 읽기'로 바꾸고, 4칸이 모두 채워진 걸 확인하면 6시간 동안은 점검을 건너뜀(헤더는 이름표일 뿐 — 데이터는 칸 번호로 읽고 씀).
+  //   빈 칸을 채우는 동작은 예전과 같음(MovedToPacking / TakenOut / PackVerified / CreatedAt). 원래 이유·이력은 아래 주석 그대로.
+  if (!__BC_HDR_OK_) {
+    let _hdrOk = false;
+    try { _hdrOk = CacheService.getScriptCache().get('bcHdrOk_v1') === '1'; } catch (eC) { _hdrOk = false; }
+    if (!_hdrOk) {
+      const _need = ['MovedToPacking', 'TakenOut', 'PackVerified', 'CreatedAt'];
+      const _cur = bc.getRange(1, 11, 1, 4).getValues()[0];
+      for (let i = 0; i < 4; i++) { if (!_cur[i]) bc.getRange(1, 11 + i).setValue(_need[i]); }
+      try { CacheService.getScriptCache().put('bcHdrOk_v1', '1', 21600); } catch (eP) { /* 다음 요청이 다시 점검할 뿐 */ }
+    }
+    __BC_HDR_OK_ = true;
+  }
   // ★ 2026-08-24 신규 — "최종 2차 검증완료"(주황, 파랑 다음 마지막 단계) 시각.
   //   K(핑크)/L(파랑)의 기존 의미는 절대 안 바꾸고, 그 뒤에 한 단계만 얹음.
-  if (!bc.getRange(1, 13).getValue()) bc.getRange(1, 13).setValue('PackVerified');
   // ★ 2026-09-02 신규(매니저 요청) — 01-S 단독 오더 목록 UI 개선의 일부로
   //   "언제 등록했는지"를 보여달라는 요청. 지금까지는 등록 시각을 아예 기록
   //   안 하고 있었음(총량피킹 배치는 Batches 시트에 CreatedAt이 있지만, 단독
   //   오더는 BatchCustomers에 직접 꽂혀서 그 컬럼이 없었음). K/L/M과 같은
   //   패턴으로 안전하게 14번째 컬럼만 새로 추가 — 기존 총량피킹 행은 이 값이
   //   비어있어도 전혀 문제 없음(단독오더 목록에서만 사용).
-  if (!bc.getRange(1, 14).getValue()) bc.getRange(1, 14).setValue('CreatedAt');
   if (__SYNC_MEMO) __SYNC_MEMO.sheets['__bcustSafe'] = bc;
   return bc;
 }
@@ -7441,6 +7452,7 @@ function savePuTkPalletDims_(data) {
     }
     try { bumpVersionLite_(); } catch (eV) { /* 무시 */ }
     try { invalidateSalesInvoiceDetailMirror_(invoice); } catch (eMirror) { /* best-effort — 화면이 이어서 미러 재계산 요청 */ }
+    try { if (typeof markSalesMirrorStale_ === 'function') markSalesMirrorStale_(); } catch (eSm) { /* 무시 — 3분 주기로 반영 */ } // ★ v50 — sales 미러 간격이 3분이 되어도(FirestoreSync v8u) PU & TK 저장(즉시 반영 패치가 없음)은 예전(v8t)과 같은 속도로 목록 반영
     return { ok: true, invoice: invoice, qty: qty, pallets: pallets.length, palletDims: pallets, qtyAt: fmtShortTs_(atRaw), qtyBy: by };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -7609,6 +7621,7 @@ function removeDimensionsCleanupTrigger() {
  * 매번 인보이스 컬럼 전체를 훑던 것을, 30초 캐시된 인덱스로 대체. 앞에서부터
  * 순서대로 채워서(뒤에 오는 값이 덮어씀) "가장 최근(마지막) 행"이 자연스럽게
  * 남게 함 — 기존 로직(뒤에서부터 찾아 첫 매치 사용)과 결과가 동일. */
+var __BC_IDX_BUILT_AT_ = 0; // ★ v49
 function getBatchCustomersInvoiceRowIndex_() {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'bcInvRowIdx_v1';
@@ -7635,6 +7648,7 @@ function getBatchCustomersInvoiceRowIndex_() {
     const payload = JSON.stringify(idx);
     _cachePutChunked_(cache, cacheKey, payload, 45); // ★ 2026-09-03 30초→45초 (TTL 그대로, 저장 방식만 청크로)
   } catch (e) { /* 캐시 저장 실패해도 계산 결과는 그대로 반환 */ }
+  __BC_IDX_BUILT_AT_ = Date.now(); // ★ v49 — 방금 시트에서 새로 만든 인덱스(캐시 아님)라는 표시
   return idx;
 }
 
@@ -7814,7 +7828,18 @@ function getSalesInvoiceDetail(invoice) {
       }
     }
     if (jobRowIndex < 0) return { ok: false, error: 'Invoice not found: ' + invoice };
-    const jobRow = sh.getRange(jobRowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
+    // ★ 2026-11-17 v49(속도) — 헤더 행을 이 요청에서 한 번만 읽음. 예전엔 getFreshColIndex_ 를 11번 불러
+    //   매번 '마지막 열 확인 + 헤더 행 읽기'(시트 호출 22번)를 했음 → 오후 시트가 붐빌 때 상세창 5~42초.
+    //   여전히 '이 요청 시점의 시트 헤더'를 직접 읽으므로(캐시 아님) 쓰기 쪽과 같은 컬럼을 보는 원칙은 그대로.
+    const _sidLc = sh.getLastColumn();
+    const jobRow = sh.getRange(jobRowIndex, 1, 1, _sidLc).getValues()[0];
+    let _sidHdr = null;
+    const _sidCol = function (headerName) {
+      if (!_sidHdr) _sidHdr = _sidLc > 0 ? sh.getRange(1, 1, 1, _sidLc).getValues()[0] : [];
+      const target = String(headerName).trim().toLowerCase();
+      for (let c = 0; c < _sidHdr.length; c++) { if (String(_sidHdr[c]).trim().toLowerCase() === target) return c + 1; }
+      return 0;
+    };
 
     function jv(name) { const c = hm[name]; return c ? jobRow[c - 1] : ''; }
     const customer = String(jv('remarks') || '');
@@ -7833,9 +7858,9 @@ function getSalesInvoiceDetail(invoice) {
     //   서로 다른 컬럼을 본다"는 사고 가능성을 구조적으로 없앰. 값이 없으면
     //   (옛날 오더, 또는 아직 아무도 입력 안 한 경우) 반드시 'unpaid'로 안전하게
     //   취급 — "확인 안 됐으면 미납으로 간주"하는 원칙.
-    const iPayStatus = getFreshColIndex_(sh, 'PaymentStatus');
-    const iPayAt = getFreshColIndex_(sh, 'PaymentStatusUpdatedAt');
-    const iPayBy = getFreshColIndex_(sh, 'PaymentStatusUpdatedBy');
+    const iPayStatus = _sidCol('PaymentStatus');
+    const iPayAt = _sidCol('PaymentStatusUpdatedAt');
+    const iPayBy = _sidCol('PaymentStatusUpdatedBy');
     const paymentStatusRaw = iPayStatus ? String(jobRow[iPayStatus - 1] || '').trim().toLowerCase() : '';
     const paymentPaid = paymentStatusRaw === 'paid';
     const paymentUpdatedAt = iPayAt ? String(jobRow[iPayAt - 1] || '').trim() : '';
@@ -7843,13 +7868,13 @@ function getSalesInvoiceDetail(invoice) {
     // ★ 2026-10-03 신규(사용자 요청, 시뮬레이션 승인) — 'PU & TK' 전용 박스 수량
     //   (TK/UPS의 전체 Dims 대신 숫자 하나만). 같은 이유로 getFreshColIndex_로
     //   매번 새로 찾아서 쓰기(setPuTkBoxQty, Code.gs)와 항상 같은 컬럼을 보게 함.
-    const iPuTkQty = getFreshColIndex_(sh, 'PuTkBoxQty');
-    const iPuTkAt = getFreshColIndex_(sh, 'PuTkBoxQtyAt');
-    const iPuTkBy = getFreshColIndex_(sh, 'PuTkBoxQtyBy');
+    const iPuTkQty = _sidCol('PuTkBoxQty');
+    const iPuTkAt = _sidCol('PuTkBoxQtyAt');
+    const iPuTkBy = _sidCol('PuTkBoxQtyBy');
     const puTkBoxQty = iPuTkQty ? Number(jobRow[iPuTkQty - 1] || 0) : 0;
-    const iPuTkPal = getFreshColIndex_(sh, 'PuTkPalletQty'); // ★ 2026-10-08 — 팔레트 수량
+    const iPuTkPal = _sidCol('PuTkPalletQty'); // ★ 2026-10-08 — 팔레트 수량
     const puTkPalletQty = iPuTkPal ? Math.max(0, Math.round(Number(jobRow[iPuTkPal - 1]) || 0)) : 0;
-    const iPuTkDims = getFreshColIndex_(sh, 'PuTkPalletDims'); // ★ 2026-11-02 v29 — 팔렛별 L×W×H·무게(JSON)
+    const iPuTkDims = _sidCol('PuTkPalletDims'); // ★ 2026-11-02 v29 — 팔렛별 L×W×H·무게(JSON)
     const puTkPalletDims = iPuTkDims ? _parsePuTkPalletDims_(jobRow[iPuTkDims - 1]) : [];
     // ★ 2026-10-02 긴급 수정 — fmtShortTs_(Code.gs)로 짧은 "MM/dd h:mm a" 형식
     //   통일(길게 찍히는 Date.toString() 버그 수정, fmtShortTs_ 주석 참고).
@@ -7858,15 +7883,15 @@ function getSalesInvoiceDetail(invoice) {
     // ★ 2026-10-07 신규 — 출고(Shipped) 정보. 묶인(LINKED) 오더는 대표(PRIMARY) 인보이스의 값을 그대로 보여줌(목록과 동일 규칙).
     let shippedFlag = false, shippedAtOut = '', shippedByOut = '';
     try {
-      const iShp = getFreshColIndex_(sh, 'Shipped');
-      const iShpAt = getFreshColIndex_(sh, 'ShippedAt');
-      const iShpBy = getFreshColIndex_(sh, 'ShippedBy');
+      const iShp = _sidCol('Shipped');
+      const iShpAt = _sidCol('ShippedAt');
+      const iShpBy = _sidCol('ShippedBy');
       let srcRow = jobRow;
       try {
         const _lk = (buildDimLinksMap_().childToPrimary || {})[invoice] || '';
         if (_lk && sh.getName() === SHEET_().getName()) {
           const _pr = getJobsInvoiceRowIndex_()[_lk];
-          if (_pr) srcRow = sh.getRange(_pr, 1, 1, sh.getLastColumn()).getValues()[0];
+          if (_pr) srcRow = sh.getRange(_pr, 1, 1, _sidLc).getValues()[0]; // ★ v49 — 같은 시트라 열 개수 재사용
         }
       } catch (eLk) { /* 대표 조회 실패 시 자기 행 값 사용 */ }
       if (iShp) shippedFlag = !!srcRow[iShp - 1];
@@ -7900,13 +7925,16 @@ function getSalesInvoiceDetail(invoice) {
     //   행에 걸쳐 있어도 "가장 마지막(최근) 행"이 자연스럽게 남음 — 기존
     //   "뒤에서부터 찾아서 첫 매치 사용"과 결과가 동일함.
     const bc = bcustSheetSafe_();
-    const bcLast = bc.getLastRow();
     let movedToPacking = false;
     let packStage = 'none'; // ★ 2026-08-24 신규 — none/moved/taken/verified (K/L/M 컬럼을 그대로 신뢰)
     const _tBeforeBcIdx = Date.now();
     const _bcIdx = getBatchCustomersInvoiceRowIndex_();
     _diagPush_('getBatchCustomersInvoiceRowIndex_ — ' + (Date.now() - _tBeforeBcIdx) + 'ms (인덱스 항목 ' + Object.keys(_bcIdx).length + '개)');
     let bcRow = _bcIdx[invoice] || 0;
+    // ★ v49 — 인덱스에서 찾았거나, 인덱스를 '방금(이 요청에서) 시트에서 새로' 만들었는데도 없으면 다시 훑을 필요 없음(같은 내용을 또 읽는 것).
+    //   캐시된(최대 45초 전) 인덱스에 없을 때만 예전처럼 전체 다시 확인(그 사이 새로 생긴 줄 대비).
+    const _bcIdxJustBuilt = __BC_IDX_BUILT_AT_ > 0 && (Date.now() - __BC_IDX_BUILT_AT_) < 5000;
+    const bcLast = (bcRow || _bcIdxJustBuilt) ? 0 : bc.getLastRow();
     if (!bcRow && bcLast >= 2) {
       // 인덱스에 없으면(캐시가 아직 못 따라간 경우) 안전하게 전체 스캔으로 한 번 더 확인
       const _tBeforeBcScan = Date.now();
