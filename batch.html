@@ -123,7 +123,7 @@
 </script>
 <meta charset="UTF-8">
 <!-- ★ 2026-11-12 v36 — 이 화면의 버전 표시(새 버전 자동 반영이 이 값을 비교함). batch.html 을 고칠 때마다 반드시 바꿀 것. -->
-<meta name="sk-build" content="v37-1117">
+<meta name="sk-build" content="v38-1118">
 <!-- ★ 2026-08-04 수정 — 요청: 스캔 태블릿에서 화면을 손가락으로 확대해서 보고 싶은데
      user-scalable=no + maximum-scale=1.0 때문에 핀치줌이 원천 차단돼 있었음.
      제한을 풀어서 두 손가락으로 자유롭게 확대/축소(원래 크기로 복귀)할 수 있게 함. -->
@@ -2117,6 +2117,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <input id="ssScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('ssScanInput', submitSsScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
+        <button class="btn btn-ghost btn-sm" id="ssResetBtn" type="button" style="display:none; margin-top:8px; margin-left:8px; border-color:#ef4444; color:#FCA5A5;" onclick="openSsResetModal()" title="관리자 전용 — 이 오더의 1차 검수 스캔을 모두 취소하고 0부터 다시 시작">↺ 처음부터 다시 (관리자)</button>
         <div class="recent-scans" id="ssRecentScans"></div>
         <div class="pv-qty-confirm" id="ssQtyConfirm" style="display:none;">
           <div class="pv-qty-confirm-icon">🔢</div>
@@ -3167,7 +3168,7 @@ function pkOnLive_(key, msg){
   // 지금 열려 있는 화면이 이 인보이스면 바로 다시 그림(다른 기기의 스캔도 즉시 보임)
   const on = pkSlotOf_(key);
   try{ if(on.pv && typeof renderPvBody === 'function'){ _pvState = Object.assign({}, st, { __inv: _pvInvoice }); renderPvBody(); } }catch(e){ console.warn('[packState] pv render', e); }
-  try{ if(on.ss && typeof renderSsBody === 'function'){ _ssState = st; renderSsBody(); } }catch(e){ console.warn('[packState] ss render', e); }
+  try{ if(on.ss && typeof renderSsBody === 'function'){ _ssState = st; _ssStateInv = _ssInvoice; renderSsBody(); } }catch(e){ console.warn('[packState] ss render', e); }
   try{ if(on.psv && typeof renderPsvBody === 'function'){ _psvState = st; _psvStateInv = _psvInvoice; renderPsvBody(); } }catch(e){ console.warn('[packState] psv render', e); }
 }
 function pkSubscribe_(slot, key, round){
@@ -9112,6 +9113,7 @@ async function removeStandaloneOrderClick(invoice){
 let ssCurrentWorker = null;
 let _ssInvoice = null;
 let _ssState = null;
+var _ssStateInv = null; // ★ v38 — _ssState 가 어느 인보이스의 상태인지
 
 function populateSsWorkerSelect(){
   const sel = document.getElementById('ssWorkerSelect');
@@ -9384,6 +9386,111 @@ function clearSsSelection(){
   sel.dispatchEvent(new Event('change'));
   renderSsInvoiceOptions('', '');
 }
+/* ★ 2026-11-18 v38 신규(현장 요청 · 시뮬레이션 승인) — Step 04 "↺ 처음부터 다시 (관리자)"
+ *   이 오더의 1차 검수 스캔을 모두 '취소'로 표시하고 0부터 다시 시작(기록은 남음 · 2차 검증·이슈·품목은 그대로).
+ *   · 관리자에게만 보임(sales Bulk Update 와 같은 기준 — 서버 bulkWhoAmI). 서버(op=resetStandaloneRound1)도 로그인·관리자를 다시 확인.
+ *   · 인보이스 끝 4자리를 입력해야 실행 버튼이 켜짐. 이미 '1차 검수 완료 · 패킹존 이동'을 누른 오더는 버튼 안 보임(서버도 거절).
+ *   · 자동 재시도 없음(gasCall) — 시간 초과 뒤 다른 사람이 새로 스캔한 것까지 취소되는 일이 없게. */
+var _ssIsAdmin = null;      // null = 아직 모름(또는 확인 실패 — 다음 오더 선택 때 다시 확인), true/false
+var _ssAdminTok = '';       // 어느 로그인으로 확인했는지(다른 계정으로 바뀌면 다시 확인)
+var _ssAdminChecking = false;
+var _ssResetBusy = false;
+async function _ssCheckAdmin_(){
+  if(_ssAdminChecking) return;
+  const tok = (typeof authGetToken === 'function') ? authGetToken() : '';
+  if(!tok){ _ssIsAdmin = false; _ssAdminTok = ''; return; }
+  _ssAdminChecking = true;
+  try {
+    const r = await authPost('bulkWhoAmI', { token: tok });
+    if(r && r.ok){ _ssIsAdmin = !!r.admin; _ssAdminTok = tok; }
+    else if(r && /session/i.test(String(r.error || ''))){ _ssIsAdmin = false; _ssAdminTok = tok; }
+    else { _ssIsAdmin = null; } // 일시 오류 — 다음에 다시 확인
+  } catch(e){ _ssIsAdmin = null; }
+  finally { _ssAdminChecking = false; }
+  try { _ssUpdateResetBtn_(); } catch(e){}
+}
+function _ssUpdateResetBtn_(){
+  const b = document.getElementById('ssResetBtn');
+  if(!b) return;
+  const st = _ssState;
+  const o = (_standaloneOrders || []).find(x => x.invoice === _ssInvoice);
+  const show = _ssIsAdmin === true && !!_ssInvoice && !!st && _ssStateInv === _ssInvoice
+    && Number(st.totalPacked || 0) > 0 && !(o && (o.movedToPacking || o.packVerified)) && !_ssResetBusy;
+  b.style.display = show ? 'inline-block' : 'none';
+}
+function closeSsResetModal(){
+  const m = document.getElementById('ssResetModal');
+  if(m) m.remove();
+  const inp = document.getElementById('ssScanInput');
+  if(inp && _ssInvoice) setTimeout(() => inp.focus(), 60);
+}
+function openSsResetModal(){
+  if(!_ssInvoice || _ssResetBusy) return;
+  if(typeof resolveSsQty === 'function') resolveSsQty(null); // 열려 있는 수량 확인 카드는 닫음
+  closeSsResetModal();
+  const inv = _ssInvoice;
+  const o = (_standaloneOrders || []).find(x => x.invoice === inv) || {};
+  const st = _ssState || {};
+  const last4 = String(inv).slice(-4);
+  const esc = (typeof escapeHtmlV36_ === 'function') ? escapeHtmlV36_ : (x => String(x == null ? '' : x));
+  const wrap = document.createElement('div');
+  wrap.id = 'ssResetModal';
+  wrap.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; display:flex; align-items:center; justify-content:center; padding:16px;';
+  wrap.innerHTML = `
+    <div style="background:#141a2e; border:1px solid #ef4444; border-radius:12px; max-width:520px; width:100%; padding:20px 22px; color:#e5e7eb; font-size:14px; line-height:1.6;">
+      <div style="font-size:17px; font-weight:800; color:#FCA5A5; margin-bottom:8px;">↺ 1차 검수를 처음부터 다시</div>
+      <div style="font-weight:700;">${esc(inv)} · ${esc(o.customer || '')}</div>
+      <div style="margin:8px 0 10px;">지금까지의 1차 검수 스캔(수량 <b>${Number(st.totalPacked || 0).toLocaleString()}</b> pcs)을 <b>모두 취소</b>하고 0부터 다시 시작합니다.</div>
+      <div style="font-size:12.5px; color:var(--text-dim, #9ca3af);">
+        · 기록은 지우지 않고 "취소"로 남깁니다<br>
+        · 2차 검증 기록 · 이슈 · 품목 목록은 그대로입니다<br>
+        · 다른 작업자가 이 오더를 스캔 중이면 먼저 멈춰 주세요
+      </div>
+      <div style="margin-top:12px;">확인하려면 인보이스 끝 4자리를 입력하세요:
+        <input id="ssResetConfirmInput" type="text" inputmode="numeric" autocomplete="off" maxlength="12" style="width:90px; margin-left:6px; padding:4px 8px; font-size:15px; text-align:center;">
+      </div>
+      <div id="ssResetErr" style="display:none; margin-top:10px; color:#FCA5A5; font-weight:700;"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button class="btn btn-ghost btn-sm" type="button" id="ssResetCloseBtn">닫기</button>
+        <button class="btn btn-sm" type="button" id="ssResetGoBtn" disabled style="background:#b91c1c; color:#fff; border-color:#b91c1c;">처음부터 다시 — 취소 실행</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const ci = document.getElementById('ssResetConfirmInput');
+  const go = document.getElementById('ssResetGoBtn');
+  ci.addEventListener('input', () => { go.disabled = (ci.value.trim() !== last4) || _ssResetBusy; });
+  ci.addEventListener('keydown', e => { e.stopPropagation(); if(e.key === 'Enter' && !go.disabled) go.click(); if(e.key === 'Escape') closeSsResetModal(); });
+  document.getElementById('ssResetCloseBtn').onclick = () => { if(!_ssResetBusy) closeSsResetModal(); };
+  go.onclick = () => runSsReset_(inv, ci.value.trim());
+  setTimeout(() => ci.focus(), 60);
+}
+async function runSsReset_(inv, confirm4){
+  if(_ssResetBusy) return;
+  const go = document.getElementById('ssResetGoBtn');
+  const err = document.getElementById('ssResetErr');
+  const closeBtn = document.getElementById('ssResetCloseBtn');
+  _ssResetBusy = true;
+  if(go){ go.disabled = true; go.textContent = '처리 중...'; }
+  if(closeBtn) closeBtn.disabled = true;
+  let res = null;
+  try {
+    res = await gasCall('resetStandaloneRound1', { token: (typeof authGetToken === 'function' ? authGetToken() : ''), invoice: inv, confirm: confirm4 });
+  } catch(e){ res = { ok:false, error: String(e && e.message || e) }; }
+  _ssResetBusy = false;
+  if(closeBtn) closeBtn.disabled = false;
+  if(res && res.ok){
+    closeSsResetModal();
+    toast(res.undone ? `✅ ${inv} 1차 검수 스캔 ${res.undone}건(수량 ${Number(res.qty||0).toLocaleString()}) 취소 — 0부터 다시 시작` : `ℹ ${inv} — 취소할 1차 검수 스캔이 없습니다`, 'success');
+    // 화면이 들고 있던 이 오더의 옛 상태(구독 캐시)를 버리고 서버에서 새로 받음 — 성공 직후 옛 숫자·버튼이 다시 보이지 않게
+    try { if(typeof _pk !== 'undefined' && _pk.cache && typeof pkKey_ === 'function') delete _pk.cache[pkKey_(STANDALONE_BATCH_ID, inv, 1)]; } catch(eK){}
+    if(_ssInvoice === inv){ try { await refreshSsState(); } catch(e){} }
+  } else {
+    const msg = String(res && res.error || '알 수 없는 오류').replace(/^❌\s*/, '');
+    if(err){ err.style.display = 'block'; err.textContent = '❌ ' + msg + ((res && /server_busy|지연|Failed|fetch/i.test(msg)) ? ' — 잠시 뒤 다시 시도해 주세요(아무것도 바뀌지 않았을 수 있음 — 화면 숫자 확인)' : ''); }
+    if(go){ go.textContent = '처음부터 다시 — 취소 실행'; const ci = document.getElementById('ssResetConfirmInput'); go.disabled = !ci || ci.value.trim() !== String(inv).slice(-4); }
+  }
+  try { _ssUpdateResetBtn_(); } catch(e){}
+}
 async function onSsInvoiceChange(){
   const sel = document.getElementById('ssInvoiceSelect');
   const invoice = sel.value;
@@ -9394,8 +9501,10 @@ async function onSsInvoiceChange(){
   //   엉뚱한 오더에 그 수량이 저장될 위험이 있으므로, 오더를 바꾸는 순간 무조건
   //   취소 처리(null)해서 안전하게 닫음.
   if(typeof resolveSsQty === 'function') resolveSsQty(null);
-  if(!invoice){ panel.classList.remove('active'); _ssInvoice = null; _ssState = null; return; }
+  if(!invoice){ panel.classList.remove('active'); _ssInvoice = null; _ssState = null; _ssStateInv = null; try { _ssUpdateResetBtn_(); } catch(eRb){} return; }
   _ssInvoice = invoice;
+  try { _ssUpdateResetBtn_(); } catch(eRb){} // 새 오더 상태를 받기 전엔 숨김(옛 오더 기준으로 보이지 않게)
+  if(_ssIsAdmin === null || _ssAdminTok !== ((typeof authGetToken === 'function') ? authGetToken() : '')) _ssCheckAdmin_(); // 관리자인지 서버에 물어봄(로그인이 바뀌었거나 지난번 확인 실패 시 다시) — 버튼 표시용, 실제 실행은 서버가 다시 확인
   panel.classList.add('active');
   document.getElementById('ssMsg').style.display = 'none';
   const input = document.getElementById('ssScanInput');
@@ -9418,6 +9527,7 @@ async function refreshSsState(){
     return;
   }
   _ssState = res;
+  _ssStateInv = _inv; // ★ v38 — 이 상태가 어느 오더 것인지(처음부터 다시 버튼 판정용)
   renderSsBody();
 }
 
@@ -9432,6 +9542,7 @@ function renderSsBody(){
   const ssTotalSku = (st.lines || []).length;
   const ssSkuEl = document.getElementById('ssProgressSku');
   if(ssSkuEl) ssSkuEl.textContent = `${ssDoneSku} / ${ssTotalSku}`;
+  try { _ssUpdateResetBtn_(); } catch(eRb){ /* 버튼 표시 실패는 검수에 영향 없음 */ }
   document.getElementById('ssProgressBar').style.width = pct + '%';
   document.getElementById('ssCompleteBtn').disabled = !st.complete || (typeof _icBusy_ === 'function' && _icBusy_('ss', _ssInvoice)); // ★ v24
 
