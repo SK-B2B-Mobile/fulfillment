@@ -472,6 +472,51 @@ function showReqSlowLog() {
   Logger.log(v);
   return v;
 }
+/* ★ 2026-11-19 v52 — 작업자 저장(upsertJob) 단계별 시간 기록(기록만 — 동작은 그대로).
+ *   11-19 오전 upsertJob 8~12초(최대 18초). 어느 단계가 시간을 쓰는지 확인하기 위함.
+ *   3초 넘게 걸린 저장만 스크립트 속성 'upsertTimingLog'(최근 60건·8KB)에 남김 → showUpsertTiming() 실행으로 확인.
+ *   숫자는 '요청 시작부터 누적 초':
+ *     lock=문서 잠금을 얻은 시점(이 값이 크면 = 다른 저장·스캔이 잠금을 쥐고 있어 기다린 시간)
+ *     hdr=헤더 지도 · find=그 인보이스 줄 찾기(idx=인덱스로 바로 / scan=인보이스 열 전체 훑기 / new=새 줄)
+ *     write=시트에 쓰기 · bump=캐시 비우기 · unlock=잠금 풀린 시점(= 잠금 안에 있던 시간 = unlock-lock)
+ *     mirror=작업자 화면 사본(workerJobs) 다시 만들기 끝(목록 전체 다시 읽기 + Firestore 쓰기 — 응답 전에 함) · end=응답 직전 */
+var __UJT__ = null;
+function _ujtStart_(via) { __UJT__ = { t0: Date.now(), via: via, m: [] }; }
+function _ujtMark_(k) { try { if (__UJT__) __UJT__.m.push(k + '=' + ((Date.now() - __UJT__.t0) / 1000).toFixed(1)); } catch (e) { /* 무시 */ } }
+function _ujtNote_(k, v) { try { if (__UJT__) __UJT__.m.push(k + ':' + v); } catch (e) { /* 무시 */ } }
+function _ujtEnd_(inv, force) {
+  const T = __UJT__; __UJT__ = null;
+  if (!T) return;
+  try {
+    const ms = Date.now() - T.t0;
+    if (ms < 3000 && !force) return;
+    const pr = PropertiesService.getScriptProperties();
+    const arr = String(pr.getProperty('upsertTimingLog') || '').split('\n').filter(Boolean);
+    arr.push(fmtDate_(new Date(T.t0), scriptTz_(), 'MM-dd HH:mm:ss') + ' ' + T.via + ' ' + (String(inv || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 14) || '-') + ' 총' + (ms / 1000).toFixed(1) + 's | ' + T.m.join(' '));
+    let keep = arr.slice(-60);
+    while (keep.length > 1 && keep.join('\n').length > 7000) keep = keep.slice(Math.ceil(keep.length / 10)); // 한글 몇 글자(3바이트) 감안해 7000자
+    pr.setProperty('upsertTimingLog', keep.join('\n'));
+  } catch (e) { /* 기록 실패는 무시 */ }
+}
+function showUpsertTiming() {
+  const raw = String(PropertiesService.getScriptProperties().getProperty('upsertTimingLog') || '');
+  if (!raw) { Logger.log('(3초 넘게 걸린 작업자 저장 기록 없음 — 배포 뒤 저장이 몇 건 쌓이면 다시 실행)'); return ''; }
+  const lines = raw.split('\n').filter(Boolean);
+  // 요약: 단계별 평균(초) — 잠금 대기 / 잠금 안 / 사본 다시 만들기
+  const num = (l, k) => { const m = l.match(new RegExp('(?:^| )' + k + '=([0-9.]+)')); return m ? Number(m[1]) : null; };
+  let n = 0, sw = 0, si = 0, sm = 0, st = 0;
+  lines.forEach(l => {
+    const lk = num(l, 'lock'), ul = num(l, 'unlock'), mg = num(l, 'merge'), mr = num(l, 'mirror'), tt = (l.match(/총([0-9.]+)s/) || [])[1];
+    if (lk == null || ul == null || tt == null) return;
+    n++; sw += lk; si += (ul - lk); sm += (mr != null && mg != null ? mr - mg : 0); st += Number(tt);
+  });
+  const f = x => (n ? (x / n).toFixed(1) : '-');
+  const fails = lines.filter(l => /잠금대기실패/.test(l)).length;
+  const head = '=== 작업자 저장(upsertJob) 3초 넘은 ' + lines.length + '건(잠금 대기 초과 실패 ' + fails + '건) · 평균(' + n + '건 기준, 초): 총 ' + f(st) + ' = 잠금 대기 ' + f(sw) + ' + 잠금 안(읽기·쓰기) ' + f(si) + ' + 작업자 사본 다시 만들기 ' + f(sm) + ' + 기타 ===';
+  const v = head + '\n' + lines.join('\n');
+  Logger.log(v);
+  return v;
+}
 function doGet(e) {
   const t0 = Date.now();
   const op = (e && e.parameter && e.parameter.op || '').toString();
@@ -584,9 +629,14 @@ function doGet_core_(e) {
 
   // iOS JSONP용 GET 방식 저장 지원
   if (op === 'upsertJob') {
+    _ujtStart_('GET');
     const data = JSON.parse((e.parameter || {}).data || '{}');
-    upsertJob_(data);
+    try { upsertJob_(data); }
+    catch (eUj) { _ujtMark_('throw'); _ujtNote_('결과', /lock|timeout|timed out/i.test(String(eUj && eUj.message || eUj)) ? '잠금대기실패' : '오류'); _ujtEnd_(data && data.invoice, true); throw eUj; }
+    _ujtMark_('merge');
     try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
+    _ujtMark_('mirror');
+    _ujtEnd_(data && data.invoice);
     return json_({ ok: true });
   }
 
@@ -886,9 +936,18 @@ function doPost_core_(e) {
       }
     }
 
-    const result = upsertJob_mergeText_(payload);
+    _ujtStart_('POST');
+    let result;
+    try { result = upsertJob_mergeText_(payload); }
+    catch (eUj) { _ujtMark_('throw'); _ujtNote_('결과', /lock|timeout|timed out/i.test(String(eUj && eUj.message || eUj)) ? '잠금대기실패' : '오류'); _ujtEnd_(payload && payload.invoice, true); throw eUj; } // ★ v52 — 잠금 대기 초과(15초)도 기록 후 예전과 똑같이 던짐
+    _ujtMark_('merge');
     try { syncWorkerJobsMirror_(); } catch (eMir) { /* best-effort, 무시 */ } // ★ 2026-09-25 신규
-    return json_(Object.assign({}, result, { ver: getVersion_() }));
+    _ujtMark_('mirror');
+    const _ujVer = getVersion_();
+    _ujtMark_('end');
+    if (result && result.ok === false) _ujtNote_('결과', '실패');
+    _ujtEnd_(payload && payload.invoice);
+    return json_(Object.assign({}, result, { ver: _ujVer }));
   }
 
   if (op === 'deleteJob') {
@@ -1807,10 +1866,12 @@ function upsertJob_mergeText_(job) {
 
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
+  _ujtMark_('lock'); // ★ v52 — 시간 기록(기록만)
 
   try {
     const sh = SHEET_();
     const hdr = headerMapCached_();
+    _ujtMark_('hdr');
     const norm = normalizeHeaderName_;
     const cInv = hdr[norm('Invoice')];
 
@@ -1866,6 +1927,7 @@ function upsertJob_mergeText_(job) {
       }
     }
 
+    _ujtMark_('find'); _ujtNote_('줄', viaIndex ? 'idx' : (isNewRow ? 'new' : 'scan'));
     const setByName = (name, val) => {
       const c = hdr[norm(name)];
       if (!c) return;
@@ -1959,18 +2021,21 @@ function upsertJob_mergeText_(job) {
         }
       });
     }
+    _ujtMark_('write');
 
     // ★ v49 — 기존 줄 값만 바뀐 경우(줄 추가·삭제 없음)엔 '인보이스→줄 번호' 인덱스 등 줄 위치 캐시를 지우지 않음
     //   (지우면 다음 저장마다 인보이스 열 전체를 다시 읽어야 함). 목록·sales·열린 배치 캐시는 예전처럼 즉시 지움.
     //   새 줄 추가·중복 줄 삭제가 있으면 예전처럼 전부 지움(bumpVersion_).
     if (isNewRow || dups.length || idxStale) bumpVersion_(); // ★ 줄이 밀린 걸 발견했으면 예전처럼 전부 지움
     else _bumpVersionRowsSame_();
+    _ujtMark_('bump');
     return { ok: true, row: rowIdx };
 
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
+    _ujtMark_('unlock');
   }
 }
 
