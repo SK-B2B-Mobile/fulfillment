@@ -5,6 +5,7 @@
  * - 헤더 이름 가변(대소문자/공백/특수문자)에도 안전
  * - Amount 저장 수정 (2026-02-19)
  * - 출고 예정 대시보드 (getShipSchedule) 추가 (2026-05-28)
+ * - ★ 2026-11-18 v51: batch.html Step 04 '전체 일괄 처리(관리자)' 요청 연결(op=bulkFillStandaloneRound1)
  * - ★ 2026-11-18 v50: batch.html Step 04 '처음부터 다시(관리자)' 요청 연결(op=resetStandaloneRound1)
  * - ★ 2026-11-18 v49: 작업자 저장(upsertJob)이 문서 잠금을 잡는 동안의 시트 읽기 7번 → 3번(기존 줄), 줄 위치 캐시 유지
  ******************************************************/
@@ -1066,6 +1067,8 @@ function doPost_core_(e) {
   if (op === 'bulkOrderAction') return json_(bulkOrderAction(data));
   // ★ 2026-11-18 v50 신규 — batch.html Step 04 '↺ 처음부터 다시(관리자)' — 단독 오더 1차 검수 스캔 전체 취소(BatchPicking.gs)
   if (op === 'resetStandaloneRound1') return json_(resetStandaloneRound1Web(data));
+  // ★ 2026-11-18 v51 신규 — batch.html Step 04 '⚡ 전체 일괄 처리(관리자)' — 단독 오더 1차 검수 남은 수량 한 번에 기록(BatchPicking.gs)
+  if (op === 'bulkFillStandaloneRound1') return json_(bulkFillStandaloneRound1Web(data));
   // ★ 2026-10-03 신규 — 'PU & TK' 전용 전체 박스 수량 입력
   if (op === 'setPuTkBoxQty') return json_(setPuTkBoxQty(data));
 
