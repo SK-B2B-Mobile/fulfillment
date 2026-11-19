@@ -1390,6 +1390,30 @@ function getStandaloneOrders() {
         createdAt: createdAt, // ★ 2026-09-02 신규 — 등록 시각(옛날 등록건은 이 값이 비어있을 수 있음, 정상)
       });
     });
+    // ★ 2026-11-18 v53(현장 요청) — "SKU" 숫자를 주문서 줄 수(같은 상품이 여러 줄이면 따로 셈) 대신 '서로 다른 상품 수'로.
+    //   검수 화면(Step 04·05)의 "SKU 0 / 88" 과 같은 기준(바코드가 같으면 한 상품 — 화면이 바코드로 합쳐 보여 줌).
+    //   예: IN00480096 주문 줄 126 → SKU 88. 품목을 못 읽으면 예전 숫자(줄 수) 그대로. 원래 줄 수는 lineCount 로 같이 줌.
+    try {
+      let biRows = null;
+      if (typeof bsOn_ === 'function' && bsOn_('bi') && typeof bsSheetRows_ === 'function') biRows = bsSheetRows_('bi', STANDALONE_BATCH_ID, 7);
+      if (!biRows) {
+        const bi = bitemsSheet_();
+        const biLast = bi.getLastRow();
+        biRows = biLast >= 2 ? bi.getRange(2, 1, biLast - 1, 5).getValues().filter(r => String(r[0]) === STANDALONE_BATCH_ID) : [];
+      }
+      const skuSet = {};
+      biRows.forEach(r => {
+        if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+        const inv = String(r[1] || '').trim();
+        const key = normBarcode_(r[4]); // 검수 화면(getPackScanState)과 똑같이 바코드로만 묶음(빈 바코드끼리도 한 줄)
+        (skuSet[inv] = skuSet[inv] || {})[key] = 1;
+      });
+      orders.forEach(o => {
+        o.lineCount = o.totalSku;
+        const m = skuSet[String(o.invoice || '').trim()];
+        if (m) o.totalSku = Object.keys(m).length;
+      });
+    } catch (eSku) { /* 실패하면 예전 숫자 그대로 */ }
     return { ok: true, orders: orders };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
@@ -6735,6 +6759,7 @@ function restoreStandaloneFromArchive_bsCore_() {
     const arcRows = arcBc.getRange(2, 1, arcBc.getLastRow() - 1, arcBc.getLastColumn()).getValues();
     const bcCols = bc.getLastColumn();
     const pick = {};           // invoice -> true (복구 대상)
+    const pickSku = {};        // ★ v51 — invoice -> 보관본 TotalSku
     const bcRestore = [];
     arcRows.forEach(r => {
       if (String(r[0]) !== STANDALONE_BATCH_ID) return;
@@ -6742,6 +6767,7 @@ function restoreStandaloneFromArchive_bsCore_() {
       if (!inv || have[inv] || pick[inv]) return;
       if (r[12]) return; // M열 PackVerified — 이미 끝난 오더는 복구 안 함
       pick[inv] = true;
+      pickSku[inv] = Number(r[6]) || 0; // ★ v51 — 보관본 품목이 두 벌이면 한 벌만 복구하려고(아래)
       const row = r.slice(0, bcCols); while (row.length < bcCols) row.push('');
       bcRestore.push(row);
     });
@@ -6758,14 +6784,61 @@ function restoreStandaloneFromArchive_bsCore_() {
         const main = cfg.get();
         const cols = main.getLastColumn();
         const rows = arc.getRange(2, 1, arc.getLastRow() - 1, arc.getLastColumn()).getValues();
+        // ★ 2026-11-18 v51(재발 방지) — 이미 있는 것을 한 번 더 붙이지 않음(예전엔 그대로 다시 붙여서
+        //   품목이 '두 번 등록'되고 필요수량이 2배가 됨 — IN00480096 등. 테스트로 재현 확인).
+        //   · 품목(BatchItems): 그 인보이스 품목이 이미 하나라도 있으면 그 인보이스는 통째로 건너뜀(품목 목록은 한 벌만 있어야 함)
+        //   · 스캔·이슈 기록: 이미 있는 줄과 글자 그대로 같은 줄만 건너뜀(일부만 남아 있는 경우에도 빠진 기록은 복구)
+        // 스캔·이슈 기록은 B열 고유번호(ScanId·IssueId)로 같은 기록인지 판단(숫자·글자 형식 차이에 영향 없음). 번호가 비어 있으면 줄 전체로.
+        const _rowKey = row => { const id = String(row[1] == null ? '' : row[1]).trim(); return id ? 'ID:' + id : JSON.stringify(row.map(x => x instanceof Date ? 'D' + x.getTime() : x)); };
+        const _isItems = (cfg.name === BITEMS_SHEET);
+        const mainHas = {}, seenRow = {};
+        const mLast = main.getLastRow();
+        if (mLast >= 2) main.getRange(2, 1, mLast - 1, cols).getValues().forEach(r => {
+          if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+          const _i0 = String(r[cfg.invIdx] || '').trim();
+          if (!pick[_i0]) return;
+          mainHas[_i0] = true;
+          if (!_isItems) seenRow[_rowKey(r.slice(0, cols))] = true;
+        });
+        let skippedHave = 0, skippedDup = 0;
         const add = [];
         rows.forEach(r => {
           if (String(r[0]) !== STANDALONE_BATCH_ID) return;
-          if (!pick[String(r[cfg.invIdx] || '').trim()]) return;
+          const _inv = String(r[cfg.invIdx] || '').trim();
+          if (!pick[_inv]) return;
+          if (_isItems && mainHas[_inv]) { skippedHave++; return; }
           const row = r.slice(0, cols); while (row.length < cols) row.push('');
+          if (!_isItems) { // 스캔·이슈 기록만 같은 줄 건너뜀(품목은 진짜 주문에 같은 줄이 두 번 있을 수 있어 그대로 둠)
+            const _k = _rowKey(row);
+            if (seenRow[_k]) { skippedDup++; return; }
+            seenRow[_k] = true;
+          }
           add.push(row);
         });
-        if (add.length) main.getRange(main.getLastRow() + 1, 1, add.length, cols).setValues(add);
+        if (skippedHave || skippedDup) out.push(cfg.name + ': 이미 있는 인보이스 품목 ' + skippedHave + '행 · 이미 있는(같은) 줄 ' + skippedDup + '행 건너뜀');
+        // ★ v51 — 보관본 안에 한 인보이스 품목이 정확히 두 벌(줄 수 = 보관된 TotalSku×2, 같은 줄끼리 모두 짝수)이면 앞쪽 한 벌만 복구
+        //   (보관이 중간에 실패해 같은 줄이 보관본에 두 번 들어간 경우 — 예전 '두 번 등록'의 원인 후보)
+        let halved = 0;
+        if (_isItems && add.length) {
+          const byInv = {};
+          add.forEach((row, k) => { const iv = String(row[cfg.invIdx] || '').trim(); (byInv[iv] = byInv[iv] || []).push(k); });
+          const drop = {};
+          Object.keys(byInv).forEach(iv => {
+            const ks = byInv[iv];
+            if (!pickSku[iv] || ks.length !== pickSku[iv] * 2) return;
+            const grp = {};
+            ks.forEach(k => { const r0 = add[k]; const key = JSON.stringify([String(r0[2]), String(r0[3]), normBarcode_(r0[4]), String(r0[5]), String(r0[6])]); (grp[key] = grp[key] || []).push(k); });
+            if (!Object.keys(grp).every(g => grp[g].length % 2 === 0)) return;
+            Object.keys(grp).forEach(g => grp[g].slice(grp[g].length / 2).forEach(k => { drop[k] = true; halved++; }));
+          });
+          if (halved) for (let k = add.length - 1; k >= 0; k--) if (drop[k]) add.splice(k, 1);
+        }
+        if (halved) out.push(cfg.name + ': 보관본에 두 벌 있던 품목 ' + halved + '행은 한 벌만 복구');
+        if (add.length) {
+          const _st = main.getLastRow() + 1;
+          if (_isItems) main.getRange(_st, 5, add.length, 1).setNumberFormat('@'); // 바코드 텍스트 고정(앞자리 0·긴 번호 보존 — 등록 때와 같게)
+          main.getRange(_st, 1, add.length, cols).setValues(add);
+        }
         out.push(cfg.name + ': ' + add.length + '행 복구');
       } catch (eS) { out.push(cfg.name + ': 실패 — ' + String(eS && eS.message || eS)); }
     });
@@ -6783,6 +6856,200 @@ function restoreStandaloneFromArchive_bsCore_() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ===================== 단독 오더 품목 '두 번 등록' 점검·정리 (★ 2026-11-18 v51 신규) =====================
+ * [문제] 일부 단독 오더(예: IN00480096)의 품목이 BatchItems 에 똑같이 두 번 들어가 있어 필요수량이 2배로 보임
+ *   (1차 검수를 다 해도 모든 줄이 정확히 절반에서 멈춤). 예전 '보관 복구'가 이미 있는 줄을 한 번 더 붙인 것으로 보임(위 복구 함수에서 재발 방지).
+ * [판정 — 아래 4가지가 모두 맞을 때만 '두 번 등록'으로 봄]
+ *   ① 그 인보이스의 품목 줄(SKU·이름·바코드·수량·랙 5칸이 같은 줄끼리 묶음 — 바코드는 앞자리 0·형식 차이 무시)이 모두 짝수 개
+ *   ② 줄 수의 절반 = BatchCustomers 의 TotalSku   ③ 수량 합의 절반 = BatchCustomers 의 TotalQty   ④ BatchCustomers 에 그 단독 오더가 1줄 있음
+ * [정리] 같은 줄끼리 중 '뒤쪽 절반'(아래쪽 행)만 지움. 지우기 전에 그 줄들을 'Backup_StandaloneDupItems' 시트에 그대로 복사(원래 행 번호 포함) — 되돌릴 수 있음.
+ *   스캔 기록(ScanLog·PackScanLog·Firestore)은 전혀 건드리지 않음. 필요수량만 원래대로 돌아옴.
+ * 사용: 편집기에서 checkStandaloneDuplicates ▶ Run(읽기만) → 목록 확인 → fixStandaloneDuplicateItems ▶ Run(정리) */
+function _sdupAnalyze_() {
+  const bc = bcustSheetSafe_();
+  const bcLast = bc.getLastRow();
+  const bcInfo = {}, bcCount = {};
+  if (bcLast >= 2) bc.getRange(2, 1, bcLast - 1, 13).getValues().forEach(r => {
+    if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+    const inv = String(r[1] || '').trim();
+    bcCount[inv] = (bcCount[inv] || 0) + 1;
+    bcInfo[inv] = { qty: Number(r[5]) || 0, sku: Number(r[6]) || 0, customer: String(r[2] || ''),
+      moved: String(r[10] == null ? '' : r[10]).trim() !== '', verified: String(r[12] == null ? '' : r[12]).trim() !== '' };
+  });
+  const bi = bitemsSheet_();
+  const last = bi.getLastRow();
+  const rows = last >= 2 ? bi.getRange(2, 1, last - 1, 7).getValues() : [];
+  const by = {};
+  rows.forEach((r, i) => {
+    if (String(r[0]) !== STANDALONE_BATCH_ID) return;
+    const inv = String(r[1] || '').trim();
+    const key = JSON.stringify([String(r[2]), String(r[3]), normBarcode_(r[4]), String(r[5]), String(r[6])]); // 바코드는 숫자·글자 형식 차이 무시
+    (by[inv] = by[inv] || []).push({ row: i + 2, key: key, qty: Number(r[5]) || 0, vals: r });
+  });
+  const found = [];
+  Object.keys(by).forEach(inv => {
+    const list = by[inv];
+    const groups = {};
+    list.forEach(x => { (groups[x.key] = groups[x.key] || []).push(x); });
+    const allEven = Object.keys(groups).every(k => groups[k].length % 2 === 0);
+    if (!allEven || list.length < 2) return;
+    const info = bcInfo[inv];
+    const total = list.reduce((a, x) => a + x.qty, 0);
+    const ok = !!info && bcCount[inv] === 1 && list.length / 2 === info.sku && total / 2 === info.qty;
+    const del = [];
+    Object.keys(groups).forEach(k => { const g = groups[k].slice().sort((a, b) => a.row - b.row); g.slice(g.length / 2).forEach(x => del.push(x)); });
+    del.sort((a, b) => a.row - b.row);
+    found.push({ invoice: inv, ok: ok, rows: list.length, delRows: del, total: total, info: info || null, bcCount: bcCount[inv] || 0 });
+  });
+  found.sort((a, b) => a.invoice < b.invoice ? -1 : 1);
+  return found;
+}
+
+function checkStandaloneDuplicates() {
+  const found = _sdupAnalyze_();
+  const lines = ['=== 단독 오더 품목 "두 번 등록" 점검(읽기만 — 바꾸는 것 없음) ==='];
+  if (!found.length) lines.push('두 번 등록된 단독 오더 없음 ✅');
+  found.forEach(f => {
+    const i = f.info;
+    lines.push((f.ok ? '🔧 정리 대상  ' : '⚠ 확인 필요(자동 정리 안 함)  ') + f.invoice + (i ? ' · ' + i.customer : '') +
+      ' — 품목 줄 ' + f.rows + '개(지울 줄 ' + f.delRows.length + '개: ' + _sdupRanges_(f.delRows) + ')' +
+      ' · 수량 합 ' + f.total + ' → ' + (f.total / 2) +
+      (i ? ' · 오더 정보 TotalSku ' + i.sku + ' / TotalQty ' + i.qty + (i.verified ? ' · 2차 검증 끝남' : '') : ' · 오더 정보 없음') +
+      (f.bcCount > 1 ? ' · 오더 정보 줄이 ' + f.bcCount + '개' : ''));
+  });
+  lines.push('정리하려면: fixStandaloneDuplicateItems ▶ Run (🔧 표시만 정리 · 지우는 줄은 Backup_StandaloneDupItems 시트에 먼저 복사)');
+  Logger.log(lines.join('\n'));
+  return lines.join('\n');
+}
+
+function _sdupRanges_(del) {
+  const out = []; let s = null, p = null;
+  del.forEach(x => { if (s === null) { s = p = x.row; } else if (x.row === p + 1) { p = x.row; } else { out.push(s === p ? String(s) : s + '~' + p); s = p = x.row; } });
+  if (s !== null) out.push(s === p ? String(s) : s + '~' + p);
+  return out.join(', ') + '행';
+}
+
+function fixStandaloneDuplicateItems() {
+  return _bsWA_(['bi'], function () { return fixStandaloneDuplicateItems_core_(); }, [STANDALONE_BATCH_ID]);
+}
+function fixStandaloneDuplicateItems_core_() {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  const fixed = [];
+  let found = [];
+  const deletedRows = []; // 실제로 지운 원래 행 번호(중간 실패 시 기록용)
+  try {
+    found = _sdupAnalyze_().filter(f => f.ok); // 잠금 안에서 다시 판정(그 사이 바뀐 것 반영)
+    if (!found.length) { Logger.log('정리할 단독 오더 없음 ✅'); return { ok: true, fixed: [] }; }
+    const bi = bitemsSheet_();
+    // 1) 지울 줄을 먼저 백업 시트에 복사
+    const bk = ensureBatchSheet_('Backup_StandaloneDupItems', ['BackedUpAt', 'OriginalRow', 'BatchId', 'Invoice', 'SKU', 'Name', 'Barcode', 'ReqQty', 'Rack']);
+    const now = batchNow_();
+    const bkRows = [];
+    found.forEach(f => f.delRows.forEach(x => { const v = x.vals.slice(0, 7); while (v.length < 7) v.push(''); bkRows.push([now, x.row].concat(v)); }));
+    const bkStart = bk.getLastRow() + 1;
+    bk.getRange(bkStart, 7, bkRows.length, 1).setNumberFormat('@'); // 바코드 텍스트 유지
+    bk.getRange(bkStart, 1, bkRows.length, 9).setValues(bkRows);
+    SpreadsheetApp.flush(); // 백업이 확실히 저장된 뒤에만 지움
+    // 2) 아래쪽 행부터 지움(위쪽 행 번호가 밀리지 않게) — 붙어 있는 줄은 한 번에
+    const all = [];
+    found.forEach(f => f.delRows.forEach(x => all.push(x.row)));
+    all.sort((a, b) => b - a);
+    let i = 0;
+    while (i < all.length) {
+      let j = i;
+      while (j + 1 < all.length && all[j + 1] === all[j] - 1) j++;
+      const top = all[j], cnt = j - i + 1;
+      bi.deleteRows(top, cnt);
+      for (let q = 0; q < cnt; q++) deletedRows.push(top + q);
+      i = j + 1;
+    }
+    found.forEach(f => fixed.push(f.invoice + '(' + f.delRows.length + '줄)'));
+    const msg = '✅ 단독 오더 품목 중복 정리 완료 — ' + fixed.join(', ') + ' · 지운 줄은 Backup_StandaloneDupItems 시트 ' + bkStart + '행부터 복사돼 있음';
+    try { PropertiesService.getScriptProperties().setProperty('standaloneDupFixLog', (now + ' ' + msg).slice(0, 8000)); } catch (eP) { /* 무시 */ }
+    Logger.log(msg);
+    return { ok: true, fixed: fixed, backupFromRow: bkStart };
+  } catch (e) {
+    const _m = '❌ 정리 실패: ' + String(e && e.message || e) + ' · 이미 지운 원래 행: ' + (deletedRows.length ? deletedRows.sort((a, b) => a - b).join(',') : '없음') +
+      ' (지운 줄은 모두 Backup_StandaloneDupItems 시트에 복사돼 있음 — 다시 실행하기 전에 알려 주세요)';
+    try { PropertiesService.getScriptProperties().setProperty('standaloneDupFixLog', (batchNow_() + ' ' + _m).slice(0, 8000)); } catch (eP) { /* 무시 */ }
+    Logger.log(_m);
+    return { ok: false, error: String(e && e.message || e), deletedRows: deletedRows };
+  } finally {
+    // 3) 성공·실패 모두 — 하나라도 지웠으면 캐시·사본·Firestore 필요수량 다시 읽기 표시(스캔 기록은 그대로)
+    if (deletedRows.length) {
+      try { if (typeof bsDirtyAll_ === 'function') bsDirtyAll_('bi'); } catch (eBs) { /* 무시 — _bsWA_ 에서도 표시 */ }
+      found.forEach(f => { try { clearInvoiceCache_(STANDALONE_BATCH_ID, f.invoice); } catch (eC) { /* 무시 */ } });
+      try { bumpVersion_(); } catch (eV) { /* 무시 */ }
+    }
+    lock.releaseLock();
+  }
+}
+
+/* ===================== 단독 오더 1차 검수(Step 04) 스캔 전체 취소 (★ 2026-11-18 v52 신규, 현장 요청) =====================
+ * 화면의 스캔 기록 'Undo'를 그 인보이스의 1차 검수 스캔 전부에 한 번에 하는 것과 같음(지우지 않고 '취소(undone)' 표시 — 기록은 남음).
+ *   · 2차 검증(Step 05) 스캔은 건드리지 않음(문서가 따로 — round 2).  · 이슈 기록·품목 목록도 그대로.
+ *   · 1차 검수 완료(패킹존 이동)를 이미 눌렀거나 2차 검증이 끝난 오더는 거절(그 표시를 먼저 되돌려야 함).
+ * 사용: 아래 RESET_R1_INVOICE_ 에 인보이스를 적고 저장 → 함수 선택 칸에서 resetStandaloneRound1Scans ▶ Run → Execution log 확인. */
+var RESET_R1_INVOICE_ = 'IN00480096';
+function resetStandaloneRound1Scans() { return resetStandaloneRound1_(RESET_R1_INVOICE_); }
+function resetStandaloneRound1_(invoiceIn) {
+  const invoice = String(invoiceIn || '').trim();
+  const say = function (m) { Logger.log(m); try { PropertiesService.getScriptProperties().setProperty('standaloneR1ResetLog', (batchNow_() + ' ' + m).slice(0, 4000)); } catch (e) { /* 무시 */ } return m; };
+  if (!invoice) return { ok: false, error: say('❌ 인보이스가 비어 있음 — RESET_R1_INVOICE_ 값을 확인하세요') };
+  // 1) 오더 정보 확인 — 단독 오더인지, 1차 완료·2차 검증 전인지
+  const bc = bcustSheetSafe_();
+  const bcLast = bc.getLastRow();
+  let found = null;
+  if (bcLast >= 2) bc.getRange(2, 1, bcLast - 1, 13).getValues().forEach(function (r) {
+    if (String(r[0]) === STANDALONE_BATCH_ID && String(r[1] || '').trim() === invoice) found = r;
+  });
+  if (!found) return { ok: false, error: say('❌ ' + invoice + ' — 단독 오더 목록(BatchCustomers)에 없음. 인보이스 번호를 확인하세요') };
+  const filled = function (v) { return String(v == null ? '' : v).trim() !== ''; };
+  if (filled(found[12])) return { ok: false, error: say('❌ ' + invoice + ' — 이미 2차 검증 완료된 오더라 취소하지 않음') };
+  if (filled(found[10])) return { ok: false, error: say('❌ ' + invoice + ' — 이미 "1차 검수 완료 · 패킹존 이동"이 눌린 오더라 취소하지 않음(그 표시를 먼저 되돌려야 함 — 알려 주세요)') };
+  // 2) Firestore 방식(지금 운영 중)일 때만 — 시트 방식이면 1차·2차 기록 구분 위험이 있어 하지 않음
+  if (!(typeof ssIsFs_ === 'function' && ssIsFs_(1))) return { ok: false, error: say('❌ 지금 1차 검수가 Firestore 방식이 아님 — 자동 취소하지 않음(알려 주세요)') };
+  const res = ssTxn_(STANDALONE_BATCH_ID, invoice, 1, function (st) {
+    let n = 0, qty = 0;
+    st.rows.forEach(function (row) {
+      if (String(row[8]) === 'undone') return;
+      row[8] = 'undone';
+      ssTouch_(row); // 1분 동기화 때 PackScanLog 시트에도 '취소'로 반영(화면 Undo 와 같은 방식)
+      n++; if (String(row[7]) === 'pass') qty += Number(row[9]) || 0;
+    });
+    return { res: { ok: true, undone: n, qty: qty }, changed: n > 0 };
+  });
+  if (!res || !res.ok) return { ok: false, error: say('❌ ' + invoice + ' — 취소 실패: ' + (res && (res.error + (res.detail ? ' / ' + res.detail : '')) || '알 수 없음') + ' — 1분 뒤 다시 실행해 주세요') };
+  try { ssPackBump_(); } catch (eB) { /* 무시 */ }
+  try { invalidatePackScanCache_(STANDALONE_BATCH_ID); } catch (eC) { /* 무시 */ }
+  const msg = res.undone
+    ? '✅ ' + invoice + ' 1차 검수 스캔 ' + res.undone + '건(수량 ' + res.qty + ') 모두 취소 — 화면은 0부터 다시 시작(기록은 "취소"로 남음 · 2차 검증 기록은 그대로)'
+    : 'ℹ ' + invoice + ' — 취소할 1차 검수 스캔이 없음(이미 0)';
+  say(msg);
+  return { ok: true, undone: res.undone, qty: res.qty };
+}
+
+/* ★ 2026-11-18 v53 — batch.html Step 04 "↺ 처음부터 다시 (관리자)" 버튼에서 부르는 서버 함수(op=resetStandaloneRound1).
+ *   ① 로그인 확인(validateSession_) ② 관리자 확인(_bulkAdminOk_ — sales Bulk Update 와 같은 기준, BULK_ADMINS)
+ *   ③ 확인 번호(인보이스 끝 4자리) 확인 ④ resetStandaloneRound1_ 그대로(1차 완료·2차 완료 오더 거절 등 같은 안전장치) ⑤ BulkLog 시트에 기록 */
+function resetStandaloneRound1Web(data) {
+  const info = (typeof validateSession_ === 'function') ? validateSession_(data && data.token) : null;
+  if (!info) return { ok: false, error: '로그인이 만료되었습니다 — 다시 로그인해 주세요' };
+  if (!(typeof _bulkAdminOk_ === 'function' && _bulkAdminOk_(info))) return { ok: false, error: '관리자만 사용할 수 있습니다' };
+  const inv = String((data && data.invoice) || '').trim();
+  if (!inv) return { ok: false, error: '인보이스가 비어 있습니다' };
+  if (String((data && data.confirm) || '').trim() !== inv.slice(-4)) return { ok: false, error: '확인 번호(인보이스 끝 4자리)가 맞지 않습니다' };
+  const by = String(info.name || info.id || '');
+  let r;
+  try { r = resetStandaloneRound1_(inv); } catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+  try {
+    if (typeof _bulkLog_ === 'function') _bulkLog_([batchNow_(), by, inv, 'Step04 1차 검수 처음부터 다시', '', '', '',
+      r && r.ok ? ('취소 ' + (r.undone || 0) + '건 · 수량 ' + (r.qty || 0)) : ('실패: ' + (r && r.error || ''))]);
+  } catch (eL) { /* 기록 실패는 결과에 영향 없음 */ }
+  return r;
 }
 
 // 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
