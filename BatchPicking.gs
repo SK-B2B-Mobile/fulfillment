@@ -1156,13 +1156,54 @@ function _findBatchRow_(batchId) {
  *         customers:[{ meta:{invoice_no,customer,ship_date,ship_via}, items:[...] }] }
  * ============================================================ */
 // ★ v30 — 끝나면(성공·실패·예외 모두) 배치 사본에 "바뀜" 표시(BatchSnap.gs). 원래 내용은 아래 createBatch_bsCore_
-function createBatch(data) { return _bsWA_(['bi', 'bc'], function () { return createBatch_bsCore_(data); }); }
+/* ★ 2026-11-19 v55 — 배치 생성 때 슬롯 번호를 '같은 저장'에서 함께 씀 + 재시도 중복 생성 방지
+ *   [사고] 11-19 B20261119-0948A: createBatch(배치·고객사)는 저장됐는데 뒤따르는 assignSlots(슬롯 번호)가 빠져서
+ *          14개 고객사가 전부 '미배정'으로 남고 TV 현황판은 0/0. (두 번 나눠 저장하는 구조라 서버가 느린 순간 한쪽만 성공 가능)
+ *   [해결] ① data.slotAssignments([{invoice, slotNum, slotSize}]) 가 오면 BatchCustomers 줄을 쓸 때 H(SlotNum)·I(SlotSize)를 같이 씀
+ *            → 응답에 slotsSaved:true, slotsAssigned(슬롯이 들어간 '서로 다른 인보이스' 수). 화면이 개수를 확인하고 모자라면 assignSlots 로 한 번 더.
+ *          ② data.reqId(화면이 초안마다 하나) — 같은 번호로 다시 오면(응답 25초 초과 재시도·버튼 다시 누름) 새 배치를 만들지 않고 처음 결과를 그대로 돌려줌.
+ *            잠금을 얻은 뒤 한 번 더 확인(앞 요청이 잠금을 쥐고 아직 쓰는 중이었던 경우). 결과는 캐시(6시간) + 스크립트 속성(최근 30건) 두 곳에 기록.
+ *   [호환] slotAssignments·reqId 가 없으면(옛 batch.html) 예전과 100% 같음. 옛 서버에 새 화면이 오면 slotsSaved 가 없어서 화면이 예전처럼 assignSlots 로 저장. */
+function _cbReqKey_(data) {
+  const r = data && data.reqId != null ? String(data.reqId).trim() : '';
+  return (r && r.length <= 100) ? 'cbReq_' + r : '';
+}
+// 확인 순서: 캐시(빠름) → 스크립트 속성 'cbReqLog'(최근 30건 — 캐시가 지워지거나 저장 실패해도 남음)
+function _cbReqGet_(key) {
+  if (!key) return null;
+  try { const v = CacheService.getScriptCache().get(key); if (v) { const o = JSON.parse(v); if (o && o.ok && o.batchId) { o.dedup = true; return o; } } } catch (e) { /* 캐시 실패 → 아래 속성 확인 */ }
+  try {
+    const log = JSON.parse(PropertiesService.getScriptProperties().getProperty('cbReqLog') || '[]');
+    for (let i = log.length - 1; i >= 0; i--) { if (log[i] && log[i].k === key && log[i].r && log[i].r.ok && log[i].r.batchId) { const o = log[i].r; o.dedup = true; return o; } }
+  } catch (e2) { /* 무시 */ }
+  return null;
+}
+function _cbReqPut_(key, result) {
+  if (!key || !result || !result.ok) return;
+  try { CacheService.getScriptCache().put(key, JSON.stringify(result), 21600); } catch (e) { /* 아래 속성에도 남김 */ }
+  try {
+    const pr = PropertiesService.getScriptProperties();
+    const log = JSON.parse(pr.getProperty('cbReqLog') || '[]');
+    log.push({ k: key, t: Date.now(), r: result });
+    pr.setProperty('cbReqLog', JSON.stringify(log.slice(-30)));
+  } catch (e2) { /* 무시 — 캐시만으로도 동작 */ }
+}
+function createBatch(data) {
+  const _dk = _cbReqKey_(data);
+  const _dup = _cbReqGet_(_dk);
+  if (_dup) return _dup; // 이미 만든 배치 — 쓰기 없음(사본 표시도 필요 없음)
+  return _bsWA_(['bi', 'bc'], function () { return createBatch_bsCore_(data); });
+}
 function createBatch_bsCore_(data) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   let result;
   let batchDocForFirestore = null; // ★ 세션E 신규 — 락 밖에서 Firestore 이중쓰기하기 위해 스코프 확장
+  const _dk = _cbReqKey_(data);
   try {
+    // ★ v55 — 잠금을 얻은 뒤 다시 확인: 같은 번호의 앞 요청이 잠금 안에서 방금 끝냈으면 그 결과를 그대로(새 배치 만들지 않음)
+    const _dup2 = _cbReqGet_(_dk);
+    if (_dup2) return (result = _dup2);
     const today = fmtDate_(new Date(), batchTz_(), 'yyyy-MM-dd');
     const batchId = generateBatchId_();
     _unmarkBatchDeleted_(batchId); // ★ 2026-10-19 — 삭제된 배치와 같은 번호로 새로 만들어진 경우 삭제 표시 해제
@@ -1192,11 +1233,31 @@ function createBatch_bsCore_(data) {
     const bc = bcustSheet_();
     const custRows = [];
     const itemRows = [];
+    // ★ v55 — 화면이 미리 계산한 슬롯 번호(있으면). assignSlots 와 같은 값 규칙: SlotNum 그대로, SlotSize 없으면 15 이하 L / 그 외 S.
+    const _slotByInv = {};
+    let _slotsGiven = false;
+    if (Array.isArray(data.slotAssignments)) {
+      _slotsGiven = true;
+      data.slotAssignments.forEach(a => {
+        if (!a || a.invoice == null || String(a.invoice) === '') return;
+        if (a.slotNum == null || String(a.slotNum).trim() === '') return;
+        _slotByInv[String(a.invoice)] = a;
+      });
+    }
+    const _slotInvDone = {};
     customers.forEach(c => {
       const meta = c.meta || {};
       const items = Array.isArray(c.items) ? c.items : [];
       const cQty = items.reduce((a, it) => a + (Number(it.req_qty)||0), 0);
-      custRows.push([batchId, meta.invoice_no||'', meta.customer||'', meta.ship_date||'', meta.ship_via||'', cQty, items.length, '', '', '']);
+      const _inv = meta.invoice_no||'';
+      const _a = _inv !== '' ? _slotByInv[String(_inv)] : null;
+      let _sn = '', _sz = '';
+      if (_a) {
+        _sn = _a.slotNum;
+        _sz = _a.slotSize || (Number(_a.slotNum) <= 15 ? 'L' : 'S');
+        _slotInvDone[String(_inv)] = true;
+      }
+      custRows.push([batchId, _inv, meta.customer||'', meta.ship_date||'', meta.ship_via||'', cQty, items.length, _sn, _sz, '']);
       items.forEach(it => {
         itemRows.push([batchId, meta.invoice_no||'', it.sku||'', it.name||'', it.barcode||'', Number(it.req_qty)||0, it.rack||'']);
       });
@@ -1221,11 +1282,15 @@ function createBatch_bsCore_(data) {
       sumItemsJson: JSON.stringify(sumItems), customersJson: JSON.stringify(customers),
     };
     result = { ok: true, batchId: batchId, totalSku: totalSku, totalQty: totalQty };
+    if (_slotsGiven) { result.slotsSaved = true; result.slotsAssigned = Object.keys(_slotInvDone).length; }
+    if (_dk) _cbReqPut_(_dk, result); // ★ v55 — 잠금 해제 '전'에 저장(뒤따르는 같은 번호 요청이 반드시 봄) — 캐시 + 스크립트 속성 두 곳
+    try { CacheService.getScriptCache().remove('getBatch_v1_' + batchId + '_meta'); } catch (eGb) { /* 무시 */ } // ★ v55 — 예전 assignSlots 가 하던 화면 캐시 비우기(삭제된 같은 번호 배치의 옛 캐시 방지)
   } catch (e) {
     result = { ok: false, error: String(e && e.message || e) };
   } finally {
     lock.releaseLock();
   }
+  if (result && result.dedup) return result; // ★ v55 — 중복 요청: 아래 후처리(큐·활성 배치 지정)는 처음 요청이 이미 함
   // ★ 세션E 신규 — "①번 이중쓰기" 패턴을 createBatch에도 동일하게 적용. 구글시트
   //   (진짜 데이터)에는 이미 성공적으로 쓴 뒤이므로, 여기서 실패해도 배치 생성
   //   결과 자체엔 전혀 영향이 없음(완전한 best-effort).
@@ -1255,6 +1320,7 @@ function createBatch_bsCore_(data) {
   if (result.ok && result.batchId) {
     try { setActiveBatch({ batchId: result.batchId }); } catch (eActive) { /* 무시 */ }
   }
+  if (result.ok && result.batchId && result.slotsAssigned) { try { bumpBatchVer_(result.batchId); } catch (eBv) { /* 무시 */ } } // ★ v55 — 슬롯이 들어간 새 배치: TV 미러가 바로 다시 계산
   return result;
 }
 
