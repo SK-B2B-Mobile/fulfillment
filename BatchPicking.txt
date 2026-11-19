@@ -7052,6 +7052,44 @@ function resetStandaloneRound1Web(data) {
   return r;
 }
 
+/* ★ 2026-11-18 v54 — batch.html Step 04 "⚡ 전체 일괄 처리 (관리자)" (op=bulkFillStandaloneRound1)
+ *   단독 오더 1차 검수의 '남은 수량'을 스캔 없이 모두 검수됨(pass)으로 기록 — 이미 스캔한 수량·이슈 차감은 그대로 두고 남은 것만.
+ *   실제 기록은 Step 05 'Manager Force Confirm' 이 쓰는 forceCompletePackScan 을 1차(round 1)로 그대로 사용(Firestore·시트 방식 모두).
+ *   ① 로그인 ② 관리자(_bulkAdminOk_) ③ 확인 번호(끝 4자리) ④ 단독 오더 · 1차 완료(K)·2차 완료(M) 전인지 ⑤ 처리자 '관리자 이름 (일괄)' ⑥ BulkLog 기록
+ *   '1차 검수 완료 · 패킹존 이동' 표시는 여기서 하지 않음(화면이 결과를 다시 확인한 뒤 기존 완료 버튼 경로로 처리). */
+function bulkFillStandaloneRound1Web(data) {
+  const info = (typeof validateSession_ === 'function') ? validateSession_(data && data.token) : null;
+  if (!info) return { ok: false, error: '로그인이 만료되었습니다 — 다시 로그인해 주세요' };
+  if (!(typeof _bulkAdminOk_ === 'function' && _bulkAdminOk_(info))) return { ok: false, error: '관리자만 사용할 수 있습니다' };
+  const inv = String((data && data.invoice) || '').trim();
+  if (!inv) return { ok: false, error: '인보이스가 비어 있습니다' };
+  if (String((data && data.confirm) || '').trim() !== inv.slice(-4)) return { ok: false, error: '확인 번호(인보이스 끝 4자리)가 맞지 않습니다' };
+  const by = String(info.name || info.id || '관리자');
+  let r;
+  try {
+    const bc = bcustSheetSafe_();
+    const bcLast = bc.getLastRow();
+    let found = null;
+    if (bcLast >= 2) bc.getRange(2, 1, bcLast - 1, 13).getValues().forEach(function (row) {
+      if (String(row[0]) === STANDALONE_BATCH_ID && String(row[1] || '').trim() === inv) found = row;
+    });
+    const filled = function (v) { return String(v == null ? '' : v).trim() !== ''; };
+    if (!found) r = { ok: false, error: inv + ' — 단독 오더 목록에 없습니다' };
+    else if (filled(found[12])) r = { ok: false, error: inv + ' — 이미 2차 검증 완료된 오더입니다' };
+    else if (filled(found[10])) r = { ok: false, error: inv + ' — 이미 1차 검수 완료(패킹존 이동)된 오더입니다' };
+    else {
+      const f = forceCompletePackScan({ batchId: STANDALONE_BATCH_ID, invoice: inv, worker: by + ' (일괄)', round: 1, reqId: data && data.reqId });
+      r = (f && f.ok) ? { ok: true, filledLines: Number(f.filledLines) || 0 } : { ok: false, error: (f && (f.error + (f.detail ? ' / ' + f.detail : ''))) || '알 수 없는 오류' };
+      if (r.ok) { try { invalidatePackScanCache_(STANDALONE_BATCH_ID); } catch (eC) { /* 무시 */ } }
+    }
+  } catch (e) { r = { ok: false, error: String(e && e.message || e) }; }
+  try {
+    if (typeof _bulkLog_ === 'function') _bulkLog_([batchNow_(), by, inv, 'Step04 1차 검수 전체 일괄 처리', '', '', '',
+      r.ok ? ('남은 ' + r.filledLines + '개 SKU 채움') : ('실패: ' + r.error)]);
+  } catch (eL) { /* 기록 실패는 결과에 영향 없음 */ }
+  return r;
+}
+
 // 트리거는 인자를 못 넘기므로, 기본값(14일)으로 실행하는 래퍼 함수
 function archiveOldBatchesDaily() {
   const t0 = Date.now();
