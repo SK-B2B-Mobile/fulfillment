@@ -123,7 +123,7 @@
 </script>
 <meta charset="UTF-8">
 <!-- ★ 2026-11-12 v36 — 이 화면의 버전 표시(새 버전 자동 반영이 이 값을 비교함). batch.html 을 고칠 때마다 반드시 바꿀 것. -->
-<meta name="sk-build" content="v38-1118">
+<meta name="sk-build" content="v39-1118">
 <!-- ★ 2026-08-04 수정 — 요청: 스캔 태블릿에서 화면을 손가락으로 확대해서 보고 싶은데
      user-scalable=no + maximum-scale=1.0 때문에 핀치줌이 원천 차단돼 있었음.
      제한을 풀어서 두 손가락으로 자유롭게 확대/축소(원래 크기로 복귀)할 수 있게 함. -->
@@ -2117,6 +2117,7 @@ document.addEventListener('DOMContentLoaded', function(){
           <input id="ssScanInput" placeholder="바코드를 스캔하세요..." autocomplete="off">
         </div>
         <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="openManualBarcodeModal('ssScanInput', submitSsScan)">✎ 바코드 수동 입력 (스캔 안 될 때)</button>
+        <button class="btn btn-ghost btn-sm" id="ssBulkBtn" type="button" style="display:none; margin-top:8px; margin-left:8px; border-color:#F59E0B; color:#FCD34D;" onclick="openSsBulkModal()" title="관리자 전용 — 남은 수량을 스캔 없이 모두 검수됨으로 기록">⚡ 전체 일괄 처리 (관리자)</button>
         <button class="btn btn-ghost btn-sm" id="ssResetBtn" type="button" style="display:none; margin-top:8px; margin-left:8px; border-color:#ef4444; color:#FCA5A5;" onclick="openSsResetModal()" title="관리자 전용 — 이 오더의 1차 검수 스캔을 모두 취소하고 0부터 다시 시작">↺ 처음부터 다시 (관리자)</button>
         <div class="recent-scans" id="ssRecentScans"></div>
         <div class="pv-qty-confirm" id="ssQtyConfirm" style="display:none;">
@@ -9395,6 +9396,7 @@ var _ssIsAdmin = null;      // null = 아직 모름(또는 확인 실패 — 다
 var _ssAdminTok = '';       // 어느 로그인으로 확인했는지(다른 계정으로 바뀌면 다시 확인)
 var _ssAdminChecking = false;
 var _ssResetBusy = false;
+var _ssBulkBusy = false; // ★ v39 — 전체 일괄 처리 중
 async function _ssCheckAdmin_(){
   if(_ssAdminChecking) return;
   const tok = (typeof authGetToken === 'function') ? authGetToken() : '';
@@ -9415,8 +9417,15 @@ function _ssUpdateResetBtn_(){
   const st = _ssState;
   const o = (_standaloneOrders || []).find(x => x.invoice === _ssInvoice);
   const show = _ssIsAdmin === true && !!_ssInvoice && !!st && _ssStateInv === _ssInvoice
-    && Number(st.totalPacked || 0) > 0 && !(o && (o.movedToPacking || o.packVerified)) && !_ssResetBusy;
+    && Number(st.totalPacked || 0) > 0 && !(o && (o.movedToPacking || o.packVerified)) && !_ssResetBusy && !_ssBulkBusy;
   b.style.display = show ? 'inline-block' : 'none';
+  // ★ v39 — ⚡ 전체 일괄 처리: 관리자 · 이 오더 상태 로드됨 · 남은 수량 있음 · 1차/2차 완료 전
+  const bb = document.getElementById('ssBulkBtn');
+  if(bb){
+    const showBulk = _ssIsAdmin === true && !!_ssInvoice && !!st && _ssStateInv === _ssInvoice
+      && Number(st.totalReq || 0) > 0 && !st.complete && !(o && (o.movedToPacking || o.packVerified)) && !_ssResetBusy && !_ssBulkBusy;
+    bb.style.display = showBulk ? 'inline-block' : 'none';
+  }
 }
 function closeSsResetModal(){
   const m = document.getElementById('ssResetModal');
@@ -9463,6 +9472,110 @@ function openSsResetModal(){
   document.getElementById('ssResetCloseBtn').onclick = () => { if(!_ssResetBusy) closeSsResetModal(); };
   go.onclick = () => runSsReset_(inv, ci.value.trim());
   setTimeout(() => ci.focus(), 60);
+}
+/* ★ 2026-11-18 v39 신규(현장 요청 · 시뮬레이션 승인) — Step 04 "⚡ 전체 일괄 처리 (관리자)"
+ *   남은 수량을 스캔 없이 모두 '검수됨'으로 기록(서버 op=bulkFillStandaloneRound1 — Step 05 Manager Force Confirm 과 같은 기록 방식, 1차용).
+ *   이미 스캔한 수량·이슈 차감은 그대로, 남은 것만 채움. 처리자는 로그인한 관리자 이름 + '(일괄)'. 서버가 로그인·관리자·끝 4자리를 다시 확인.
+ *   체크(기본 켬)되어 있으면, 결과를 서버에서 다시 받아 100% 확인된 뒤 기존 '1차 검수 완료 · 패킹존 이동' 경로(completeSsInspection)로 완료 표시.
+ *   자동 재시도 없음(gasCall). 잘못 처리했으면 '↺ 처음부터 다시'로 되돌릴 수 있음(완료 표시 전까지). */
+function closeSsBulkModal(){
+  const m = document.getElementById('ssBulkModal');
+  if(m) m.remove();
+  const inp = document.getElementById('ssScanInput');
+  if(inp && _ssInvoice && !inp.disabled) setTimeout(() => inp.focus(), 60);
+}
+function openSsBulkModal(){
+  if(!_ssInvoice || _ssBulkBusy || _ssResetBusy) return;
+  if(_ssStateInv !== _ssInvoice || !_ssState){ toast('오더를 불러오는 중입니다 — 잠시 뒤 다시 눌러 주세요', 'info'); return; }
+  if(typeof resolveSsQty === 'function') resolveSsQty(null);
+  closeSsBulkModal(); try { closeSsResetModal(); } catch(e){}
+  const inv = _ssInvoice;
+  const o = (_standaloneOrders || []).find(x => x.invoice === inv) || {};
+  const st = _ssState || {};
+  const leftSku = (st.lines || []).filter(l => !l.complete).length;
+  const leftQty = Math.max(0, Number(st.totalReq || 0) - Number(st.totalPacked || 0));
+  const last4 = String(inv).slice(-4);
+  const esc = (typeof escapeHtmlV36_ === 'function') ? escapeHtmlV36_ : (x => String(x == null ? '' : x));
+  const wrap = document.createElement('div');
+  wrap.id = 'ssBulkModal';
+  wrap.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:9999; display:flex; align-items:center; justify-content:center; padding:16px;';
+  wrap.innerHTML = `
+    <div style="background:#141a2e; border:1px solid #F59E0B; border-radius:12px; max-width:540px; width:100%; padding:20px 22px; color:#e5e7eb; font-size:14px; line-height:1.6;">
+      <div style="font-size:17px; font-weight:800; color:#FCD34D; margin-bottom:8px;">⚡ 1차 검수 전체 일괄 처리</div>
+      <div style="font-weight:700;">${esc(inv)} · ${esc(o.customer || '')}</div>
+      <div style="margin:8px 0 10px;">남은 <b>SKU ${leftSku.toLocaleString()}개 · 수량 ${leftQty.toLocaleString()} pcs</b> 를 스캔 없이 모두 "검수됨"으로 기록합니다.</div>
+      <div style="font-size:12.5px; color:var(--text-dim, #9ca3af);">
+        <span style="color:#FCA5A5; font-weight:700;">⚠ 실제 바코드 확인을 건너뜁니다(오출고 방지 장치 생략)</span><br>
+        · 이미 스캔한 수량 · 이슈 차감은 그대로 두고 "남은 것만" 채웁니다<br>
+        · 기록에는 처리자 "로그인한 관리자 이름 (일괄)"로 남습니다<br>
+        · 잘못 눌렀으면 완료 표시 전까지 ↺ 처음부터 다시 로 되돌릴 수 있습니다
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:12px; cursor:pointer;">
+        <input type="checkbox" id="ssBulkAutoComplete" checked>
+        <span>처리 뒤 <b>"1차 검수 완료 · 패킹존 이동"</b>까지 바로 표시</span>
+      </label>
+      <div style="margin-top:12px;">확인하려면 인보이스 끝 4자리를 입력하세요:
+        <input id="ssBulkConfirmInput" type="text" inputmode="numeric" autocomplete="off" maxlength="12" style="width:90px; margin-left:6px; padding:4px 8px; font-size:15px; text-align:center;">
+      </div>
+      <div id="ssBulkErr" style="display:none; margin-top:10px; color:#FCA5A5; font-weight:700;"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button class="btn btn-ghost btn-sm" type="button" id="ssBulkCloseBtn">닫기</button>
+        <button class="btn btn-sm" type="button" id="ssBulkGoBtn" disabled style="background:#b45309; color:#fff; border-color:#b45309;">⚡ 일괄 처리 실행</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const ci = document.getElementById('ssBulkConfirmInput');
+  const go = document.getElementById('ssBulkGoBtn');
+  ci.addEventListener('input', () => { go.disabled = (ci.value.trim() !== last4) || _ssBulkBusy; });
+  ci.addEventListener('keydown', e => { e.stopPropagation(); if(e.key === 'Enter' && !go.disabled) go.click(); if(e.key === 'Escape' && !_ssBulkBusy) closeSsBulkModal(); });
+  document.getElementById('ssBulkCloseBtn').onclick = () => { if(!_ssBulkBusy) closeSsBulkModal(); };
+  go.onclick = () => runSsBulk_(inv, ci.value.trim(), !!(document.getElementById('ssBulkAutoComplete') || {}).checked);
+  setTimeout(() => ci.focus(), 60);
+}
+async function runSsBulk_(inv, confirm4, autoComplete){
+  if(_ssBulkBusy) return;
+  const go = document.getElementById('ssBulkGoBtn');
+  const err = document.getElementById('ssBulkErr');
+  const closeBtn = document.getElementById('ssBulkCloseBtn');
+  const showErr = m => { if(err){ err.style.display = 'block'; err.textContent = '❌ ' + m; } };
+  // 이 오더의 스캔이 아직 저장 중이면 기다리게 함(저장 전 수량으로 남은 양을 계산하지 않게 — 서버도 문서 기준으로 다시 계산함)
+  if((typeof _ssScanBusy !== 'undefined' && _ssScanBusy) || (typeof _ssScanQueue !== 'undefined' && _ssScanQueue.length)){ showErr('스캔이 아직 저장 중입니다 — 잠시 뒤 다시 눌러 주세요'); return; }
+  _ssBulkBusy = true;
+  if(go){ go.disabled = true; go.textContent = '처리 중...'; }
+  if(closeBtn) closeBtn.disabled = true;
+  try { _ssUpdateResetBtn_(); } catch(e){}
+  let res = null;
+  try {
+    const reqId = 'bulk-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    res = await gasCall('bulkFillStandaloneRound1', { token: (typeof authGetToken === 'function' ? authGetToken() : ''), invoice: inv, confirm: confirm4, reqId });
+  } catch(e){ res = { ok:false, error: String(e && e.message || e) }; }
+  if(!(res && res.ok)){
+    _ssBulkBusy = false;
+    if(closeBtn) closeBtn.disabled = false;
+    const msg = String(res && res.error || '알 수 없는 오류').replace(/^❌\s*/, '');
+    showErr(msg + ((/server_busy|지연|Failed|fetch/i.test(msg)) ? ' — 화면 숫자를 확인한 뒤 다시 시도해 주세요(일부만 기록됐을 수는 없음 — 한 번에 저장됨)' : ''));
+    if(go){ go.textContent = '⚡ 일괄 처리 실행'; const ci = document.getElementById('ssBulkConfirmInput'); go.disabled = !ci || ci.value.trim() !== String(inv).slice(-4); }
+    try { _ssUpdateResetBtn_(); } catch(e){}
+    return;
+  }
+  closeSsBulkModal();
+  // 서버에서 결과를 다시 받음(구독 캐시의 옛 상태를 버리고)
+  try { if(typeof _pk !== 'undefined' && _pk.cache && typeof pkKey_ === 'function') delete _pk.cache[pkKey_(STANDALONE_BATCH_ID, inv, 1)]; } catch(eK){}
+  if(_ssInvoice === inv){ try { await refreshSsState(); } catch(e){} }
+  _ssBulkBusy = false;
+  try { _ssUpdateResetBtn_(); } catch(e){}
+  const filled = Number(res.filledLines || 0);
+  toast(filled ? `✅ ${inv} — 남은 ${filled}개 SKU 일괄 처리 완료` : `ℹ ${inv} — 남은 수량이 없어 채울 것이 없었습니다`, 'success');
+  if(!autoComplete) return;
+  // 완료 표시: 지금 화면이 이 오더이고, 서버에서 다시 받은 상태가 100% 일 때만 기존 완료 버튼 경로로
+  if(_ssInvoice !== inv || _ssStateInv !== inv || !_ssState || !_ssState.complete){
+    showSsMsg({ kind: 'bad', icon: '⚠', title: inv + ' — 아직 100%가 아니라 "1차 검수 완료"는 표시하지 않았습니다', sub: '화면을 확인한 뒤 완료 버튼을 직접 눌러 주세요' });
+    return;
+  }
+  const cb = document.getElementById('ssCompleteBtn');
+  if(cb && cb.disabled){ try { renderSsBody(); } catch(e){} }
+  if(cb && !cb.disabled){ await completeSsInspection(); }
+  else showSsMsg({ kind: 'bad', icon: '⚠', title: inv + ' — 완료 버튼을 누를 수 없는 상태라 "1차 검수 완료"는 표시하지 않았습니다', sub: '잠시 뒤 완료 버튼을 직접 눌러 주세요' });
 }
 async function runSsReset_(inv, confirm4){
   if(_ssResetBusy) return;
