@@ -123,7 +123,7 @@
 </script>
 <meta charset="UTF-8">
 <!-- ★ 2026-11-12 v36 — 이 화면의 버전 표시(새 버전 자동 반영이 이 값을 비교함). batch.html 을 고칠 때마다 반드시 바꿀 것. -->
-<meta name="sk-build" content="v39-1118">
+<meta name="sk-build" content="v40-1119">
 <!-- ★ 2026-08-04 수정 — 요청: 스캔 태블릿에서 화면을 손가락으로 확대해서 보고 싶은데
      user-scalable=no + maximum-scale=1.0 때문에 핀치줌이 원천 차단돼 있었음.
      제한을 풀어서 두 손가락으로 자유롭게 확대/축소(원래 크기로 복귀)할 수 있게 함. -->
@@ -5588,16 +5588,55 @@ document.getElementById('startBatchBtn').onclick = async () => {
     }
   }
 
+  // ★ 2026-11-19 v40 — 슬롯 자동 배정을 배치 생성 '전에' 계산해서 createBatch 한 번에 같이 저장(서버 BatchPicking v55).
+  //   [사고] 11-19 B20261119-0948A: 배치는 만들어졌는데 뒤따르는 슬롯 저장(assignSlots)이 빠져 14개 고객사가 전부 미배정, TV 0/0.
+  //   이제: ① 다른 배치 점유 정보 → ② 스캔 인덱스 → ③ 자동 배정(규칙 그대로)을 먼저 하고, ④ createBatch 에 slotAssignments 를 실어 보냄.
+  //   ⑤ 같은 초안에서는 같은 요청 번호(reqId) — 응답이 늦어 재시도하거나 버튼을 다시 눌러도 서버가 배치를 두 번 만들지 않음.
+  //   ⑥ 서버가 저장한 슬롯 개수(slotsAssigned)가 모자라거나, 옛 서버라 slotsSaved 가 없으면 예전처럼 assignSlots 로 저장(실패 시 빨간 배너).
+  let assignResult = null;
+  try{
+    await fetchOccupiedSlots();
+    buildScanIndex();
+    assignResult = autoAssignSlots();
+  }catch(ePre){
+    console.error('[v40] 배치 생성 전 슬롯 계산 실패:', ePre);
+    toast('슬롯 자동 배정 계산 실패 — 배치는 만들지 않았습니다: ' + String(ePre && ePre.message || ePre), 'error');
+    btn.disabled = false; btn.textContent = '배치 시작';
+    return;
+  }
+  const _plannedSlots = state.slots.filter(s => s.assignedTo).map(s => ({ invoice: s.assignedTo, slotNum: s.num, slotSize: s.size }));
+  const _plannedInvCount = new Set(_plannedSlots.map(a => String(a.invoice))).size;
+  let _slotsAlreadySaved = false;
+
   if(GAS_READY){
+    // 요청 번호는 '같은 내용의 초안'에만 재사용 — 파일을 바꿔 다시 누르면 새 번호(옛 배치를 돌려받는 일 방지)
+    let _fp = '';
+    try{
+      // 내용 전체(인보이스·고객사·배송일·방법 + 품목마다 SKU·바코드·수량·랙) — 하나라도 다르면 다른 초안
+      const _it = it => [String(it.sku||''), String(it.barcode||''), Number(it.req_qty)||0, String(it.rack||'')];
+      _fp = JSON.stringify([
+        state.custFiles.map(cf => { const m = cf.meta || {}; return [String(m.invoice_no||''), String(m.customer||''), String(m.ship_date||''), String(m.ship_via||''), (cf.items||[]).map(_it)]; }),
+        (state.sumFile.items||[]).map(_it)
+      ]);
+    }catch(e){ _fp = 'x' + Date.now(); }
+    if(state._createReqFp !== _fp){ state._createReqId = null; state._createReqFp = _fp; }
+    if(!state._createReqId){
+      try{ state._createReqId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : ''; }catch(e){ state._createReqId = ''; }
+      if(!state._createReqId) state._createReqId = 'cb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+    }
     const created = await gasCallWithRetry('createBatch', {
       sumItems: state.sumFile.items,
       customers: state.custFiles.map(cf => ({ meta: cf.meta, items: cf.items })),
+      slotAssignments: _plannedSlots,
+      reqId: state._createReqId,
     });
     if(!created.ok){
-      toast('배치 생성 실패: ' + (created.error||'서버 오류'), 'error');
+      toast('배치 생성 실패: ' + (created.error||'서버 오류') + ' — 새로고침하지 말고 잠시 후 [배치 시작]을 다시 눌러 주세요(서버에 이미 만들어졌으면 그 배치로 이어짐)', 'error');
       btn.disabled = false; btn.textContent = '배치 시작';
       return;
     }
+    state._createReqId = null; // 성공 — 다음 초안은 새 번호
+    _slotsAlreadySaved = (created.slotsSaved === true && Number(created.slotsAssigned) === _plannedInvCount);
     state.batchId = created.batchId; // 서버가 발급한 정식 배치ID로 교체
     state.batchCreatedAt = created.createdAt || new Date().toISOString(); // ★ 2026-08-07
     state.batchTotalSku = created.totalSku != null ? created.totalSku : null; // ★ 2026-08-11
@@ -5611,14 +5650,32 @@ document.getElementById('startBatchBtn').onclick = async () => {
 
   // ★ 2026-07-23 재수정: 이제 다른 배치 점유는 배정을 막지 않음(완전 독립) —
   //   대신 겹치는 번호가 있으면 참고용 경고 배지 표시를 위해 정보만 미리 가져옴.
-  await fetchOccupiedSlots();
+  //   (★ v40 — 점유 조회·스캔 인덱스·자동 배정은 위에서 배치 생성 '전에' 이미 함. 경고 배지만 정식 배치ID 기준으로 다시 맞춤 — 배정 번호는 안 바뀜)
+  if(GAS_READY){
+    try{
+      const _prevOb = state.occupiedSlotDetail || {}, _prevSet = state.occupiedSlots;
+      await fetchOccupiedSlots();
+      // 다시 조회가 실패해서 비었으면(조회 함수가 실패를 알리지 않고 빈 값으로 둠) 생성 전 정보를 그대로 씀 — 경고 배지가 사라지지 않게
+      if(Object.keys(state.occupiedSlotDetail || {}).length === 0 && Object.keys(_prevOb).length > 0){ state.occupiedSlotDetail = _prevOb; state.occupiedSlots = _prevSet; }
+      const _ob = state.occupiedSlotDetail || {};
+      state.slots.forEach(s => { s.otherBatchWarning = (s.assignedTo && _ob[s.num]) ? _ob[s.num] : null; });
+    }catch(eOcc){ /* 경고 배지용 참고 정보 — 실패해도 배정·저장엔 영향 없음 */ }
+  }
   if(state.occupiedSlots.size > 0){
     toast(`⚠ 다른 배치가 슬롯 번호 ${state.occupiedSlots.size}개를 함께 쓰고 있습니다 (겹치는 슬롯엔 경고 배지 표시) — 실제 자리가 겹치지 않는지 현장에서 확인하세요`, 'error');
   }
 
-  buildScanIndex();
-  const assignResult = autoAssignSlots();
-  await syncSlotsToServer();
+  let _slotSaveFailed = false;
+  if(_slotsAlreadySaved){
+    _lastTrustedSlotDataAt = Date.now(); // ★ v40 — 서버가 배치와 함께 저장 완료(syncSlotsToServer 성공과 같은 보호)
+  } else {
+    // 옛 서버(slotsSaved 없음)이거나 개수가 모자람 → 예전처럼 따로 저장. 실패하면 syncSlotsToServer 가 빨간 배너를 띄움.
+    const _sres = await syncSlotsToServer();
+    if(GAS_READY && !(_sres && _sres.ok)){
+      _slotSaveFailed = true;
+      try{ console.warn('[v40] 배치 생성 후 슬롯 저장 실패:', _sres); }catch(e){}
+    }
+  }
   // ★ 2026-07-23: 이제 이 배치 자체가 30명을 초과할 때만 31번 이후로 나감 (다른 배치와 무관)
   if(assignResult && assignResult.overflowCount > 0){
     toast(`⚠ 이 배치가 30개 슬롯보다 커서 ${assignResult.overflowCount}명은 31번 이후 번호로 자동 배정했습니다 — 실제 여유 공간이 있는지 확인하세요`, 'error');
@@ -5635,7 +5692,8 @@ document.getElementById('startBatchBtn').onclick = async () => {
   renderBatchTabMode(); // ★ 2026-08-11: "01 Batch" 탭을 다시 열어도 업로드 폼 대신 진행중 안내 카드가 보이도록
   gotoView('v-slots');
   btn.disabled = false; btn.textContent = '배치 시작';
-  toast(`배치 ${state.batchId} 시작 · 슬롯 자동 배정 완료` + (GAS_READY?' · 저장됨':' · 데모모드(저장안됨)'), 'success');
+  if(_slotSaveFailed) toast(`배치 ${state.batchId} 생성됨 · ⚠ 슬롯 번호 저장 실패 — Step 02 에서 [Auto-reassign] 을 눌러 다시 저장하세요`, 'error');
+  else toast(`배치 ${state.batchId} 시작 · 슬롯 자동 배정 완료` + (GAS_READY?' · 저장됨':' · 데모모드(저장안됨)'), 'success');
 };
 
 // ★ 2026-09-22 긴급 수정 — 실제 사고 발견: CMS가 "총량 GROUP PICKING CHECK LIST"와
