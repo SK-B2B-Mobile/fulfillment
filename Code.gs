@@ -5,6 +5,8 @@
  * - 헤더 이름 가변(대소문자/공백/특수문자)에도 안전
  * - Amount 저장 수정 (2026-02-19)
  * - 출고 예정 대시보드 (getShipSchedule) 추가 (2026-05-28)
+ * - ★ 2026-11-18 v50: batch.html Step 04 '처음부터 다시(관리자)' 요청 연결(op=resetStandaloneRound1)
+ * - ★ 2026-11-18 v49: 작업자 저장(upsertJob)이 문서 잠금을 잡는 동안의 시트 읽기 7번 → 3번(기존 줄), 줄 위치 캐시 유지
  ******************************************************/
 
 // 🔴 여기 당신 스프레드시트 ID
@@ -1062,6 +1064,8 @@ function doPost_core_(e) {
   // ★ 2026-11-10 신규 — sales.html 관리자 전용 '여러 오더 한 번에 처리'(Bulk Update). 오더 1건씩, 서버 규칙 그대로
   if (op === 'bulkWhoAmI') return json_(bulkWhoAmI_(data));
   if (op === 'bulkOrderAction') return json_(bulkOrderAction(data));
+  // ★ 2026-11-18 v50 신규 — batch.html Step 04 '↺ 처음부터 다시(관리자)' — 단독 오더 1차 검수 스캔 전체 취소(BatchPicking.gs)
+  if (op === 'resetStandaloneRound1') return json_(resetStandaloneRound1Web(data));
   // ★ 2026-10-03 신규 — 'PU & TK' 전용 전체 박스 수량 입력
   if (op === 'setPuTkBoxQty') return json_(setPuTkBoxQty(data));
 
@@ -1729,10 +1733,20 @@ function getJobsInvoiceRowIndex_() {
     const last = sh.getLastRow();
     if (last >= 2) {
       const vals = sh.getRange(2, invCol, last - 1, 1).getValues();
+      let _dup = false;
+      const _seenRaw = {};
       for (let i = 0; i < vals.length; i++) {
         const inv = String(vals[i][0]).trim();
-        if (inv) idx[inv] = i + 2;
+        if (inv) {
+          const _raw = String(vals[i][0]); // 중복 판정은 upsertJob 의 전체 훑기와 같은 기준(글자 그대로 같음)
+          if (_seenRaw[_raw]) _dup = true;
+          _seenRaw[_raw] = 1;
+          idx[inv] = i + 2;
+        }
       }
+      // ★ 2026-11-18 v49 — 같은 인보이스가 두 줄 이상이면 표시(인보이스가 될 수 없는 키). upsertJob 은 이 표시가 있으면
+      //   인덱스를 쓰지 않고 예전처럼 열 전체를 훑어 '첫 줄 갱신 + 나머지 삭제'를 함. 다른 사용처는 인보이스로만 찾으므로 영향 없음.
+      if (_dup) idx['__skHasDup__'] = 1;
     }
   }
   try {
@@ -1795,33 +1809,58 @@ function upsertJob_mergeText_(job) {
     const sh = SHEET_();
     const hdr = headerMapCached_();
     const norm = normalizeHeaderName_;
-    const last = sh.getLastRow();
     const cInv = hdr[norm('Invoice')];
 
     if (!cInv) return { ok: false, error: 'Invoice column not found' };
 
+    // ★ 2026-11-18 v49(속도 — 잠금 잡는 시간 줄이기) — 이 함수는 문서 잠금(스캔 저장·패킹 등과 같은 잠금)을 잡은 채로 돎.
+    //   예전: 시트 호출 7번(헤더 2 + 마지막 줄 + 인보이스 열 전체 + 마지막 열 + 그 줄 + 헤더 다시) → 붐비는 시간 저장 1건 10~15초.
+    //   이제: ① 열 개수 = 방금 읽은 헤더 폭(같은 값 — 헤더를 getLastColumn 폭으로 읽음) ② 인보이스 위치는 캐시된 인덱스로 찾고
+    //   그 줄을 읽어 '인보이스가 정확히 같은지' 확인되면 바로 사용(아니면 예전처럼 열 전체 훑기) ③ 날짜 칸 서식은 헤더 지도로 찾음.
+    //   → 기존 줄 저장은 시트 읽기 3번(헤더 2 + 그 줄). 새 인보이스·인덱스 불일치는 예전과 똑같은 방식.
+    let lastCol = 0;
+    Object.keys(hdr).forEach(function (k) { if (hdr[k] > lastCol) lastCol = hdr[k]; });
+    const target = String(job.invoice);
+
     let rowIdx = 0;
+    let rowVals = null;
+    let viaIndex = false;
     const dups = [];
-    if (last >= 2 && cInv >= 1) {
-      const colVals = sh.getRange(2, cInv, last - 1, 1).getValues().map(r => String(r[0] || ''));
-      const target = String(job.invoice);
-      for (let i = 0; i < colVals.length; i++) {
-        if (colVals[i] === target) {
-          if (!rowIdx) rowIdx = 2 + i;
-          else dups.push(2 + i);
+    let idxStale = false;
+    try {
+      const _idx = getJobsInvoiceRowIndex_();
+      const _cand = _idx['__skHasDup__'] ? 0 : (Number(_idx[target.trim()]) || 0); // 중복 줄이 있으면 예전 방식(정리 포함)
+      if (_cand >= 2) {
+        const _rv = sh.getRange(_cand, 1, 1, lastCol).getValues()[0];
+        if (String(_rv[cInv - 1] || '') === target) { rowIdx = _cand; rowVals = _rv; viaIndex = true; }
+        else idxStale = true; // 인덱스가 가리킨 줄의 인보이스가 다름 = 줄이 밀림(손으로 정렬·삭제 등)
+      }
+    } catch (eIdx) {
+      rowIdx = 0; rowVals = null; viaIndex = false;
+      idxStale = true; // 인덱스가 시트 밖(줄 수보다 큰 번호 — 보관 정리로 줄이 줄어든 뒤 등)을 가리키면 읽기 오류 → 낡은 것으로 보고 지움
+    }
+    if (idxStale) { try { CacheService.getScriptCache().remove('jobsInvRowIdx_v1_meta'); } catch (eRm) { /* 무시 */ } } // 낡은 인덱스를 다른 화면이 계속 쓰지 않게 즉시 지움
+
+    let isNewRow = false;
+    if (!viaIndex) {
+      const last = sh.getLastRow();
+      if (last >= 2 && cInv >= 1) {
+        const colVals = sh.getRange(2, cInv, last - 1, 1).getValues().map(r => String(r[0] || ''));
+        for (let i = 0; i < colVals.length; i++) {
+          if (colVals[i] === target) {
+            if (!rowIdx) rowIdx = 2 + i;
+            else dups.push(2 + i);
+          }
         }
       }
-    }
-
-    const lastCol = sh.getLastColumn();
-
-    let rowVals;
-    if (rowIdx) {
-      rowVals = sh.getRange(rowIdx, 1, 1, lastCol).getValues()[0];
-    } else {
-      rowIdx = last + 1;
-      ensureSheetRoom_(sh, rowIdx); // ★ 2026-08-12 신규 — 시트 행 부족 시 자동으로 미리 늘려둠 (BatchPicking.gs에 정의, 같은 프로젝트라 호출 가능)
-      rowVals = new Array(lastCol).fill('');
+      if (rowIdx) {
+        rowVals = sh.getRange(rowIdx, 1, 1, lastCol).getValues()[0];
+      } else {
+        rowIdx = last + 1;
+        isNewRow = true;
+        ensureSheetRoom_(sh, rowIdx); // ★ 2026-08-12 신규 — 시트 행 부족 시 자동으로 미리 늘려둠 (BatchPicking.gs에 정의, 같은 프로젝트라 호출 가능)
+        rowVals = new Array(lastCol).fill('');
+      }
     }
 
     const setByName = (name, val) => {
@@ -1900,12 +1939,9 @@ function upsertJob_mergeText_(job) {
       }
     }
 
-    const hdr2 = _hdrRow_(sh, lastCol);
-    hdr2.forEach(function(h, i) {
-      const n = String(h).trim().toLowerCase().replace(/\s/g,'');
-      if (n === 'startatiso' || n === 'endatiso') {
-        sh.getRange(rowIdx, i + 1).setNumberFormat('@');
-      }
+    // ★ v49 — 헤더를 다시 읽지 않고 헤더 지도로 날짜(ISO) 칸을 찾음(같은 칸 — 헤더 이름 'StartAtISO'·'EndAtISO')
+    [hdr[norm('StartAtISO')], hdr[norm('EndAtISO')]].forEach(function (c) {
+      if (c && c <= lastCol) sh.getRange(rowIdx, c).setNumberFormat('@');
     });
 
     sh.getRange(rowIdx, 1, 1, lastCol).setValues([rowVals]);
@@ -1921,7 +1957,11 @@ function upsertJob_mergeText_(job) {
       });
     }
 
-    bumpVersion_();
+    // ★ v49 — 기존 줄 값만 바뀐 경우(줄 추가·삭제 없음)엔 '인보이스→줄 번호' 인덱스 등 줄 위치 캐시를 지우지 않음
+    //   (지우면 다음 저장마다 인보이스 열 전체를 다시 읽어야 함). 목록·sales·열린 배치 캐시는 예전처럼 즉시 지움.
+    //   새 줄 추가·중복 줄 삭제가 있으면 예전처럼 전부 지움(bumpVersion_).
+    if (isNewRow || dups.length || idxStale) bumpVersion_(); // ★ 줄이 밀린 걸 발견했으면 예전처럼 전부 지움
+    else _bumpVersionRowsSame_();
     return { ok: true, row: rowIdx };
 
   } catch (e) {
@@ -1931,7 +1971,28 @@ function upsertJob_mergeText_(job) {
   }
 }
 
+/* ★ 2026-11-18 v49 — bumpVersion_() 중 '줄 위치·디멘션·BatchCustomers' 캐시는 그대로 두는 버전.
+ *   기존 Jobs 줄의 값만 바꾸고 줄을 추가·삭제·이동하지 않는 저장(upsertJob 기존 줄)에서만 사용.
+ *   bumpVersionLite_ 보다 열린 배치 목록 캐시(openBatches)까지 지움 — upsertJob 이 예전에 지우던 것과 같게(안전). */
+function _bumpVersionRowsSame_() {
+  PROP.setProperty('jobsVersion', _nowVer_());
+  __JOBS_BLOCK = null; __HDR_ROW = null;
+  try {
+    CacheService.getScriptCache().removeAll([
+      'listJobs_cache_v1_meta',
+      'salesOverview_cache_v1_meta',
+      'salesToday_cache_v1_meta',
+      'openBatches_v1_meta'
+    ]);
+  } catch (e) { /* 캐시 정리 실패해도 저장 자체는 성공 — 캐시는 짧은 TTL로 곧 만료됨 */ }
+}
+
 /* ======= listJobs: always return HH:mm string ======== */
+// ★ v48 — '보관됨' 판정(예전 목록 필터와 완전히 같은 규칙: true·1·y·yes, 대소문자·공백 무시. 체크박스 true 도 'true')
+function _ljIsArchived_(v) {
+  const t = String(v === undefined || v === null ? '' : v).trim().toLowerCase();
+  return t === 'true' || t === '1' || t === 'y' || t === 'yes';
+}
 function listJobs_textSafe_() {
   const sh = SHEET_();
   const hdr = headerMapCached_();
@@ -1961,7 +2022,37 @@ function listJobs_textSafe_() {
   const iInspector = hdr[norm('Inspector')];
   const iInspEnd   = hdr[norm('Insp. End')];
   const lastCol = sh.getLastColumn();
-  const rows = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  // ★ 2026-11-16 v48(로드맵 6-3) — 예전엔 Jobs 전체(11-16 기준 3,425줄 × 53칸 ≈ 18만 칸)를 매번 읽고 보관(archived) 안 된 줄(118줄)만 남겼음
+  //   → 시트가 바쁠 때 이 읽기 한 번이 5~45초(11-16 08:01 작업 목록 미러 45.6초). 이제 '보관' 칸 하나만 먼저 읽어서
+  //   맨 위부터 이어지는 '보관된 줄'은 건너뛰고, 보관 안 된 첫 줄부터만 읽음(약 1/6). 결과는 예전과 똑같음(건너뛴 줄은 원래도 버리던 줄).
+  //   안전장치: 읽는 사이 줄이 늘거나 줄거나 밀리면(보관 정리·삭제·추가·정렬 — 인보이스 순서로 확인) 이번 한 번은 예전처럼 전체를 읽음.
+  //   보관·인보이스 칸이 없거나 읽기 실패해도 전체 읽기.
+  let startRow = 2, invCol = null;
+  if (iArch && iInv) {
+    try {
+      const archCol = sh.getRange(2, iArch, lastRow - 1, 1).getValues();
+      let k = 0;
+      while (k < archCol.length && _ljIsArchived_(archCol[k][0])) k++;
+      if (k > 0) invCol = sh.getRange(2, iInv, lastRow - 1, 1).getValues(); // 아래 '줄이 밀렸는지' 확인용(인보이스 칸 하나)
+      startRow = 2 + k;
+    } catch (eArch) { startRow = 2; invCol = null; }
+  }
+  let rows = startRow <= lastRow ? sh.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues() : [];
+  if (startRow > 2) {
+    let lr2 = -1;
+    try { lr2 = sh.getLastRow(); } catch (eLr) { lr2 = -1; }
+    // 줄이 밀렸는지: 마지막 줄 번호가 같아도(정렬·같은 수의 삭제+추가) 읽은 줄들의 인보이스가 처음 읽은 순서와 하나라도 다르면 밀린 것
+    let moved = !invCol;
+    for (let q = 0; !moved && q < rows.length; q++) {
+      const a = invCol[startRow - 2 + q];
+      if (!a || String(a[0]) !== String(rows[q][iInv - 1])) moved = true;
+    }
+    if (lr2 !== lastRow || moved) { // 그 사이 줄이 바뀜 → 지금 마지막 줄까지 전체(예전 방식)
+      const lrNow = lr2 >= 0 ? lr2 : lastRow;
+      startRow = 2;
+      rows = lrNow >= 2 ? sh.getRange(2, 1, lrNow - 1, lastCol).getValues() : [];
+    }
+  }
 
   // ★ 2026-08-06 신규(매니저 요청) — 메인 대시보드(index.html)의 자동보관 규칙을
   //   "검수 다음날 무조건 삭제"에서 "디멘션 저장 시각 기준 영업일 2일 후"로
@@ -1970,7 +2061,7 @@ function listJobs_textSafe_() {
 
   const tz = scriptTz_();
   const jobs = rows.map((r, i) => ({
-    _rowIndex: i + 2, // ★ 2026-07-29 신규: 원본 시트 행 번호를 미리 저장해둠(아래 메모 읽기용)
+    _rowIndex: i + startRow, // ★ v48 — 읽기 시작 줄 기준(예전엔 항상 2) / ★ 2026-07-29 신규: 원본 시트 행 번호를 미리 저장해둠(아래 메모 읽기용)
     invoice: iInv ? r[iInv - 1] : '',
     amount: iAmount ? r[iAmount - 1] : '',
     shipDate: iShip ? r[iShip - 1] : '',
@@ -2010,10 +2101,7 @@ function listJobs_textSafe_() {
   //   첫 조회(cold load)마다 이 불필요한 메모 읽기가 누적되어 "fetchData timed
   //   out"까지 발생하는 원인이 됐음. 필터링을 먼저 해서, 실제로 화면에 보일
   //   행에 대해서만 메모를 읽도록 순서를 바꿈 — 결과는 완전히 동일하고 속도만 개선됨.
-  const cleaned = jobs.filter(j => {
-    const v = String(j.archived || '').trim().toLowerCase();
-    return !(v === 'true' || v === '1' || v === 'y' || v === 'yes');
-  });
+  const cleaned = jobs.filter(j => !_ljIsArchived_(j.archived)); // ★ v48 — 같은 판정을 함수로(건너뛰기 판정과 반드시 같게)
 
   // ★ 2026-10-05 속도 개선 — 이슈(ISSUES) 행마다 getNote()를 개별 호출하던 것(행 수 × API 1회, 동기화가
   //   몰리는 시간대엔 호출당 0.5~수 초 → 한 사이클 수백 초의 주원인)을, 검수 열 전체 메모를
@@ -2022,12 +2110,12 @@ function listJobs_textSafe_() {
   let notesCol = null;
   const needNotes = iInsp && cleaned.some(j => String(j.inspection || '').indexOf('ISSUES') >= 0);
   if (needNotes) {
-    try { notesCol = sh.getRange(2, iInsp, lastRow - 1, 1).getNotes(); } catch (eNotes) { notesCol = null; }
+    try { notesCol = rows.length ? sh.getRange(startRow, iInsp, rows.length, 1).getNotes() : []; } catch (eNotes) { notesCol = null; } // ★ v48 — 읽은 줄 범위만
   }
   cleaned.forEach(job => {
     if (String(job.inspection || '').indexOf('ISSUES') >= 0) {
       try {
-        if (notesCol) job.inspectionNote = (notesCol[job._rowIndex - 2] && notesCol[job._rowIndex - 2][0]) || '';
+        if (notesCol) job.inspectionNote = (notesCol[job._rowIndex - startRow] && notesCol[job._rowIndex - startRow][0]) || '';
         else job.inspectionNote = sh.getRange(job._rowIndex, iInsp).getNote() || '';
       } catch(e) { job.inspectionNote = ''; }
     }
